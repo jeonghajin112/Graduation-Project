@@ -704,3 +704,4 @@ export function RenderedPageEvidenceCard({
     </article>
   );
 }
+import "@/styles/page-evidence-layout.css";
