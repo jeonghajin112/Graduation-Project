@@ -1,0 +1,14 @@
+Use case: ui-mockup.
+Asset type: non-shipping design direction concept for a Korean web accessibility product landing page.
+Primary request: Design a completely new “sensory layers” landing page for UNI ACCESS, using one photographic material study to make structure, perception, operation, and understanding feel like layers of the same page.
+Scene/backdrop: Deep neutral blue-black canvas containing a single full-width macro photograph of stacked translucent acrylic sheets, embossed paper, and a thin metal grid. The objects overlap to create crisp readable depth, but the upper-left copy zone stays calm and dark.
+Subject: Minimal header floats directly on the calm zone with no container. A light-weight Korean headline is centered slightly left of the optical axis over the dark negative space. One ivory CTA with dark text sits below. The material photograph grows larger toward the lower half and becomes the actual stage; four tiny bright focus pins mark its layers. The next section begins as a horizontal sequence cut from the same material field.
+Style/medium: Scientific material photography plus restrained contemporary art-direction. Premium but not luxury, dimensional but not glassmorphism. Functional type remains perfectly opaque.
+Composition/framing: 3:2 landscape, full-bleed cinematic macro crop, no screenshot or device. Headline maximum three lines, CTA above fold, bottom edge previews the next horizontal flow.
+Lighting/mood: One soft side light from the right reveals embossing and acrylic edges; calm precision, no neon atmosphere.
+Color palette: blue-black #10171D, ivory #F4F2EA, electric apricot #FF6B3D as the only accent, steel #7D8790. Accent under 8 percent.
+Materials/textures: Frosted acrylic, embossed paper, fine metal mesh, realistic edge highlights, shallow depth of field only in the lower visual zone.
+Text (verbatim): Korean hero headline exactly “보이지 않던 장벽을, 이해할 수 있는 결과로.” Set once, perfectly legible, Korean-safe sans, weight 380, large display. Brand text exactly “UNI ACCESS”. CTA exactly “대시보드 열기”. Do not add any other readable text.
+Dimensions: 1536x1024 landscape.
+Constraints: No URL input. One CTA. Text zone must remain calm and high contrast. No functional text on transparent or busy material. No fake dashboard or numbers.
+Avoid: cyan cyberpunk, purple gradient, neon glow, liquid-glass UI cards, frosted content cards, right-column mockup, centered bold hero, decorative blobs, excessive lens flare, three equal cards, watermarks.

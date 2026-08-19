@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: accessibility-platform
+
+  datasource:
+    url: jdbc:h2:file:./data/accessibilitydb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: true
+
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+
+  sql:
+    init:
+      # schema.sql must run before Hibernate so legacy H2 enum constraints are
+      # widened without requiring a manual database edit.
+      mode: always
+
+accessibility:
+  artifacts:
+    directory: ./data/artifacts
+    max-file-size-bytes: 20971520
+
+server:
+  port: 9090

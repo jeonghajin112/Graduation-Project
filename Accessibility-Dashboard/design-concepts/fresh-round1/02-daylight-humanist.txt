@@ -1,0 +1,14 @@
+Use case: ui-mockup.
+Asset type: non-shipping visual direction concept for a Korean web accessibility product landing page, desktop first viewport plus a visible next-section transition.
+Primary request: Design a completely new daylight humanist landing page for UNI ACCESS where inclusive interaction feels tangible, calm, and contemporary.
+Scene/backdrop: The entire hero is an authored editorial photograph of a real desk in cool morning daylight: a hand on a keyboard, another hand near a trackpad, an open laptop viewed obliquely, and translucent colored acetate sheets casting crisp rectangular shadows. The screen content is intentionally defocused and contains no fake UI or text. No person’s face and no disability stereotype.
+Subject: A real page composition placed over and around the photograph. A quiet top navigation sits in a deliberately calm pale zone. A large opaque off-white text block is anchored low-left and overlaps the image edge; its shape is rectangular with one clipped corner, not a rounded card. A cobalt CTA sits inside the text block. Below, the image gives way to a spacious editorial band with one large sentence and a small annotated line, not feature cards.
+Style/medium: Korean culture-magazine editorial photography combined with modern public-interest digital design. Humanist sans typography, precise whitespace, honest photographic texture.
+Composition/framing: 3:2 landscape, full-bleed page, eye-level oblique crop. Hero copy occupies no more than 42 percent of width, but it is not a two-column split; the photograph continues behind and around it. Keep the CTA above the fold and the next section visible at the bottom.
+Lighting/mood: Soft natural daylight from upper-left, realistic contact shadows, optimistic and composed, not sentimental.
+Color palette: cool daylight gray #E7EAEC, ink #152126, cobalt #1757D7 as the only accent, paper white #FBFBF7, natural skin and pale wood tones kept desaturated.
+Materials/textures: Real paper fibers, matte keyboard keys, brushed aluminum laptop, translucent acetate, subtle photographic grain.
+Text (verbatim): Korean hero headline exactly “접근성은 점수가 아니라, 고칠 수 있는 일이어야 합니다.” Set once in a Korean-safe humanist sans, weight 550, dark ink, maximum three lines. Brand text exactly “UNI ACCESS”. CTA exactly “대시보드 열기”. No other readable text.
+Dimensions: 1536x1024, landscape 3:2.
+Constraints: No URL field. One CTA. Text must sit on an opaque high-contrast surface, never directly on the busy image. No fake product screen. No disability equipment, medical symbols, or tokenized representation.
+Avoid: centered SaaS hero, right-side screenshot card, gradient mesh, glassmorphism, capsule overload, three equal cards, giant bold Hangul, cute characters, hands pointing at the camera, stock-photo smiles, watermarks, extra readable text.

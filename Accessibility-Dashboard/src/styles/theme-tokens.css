@@ -1,0 +1,181 @@
+@layer base {
+  .bridge-dashboard {
+    /* Stage 1: Coral action → semantic action; danger → v2 danger. Names preserved. */
+    --dashboard-accent: var(--primary, #0071e3);
+    --dashboard-accent-hover: #0066cc;
+    --dashboard-danger: var(--destructive, #d70015);
+    /* Control radius (8px) — selected sidebar rows must not use pill / 9999px */
+    --dashboard-sidebar-item-radius: 0.5rem;
+    --dashboard-sidebar-item-active-border: transparent;
+    /* Section titles (프로젝트 / 최근 분석한 페이지). Applied via .sidebar-section-heading
+       — do not use Tailwind text-[var(--size)] (collides with text-[var(--color)] → computed 16px). */
+    --dashboard-sidebar-section-title-size: clamp(11px, 0.365vw, 14px);
+    --dashboard-sidebar-section-title-line-height: clamp(14px, 0.469vw, 18px);
+  }
+
+  /* Single source-of-truth for section heading metrics (both labels share this class). */
+  .bridge-dashboard .sidebar-section-heading {
+    font-size: var(--dashboard-sidebar-section-title-size);
+    font-weight: 700;
+    line-height: var(--dashboard-sidebar-section-title-line-height);
+  }
+
+  .bridge-dashboard.theme-light {
+    /* page/card/text → global semantic aliases; nav/modal/shadow/geometry untouched */
+    --dashboard-page-bg: var(--background, #f5f5f7);
+    --dashboard-top-bg: var(--background, #f5f5f7);
+    --dashboard-content-bg: var(--background, #f5f5f7);
+    --dashboard-shell-bg: transparent;
+    --dashboard-card-bg: var(--card, #ffffff);
+    --dashboard-content-card-bg: var(--card, #ffffff);
+    --dashboard-nested-surface: rgba(255, 255, 255, 0.7);
+    --dashboard-muted-surface: rgba(246, 241, 235, 0.76);
+    --dashboard-hover-surface: rgba(239, 229, 218, 0.88);
+    --dashboard-border-subtle: rgba(31, 27, 24, 0.055);
+    --dashboard-card-border: rgba(24, 20, 18, 0.045);
+    --dashboard-nested-border: rgba(31, 27, 24, 0.07);
+    --dashboard-text-strong: var(--foreground, #1d1d1f);
+    --dashboard-text-primary: var(--foreground, #1d1d1f);
+    --dashboard-text-muted: var(--muted-foreground, #6e6e73);
+    --dashboard-text-secondary: var(--muted-foreground, #6e6e73);
+    --dashboard-drawer-bg: rgba(255, 255, 255, 0.995);
+    --dashboard-drawer-shadow: 0 28px 76px rgba(31, 27, 24, 0.13);
+    --dashboard-header-shadow: 0 14px 28px rgba(17, 17, 17, 0.14);
+    /* Tree-navigation selection: quiet neutral surface; blue is reserved for icons/focus. */
+    --dashboard-sidebar-active-bg: #e5e5ea;
+    --dashboard-sidebar-active-text: #1d1d1f;
+    /* Idle primary labels: black series. Hover: text-only (no card fill/border). */
+    --dashboard-sidebar-muted-text: #1d1d1f;
+    --dashboard-sidebar-hover-text: #4b4b4f;
+    --dashboard-sidebar-item-hover-bg: #e5e5ea;
+    --dashboard-sidebar-item-hover-border: transparent;
+    --dashboard-menu-trigger-bg: rgba(255, 255, 255, 0.8);
+    --dashboard-menu-trigger-text: #0f172a;
+    --dashboard-date-day-bg: transparent;
+    --dashboard-date-day-border: rgba(31, 27, 24, 0.13);
+    --dashboard-date-separator: rgba(31, 27, 24, 0.12);
+    --recent-scan-card-bg: var(--card, #ffffff);
+    --recent-scan-card-border: transparent;
+    --recent-scan-pager-dot-bg: #9ca3af;
+    --recent-scan-pager-dot-hover-bg: #6b7280;
+    --project-table-head-bg: #f5f5f7;
+    --project-table-row-hover-bg: #f5f5f7;
+    --report-search-popover-bg: var(--popover, #ffffff);
+    --report-search-option-text: #64748b;
+    --report-search-option-hover-bg: #f8fafc;
+    --report-search-option-hover-text: #475569;
+    --site-score-line-color: #111111;
+    --site-score-grid-color: #d8dee8;
+    /* Page detail local extension. Values follow DESIGN.md semantic statuses.
+       Kept scoped to the dashboard (no new global token API). */
+    --site-issue-bar-color: #c2410c;
+    --site-chart-cursor-color: #6e6e73;
+    /* Glassmorphism surfaces (borderless). Only the outer card blurs; nested
+       boxes use translucent neutral fills so blur never stacks. */
+    --site-glass-bg: rgba(255, 255, 255, 0.66);
+    --site-glass-bg-opaque: #ffffff;
+    --site-glass-blur: 22px;
+    --site-glass-shadow: 0 18px 44px rgba(31, 27, 24, 0.1);
+    --site-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    --site-hairline: transparent;
+    /* Structural dividers stay visible even though box borders are removed. */
+    --site-divider: rgba(60, 60, 67, 0.18);
+    --site-row-surface: rgba(120, 120, 128, 0.07);
+    --site-inset-surface: rgba(255, 255, 255, 0.66);
+    --site-severity-critical-text: #d70015;
+    --site-severity-critical-bg: color-mix(in srgb, #d70015 8%, var(--card, #ffffff));
+    --site-severity-high-text: #8a5a00;
+    --site-severity-high-bg: color-mix(in srgb, #8a5a00 8%, var(--card, #ffffff));
+    --site-severity-medium-text: var(--foreground, #1d1d1f);
+    --site-severity-medium-bg: color-mix(in srgb, var(--foreground, #1d1d1f) 7%, var(--card, #ffffff));
+    --site-severity-low-text: #026a4a;
+    --site-severity-low-bg: color-mix(in srgb, #026a4a 8%, var(--card, #ffffff));
+  }
+
+  .bridge-dashboard.theme-dark {
+    /* off-black dark palette (pure black canvas removed) */
+    --dashboard-page-bg: var(--background, #111113);
+    --dashboard-top-bg: var(--background, #111113);
+    --dashboard-content-bg: var(--background, #111113);
+    --dashboard-shell-bg: transparent;
+    --dashboard-card-bg: var(--card, #1c1c1e);
+    --dashboard-content-card-bg: var(--card, #1c1c1e);
+    --dashboard-nested-surface: #242426; /* raised */
+    --dashboard-muted-surface: #121212;
+    --dashboard-hover-surface: #1a1a1a;
+    --dashboard-border-subtle: #222222;
+    --dashboard-card-border: transparent;
+    --dashboard-nested-border: #222222;
+    --dashboard-text-strong: var(--foreground, #f5f5f7);
+    --dashboard-text-primary: var(--foreground, #f5f5f7);
+    --dashboard-text-muted: var(--muted-foreground, #a1a1a6);
+    --dashboard-text-secondary: var(--muted-foreground, #a1a1a6);
+    --dashboard-drawer-bg: var(--card, #1c1c1e);
+    --dashboard-drawer-shadow: 0 28px 76px rgba(0, 0, 0, 0.5);
+    --dashboard-header-shadow: 0 14px 28px rgba(0, 0, 0, 0.4);
+    /* Reference tree: dark selected row, white ink, blue icons. */
+    --dashboard-sidebar-active-bg: rgba(255, 255, 255, 0.055);
+    --dashboard-sidebar-active-text: #f5f5f7;
+    --dashboard-sidebar-muted-text: #e8e8ed;
+    --dashboard-sidebar-hover-text: #f5f5f7;
+    --dashboard-sidebar-item-hover-bg: rgba(255, 255, 255, 0.04);
+    --dashboard-sidebar-item-hover-border: transparent;
+    --dashboard-menu-trigger-bg: #1f1f1f;
+    --dashboard-menu-trigger-text: #ffffff;
+    --dashboard-date-day-bg: rgba(255, 255, 255, 0.045);
+    --dashboard-date-day-border: rgba(255, 255, 255, 0.1);
+    --dashboard-date-separator: rgba(255, 255, 255, 0.14);
+    --recent-scan-card-bg: var(--card, #1c1c1e);
+    --recent-scan-card-border: #222222;
+    --recent-scan-pager-dot-bg: #4b5563;
+    --recent-scan-pager-dot-hover-bg: #6b7280;
+    --project-table-head-bg: #242426;
+    --project-table-row-hover-bg: #242426;
+    --report-search-popover-bg: var(--popover, #1c1c1e);
+    --report-search-option-text: #b3b3b3;
+    --report-search-option-hover-bg: #141414;
+    --report-search-option-hover-text: #e5e7eb;
+    --site-score-line-color: #f8fafc;
+    --site-score-grid-color: rgba(255, 255, 255, 0.14);
+    /* Dark severity/chart ink lifted for AA on off-black surfaces. */
+    --site-issue-bar-color: #ffb340;
+    --site-chart-cursor-color: #a1a1a6;
+    --site-glass-bg: rgba(38, 38, 41, 0.6);
+    --site-glass-bg-opaque: #1c1c1e;
+    --site-glass-blur: 22px;
+    --site-glass-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
+    --site-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --site-hairline: transparent;
+    --site-divider: rgba(255, 255, 255, 0.14);
+    --site-row-surface: rgba(255, 255, 255, 0.07);
+    --site-inset-surface: rgba(255, 255, 255, 0.11);
+    --site-severity-critical-text: #ff453a;
+    --site-severity-critical-bg: color-mix(in srgb, #ff453a 8%, var(--card, #1c1c1e));
+    --site-severity-high-text: #ffb340;
+    --site-severity-high-bg: color-mix(in srgb, #ffb340 8%, var(--card, #1c1c1e));
+    --site-severity-medium-text: var(--foreground, #f5f5f7);
+    --site-severity-medium-bg: color-mix(in srgb, var(--foreground, #f5f5f7) 10%, var(--card, #1c1c1e));
+    --site-severity-low-text: #30d158;
+    --site-severity-low-bg: color-mix(in srgb, #30d158 8%, var(--card, #1c1c1e));
+  }
+}
+
+/*
+ * Unlayered so it wins over Tailwind @layer utilities text-[color:var(--dashboard-text-muted)]
+ * without !important. Color SoT remains --dashboard-sidebar-muted-text (primary label ink).
+ */
+.bridge-dashboard .sidebar-section-heading {
+  color: var(--dashboard-text-muted);
+  font-weight: 700;
+}
+
+/* Dense desktop tree; mobile keeps the 44px target. */
+.bridge-dashboard {
+  --dashboard-sidebar-nav-height: clamp(2rem, 1.25vw, 3rem);
+}
+
+@media (max-width: 767px) {
+  .bridge-dashboard {
+    --dashboard-sidebar-nav-height: 2.75rem;
+  }
+}

@@ -1,0 +1,9 @@
+Use case: ui-mockup.
+Asset type: second-round non-shipping refinement of a Korean web accessibility landing-page direction.
+Reference role: Image 1 defines the winning “signal manifesto” ism: carbon-black page, warm-white text, sulfur-yellow accent, asymmetric composition, and a full-page product stage. Preserve all of those invariants.
+Desired result: Refine only the hero visual material, replacing thin technical wireframes with one concrete tactile photographic object while keeping all UI type flat and real-looking.
+Change only: The lower-right and bottom hero stage becomes a macro editorial photograph of matte carbon-black embossed paper sheets cut into layered rectangular openings. A single raised sulfur-yellow line travels across the layers and passes through three precise punched holes. The upper-left copy zone remains flat carbon black and completely calm. The material image should feel physical, high-trust, and directly connected to finding barriers, not decorative abstraction.
+Preserve exactly: carbon #10110F, warm white #F2F0E8, sulfur yellow #D8F04A only accent under 10 percent, headline around 64-68px equivalent and weight 600, sparse top nav, one CTA, no rounded surfaces, no gradient, no glow.
+Text (verbatim): Brand “UNI ACCESS”. Korean headline exactly “접근성은 점수가 아니라, 고칠 수 있는 일이어야 합니다.” CTA exactly “대시보드 열기”. No other readable text.
+Composition/framing: Full-page 1536x1024 landscape, real hero copy above a full-width material stage, next-section edge visible at bottom. No device frame and no right-column card.
+Do not add or remove: No URL input, braille dots, disability symbols, hands, screens, fake UI, fake scores, glass, 3D icons, cards, extra colors, extra CTA, logos, or watermarks.

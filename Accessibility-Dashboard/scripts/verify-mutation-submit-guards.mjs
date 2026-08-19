@@ -1,0 +1,192 @@
+/**
+ * Same-task re-entry regressions for sidebar project save/delete and project
+ * page delete. Each mutation is held in flight while the DOM button is clicked
+ * twice synchronously; exactly one PATCH may reach the API.
+ *
+ * Usage: BASE_URL=http://127.0.0.1:4173 node scripts/verify-mutation-submit-guards.mjs
+ */
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+
+const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const timestamp = "2026-08-11T10:00:00.000Z";
+
+let organization = {
+  id: 1,
+  name: "Mutation guard project",
+  type: "ETC",
+  homepageUrl: "https://example.com",
+  description: "",
+  status: "ACTIVE",
+  createdAt: timestamp,
+  updatedAt: timestamp
+};
+const target = {
+  id: 101,
+  organizationId: organization.id,
+  name: "Mutation guard page",
+  targetType: "WEB",
+  accessUrl: "https://example.com/mutation-guard",
+  faviconUrl: null,
+  description: "",
+  status: "ACTIVE",
+  createdAt: timestamp,
+  updatedAt: timestamp
+};
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+const pageDeleteStarted = createDeferred();
+const releasePageDelete = createDeferred();
+const projectSaveStarted = createDeferred();
+const releaseProjectSave = createDeferred();
+const projectDeleteStarted = createDeferred();
+const releaseProjectDelete = createDeferred();
+const observed = {
+  pageDeletePatches: 0,
+  projectSavePatches: 0,
+  projectDeletePatches: 0,
+  unknownRequests: new Set()
+};
+let organizationActive = true;
+let targets = [target];
+
+const browser = await chromium.launch({ headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const method = request.method();
+    const pathname = new URL(request.url()).pathname;
+
+    if (method === "GET" && pathname === "/api/organizations") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(organizationActive ? [organization] : [])
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/organizations/${organization.id}/evaluation-targets`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(targets)
+      });
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/requests") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+
+    if (method === "PATCH" && pathname === `/api/targets/${target.id}/delete`) {
+      observed.pageDeletePatches += 1;
+      pageDeleteStarted.resolve();
+      await releasePageDelete.promise;
+      targets = [];
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      return;
+    }
+
+    if (method === "PATCH" && pathname === `/api/organizations/${organization.id}`) {
+      observed.projectSavePatches += 1;
+      projectSaveStarted.resolve();
+      await releaseProjectSave.promise;
+      const body = JSON.parse(request.postData() ?? "{}");
+      organization = { ...organization, name: body.name, description: body.description, updatedAt: timestamp };
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      return;
+    }
+
+    if (method === "PATCH" && pathname === `/api/organizations/${organization.id}/deactivate`) {
+      observed.projectDeletePatches += 1;
+      projectDeleteStarted.resolve();
+      await releaseProjectDelete.promise;
+      organizationActive = false;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      return;
+    }
+
+    observed.unknownRequests.add(`${method} ${pathname}`);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto(`${baseUrl}/projects/${organization.id}`, { waitUntil: "networkidle" });
+  await page.getByRole("heading", { level: 1, name: organization.name, exact: true }).waitFor();
+
+  await page.getByRole("button", { name: `${target.name} 제거`, exact: true }).click();
+  const pageDeleteDialog = page.getByRole("dialog", { name: "페이지 제거", exact: true });
+  const pageDeleteButton = pageDeleteDialog.getByRole("button", { name: "제거", exact: true });
+  await pageDeleteButton.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await pageDeleteStarted.promise;
+  await page.waitForTimeout(50);
+  assert.equal(observed.pageDeletePatches, 1, "page delete must issue one PATCH");
+  releasePageDelete.resolve();
+  await pageDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
+
+  const sidebar = page.locator("aside");
+  await sidebar.getByRole("button", { name: organization.name, exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "수정", exact: true }).click();
+  const editDialog = page.getByRole("dialog", { name: "프로젝트 수정", exact: true });
+  const updatedName = "Mutation guard renamed";
+  await editDialog.getByLabel("프로젝트 이름", { exact: true }).fill(updatedName);
+  const saveButton = editDialog.getByRole("button", { name: "저장", exact: true });
+  await saveButton.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await projectSaveStarted.promise;
+  await page.waitForTimeout(50);
+  assert.equal(observed.projectSavePatches, 1, "project save must issue one PATCH");
+  releaseProjectSave.resolve();
+  await editDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  await page.getByRole("heading", { level: 1, name: updatedName, exact: true }).waitFor();
+
+  await sidebar.getByRole("button", { name: updatedName, exact: true }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "삭제", exact: true }).click();
+  const projectDeleteDialog = page.getByRole("dialog", { name: "프로젝트 제거", exact: true });
+  const projectDeleteButton = projectDeleteDialog.getByRole("button", { name: "네", exact: true });
+  await projectDeleteButton.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await projectDeleteStarted.promise;
+  await page.waitForTimeout(50);
+  assert.equal(observed.projectDeletePatches, 1, "project delete must issue one PATCH");
+  releaseProjectDelete.resolve();
+  await projectDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  await page.waitForURL("**/analyze", { timeout: 10_000 });
+
+  assert.deepEqual([...observed.unknownRequests], []);
+  console.log(
+    JSON.stringify(
+      {
+        result: "PASS",
+        pageDeletePatches: observed.pageDeletePatches,
+        projectSavePatches: observed.projectSavePatches,
+        projectDeletePatches: observed.projectDeletePatches,
+        finalPath: new URL(page.url()).pathname
+      },
+      null,
+      2
+    )
+  );
+} finally {
+  releasePageDelete.resolve();
+  releaseProjectSave.resolve();
+  releaseProjectDelete.resolve();
+  await browser.close();
+}

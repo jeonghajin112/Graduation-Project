@@ -1,0 +1,83 @@
+# OS
+.DS_Store
+Thumbs.db
+__MACOSX/
+
+# IDE
+.idea/
+.vscode/
+*.iws
+*.iml
+*.ipr
+
+# Logs
+*.log
+logs/
+.firecrawl/
+
+# Env / secrets
+.env
+*.env
+**/.env
+**/*.pem
+**/*secret*.*
+**/*credential*.*
+**/*credentials*.*
+**/*service-account*.json
+**/uniaccess-*.json
+**/application-secret.yml
+**/application-prod.yml
+
+# Java / Spring / Gradle
+.gradle/
+**/.gradle/
+build/
+**/build/
+out/
+/target/
+/ap-backend/target/
+*.class
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# H2 / local DB
+*.db
+*.mv.db
+*.trace.db
+*.sqlite
+*.sqlite3
+
+# Node / Frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+**/.venv/
+**/venv/
+**/env/
+
+# AI-module generated outputs
+AI-module/output/*
+!AI-module/output/.gitkeep
+
+# OCR Cache
+**/.ocr_cache/
+
+# Generated reports, recordings, and build command output
+artifacts/
+**/artifacts/
+**/.artifacts/
+**/*build_out.txt
+**/*tsc_out.txt
