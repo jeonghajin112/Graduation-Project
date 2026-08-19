@@ -1,3 +1,7 @@
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-toolbar {
+  display: none !important;
+}
+
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
   display: flex;
   min-width: 0;
