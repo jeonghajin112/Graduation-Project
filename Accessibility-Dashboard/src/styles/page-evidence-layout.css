@@ -4,9 +4,9 @@
   min-height: 24rem;
   flex-direction: column;
   padding: 1rem;
-  border: 1px solid var(--dashboard-nested-border);
-  border-radius: var(--dashboard-site-nested-radius);
-  background: var(--site-row-surface);
+  border: 1px solid var(--dashboard-card-border);
+  border-radius: var(--dashboard-site-card-radius);
+  background: var(--site-glass-bg-opaque);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-heading h3 {
@@ -168,9 +168,13 @@
 }
 
 @container (min-width: 64rem) {
-  .bridge-dashboard.dashboard-site-detail .site-page-evidence-grid {
+  .bridge-dashboard.dashboard-site-detail .site-dashboard-layout {
     grid-template-columns: minmax(0, 1fr) clamp(17rem, 18vw, 22rem);
-    align-items: stretch;
+    align-items: start;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-grid-item {
+    grid-column: auto;
   }
 
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
