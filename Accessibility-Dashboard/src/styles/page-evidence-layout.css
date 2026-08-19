@@ -174,7 +174,8 @@
   }
 
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
-    height: 100%;
+    align-self: start;
+    height: auto;
     min-height: 30rem;
   }
 }
