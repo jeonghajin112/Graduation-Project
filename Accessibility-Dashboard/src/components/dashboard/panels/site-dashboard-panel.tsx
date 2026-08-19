@@ -12,6 +12,7 @@ import type {
 } from "@/types/accessibility-domain";
 
 import { selectLatestEvaluationRequest } from "../shared/evaluation-request-selection";
+import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
 import { fallbackWcagCriterion, severityChartItems, wcagCriterionByIssueCode } from "./site-dashboard/constants";
 import { hasUsableIssueLocator } from "./site-dashboard/issue-locator";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
@@ -126,6 +127,7 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
           onSelectIssue={setSelectedIssueId}
         />
       </div>
+      <AnalysisTrendPanel requestId={latestResultRequestId} />
     </div>
   );
 }
