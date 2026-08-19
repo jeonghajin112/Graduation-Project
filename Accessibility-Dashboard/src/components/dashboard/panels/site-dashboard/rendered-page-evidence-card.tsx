@@ -675,6 +675,7 @@ export function RenderedPageEvidenceCard({
               )}
             </div>
 
+            <AnalysisTrendPanel requestId={artifact.requestId} />
           </div>
         )}
 
@@ -704,4 +705,5 @@ export function RenderedPageEvidenceCard({
     </article>
   );
 }
+import { AnalysisTrendPanel } from "./analysis-trend-panel";
 import "@/styles/page-evidence-layout.css";
