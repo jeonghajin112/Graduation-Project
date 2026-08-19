@@ -170,16 +170,17 @@
 @container (min-width: 64rem) {
   .bridge-dashboard.dashboard-site-detail .site-dashboard-layout {
     grid-template-columns: minmax(0, 1fr) clamp(17rem, 18vw, 22rem);
-    align-items: start;
+    align-items: stretch;
   }
 
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-grid-item {
     grid-column: auto;
+    height: 100%;
   }
 
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
-    align-self: start;
-    height: auto;
+    align-self: stretch;
+    height: 100%;
     min-height: 30rem;
   }
 }
