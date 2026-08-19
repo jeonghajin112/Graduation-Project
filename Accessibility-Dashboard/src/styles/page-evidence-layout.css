@@ -1,0 +1,21 @@
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-grid::after {
+  display: none;
+  min-width: 0;
+  min-height: 30rem;
+  border: 1px solid var(--dashboard-nested-border);
+  border-radius: var(--dashboard-site-nested-radius);
+  background: var(--site-row-surface);
+  content: "";
+}
+
+@container (min-width: 64rem) {
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-grid {
+    grid-template-columns: minmax(0, 1fr) clamp(17rem, 18vw, 22rem);
+    align-items: stretch;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-grid::after {
+    display: block;
+    height: 100%;
+  }
+}
