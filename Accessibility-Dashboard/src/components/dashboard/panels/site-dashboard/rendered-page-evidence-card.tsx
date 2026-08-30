@@ -1,31 +1,25 @@
-import {
-  Code2,
-  Eye,
-  EyeOff,
-  MonitorOff,
-  RefreshCw
-} from "lucide-react";
+import { MonitorOff, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { getEvaluationArtifactContentUrl } from "@/services/backend-api";
 import type { EvaluationArtifact } from "@/types/accessibility-domain";
 
 import { formatDateTime } from "../../shared/utils";
+import { formatIssueCodeLabel } from "./constants";
 import {
   DASHBOARD_REPLAY_SOURCE,
   parsePageReplayMessage,
   toPageReplayIssue,
   type DashboardToPageReplayMessage
 } from "./page-replay-protocol";
-import { hasUsableIssueLocator } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
 import type { EvaluationArtifactLoadState } from "./use-evaluation-artifact";
 
-type EvidenceView = "page" | "code";
 type ReplayConnectionState = "loading" | "ready" | "error";
 
 type RenderedPageEvidenceCardProps = {
   artifact: EvaluationArtifact | null;
+  artifactContentUrl?: string;
   errorMessage: string | null;
   loadState: EvaluationArtifactLoadState;
   onRetry: () => void;
@@ -36,6 +30,7 @@ type RenderedPageEvidenceCardProps = {
 };
 
 const REPLAY_READY_TIMEOUT_MS = 8_000;
+const REPLAY_SCROLLBAR_GUTTER_PX = 16;
 
 function EmptyEvidenceState({
   loadState,
@@ -69,6 +64,7 @@ function EmptyEvidenceState({
 
 export function RenderedPageEvidenceCard({
   artifact,
+  artifactContentUrl,
   errorMessage,
   loadState,
   onRetry,
@@ -77,13 +73,12 @@ export function RenderedPageEvidenceCard({
   selectedIssueId,
   targetName
 }: RenderedPageEvidenceCardProps) {
-  const [activeView, setActiveView] = useState<EvidenceView>("page");
   const [frameRevision, setFrameRevision] = useState(0);
   const [fallbackIssueId, setFallbackIssueId] = useState<number | null>(null);
-  const [markersVisible, setMarkersVisible] = useState(true);
   const [replayConnectionState, setReplayConnectionState] = useState<ReplayConnectionState>("loading");
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const [severityFilter, setSeverityFilter] = useState<RecentIssueRow["severity"]["key"] | "ALL">("ALL");
+  const [replayScale, setReplayScale] = useState(1);
+  const previewRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeDocumentTokenRef = useRef<string | null>(null);
   const pendingDocumentTokenRef = useRef<string | null>(null);
@@ -100,23 +95,28 @@ export function RenderedPageEvidenceCard({
   const selectedIssueStateRef = useRef(selectedIssueId);
   selectedIssueStateRef.current = selectedIssueId;
 
-  const visibleRows = useMemo(
-    () =>
-      severityFilter === "ALL"
-        ? rows
-        : rows.filter((row) => row.severity.key === severityFilter),
-    [rows, severityFilter]
-  );
-  const replayIssues = useMemo(() => visibleRows.map(toPageReplayIssue), [visibleRows]);
+  const replayIssues = useMemo(() => rows.map(toPageReplayIssue), [rows]);
   // Polling replaces row arrays even when their wire payload is unchanged. Reinitializing the
   // replay for an identity-only change destroys marker DOM, keyboard focus, and its tooltip link.
   const replayIssuesSignature = useMemo(() => JSON.stringify(replayIssues), [replayIssues]);
   const fallbackIssue = replayIssues.find((issue) => issue.id === fallbackIssueId) ?? null;
-  const selectedRow = visibleRows.find(({ issue }) => issue.id === selectedIssueId) ?? null;
   const selectedVisibleIssueId = replayIssues.some((issue) => issue.id === selectedIssueId)
     ? selectedIssueId
     : null;
-  const contentUrl = artifact ? getEvaluationArtifactContentUrl(artifact.contentUrl) : null;
+  const contentUrl = artifact
+    ? artifactContentUrl ?? getEvaluationArtifactContentUrl(artifact.contentUrl)
+    : null;
+  const replaySourceWidth = artifact
+    ? Math.max(artifact.viewportWidthCssPx, artifact.pageWidthCssPx) + REPLAY_SCROLLBAR_GUTTER_PX
+    : 0;
+  const replayFrameStyle = artifact && replayScale < 0.999
+    ? {
+        width: `${replaySourceWidth}px`,
+        height: `${100 / replayScale}%`,
+        transform: `scale(${replayScale})`,
+        transformOrigin: "top left"
+      }
+    : undefined;
 
   function clearReplayReadyTimeout() {
     replayReadyWatchdogEpochRef.current += 1;
@@ -195,7 +195,7 @@ export function RenderedPageEvidenceCard({
       type: "INIT_ISSUES",
       issues: replayIssues,
       selectedIssueId: selectedVisibleIssueId,
-      markersVisible
+      markersVisible: true
     });
     initializedReplayRef.current = {
       documentToken,
@@ -208,12 +208,37 @@ export function RenderedPageEvidenceCard({
   }, [artifact?.contentUrl, artifact?.id]);
 
   useLayoutEffect(() => {
+    const preview = previewRef.current;
+    const sourceWidth = replaySourceWidth;
+    if (!preview || !sourceWidth) {
+      setReplayScale(1);
+      return;
+    }
+
+    const updateReplayScale = () => {
+      const availableWidth = preview.clientWidth;
+      if (availableWidth <= 0) {
+        return;
+      }
+      const nextScale = Math.min(1, availableWidth / sourceWidth);
+      setReplayScale((currentScale) =>
+        Math.abs(currentScale - nextScale) < 0.001 ? currentScale : nextScale
+      );
+    };
+
+    updateReplayScale();
+    const resizeObserver = new ResizeObserver(updateReplayScale);
+    resizeObserver.observe(preview);
+    return () => resizeObserver.disconnect();
+  }, [artifact?.id, replaySourceWidth]);
+
+  useLayoutEffect(() => {
     clearReplayReadyTimeout();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     setFallbackIssueId(null);
     setReplayConnectionState("loading");
 
-    if (loadState === "ready" && artifact && activeView === "page") {
+    if (loadState === "ready" && artifact) {
       armReplayReadyTimeout();
     }
 
@@ -221,7 +246,7 @@ export function RenderedPageEvidenceCard({
       clearReplayReadyTimeout();
       invalidateReplayDocumentSession();
     };
-  }, [activeView, artifact?.contentUrl, artifact?.id, frameRevision, loadState]);
+  }, [artifact?.contentUrl, artifact?.id, frameRevision, loadState]);
 
   useEffect(() => {
     setFallbackIssueId(null);
@@ -232,21 +257,10 @@ export function RenderedPageEvidenceCard({
   }, [replayIssuesSignature]);
 
   useEffect(() => {
-    if (activeView !== "page") {
-      clearReplayReadyTimeout();
-    }
-  }, [activeView]);
-
-  useEffect(() => {
-    if (
-      loadState !== "ready" ||
-      activeView !== "page" ||
-      !markersVisible ||
-      replayConnectionState !== "ready"
-    ) {
+    if (loadState !== "ready" || replayConnectionState !== "ready") {
       setFallbackIssueId(null);
     }
-  }, [activeView, loadState, markersVisible, replayConnectionState]);
+  }, [loadState, replayConnectionState]);
 
   useEffect(() => {
     return () => clearReplayReadyTimeout();
@@ -353,8 +367,6 @@ export function RenderedPageEvidenceCard({
 
         if (
           loadState === "ready" &&
-          activeView === "page" &&
-          markersVisible &&
           replayConnectionState === "ready" &&
           replayIssues.some((issue) => issue.id === message.issueId)
         ) {
@@ -371,28 +383,18 @@ export function RenderedPageEvidenceCard({
 
     window.addEventListener("message", handleReplayMessage);
     return () => window.removeEventListener("message", handleReplayMessage);
-  }, [
-    activeView,
-    loadState,
-    markersVisible,
-    onSelectIssue,
-    replayConnectionState,
-    replayIssues,
-    rows,
-    selectedIssueId,
-    selectedVisibleIssueId
-  ]);
+  }, [loadState, onSelectIssue, replayConnectionState, replayIssues]);
 
   useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
+    if (replayConnectionState !== "ready") {
       return;
     }
 
     sendInitialIssues();
-  }, [activeView, replayConnectionState, replayIssuesSignature, replayReadyEpoch]);
+  }, [replayConnectionState, replayIssuesSignature, replayReadyEpoch]);
 
   useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
+    if (replayConnectionState !== "ready") {
       return;
     }
 
@@ -407,19 +409,7 @@ export function RenderedPageEvidenceCard({
       type: "FOCUS_ISSUE",
       issueId: selectedVisibleIssueId
     });
-  }, [activeView, replayConnectionState, selectedVisibleIssueId]);
-
-  useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
-      return;
-    }
-
-    postToReplay({
-      source: DASHBOARD_REPLAY_SOURCE,
-      type: "SET_MARKERS_VISIBLE",
-      markersVisible
-    });
-  }, [activeView, markersVisible, replayConnectionState]);
+  }, [replayConnectionState, selectedVisibleIssueId]);
 
   function handleFrameLoad() {
     frameLoadObservedRef.current = true;
@@ -447,48 +437,6 @@ export function RenderedPageEvidenceCard({
     requestReplayDocumentState();
   }
 
-  function handleSeverityChange(nextFilter: typeof severityFilter) {
-    setFallbackIssueId(null);
-    setSeverityFilter(nextFilter);
-
-    const nextVisibleRows =
-      nextFilter === "ALL"
-        ? rows
-        : rows.filter((row) => row.severity.key === nextFilter);
-    const currentSelectedIssueId = selectedIssueStateRef.current;
-
-    if (
-      currentSelectedIssueId !== null &&
-      nextVisibleRows.some((row) => row.issue.id === currentSelectedIssueId)
-    ) {
-      return;
-    }
-
-    // Returning to ALL must not silently resurrect a selection the user already cleared.
-    if (nextFilter === "ALL" && currentSelectedIssueId === null) {
-      return;
-    }
-
-    const nextIssue =
-      nextVisibleRows.find((row) => hasUsableIssueLocator(row.issue)) ??
-      nextVisibleRows[0] ??
-      null;
-    const nextIssueId = nextIssue?.issue.id ?? null;
-
-    if (nextIssueId !== currentSelectedIssueId) {
-      // Close the window in which a replay message can race the parent state update.
-      selectedIssueStateRef.current = nextIssueId;
-      onSelectIssue(nextIssueId);
-    }
-  }
-
-  function showPageView() {
-    if (activeView !== "page") {
-      setReplayConnectionState("loading");
-      setActiveView("page");
-    }
-  }
-
   return (
     <article aria-labelledby="site-page-evidence-heading" className="dashboard-card site-page-evidence-card">
       <header className="site-page-evidence-header">
@@ -501,60 +449,6 @@ export function RenderedPageEvidenceCard({
           </p>
         </div>
 
-        <div className="site-page-evidence-toolbar" aria-label="페이지 검사 화면 도구">
-          <div className="site-page-evidence-view-switch" aria-label="보기 방식">
-            <button type="button" aria-pressed={activeView === "page"} onClick={showPageView}>
-              <Eye aria-hidden="true" size={15} />
-              페이지
-            </button>
-            <button
-              type="button"
-              aria-pressed={activeView === "code"}
-              onClick={() => {
-                setFallbackIssueId(null);
-                setActiveView("code");
-              }}
-            >
-              <Code2 aria-hidden="true" size={15} />
-              코드
-            </button>
-          </div>
-
-          {loadState === "ready" && activeView === "page" && (
-            <>
-              <label className="site-page-evidence-filter">
-                <span>심각도</span>
-                <select
-                  value={severityFilter}
-                  onChange={(event) => handleSeverityChange(event.target.value as typeof severityFilter)}
-                >
-                  <option value="ALL">전체</option>
-                  <option value="CRITICAL">심각</option>
-                  <option value="HIGH">높음</option>
-                  <option value="MEDIUM">보통</option>
-                  <option value="LOW">낮음</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                className="site-page-evidence-marker-toggle"
-                aria-pressed={markersVisible}
-                onClick={() =>
-                  setMarkersVisible((current) => {
-                    if (current) {
-                      setFallbackIssueId(null);
-                    }
-                    return !current;
-                  })
-                }
-              >
-                {markersVisible ? <EyeOff aria-hidden="true" size={15} /> : <Eye aria-hidden="true" size={15} />}
-                {markersVisible ? "마커 숨기기" : "마커 표시"}
-              </button>
-
-            </>
-          )}
-        </div>
       </header>
 
       <div className="site-page-evidence-body">
@@ -562,6 +456,18 @@ export function RenderedPageEvidenceCard({
           <div className="site-page-evidence-loading" role="status" aria-live="polite">
             <span className="site-page-evidence-loading-bar" />
             <span>페이지 재현 화면을 불러오는 중입니다</span>
+          </div>
+        )}
+
+        {loadState === "reconciling" && (
+          <div className="site-page-evidence-empty" role="status" aria-live="polite">
+            <MonitorOff aria-hidden="true" size={26} strokeWidth={1.8} />
+            <div>
+              <p className="site-page-evidence-empty-title">재현 페이지를 준비 중입니다</p>
+              <p className="site-page-evidence-empty-description">
+                분석 결과는 준비됐으며, 재현 페이지 업로드를 백그라운드에서 확인하고 있습니다.
+              </p>
+            </div>
           </div>
         )}
 
@@ -583,10 +489,11 @@ export function RenderedPageEvidenceCard({
           </div>
         )}
 
-        {loadState === "ready" && artifact && activeView === "page" && (
+        {loadState === "ready" && artifact && (
           <div className="site-page-evidence-grid">
             <div className="site-page-evidence-replay-column">
               <div
+                ref={previewRef}
                 className="site-page-evidence-preview"
                 role="region"
                 aria-label={`${targetName} 접근성 검사 페이지 재현 화면`}
@@ -597,7 +504,9 @@ export function RenderedPageEvidenceCard({
                   key={`${artifact.id}:${frameRevision}`}
                   ref={iframeRef}
                   className="site-page-evidence-replay-frame"
+                  data-replay-scale={replayScale.toFixed(4)}
                   src={contentUrl ?? undefined}
+                  style={replayFrameStyle}
                   title={`${targetName} 접근성 검사 페이지 재현`}
                   sandbox="allow-scripts"
                   referrerPolicy="no-referrer"
@@ -661,7 +570,7 @@ export function RenderedPageEvidenceCard({
                       {fallbackIssue.severityLabel}
                     </span>
                     <span className="site-page-evidence-fallback-detail__tag">
-                      {fallbackIssue.code ? `KWCAG ${fallbackIssue.code}` : "KWCAG"}
+                      {formatIssueCodeLabel(fallbackIssue.code) || "KWCAG"}
                     </span>
                   </div>
                   <p className="site-page-evidence-fallback-detail__title">{fallbackIssue.title}</p>
@@ -675,29 +584,6 @@ export function RenderedPageEvidenceCard({
               )}
             </div>
 
-          </div>
-        )}
-
-        {loadState === "ready" && artifact && activeView === "code" && (
-          <div className="site-page-evidence-code-view">
-            <div className="site-page-evidence-code-heading">
-              <Code2 aria-hidden="true" size={17} />
-              <h3>관련 코드</h3>
-            </div>
-            {selectedRow ? (
-              <>
-                <p>{selectedRow.issue.issueTitle}</p>
-                <pre tabIndex={0} aria-label={`${selectedRow.issue.issueTitle} 관련 코드`}>
-                  <code>
-                    {selectedRow.issue.locator?.htmlSnippet ||
-                      selectedRow.issue.locationPath ||
-                      "이 스캔에는 관련 코드 조각이 저장되지 않았습니다."}
-                  </code>
-                </pre>
-              </>
-            ) : (
-              <p className="site-page-evidence-code-empty">페이지 보기에서 이슈를 먼저 선택하세요.</p>
-            )}
           </div>
         )}
       </div>

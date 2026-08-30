@@ -241,7 +241,8 @@ async function markerFacts(frame, limit = Number.POSITIVE_INFINITY) {
       const rect = marker.getBoundingClientRect();
       return {
         hidden: marker.hidden,
-        label: marker.textContent,
+        markerIndex: marker.dataset.markerIndex,
+        text: marker.textContent,
         ariaLabel: marker.getAttribute("aria-label"),
         ariaPressed: marker.getAttribute("aria-pressed"),
         selected: marker.dataset.selected,

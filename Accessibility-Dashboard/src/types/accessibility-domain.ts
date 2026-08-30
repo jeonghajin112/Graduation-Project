@@ -1,4 +1,4 @@
-export type MenuType = "dashboard" | "analyze" | "projects" | "reports" | "project-create";
+export type MenuType = "analyze" | "projects";
 
 export type ApiResponse<T> = {
   success: boolean;
@@ -7,7 +7,8 @@ export type ApiResponse<T> = {
 };
 
 export type EvaluationStatus = "PENDING" | "IN_PROGRESS" | "RUNNING" | "COMPLETED" | "FAILED";
-export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR" | "INFO";
+export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR";
+export type EvaluationModule = "rule_based" | "text_difficulty" | "cv_visual";
 export type RequestStatus = EvaluationStatus;
 export type AnalysisStatus = "SUCCESS" | "FAILED";
 export type AnalyzerType = "RULE_BASED" | "AI_TEXT" | "CV_VISION";
@@ -54,13 +55,16 @@ export type EvaluationResultSummary = {
   requestId: number;
   targetName: string;
   status: EvaluationStatus;
-  totalScore: number | null;
+  totalScore: number;
   totalIssueCount: number;
   criticalIssueCount: number;
-  requestedAt: string | null;
+  requestedAt: string;
 };
 
-export type IssueLocatorContext = "DOCUMENT" | "FRAME" | "SHADOW_ROOT";
+// The backend preserves legacy/custom locator context strings. Replay support
+// is narrowed at runtime in issue-locator.ts instead of pretending the wire
+// contract is a closed enum.
+export type IssueLocatorContext = string;
 
 export type IssueLocatorPathStep = {
   context: IssueLocatorContext;
@@ -71,6 +75,11 @@ export type IssueLocatorPathStep = {
 export type IssueLocator = {
   kind: string;
   pathSteps: IssueLocatorPathStep[];
+  x: number | null;
+  y: number | null;
+  width: number | null;
+  height: number | null;
+  coordinateSpace: string | null;
   visible: boolean | null;
   htmlSnippet: string | null;
 };
@@ -96,17 +105,17 @@ export type EvaluationArtifact = {
 };
 
 export type EvaluationIssue = {
-  id: number | string;
+  id: number;
   requestId: number;
-  module: string;
+  module: EvaluationModule;
   severity: EvaluationIssueSeverity;
   title: string;
-  description: string;
-  recommendation?: string | null;
-  selector?: string | null;
-  locator?: IssueLocator | null;
-  wcagCode?: string | null;
-  createdAt?: string | null;
+  description: string | null;
+  recommendation: string | null;
+  selector: string | null;
+  locator: IssueLocator | null;
+  wcagCode: string;
+  createdAt: string;
 };
 
 export type AnalysisResult = {
@@ -194,27 +203,38 @@ export type OrganizationModel = {
 export type EvaluationRequestModel = EvaluationRequest;
 export type IssueResultModel = IssueResult;
 
+export type DashboardIssueGroup = {
+  issueCode: string;
+  issueTitle: string;
+  severity: SeverityLevel;
+  count: number;
+};
+
+export type DashboardLatestIssueCount = {
+  evaluationTargetId: number;
+  requestId: number;
+  totalIssueCount: number;
+  criticalIssueCount: number;
+  highIssueCount: number;
+  mediumIssueCount: number;
+  lowIssueCount: number;
+  groups: DashboardIssueGroup[];
+};
+
 export type DashboardViewModel = {
   organizations: OrganizationModel[];
   evaluationRequests: EvaluationRequestModel[];
   resultSummaries: EvaluationResultSummary[];
-  evaluationIssues: EvaluationIssue[];
-  analysisResults: AnalysisResult[];
+  latestIssueCounts: DashboardLatestIssueCount[];
   scoreResults: ScoreResult[];
-  scoreDetails: ScoreDetail[];
-  issueResults: IssueResultModel[];
-  improvementGuides: ImprovementGuide[];
 };
 
-export type DashboardApiResponse = {
-  organizations: Organization[];
-  evaluationTargets: EvaluationTarget[];
+export type DashboardOverviewApiResponse = {
+  organizations: Array<Organization & { evaluationTargets: EvaluationTarget[] }>;
   evaluationRequests: EvaluationRequest[];
-  analysisResults: AnalysisResult[];
-  issueResults: IssueResult[];
+  resultSummaries: EvaluationResultSummary[];
   scoreResults: ScoreResult[];
-  scoreDetails?: ScoreDetail[];
-  improvementGuides?: ImprovementGuide[];
+  latestIssueCounts: DashboardLatestIssueCount[];
 };
 
 export type CreateEvaluationTargetInput = {

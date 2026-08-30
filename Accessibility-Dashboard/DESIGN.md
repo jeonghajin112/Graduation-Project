@@ -339,13 +339,13 @@ dashboard, auth/routing/API, 56px/980px/Liquid Glass의 기본 도입.
 
 | 관찰 구간 변경 파일 | 최초 SHA256 | 최신 SHA256 | P1 보호 판정 |
 |---|---|---|---|
-| `src/components/dashboard/panels/dashboard-panel.tsx` | `9D3D0396D6B10D12DCB25EE23FA383FD295370DA74999D9E6B62C303876F55D4` | `5708DAB91F7DA54A56FD81A75723A694A8862E720CA679BAB563F13037A28491` | `/dashboard` 경로에서 사용하는 기본 대시보드 패널 |
+| `src/components/dashboard/panels/dashboard-panel.tsx` | `9D3D0396D6B10D12DCB25EE23FA383FD295370DA74999D9E6B62C303876F55D4` | `5708DAB91F7DA54A56FD81A75723A694A8862E720CA679BAB563F13037A28491` | 감사 당시 기본 대시보드 패널이었으며 이후 제거됨 |
 | `src/index.css` | `4880CBFCBB31EE115C8C91A2EE4FAFAB730A5A7C037ACB8DCFC47792A8D25117` | `2156ED70051F1D2EB0B340691E3B988D2A6AEC6ED7B5690CFF659801418A0B7C` | 완료된 P1 write set; 추가 작업은 foundation hunk만 |
 | `src/styles/theme-tokens.css` | `C41DCCF85B1E87464AC85E04065B9D44246CE7CC313B9773DD8F9CE2886AE1C5` | `31D74F2266260DCFC356878E2EB38BCF8497EF095D92CA9855FE24F7DC957B57` | 완료된 P1 write set |
 | `src/components/ui/button.tsx` | `636C941597BC1E09F937A62E904ABD1B409D785E4A3CB5AFE5BE55E9F603B22D` | `C43671C741AD83AAA3F72548B357CB8DDBC6B3133F0156524B88C3FD3C5746D5` | 완료된 P1 write set |
 | `src/components/ui/input.tsx` | `84E0CF4B902E8D9FA5480AE28CB3D4A35EB798BCBBA5AA807C569FBCB25F243E` | `2CEBF20C17C39A0B618732BD8F547EB673C389ABC6D4CB6DAAB37874EDF57D9F` | 완료된 P1 write set |
 
-프로필 대시보드 모달과 전용 CSS는 2026-08-11 제거됐다. 계정 메뉴는 설정과 로그아웃만 제공하며, 기본 대시보드는 `/dashboard` 경로에서만 렌더링한다.
+프로필 대시보드 모달과 전용 CSS는 2026-08-11 제거됐다. 계정 메뉴는 설정과 로그아웃만 제공한다. 종합 대시보드 패널과 메뉴도 이후 제거됐으며, 이전 `/dashboard` 주소는 `/analyze`로 이동한다.
 
 ### 설치된 디자인 시스템 실체
 
@@ -358,11 +358,11 @@ dashboard, auth/routing/API, 56px/980px/Liquid Glass의 기본 도입.
 
 | v2 계약 | 현행 파일·selector/변수/컴포넌트 | 판정 및 phase 경계 |
 |---|---|---|
-| D5 대시보드 기본값 | D5 root는 `sidebar-demo.tsx:172-179`의 `.bridge-dashboard.theme-light/theme-dark`와 `.dashboard-shell`; `/dashboard`는 `dashboard-route.ts:85-92`에서 `menu: "dashboard"`. 그러나 `App.tsx:52-55`의 `/`는 D2 `HeroDemo`, wildcard는 dashboard shell이며 알 수 없는 path는 `dashboard-route.ts:95-100`에서 `analyze`가 된다. | 디자인 기본 surface와 현재 최초 route는 불일치. routing/API/data는 P1–P3 모두 비대상으로 고정한다. |
+| D5 앱 셸 기본값 | D5 root는 `sidebar-demo.tsx`의 `.bridge-dashboard.theme-light/theme-dark`와 `.dashboard-shell`; 종합 대시보드 메뉴와 패널은 제거됐고 `/dashboard`는 `/analyze`로 이동한다. `/`는 D2 랜딩을 표시한다. | D5는 새 분석과 프로젝트·페이지 상세 앱 셸에 적용된다. |
 | light/dark/system 3상태 | `toggle-theme.tsx:6`의 type; `account-settings-modal.tsx:9-33,81-107`의 3개 radio; `use-dashboard-theme.ts:6-28`의 상태/해석, `30-36`의 저장/`.dark`, `38-53`의 system listener; `index.css:27-71`의 `:root/.dark`. | 실제 설정 modal은 3상태. `ToggleTheme` component 자체는 binary이고 사용처가 검색되지 않았다. UI/API 변경 없이 회귀 검증만 한다. |
 | control 8px | `button.tsx:34`, `input.tsx:10`의 `rounded-lg`; `theme-tokens.css:8`의 `--dashboard-sidebar-item-radius: 0.5rem`과 `sidebar.tsx:117`; `index.css:1312` skip link. | shared foundation은 일치. account/sidebar의 `rounded-xl/2xl/full`은 P2에서 역할별 판정한다. |
-| large surface 18px | `index.css:963`의 `.recent-scan-card`는 18px. `.dashboard-card`는 `index.css:258-268`에서 28px이고 TSX에도 `rounded-[28px]`가 다수다. | D5 주요 surface는 아직 불일치. P2 대상이며 P1에서 전역 치환 금지. |
-| D5 gap 12–16px | `dashboard-panel.tsx:485-492`와 `site-dashboard-panel.tsx:103`의 `gap-3`(12px), `sidebar-demo.tsx:349`의 `py-3/sm:py-4/lg:py-4`(12/16px), 공용 `gap-4`(16px). | 핵심 grid 일부 일치. sidebar `gap-6`, compact 세부 gap은 역할별 예외라 P2에서 확인한다. |
+| large surface 18px | `.dashboard-card`는 페이지 상세 등 현재 앱 화면에서도 사용되며 TSX에 `rounded-[28px]`가 남아 있다. | D5 주요 surface는 아직 불일치. P2 대상이며 P1에서 전역 치환 금지. |
+| D5 gap 12–16px | `site-dashboard-panel.tsx`의 `gap-3`(12px), `sidebar-demo.tsx`의 반응형 12/16px 여백, 공용 `gap-4`(16px). | 핵심 grid 일부 일치. sidebar `gap-6`, compact 세부 gap은 역할별 예외라 P2에서 확인한다. |
 | D5 body 14–16px | Button/Input/Label과 dashboard card 다수의 `text-sm`(14px), skip link `index.css:1315`의 `0.875rem`; global body는 `141-148`에서 font stack/color만 지정. D2 `.uni-landing`은 `landing.css:44`에서 17px. | D5는 14px 중심이나 14–16 전역 scale 변수는 없다. D2 17px는 P1/P2에서 건드리지 않는다. |
 | 접근성 | global focus `index.css:150-154` 3px/2px action ring; dashboard skip link `sidebar-demo.tsx:176-177` + `index.css:1302-1325`; dialog focus trap/restore/Escape는 `use-dialog-accessibility.ts`; settings는 labelled radiogroup; `index.css:2117-2131`, `landing.css:2359-2399`은 forced-colors/reduced-motion. | 기반은 있으나 sidebar/settings의 Coral 2px focus, 일부 36/28px control이 남는다. P2에서 44px/focus/color-only와 함께 처리한다. |
 | 320/390/768/1024/1440 | D5 shell `sidebar-demo.tsx:179`의 `md:flex-row`, content `:349`의 `px-4/sm:px-7/lg:px-10`; `index.css:445` min 768, modal `1977/1992/2064` max 1023/767/479. D2 `landing.css:1857/1885/1948/2146/2332` max 1279/1023/767/639/359, `:295` min 1440+height 900. `verify-accessibility-p0.mjs:5,19-30,72-83`이 정확한 5개 폭에서 overflow를 검사한다. | 320/390은 별도 breakpoint가 아니라 검증 viewport다. 768/1024 경계 양쪽, 1440 wide layout을 light/dark/system과 함께 확인한다. |
@@ -372,7 +372,7 @@ dashboard, auth/routing/API, 56px/980px/Liquid Glass의 기본 도입.
 ### P1 → P2 → P3
 
 1. **P1 — foundation 인수/잠금:** 완료된 Stage 1의 정확한 4개 write set과 검증 결과를 인수한다. 새 구현은 하지 않고 최신 SHA256, missing token, shared control 사용처, a11y/build를 재검증해 기준점을 잠근다.
-2. **P2 — D5 presentation:** sidebar/navigation, dashboard card/chart, account settings modal/form을 8px control, 18px surface, 12–16px gap, 14–16px body, 44px target, flat/hairline로 정리한다. account/sidebar/dashboard owner가 모두 정지한 뒤 presentation hunk만 수행한다.
+2. **P2 — D5 presentation:** sidebar/navigation, 페이지 상세 card/chart, account settings modal/form을 8px control, 18px surface, 12–16px gap, 14–16px body, 44px target, flat/hairline로 정리한다. 관련 owner가 모두 정지한 뒤 presentation hunk만 수행한다.
 3. **P3 — D2 landing:** `landing.css`와 landing presentation만 Pretendard-first, 40–48px hero, 44px/8px CTA, 18px stage, semantic severity, reduced motion에 맞춘다.
 
 P1–P3 공통 비대상은 UI 구조, component public API/props/variant 이름, API, routing, data/query/chart 계산, controller, backend다.

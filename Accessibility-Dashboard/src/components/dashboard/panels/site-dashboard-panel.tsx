@@ -1,72 +1,92 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type {
-  AnalysisResult,
   AnalyzerType,
+  AnalysisResult,
+  EvaluationArtifact,
   EvaluationResultSummary,
   EvaluationRequestModel,
   EvaluationTargetModel,
-  ImprovementGuide,
   IssueResultModel,
   ScoreResult
 } from "@/types/accessibility-domain";
 
 import { selectLatestEvaluationRequest } from "../shared/evaluation-request-selection";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
-import { fallbackWcagCriterion, severityChartItems, wcagCriterionByIssueCode } from "./site-dashboard/constants";
+import { resolveWcagCriterion, severityChartItems } from "./site-dashboard/constants";
 import { hasUsableIssueLocator } from "./site-dashboard/issue-locator";
+import { PageInformationPanel } from "./site-dashboard/page-information-panel";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
+import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
 import type { RecentIssueRow } from "./site-dashboard/types";
 import { useEvaluationArtifact } from "./site-dashboard/use-evaluation-artifact";
+import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
 import { getAnalyzerTypeLabel } from "./site-dashboard/utils";
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;
   evaluationRequests: EvaluationRequestModel[];
   resultSummaries: EvaluationResultSummary[];
-  analysisResults: AnalysisResult[];
   scoreResults: ScoreResult[];
+  previewEvidence?: SiteDashboardPreviewEvidence;
+};
+
+export type SiteDashboardPreviewEvidence = {
+  analysisResults: AnalysisResult[];
+  artifact: EvaluationArtifact | null;
+  artifactContentUrl?: string;
   issueResults: IssueResultModel[];
-  improvementGuides: ImprovementGuide[];
 };
 
 export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
   const {
     evaluationTarget,
     evaluationRequests,
+    previewEvidence,
     resultSummaries,
-    analysisResults,
-    improvementGuides,
-    issueResults,
     scoreResults
   } = props;
   const targetEvaluationRequests = evaluationRequests.filter(
     (request) => request.evaluationTargetId === evaluationTarget.id
   );
-  const requestIdByAnalysisResultId = useMemo(
-    () => new Map(
-      analysisResults.map((analysisResult) => [analysisResult.id, analysisResult.evaluationRequestId])
-    ),
-    [analysisResults]
-  );
-  const analysisResultById = useMemo(
-    () => new Map(analysisResults.map((analysisResult) => [analysisResult.id, analysisResult])),
-    [analysisResults]
-  );
-  const guidesByIssueId = useMemo(
-    () => buildGuidesByIssueId(improvementGuides),
-    [improvementGuides]
-  );
   const materializedRequestIds = new Set([
     ...resultSummaries.map((summary) => summary.requestId),
-    ...scoreResults.map((scoreResult) => scoreResult.evaluationRequestId),
-    ...analysisResults.map((analysisResult) => analysisResult.evaluationRequestId)
+    ...scoreResults.map((scoreResult) => scoreResult.evaluationRequestId)
   ]);
   const latestMaterializedResultRequest = selectLatestEvaluationRequest(
     targetEvaluationRequests,
     materializedRequestIds
   );
   const latestResultRequestId = latestMaterializedResultRequest?.id ?? null;
+  const {
+    analysisResults,
+    errorMessage: resultDetailsErrorMessage,
+    issueResults,
+    loadState: resultDetailsLoadState,
+    retry: retryResultDetails
+  } = useEvaluationResultDetails(
+    latestMaterializedResultRequest,
+    previewEvidence
+      ? {
+          analysisResults: previewEvidence.analysisResults,
+          issueResults: previewEvidence.issueResults
+        }
+      : undefined
+  );
+  const requestIdByAnalysisResultId = useMemo(
+    () =>
+      new Map(
+        analysisResults.map((analysisResult) => [
+          analysisResult.id,
+          analysisResult.evaluationRequestId
+        ])
+      ),
+    [analysisResults]
+  );
+  const analysisResultById = useMemo(
+    () => new Map(analysisResults.map((analysisResult) => [analysisResult.id, analysisResult])),
+    [analysisResults]
+  );
   const latestIssues = useMemo(
     () =>
       latestResultRequestId === null
@@ -81,7 +101,10 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
     errorMessage: artifactErrorMessage,
     loadState: artifactLoadState,
     retry: retryArtifact
-  } = useEvaluationArtifact(latestResultRequestId);
+  } = useEvaluationArtifact(
+    latestMaterializedResultRequest,
+    previewEvidence ? { artifact: previewEvidence.artifact } : undefined
+  );
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const latestIssueSignature = latestIssues.map((issue) => issue.id).join(",");
 
@@ -103,45 +126,73 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
         return {
           issue,
           severity,
-          wcagCriterion: wcagCriterionByIssueCode[issue.issueCode] ?? fallbackWcagCriterion,
-          issueGuides: guidesByIssueId.get(issue.id) ?? [],
+          wcagCriterion: resolveWcagCriterion(issue.issueCode, issue.issueTitle),
+          issueGuides: [],
           analyzerLabel: getAnalyzerTypeLabel(analyzerType),
           analyzerType,
           showsAiGuide: isTextAccessibilityIssue(issue, analyzerType)
         };
       }),
-    [analysisResultById, guidesByIssueId, latestIssues]
+    [analysisResultById, latestIssues]
   );
+  const evidenceLoadState =
+    resultDetailsLoadState === "loading"
+      ? "loading"
+      : resultDetailsLoadState === "error"
+        ? "error"
+        : artifactLoadState;
+  const evidenceErrorMessage = resultDetailsErrorMessage ?? artifactErrorMessage;
+  const retryEvidence =
+    resultDetailsLoadState === "error" ? retryResultDetails : retryArtifact;
+  // Severity comes from the result-details request, not from the replay
+  // artifact. Keep it available when only the DOM replay is missing or is
+  // still being reconciled.
+  const showsRailDetailCards = resultDetailsLoadState === "ready";
+  const latestAnalyzedAt =
+    artifact?.capturedAt ??
+    latestMaterializedResultRequest?.requestedAt ??
+    latestMaterializedResultRequest?.updatedAt ??
+    null;
 
   return (
     <div className="site-dashboard-layout grid min-h-[31rem] grid-cols-1 items-stretch">
       <div className="site-page-evidence-grid-item">
         <RenderedPageEvidenceCard
           artifact={artifact}
-          errorMessage={artifactErrorMessage}
-          loadState={artifactLoadState}
+          artifactContentUrl={previewEvidence?.artifactContentUrl}
+          errorMessage={evidenceErrorMessage}
+          loadState={evidenceLoadState}
           rows={replayIssueRows}
           selectedIssueId={selectedIssueId}
           targetName={evaluationTarget.name}
-          onRetry={retryArtifact}
+          onRetry={retryEvidence}
           onSelectIssue={setSelectedIssueId}
         />
       </div>
-      <AnalysisTrendPanel requestId={latestResultRequestId} />
+      <div className="site-dashboard-rail">
+        <PageInformationPanel
+          accessUrl={evaluationTarget.accessUrl}
+          analyzedAt={latestAnalyzedAt}
+          faviconUrl={evaluationTarget.faviconUrl}
+          name={evaluationTarget.name}
+          targetType={evaluationTarget.targetType}
+          viewportHeight={artifact?.viewportHeightCssPx ?? null}
+          viewportWidth={artifact?.viewportWidthCssPx ?? null}
+        />
+
+        <AnalysisTrendPanel
+          evaluationRequests={evaluationRequests}
+          evaluationTargetId={evaluationTarget.id}
+          resultSummaries={resultSummaries}
+          scoreResults={scoreResults}
+        />
+
+        {showsRailDetailCards && (
+          <SeverityDistributionPanel issues={latestIssues} />
+        )}
+      </div>
     </div>
   );
-}
-
-function buildGuidesByIssueId(improvementGuides: ImprovementGuide[]): Map<number, ImprovementGuide[]> {
-  const guidesByIssueId = new Map<number, ImprovementGuide[]>();
-
-  for (const guide of improvementGuides) {
-    const currentGuides = guidesByIssueId.get(guide.issueResultId) ?? [];
-    currentGuides.push(guide);
-    guidesByIssueId.set(guide.issueResultId, currentGuides);
-  }
-
-  return guidesByIssueId;
 }
 
 function isTextAccessibilityIssue(issue: IssueResultModel, analyzerType?: AnalyzerType): boolean {

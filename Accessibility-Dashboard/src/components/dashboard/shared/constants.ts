@@ -32,14 +32,6 @@ export const chartTokens = {
   tooltipBg: "rgba(15, 23, 42, 0.94)",
   tooltipBorder: "rgba(148, 163, 184, 0.16)",
   tooltipText: "#f8fafc",
-  tooltipSubtle: "#94a3b8",
-  donutPalette: ["#ef6a50", "#3b82f6", "#8b5cf6", "#10b981", "#f59e0b"]
+  tooltipSubtle: "#94a3b8"
 } as const;
-
-export const metricSparklineColors: Record<"orange" | "emerald" | "indigo" | "rose", string> = {
-  orange: "#ef6a50",
-  emerald: "#8f9b8e",
-  indigo: "#111111",
-  rose: "#d56c81"
-};
 

@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
 import React, { createContext, useContext } from "react";
 
 export interface SidebarItem {
@@ -63,7 +62,7 @@ export function Sidebar({
   );
 }
 
-export function SidebarBody(props: React.ComponentProps<typeof motion.div>) {
+export function SidebarBody(props: React.ComponentProps<"aside">) {
   return <DesktopSidebar {...props} />;
 }
 
@@ -71,19 +70,18 @@ export function DesktopSidebar({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof motion.div>) {
+}: React.ComponentProps<"aside">) {
   return (
-    <motion.aside
+    <aside
       className={cn(
         "dashboard-drawer dashboard-sidebar z-20 flex shrink-0 flex-col overflow-hidden border-b md:border-b-0 md:border-r",
         className
       )}
-      initial={false}
       style={{ backfaceVisibility: "hidden", contain: "layout paint style" }}
       {...props}
     >
       {children}
-    </motion.aside>
+    </aside>
   );
 }
 

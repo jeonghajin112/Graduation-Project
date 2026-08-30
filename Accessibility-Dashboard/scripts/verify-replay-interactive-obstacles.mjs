@@ -183,11 +183,12 @@ async function setFixtureControlsNeutralized(page, neutralized) {
 async function markerFacts(page) {
   return page.evaluate(() => {
     const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
-    return [...root.querySelectorAll(".marker")].map((marker, index) => {
+    return [...root.querySelectorAll(".marker")].map((marker, arrayIndex) => {
       const rect = marker.getBoundingClientRect();
       return {
-        index,
-        label: marker.textContent,
+        arrayIndex,
+        markerIndex: marker.dataset.markerIndex,
+        text: marker.textContent,
         hidden: marker.hidden,
         display: getComputedStyle(marker).display,
         rect: {
@@ -241,11 +242,11 @@ async function assertVisibleMarkersRemainAnchored(page, markers, issues, message
   markers.forEach((marker, index) => {
     if (marker.hidden) return;
     const target = targets[index];
-    assert.ok(target, `${message}: visible marker ${marker.label} must have a rendered target`);
+    assert.ok(target, `${message}: visible marker ${marker.markerIndex} must have a rendered target`);
     const distance = rectangleDistance(marker.rect, target);
     assert.ok(
       distance <= MAX_VISIBLE_MARKER_ANCHOR_DISTANCE,
-      `${message}: marker ${marker.label} drifted ${distance.toFixed(2)}px from its target; maximum is ${MAX_VISIBLE_MARKER_ANCHOR_DISTANCE}px`
+      `${message}: marker ${marker.markerIndex} drifted ${distance.toFixed(2)}px from its target; maximum is ${MAX_VISIBLE_MARKER_ANCHOR_DISTANCE}px`
     );
     distances.push(distance);
   });
@@ -958,7 +959,7 @@ try {
 
   const deterministicBefore = markers
     .filter((marker) => !marker.hidden)
-    .map((marker) => ({ label: marker.label, rect: marker.rect }));
+    .map((marker) => ({ markerIndex: marker.markerIndex, rect: marker.rect }));
   await sendCommand(page, {
     type: "INIT_ISSUES",
     markersVisible: true,
@@ -968,7 +969,7 @@ try {
   await waitForMarkers(page, issues.length);
   const deterministicAfter = (await markerFacts(page))
     .filter((marker) => !marker.hidden)
-    .map((marker) => ({ label: marker.label, rect: marker.rect }));
+    .map((marker) => ({ markerIndex: marker.markerIndex, rect: marker.rect }));
   assert.deepEqual(deterministicAfter, deterministicBefore, "interactive-obstacle placement must be deterministic");
 
   assert.deepEqual(pageErrors, [], "interactive obstacle fixture must not raise page errors");

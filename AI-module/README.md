@@ -84,7 +84,7 @@ graduation_project/
 | contrast_analyzer.py | WCAG 명암비 공식으로 전경색/배경색 대비 계산 + AA/AAA 판정 + 수정 색상 추천 |
 | cv_runner.py | OCR → 명암비 분석 → 결과 JSON 출력 통합 실행기 |
 
-**검사 기준:** KWCAG 5.3.3 콘텐츠의 명도 대비 (AA 기준 4.5:1, 큰 텍스트 3.0:1)
+**검사 기준:** KWCAG 5.4.3 텍스트 콘텐츠의 명도 대비 (AA 기준 4.5:1, 큰 텍스트 3.0:1)
 
 ---
 

@@ -4,12 +4,14 @@
  * - an ambiguous outcome becomes GET-only recovery and never repeats the POST;
  * - an eventually visible server commit is reconciled without duplication.
  *
- * Usage: BASE_URL=http://127.0.0.1:5173 node scripts/verify-organization-create-post-timeout.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-11T10:00:00.000Z";
 const createTimeoutMs = 15_000;
 
@@ -102,29 +104,14 @@ async function runScenario(browser, { commitBeforeResponse, createdProject }) {
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
 
-      if (method === "GET" && pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (method === "GET" && pathname === "/api/organizations") {
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
         observed.organizationGets += 1;
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(
-            commitBeforeResponse && revealCreatedProject ? [createdProject] : []
-          )
-        });
+        await fulfillJson(route, createDashboardOverview({
+          organizations: commitBeforeResponse && revealCreatedProject ? [createdProject] : []
+        }));
         if (observed.retryArmed) {
           retryOrganizationGet.resolve();
         }
-        return;
-      }
-      if (
-        method === "GET" &&
-        pathname === `/api/organizations/${createdProject.id}/evaluation-targets`
-      ) {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
         return;
       }
 
@@ -237,13 +224,9 @@ async function runUnmountScenario(browser) {
     });
     await page.route("**/api/**", async (route) => {
       const pathname = new URL(route.request().url()).pathname;
-      if (pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (pathname === "/api/organizations") {
+      if (pathname === "/api/dashboard/overview") {
         organizationGets += 1;
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+        await fulfillJson(route, createDashboardOverview());
         return;
       }
       await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
@@ -299,13 +282,9 @@ async function runHttpErrorScenario(browser, { status, expectGetOnlyRecovery }) 
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (method === "GET" && pathname === "/api/organizations") {
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
         observed.organizationGets += 1;
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+        await fulfillJson(route, createDashboardOverview());
         if (retryArmed) {
           retryOrganizationGet.resolve();
         }

@@ -1,5 +1,6 @@
 import type { IssueLocatorPathStep } from "@/types/accessibility-domain";
 
+import { normalizeIssueCode } from "./constants";
 import { getReplayIssuePathSteps } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
 
@@ -123,7 +124,11 @@ export function toPageReplayIssue(row: RecentIssueRow): PageReplayIssue {
       REPLAY_TEXT_LIMITS.severityLabel,
       row.severity.key
     ),
-    code: toBoundedReplayText(row.issue.issueCode, REPLAY_TEXT_LIMITS.code, "UNKNOWN"),
+    code: toBoundedReplayText(
+      normalizeIssueCode(row.issue.issueCode),
+      REPLAY_TEXT_LIMITS.code,
+      "UNKNOWN"
+    ),
     title: toBoundedReplayText(
       row.issue.issueTitle,
       REPLAY_TEXT_LIMITS.title,

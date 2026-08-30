@@ -3,12 +3,14 @@
  * directory refresh fails, closing/reopening the modal and retrying must issue
  * only a GET. The organization POST must never be repeated.
  *
- * Usage: BASE_URL=http://127.0.0.1:5173 node scripts/verify-organization-create-refresh-retry.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-10T10:00:00.000Z";
 const project = {
   id: 77,
@@ -66,21 +68,12 @@ try {
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
 
-    if (method === "GET" && pathname === "/api/requests") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-      return;
-    }
-
-    if (method === "GET" && pathname === "/api/organizations") {
+    if (method === "GET" && pathname === "/api/dashboard/overview") {
       observed.organizationGets += 1;
 
       if (organizationCommitted && !allowRecovery) {
         observed.postMutationOrganizationGets += 1;
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: "[]"
-        });
+        await fulfillJson(route, createDashboardOverview());
         firstRefreshMissedProject.resolve();
         return;
       }
@@ -88,16 +81,7 @@ try {
       if (organizationCommitted) {
         observed.successfulRecoveryGets += 1;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(organizations)
-      });
-      return;
-    }
-
-    if (method === "GET" && pathname === `/api/organizations/${project.id}/evaluation-targets`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      await fulfillJson(route, createDashboardOverview({ organizations }));
       return;
     }
 
@@ -106,11 +90,7 @@ try {
       observed.postBody = JSON.parse(request.postData() ?? "null");
       organizations = [project];
       organizationCommitted = true;
-      await route.fulfill({
-        status: 201,
-        contentType: "application/json",
-        body: JSON.stringify(project)
-      });
+      await fulfillJson(route, project, { status: 201 });
       return;
     }
 
@@ -163,7 +143,7 @@ try {
   allowRecovery = true;
   const recoveryRequestPromise = page.waitForRequest(
     (request) =>
-      request.method() === "GET" && new URL(request.url()).pathname === "/api/organizations"
+      request.method() === "GET" && new URL(request.url()).pathname === "/api/dashboard/overview"
   );
   await dialog
     .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })

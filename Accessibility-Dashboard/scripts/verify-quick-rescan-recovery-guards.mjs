@@ -1,17 +1,18 @@
 /**
- * Regression coverage for the mutation guards shared by Quick Analyze and the
- * existing-target rescan action.
+ * Regression coverage for the still-supported Quick Analyze mutation and
+ * recovery guards.
  *
  * Usage:
- *   BASE_URL=http://127.0.0.1:5173 node scripts/verify-quick-rescan-recovery-guards.mjs
+ *   npm run test:recovery
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-11T00:00:00.000Z";
 const quickRecoveryStorageKey = "accessibility-dashboard.quick-analysis-attempt.v1";
-const rescanRecoveryStorageKey = "accessibility-dashboard.target-rescan-attempts.v1";
 
 const organization = {
   id: 1,
@@ -70,10 +71,16 @@ const score = {
 };
 
 async function fulfillJson(route, body, status = 200) {
+  const successful = status >= 200 && status < 300;
   await route.fulfill({
     status,
     contentType: "application/json",
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      success: successful,
+      data: successful ? body : null,
+      message:
+        successful || typeof body?.message !== "string" ? null : body.message
+    })
   });
 }
 
@@ -81,6 +88,30 @@ function dashboardPayload(
   pathname,
   { committed = false, completed = false, directoryVisible = committed, targets = [target] } = {}
 ) {
+  if (pathname === "/api/dashboard/overview") {
+    return createDashboardOverview({
+      organizations: directoryVisible ? [organization] : [],
+      evaluationTargets: directoryVisible ? targets : [],
+      evaluationRequests: committed ? [completed ? completedRequest : pendingRequest] : [],
+      resultSummaries: committed && completed ? [summary] : [],
+      scoreResults: committed && completed ? [score] : [],
+      latestIssueCounts:
+        committed && completed
+          ? [
+              {
+                evaluationTargetId: target.id,
+                requestId: completedRequest.id,
+                totalIssueCount: 0,
+                criticalIssueCount: 0,
+                highIssueCount: 0,
+                mediumIssueCount: 0,
+                lowIssueCount: 0,
+                groups: []
+              }
+            ]
+          : []
+    });
+  }
   if (pathname === "/api/organizations") return directoryVisible ? [organization] : [];
   if (pathname === "/api/organizations/1/evaluation-targets") return targets;
   if (pathname === "/api/requests") {
@@ -254,7 +285,11 @@ async function verifyQuickPostTimeout(browser) {
     };
   });
   await page.route("**/api/**", async (route) => {
-    await fulfillJson(route, []);
+    const pathname = new URL(route.request().url()).pathname;
+    await fulfillJson(
+      route,
+      dashboardPayload(pathname, { committed: false, directoryVisible: false })
+    );
   });
 
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
@@ -285,252 +320,6 @@ async function verifyQuickPostTimeout(browser) {
   await waitForQuickFailure(page);
   await page.close();
   return { posts: probe.posts, abortedAfterVirtualMs: observedAbortDelay };
-}
-
-async function verifyRescanAmbiguousCommitAndMutex(browser) {
-  let posts = 0;
-  let committed = false;
-  const page = await browser.newPage();
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      posts += 1;
-      committed = true;
-      await fulfillJson(route, { message: "response lost after commit" }, 503);
-      return;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, {
-        committed,
-        completed: committed,
-        directoryVisible: true
-      })
-    );
-  });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  const button = page.locator("button.dashboard-site-rescan-button");
-  await button.evaluate((element) => {
-    element.click();
-    element.click();
-  });
-  await page.waitForFunction(() => {
-    const element = document.querySelector("button.dashboard-site-rescan-button");
-    return element && !element.disabled;
-  });
-  assert.equal(posts, 1, "same-task rescan submit must send one POST");
-  await page.close();
-  return { posts };
-}
-
-async function verifyRescanTargetChangeCancellation(browser) {
-  const secondTarget = {
-    ...target,
-    id: 102,
-    name: "Second page",
-    accessUrl: "https://example.com/second"
-  };
-  let posts = 0;
-  let postSeenResolve;
-  let releasePostResolve;
-  const postSeen = new Promise((resolve) => {
-    postSeenResolve = resolve;
-  });
-  const releasePost = new Promise((resolve) => {
-    releasePostResolve = resolve;
-  });
-  const page = await browser.newPage();
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      posts += 1;
-      postSeenResolve();
-      await releasePost;
-      try {
-        await route.abort();
-      } catch {
-        // The target-change abort may already have cancelled the route.
-      }
-      return;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, {
-        committed: false,
-        completed: false,
-        directoryVisible: true,
-        targets: [target, secondTarget]
-      })
-    );
-  });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  await page.locator("button.dashboard-site-rescan-button").click();
-  await postSeen;
-  await page.evaluate(() => {
-    history.pushState({}, "", "/projects/1/pages/102");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
-  await page.waitForURL("**/projects/1/pages/102");
-  await page.waitForFunction(() => {
-    const element = document.querySelector("button.dashboard-site-rescan-button");
-    return element && !element.disabled;
-  });
-  assert.equal(posts, 1);
-  assert.equal(
-    await page.locator("button.dashboard-site-rescan-button").isDisabled(),
-    false,
-    "a hanging old-target POST must not lock the newly selected target"
-  );
-  releasePostResolve();
-  await page.close();
-  return { posts, newTargetUnlocked: true };
-}
-
-async function verifyRescanPostTimeout(browser) {
-  let posts = 0;
-  let postSeenResolve;
-  let releasePostResolve;
-  let postFailureResolve;
-  const postSeen = new Promise((resolve) => {
-    postSeenResolve = resolve;
-  });
-  const releasePost = new Promise((resolve) => {
-    releasePostResolve = resolve;
-  });
-  const postFailure = new Promise((resolve) => {
-    postFailureResolve = resolve;
-  });
-  const page = await browser.newPage();
-  page.setDefaultTimeout(7000);
-  page.on("requestfailed", async (request) => {
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      postFailureResolve(await page.evaluate(() => Date.now()));
-    }
-  });
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      posts += 1;
-      postSeenResolve();
-      await releasePost;
-      try {
-        await route.abort();
-      } catch {
-        // The page-side timeout should already have cancelled this route.
-      }
-      return;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, {
-        committed: false,
-        completed: false,
-        directoryVisible: true
-      })
-    );
-  });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  await page.clock.install({ time: new Date(1_000_000) });
-  const button = page.locator("button.dashboard-site-rescan-button");
-  await button.click();
-  await postSeen;
-  const virtualPostStart = await page.evaluate(() => Date.now());
-  await page.clock.runFor(15_000);
-  const failedAt = await Promise.race([
-    postFailure,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("rescan POST did not abort at its deadline")), 5000)
-    )
-  ]);
-  const observedAbortDelay = failedAt - virtualPostStart;
-  assert.ok(
-    observedAbortDelay >= 14_900 && observedAbortDelay <= 15_050,
-    `rescan POST must abort at its 15-second deadline, observed ${observedAbortDelay}ms after interception`
-  );
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await page.clock.runFor(5000);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    if (!(await button.isDisabled())) {
-      break;
-    }
-  }
-  assert.equal(await button.isDisabled(), false, "rescan must unlock after bounded reconciliation");
-  assert.equal(posts, 1);
-  releasePostResolve();
-  await page.close();
-  return { posts, abortedAfterObservedMs: observedAbortDelay };
-}
-
-async function verifyRescanBackgroundPreemption(browser) {
-  let posts = 0;
-  let committed = false;
-  let hangNextRequestList = false;
-  let postSeenResolve;
-  let backgroundSeenResolve;
-  let releaseBackgroundResolve;
-  const postSeen = new Promise((resolve) => {
-    postSeenResolve = resolve;
-  });
-  const backgroundSeen = new Promise((resolve) => {
-    backgroundSeenResolve = resolve;
-  });
-  const releaseBackground = new Promise((resolve) => {
-    releaseBackgroundResolve = resolve;
-  });
-  const page = await browser.newPage();
-  page.setDefaultTimeout(10_000);
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      posts += 1;
-      postSeenResolve();
-      committed = true;
-      await fulfillJson(route, completedRequest);
-      return;
-    }
-    if (pathname === "/api/requests" && hangNextRequestList) {
-      hangNextRequestList = false;
-      backgroundSeenResolve();
-      await releaseBackground;
-      try {
-        await route.abort();
-      } catch {
-        // The mutation refresh should already have aborted this background load.
-      }
-      return;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, {
-        committed,
-        completed: committed,
-        directoryVisible: true
-      })
-    );
-  });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  hangNextRequestList = true;
-  await backgroundSeen;
-  const button = page.locator("button.dashboard-site-rescan-button");
-  await button.click();
-  await postSeen;
-  await page.waitForFunction(() => {
-    const element = document.querySelector("button.dashboard-site-rescan-button");
-    return element && !element.disabled;
-  });
-  assert.equal(posts, 1, "rescan refresh must preempt a hanging background load");
-  releaseBackgroundResolve();
-  await page.close();
-  return { posts, preempted: true };
 }
 
 async function verifyQuickRecoveryAfterReload(browser) {
@@ -626,17 +415,19 @@ async function verifyQuickRecoveryAfterSpaUnmount(browser) {
       dashboardPayload(pathname, {
         committed: allowRecovery,
         completed: allowRecovery,
-        directoryVisible: allowRecovery
+        directoryVisible: true,
+        targets: allowRecovery ? [target] : []
       })
     );
   });
 
-  await page.goto(`${baseUrl}/dashboard`, { waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}/projects/${organization.id}`, { waitUntil: "networkidle" });
   await page.evaluate(() => {
     window.__quickRecoveryDocumentMarker = crypto.randomUUID();
   });
   const documentMarker = await page.evaluate(() => window.__quickRecoveryDocumentMarker);
   await page.locator("button.sidebar-nav-link").first().click();
+  await page.locator("#quick-analyze-url").waitFor();
   await page.locator("#quick-analyze-url").fill("https://example.com");
   await clickQuickSubmit(page);
   await postSeen;
@@ -672,7 +463,10 @@ async function verifyQuickDifferentUrlFailsClosed(browser) {
       postSeenResolve();
       return;
     }
-    await fulfillJson(route, []);
+    await fulfillJson(
+      route,
+      dashboardPayload(pathname, { committed: false, directoryVisible: false })
+    );
   });
 
   const recoveryUrl = "https://recovery-a.example";
@@ -699,149 +493,30 @@ async function verifyQuickDifferentUrlFailsClosed(browser) {
   return { posts, storedUrl: storedRecovery.url };
 }
 
-async function verifyRescanRecoveryAfterReload(browser) {
-  let posts = 0;
-  let allowRecovery = false;
-  let postSeenResolve;
-  const postSeen = new Promise((resolve) => {
-    postSeenResolve = resolve;
-  });
+async function verifyMalformedQuickRecoveryFailsClosed(browser) {
   const page = await browser.newPage();
-  page.setDefaultTimeout(10_000);
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      posts += 1;
-      await fulfillJson(route, { message: "response lost after commit" }, 503);
-      postSeenResolve();
-      return;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, {
-        committed: allowRecovery,
-        completed: allowRecovery,
-        directoryVisible: true
-      })
-    );
-  });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  await page.locator("button.dashboard-site-rescan-button").click();
-  await postSeen;
-  assert.equal(posts, 1);
-  assert.notEqual(
-    await page.evaluate((key) => sessionStorage.getItem(key), rescanRecoveryStorageKey),
-    null,
-    "rescan must persist its checkpoint before POST"
-  );
-
-  await page.reload({ waitUntil: "networkidle" });
-  allowRecovery = true;
-  await page.locator("button.dashboard-site-rescan-button").click();
-  await waitForObservedCondition(
-    async () =>
-      (await page.evaluate((key) => sessionStorage.getItem(key), rescanRecoveryStorageKey)) === null,
-    "rescan reload recovery did not reach and clear its terminal request",
-    10_000
-  );
-  assert.equal(posts, 1, "rescan reload recovery must remain GET-only");
-  await page.close();
-  return { posts, recoveryCleared: true };
-}
-
-async function verifyMalformedRecoveryFailsClosed(browser) {
-  const quickPage = await browser.newPage();
-  let quickPosts = 0;
-  await quickPage.addInitScript((key) => {
+  let posts = 0;
+  await page.addInitScript((key) => {
     sessionStorage.setItem(key, "malformed-recovery-record");
   }, quickRecoveryStorageKey);
-  await quickPage.route("**/api/**", async (route) => {
+  await page.route("**/api/**", async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
-      quickPosts += 1;
-    }
-    await fulfillJson(route, []);
-  });
-  await quickPage.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
-  await quickPage.locator("#quick-analyze-url").fill("https://blocked.example");
-  await clickQuickSubmit(quickPage);
-  await quickPage.locator("#quick-analyze-url-error").waitFor();
-  assert.equal(quickPosts, 0, "malformed Quick recovery must fail closed before POST");
-  await quickPage.close();
-
-  const rescanPage = await browser.newPage();
-  let rescanPosts = 0;
-  await rescanPage.addInitScript((key) => {
-    sessionStorage.setItem(key, "malformed-recovery-record");
-  }, rescanRecoveryStorageKey);
-  await rescanPage.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
-      rescanPosts += 1;
-    }
-    await fulfillJson(
-      route,
-      dashboardPayload(pathname, { committed: false, directoryVisible: true })
-    );
-  });
-  await rescanPage.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  await rescanPage.locator("button.dashboard-site-rescan-button").click();
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.equal(rescanPosts, 0, "malformed rescan recovery must fail closed before POST");
-  await rescanPage.close();
-  return { quickPosts, rescanPosts };
-}
-
-async function verifyRescanAmbiguousCandidatesFailClosed(browser) {
-  const foreignFailedRequest = {
-    ...pendingRequest,
-    id: 502,
-    status: "FAILED",
-    updatedAt: "2026-08-11T00:00:01.000Z"
-  };
-  let posts = 0;
-  let requestListGetsAfterPost = 0;
-  let committed = false;
-  const page = await browser.newPage();
-  await page.route("**/api/**", async (route) => {
-    const request = route.request();
-    const pathname = new URL(request.url()).pathname;
-    if (request.method() === "POST" && pathname === "/api/requests") {
       posts += 1;
-      committed = true;
-      await fulfillJson(route, { message: "response lost after commit" }, 503);
-      return;
-    }
-    if (pathname === "/api/requests" && committed) {
-      requestListGetsAfterPost += 1;
-      await fulfillJson(route, [pendingRequest, foreignFailedRequest]);
-      return;
     }
     await fulfillJson(
       route,
-      dashboardPayload(pathname, { committed: false, directoryVisible: true })
+      dashboardPayload(pathname, { committed: false, directoryVisible: false })
     );
   });
-
-  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "networkidle" });
-  await page.locator("button.dashboard-site-rescan-button").click();
-  await waitForObservedCondition(
-    () => requestListGetsAfterPost >= 1,
-    "rescan did not inspect the ambiguous request candidates"
-  );
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  const storedRecovery = await page.evaluate(
-    (key) => JSON.parse(sessionStorage.getItem(key)),
-    rescanRecoveryStorageKey
-  );
-  assert.equal(storedRecovery.attempts[0].phase, "reconciling");
-  assert.equal(posts, 1, "multiple candidates must not be adopted as a known request");
+  await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+  await page.locator("#quick-analyze-url").fill("https://blocked.example");
+  await clickQuickSubmit(page);
+  await page.locator("#quick-analyze-url-error").waitFor();
+  assert.equal(posts, 0, "malformed Quick recovery must fail closed before POST");
   await page.close();
-  return { posts, phase: storedRecovery.attempts[0].phase };
+  return { posts };
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -850,16 +525,10 @@ try {
     quickAmbiguousMutex: await verifyQuickAmbiguousCommitAndMutex(browser),
     quickCheckpointResume: await verifyQuickCheckpointResume(browser),
     quickTimeout: await verifyQuickPostTimeout(browser),
-    rescanAmbiguousMutex: await verifyRescanAmbiguousCommitAndMutex(browser),
-    rescanTargetChange: await verifyRescanTargetChangeCancellation(browser),
-    rescanTimeout: await verifyRescanPostTimeout(browser),
-    rescanBackgroundPreemption: await verifyRescanBackgroundPreemption(browser),
     quickReloadRecovery: await verifyQuickRecoveryAfterReload(browser),
     quickSpaRecovery: await verifyQuickRecoveryAfterSpaUnmount(browser),
     quickDifferentUrl: await verifyQuickDifferentUrlFailsClosed(browser),
-    rescanReloadRecovery: await verifyRescanRecoveryAfterReload(browser),
-    malformedRecovery: await verifyMalformedRecoveryFailsClosed(browser),
-    rescanAmbiguousCandidates: await verifyRescanAmbiguousCandidatesFailClosed(browser)
+    malformedRecovery: await verifyMalformedQuickRecoveryFailsClosed(browser)
   };
   console.log(JSON.stringify({ result: "PASS", ...result }, null, 2));
 } finally {

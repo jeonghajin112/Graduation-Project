@@ -1,13 +1,17 @@
 import { API_BASE_URL } from "@/config/api";
+import {
+  clearSessionRecoveryIfUnchanged,
+  clearSessionRecoveryStorage,
+  isRecoveryTimestampStale,
+  readSessionRecovery
+} from "@/services/recovery-storage";
 
 export const SITE_CREATE_RECOVERY_STORAGE_KEY =
   "accessibility-dashboard.site-create-attempt.v1";
 
-const SITE_NAME_MAX_LENGTH = 100;
-const SITE_URL_MAX_LENGTH = 2_048;
+export const SITE_NAME_MAX_LENGTH = 100;
+export const SITE_URL_MAX_LENGTH = 500;
 const ID_LIST_MAX_LENGTH = 10_000;
-const RECOVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1_000;
-const RECOVERY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 
 type SiteCreateRecoveryBase = {
   version: 1;
@@ -78,10 +82,34 @@ function normalizeIdList(value: unknown): number[] | null {
 }
 
 export function normalizeSiteCreateAccessUrl(value: string): string {
+  const trimmed = value.trim();
   try {
-    return new URL(value.trim()).href;
+    const parsed = new URL(trimmed);
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname) {
+      return parsed.href;
+    }
   } catch {
-    return value.trim();
+    // Return the trimmed input so the caller can present a validation error.
+  }
+  return trimmed;
+}
+
+export function isValidEvaluationTargetAccessUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > SITE_URL_MAX_LENGTH) {
+    return false;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname.length > 0 &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0 &&
+      parsed.href.length <= SITE_URL_MAX_LENGTH
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -107,8 +135,7 @@ function normalizePersistedSiteCreateAttempt(
     !isPositiveId(value.projectId) ||
     name.length === 0 ||
     name.length > SITE_NAME_MAX_LENGTH ||
-    accessUrl.length === 0 ||
-    accessUrl.length > SITE_URL_MAX_LENGTH ||
+    !isValidEvaluationTargetAccessUrl(accessUrl) ||
     previousTargetIds === null ||
     !Number.isSafeInteger(value.startedAt) ||
     (value.startedAt as number) <= 0
@@ -185,41 +212,23 @@ export function isSiteCreateAttemptStale(
   attempt: PersistedSiteCreateAttempt,
   now = Date.now()
 ): boolean {
-  return (
-    attempt.startedAt < now - RECOVERY_STALE_AFTER_MS ||
-    attempt.startedAt > now + RECOVERY_MAX_FUTURE_SKEW_MS
-  );
+  return isRecoveryTimestampStale(attempt.startedAt, now);
 }
 
 export function readSiteCreateRecovery(): SiteCreateRecoveryReadResult {
-  try {
-    const rawValue = window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY);
-    if (rawValue === null) {
-      return { kind: "none" };
-    }
-
-    const attempt = normalizePersistedSiteCreateAttempt(
-      JSON.parse(rawValue) as unknown
-    );
-    if (attempt === null) {
-      return { kind: "blocked", rawValue };
-    }
-    return {
-      kind: "valid",
-      attempt,
-      rawValue,
-      isStale: isSiteCreateAttemptStale(attempt)
-    };
-  } catch {
-    try {
-      return {
-        kind: "blocked",
-        rawValue: window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY)
-      };
-    } catch {
-      return { kind: "blocked", rawValue: null };
-    }
+  const recovery = readSessionRecovery(
+    SITE_CREATE_RECOVERY_STORAGE_KEY,
+    normalizePersistedSiteCreateAttempt
+  );
+  if (recovery.kind !== "valid") {
+    return recovery;
   }
+  return {
+    kind: "valid",
+    attempt: recovery.value,
+    rawValue: recovery.rawValue,
+    isStale: isSiteCreateAttemptStale(recovery.value)
+  };
 }
 
 export function writeSiteCreateRecovery(
@@ -252,24 +261,12 @@ export function writeSiteCreateRecovery(
 export function clearSiteCreateRecovery(
   expectedRawValue: string
 ): boolean {
-  try {
-    if (
-      window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY) !==
-      expectedRawValue
-    ) {
-      return false;
-    }
-    window.sessionStorage.removeItem(SITE_CREATE_RECOVERY_STORAGE_KEY);
-    return window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
+  return clearSessionRecoveryIfUnchanged(
+    SITE_CREATE_RECOVERY_STORAGE_KEY,
+    expectedRawValue
+  );
 }
 
 export function clearSiteCreateRecoveryStorage(): void {
-  try {
-    window.sessionStorage.removeItem(SITE_CREATE_RECOVERY_STORAGE_KEY);
-  } catch {
-    // Logout must remain available when storage is blocked by the browser.
-  }
+  clearSessionRecoveryStorage(SITE_CREATE_RECOVERY_STORAGE_KEY);
 }

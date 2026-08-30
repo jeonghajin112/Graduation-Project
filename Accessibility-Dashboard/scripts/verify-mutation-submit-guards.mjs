@@ -3,12 +3,14 @@
  * page delete. Each mutation is held in flight while the DOM button is clicked
  * twice synchronously; exactly one PATCH may reach the API.
  *
- * Usage: BASE_URL=http://127.0.0.1:4173 node scripts/verify-mutation-submit-guards.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-11T10:00:00.000Z";
 
 let organization = {
@@ -66,26 +68,26 @@ try {
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
 
+    if (method === "GET" && pathname === "/api/dashboard/overview") {
+      await fulfillJson(route, createDashboardOverview({
+        organizations: organizationActive ? [organization] : [],
+        evaluationTargets: organizationActive ? targets : []
+      }));
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/organizations") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(organizationActive ? [organization] : [])
-      });
+      await fulfillJson(route, organizationActive ? [organization] : []);
       return;
     }
 
     if (method === "GET" && pathname === `/api/organizations/${organization.id}/evaluation-targets`) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(targets)
-      });
+      await fulfillJson(route, targets);
       return;
     }
 
     if (method === "GET" && pathname === "/api/requests") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      await fulfillJson(route, []);
       return;
     }
 
@@ -93,8 +95,16 @@ try {
       observed.pageDeletePatches += 1;
       pageDeleteStarted.resolve();
       await releasePageDelete.promise;
+      if (observed.pageDeletePatches === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: {}, message: null })
+        });
+        return;
+      }
       targets = [];
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, null);
       return;
     }
 
@@ -104,7 +114,7 @@ try {
       await releaseProjectSave.promise;
       const body = JSON.parse(request.postData() ?? "{}");
       organization = { ...organization, name: body.name, description: body.description, updatedAt: timestamp };
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, organization);
       return;
     }
 
@@ -112,8 +122,20 @@ try {
       observed.projectDeletePatches += 1;
       projectDeleteStarted.resolve();
       await releaseProjectDelete.promise;
+      if (observed.projectDeletePatches === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            message: "프로젝트 제거가 거부되었습니다."
+          })
+        });
+        return;
+      }
       organizationActive = false;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, null);
       return;
     }
 
@@ -135,7 +157,14 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.pageDeletePatches, 1, "page delete must issue one PATCH");
   releasePageDelete.resolve();
+  await pageDeleteDialog
+    .getByRole("alert")
+    .filter({ hasText: "data: null 형식" })
+    .waitFor();
+  assert.equal(await pageDeleteDialog.isVisible(), true);
+  await pageDeleteButton.click();
   await pageDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  assert.equal(observed.pageDeletePatches, 2, "void contract failure retry must issue one new PATCH");
 
   const sidebar = page.locator("aside");
   await sidebar.getByRole("button", { name: organization.name, exact: true }).click({ button: "right" });
@@ -167,8 +196,19 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.projectDeletePatches, 1, "project delete must issue one PATCH");
   releaseProjectDelete.resolve();
+  await projectDeleteDialog
+    .getByRole("alert")
+    .filter({ hasText: "프로젝트 제거가 거부되었습니다" })
+    .waitFor();
+  assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
+  await projectDeleteButton.click();
   await projectDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
   await page.waitForURL("**/analyze", { timeout: 10_000 });
+  assert.equal(
+    observed.projectDeletePatches,
+    2,
+    "success:false retry must issue one new PATCH"
+  );
 
   assert.deepEqual([...observed.unknownRequests], []);
   console.log(

@@ -1,10 +1,7 @@
 package com.accessibility.platform.result.service;
 
-import com.accessibility.platform.analysis.domain.AnalysisResult;
 import com.accessibility.platform.analysis.domain.AnalyzerType;
-import com.accessibility.platform.analysis.domain.IssueResult;
 import com.accessibility.platform.analysis.domain.Severity;
-import com.accessibility.platform.analysis.repository.AnalysisResultRepository;
 import com.accessibility.platform.analysis.repository.IssueResultRepository;
 import com.accessibility.platform.request.domain.EvaluationRequest;
 import com.accessibility.platform.result.dto.EvaluationIssueResponse;
@@ -18,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -28,7 +24,6 @@ public class EvaluationResultQueryService {
 
     private final EvaluationRequestService evaluationRequestService;
     private final ScoreResultRepository scoreResultRepository;
-    private final AnalysisResultRepository analysisResultRepository;
     private final IssueResultRepository issueResultRepository;
 
     public EvaluationResultSummaryResponse getSummary(Long requestId) {
@@ -38,26 +33,16 @@ public class EvaluationResultQueryService {
                 .map(ScoreResult::getTotalScore)
                 .orElse(BigDecimal.ZERO);
 
-        List<AnalysisResult> analysisResults = analysisResultRepository.findByEvaluationRequestId(requestId);
-        
-        long totalIssues = 0;
-        long criticalIssues = 0;
-
-        for (AnalysisResult ar : analysisResults) {
-            List<IssueResult> issues = issueResultRepository.findByAnalysisResultId(ar.getId());
-            totalIssues += issues.size();
-            criticalIssues += issues.stream()
-                    .filter(i -> i.getSeverity() == Severity.CRITICAL)
-                    .count();
-        }
+        IssueResultRepository.RequestIssueSummaryProjection issueSummary =
+                issueResultRepository.summarizeRequestIssues(requestId, Severity.CRITICAL);
 
         return new EvaluationResultSummaryResponse(
                 request.getId(),
                 request.getEvaluationTarget().getName(),
                 request.getStatus(),
                 totalScore,
-                totalIssues,
-                criticalIssues,
+                issueSummary.getTotalIssueCount(),
+                issueSummary.getCriticalIssueCount(),
                 request.getRequestedAt()
         );
     }
@@ -65,16 +50,11 @@ public class EvaluationResultQueryService {
     public List<EvaluationIssueResponse> getIssues(Long requestId) {
         evaluationRequestService.getRequest(requestId);
 
-        List<EvaluationIssueResponse> responses = new ArrayList<>();
-        List<AnalysisResult> analysisResults = analysisResultRepository.findByEvaluationRequestId(requestId);
-
-        for (AnalysisResult analysisResult : analysisResults) {
-            List<IssueResult> issues = issueResultRepository.findByAnalysisResultId(analysisResult.getId());
-            for (IssueResult issue : issues) {
-                responses.add(new EvaluationIssueResponse(
+        return issueResultRepository.findIssueDetailsByRequestId(requestId).stream()
+                .map(issue -> new EvaluationIssueResponse(
                         issue.getId(),
                         requestId,
-                        moduleName(analysisResult.getAnalyzerType()),
+                        moduleName(issue.getAnalysisResult().getAnalyzerType()),
                         issueSeverity(issue.getSeverity()),
                         issue.getIssueTitle(),
                         issue.getMessage(),
@@ -83,11 +63,8 @@ public class EvaluationResultQueryService {
                         issue.getIssueCode(),
                         IssueLocatorResponse.from(issue.getLocator()),
                         issue.getCreatedAt()
-                ));
-            }
-        }
-
-        return responses;
+                ))
+                .toList();
     }
 
     private String moduleName(AnalyzerType analyzerType) {

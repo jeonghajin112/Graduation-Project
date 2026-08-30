@@ -10,7 +10,8 @@ import {
   buildRecentAnalyzedPages,
   getQuickAnalysisRegistryServerSnapshot,
   getQuickAnalysisRegistrySnapshot,
-  subscribeQuickAnalysisRegistry
+  subscribeQuickAnalysisRegistry,
+  type QuickAnalysisResultRecord
 } from "@/services/quick-analysis-registry";
 import type { OrganizationModel } from "@/types/accessibility-domain";
 
@@ -21,6 +22,8 @@ const PROJECT_MENU_WIDTH = 132;
 const PROJECT_MENU_HEIGHT = 74;
 const PROJECT_MENU_GAP = 4;
 const PROJECT_MENU_VIEWPORT_PADDING = 8;
+const EMPTY_QUICK_ANALYSIS_RESULTS: readonly QuickAnalysisResultRecord[] = [];
+const subscribeStaticQuickAnalysisResults = () => () => undefined;
 
 /** Shared selected/hover/focus chrome for project + recent-page sidebar rows (radius via design token, never pill). */
 const SIDEBAR_NAV_ITEM_BASE =
@@ -38,19 +41,25 @@ export function SidebarProjectsSection({
   selection,
   isDarkMode,
   onSelectProject,
+  onSelectPage,
   onSelectRecentPage,
   onCreateProject,
   onUpdateProject,
-  onDeleteProject
+  onDeleteProject,
+  quickAnalysisResultsOverride,
+  readOnly = false
 }: {
   organizations: OrganizationModel[];
   selection: DashboardSidebarSelection | null;
   isDarkMode: boolean;
   onSelectProject: (projectId: number) => void;
+  onSelectPage?: (input: { projectId: number; pageId: number }) => void;
   onSelectRecentPage: (pageId: number) => void;
   onCreateProject: () => void;
   onUpdateProject: (input: { projectId: number; name: string; description: string }) => Promise<void>;
   onDeleteProject: (projectId: number) => Promise<void>;
+  quickAnalysisResultsOverride?: readonly QuickAnalysisResultRecord[];
+  readOnly?: boolean;
 }) {
   const projectMenuElements = useRef(new Map<number, HTMLDivElement>());
   const projectMenuTriggers = useRef(new Map<number, HTMLButtonElement>());
@@ -67,10 +76,18 @@ export function SidebarProjectsSection({
   const activeDeleteOperationIdRef = useRef<symbol | null>(null);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<number>>(() => new Set());
   const autoExpandedPageProjectId = useRef<number | null>(null);
+  const hasQuickAnalysisResultsOverride = quickAnalysisResultsOverride !== undefined;
+  const staticQuickAnalysisResults = quickAnalysisResultsOverride ?? EMPTY_QUICK_ANALYSIS_RESULTS;
   const quickAnalysisResults = useSyncExternalStore(
-    subscribeQuickAnalysisRegistry,
-    getQuickAnalysisRegistrySnapshot,
-    getQuickAnalysisRegistryServerSnapshot
+    hasQuickAnalysisResultsOverride
+      ? subscribeStaticQuickAnalysisResults
+      : subscribeQuickAnalysisRegistry,
+    hasQuickAnalysisResultsOverride
+      ? () => staticQuickAnalysisResults
+      : getQuickAnalysisRegistrySnapshot,
+    hasQuickAnalysisResultsOverride
+      ? () => staticQuickAnalysisResults
+      : getQuickAnalysisRegistryServerSnapshot
   );
   const recentAnalyzedPages = useMemo(
     () =>
@@ -266,9 +283,10 @@ export function SidebarProjectsSection({
         <button
           type="button"
           onClick={onCreateProject}
-          className="sidebar-tree-add ml-auto inline-flex shrink-0 items-center justify-center transition"
+          disabled={readOnly}
+          className="sidebar-tree-add ml-auto inline-flex shrink-0 items-center justify-center transition disabled:cursor-not-allowed"
           aria-label="프로젝트 추가"
-          title="프로젝트 추가"
+          title={readOnly ? "읽기 전용 미리보기에서는 프로젝트를 추가할 수 없습니다" : "프로젝트 추가"}
         >
           <Plus size={14} strokeWidth={2.2} />
         </button>
@@ -308,12 +326,18 @@ export function SidebarProjectsSection({
                         onSelectProject(project.id);
                       }}
                       onContextMenu={(event) => {
+                        if (readOnly) {
+                          return;
+                        }
                         event.preventDefault();
                         event.stopPropagation();
                         showProjectMenu(project.id, event.clientX, event.clientY);
                       }}
                       onKeyDown={(event) => {
-                        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+                        if (
+                          readOnly ||
+                          (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))
+                        ) {
                           return;
                         }
 
@@ -326,7 +350,7 @@ export function SidebarProjectsSection({
                           triggerRect.bottom + PROJECT_MENU_GAP
                         );
                       }}
-                      aria-keyshortcuts="Shift+F10"
+                      aria-keyshortcuts={readOnly ? undefined : "Shift+F10"}
                       aria-expanded={isExpanded}
                       aria-controls={childListId}
                       aria-current={isActive ? "page" : undefined}
@@ -359,7 +383,7 @@ export function SidebarProjectsSection({
                       </span>
                     </button>
 
-                  <div
+                   {!readOnly ? <div
                     ref={(element) => {
                       if (!element) {
                         projectMenuElements.current.delete(project.id);
@@ -408,7 +432,7 @@ export function SidebarProjectsSection({
                       <Trash2 size={13} />
                       삭제
                     </button>
-                  </div>
+                   </div> : null}
                   </div>
 
                   {isExpanded ? (
@@ -421,22 +445,42 @@ export function SidebarProjectsSection({
 
                         return (
                           <li key={page.id}>
-                            <Link
-                              to={`/projects/${project.id}/pages/${page.id}`}
-                              aria-current={isPageActive ? "page" : undefined}
-                              aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
-                              title={`${page.name} · ${project.name}`}
-                              className={cn(
-                                SIDEBAR_NAV_ITEM_BASE,
-                                "sidebar-tree-child-row",
-                                isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
-                              )}
-                            >
-                              <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
-                                <FileText size={16} aria-hidden="true" />
-                              </span>
-                              <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
-                            </Link>
+                            {readOnly ? (
+                              <button
+                                type="button"
+                                aria-current={isPageActive ? "page" : undefined}
+                                aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
+                                title={`${page.name} · ${project.name}`}
+                                onClick={() => onSelectPage?.({ projectId: project.id, pageId: page.id })}
+                                className={cn(
+                                  SIDEBAR_NAV_ITEM_BASE,
+                                  "sidebar-tree-child-row",
+                                  isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
+                                )}
+                              >
+                                <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
+                                  <FileText size={16} aria-hidden="true" />
+                                </span>
+                                <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
+                              </button>
+                            ) : (
+                              <Link
+                                to={`/projects/${project.id}/pages/${page.id}`}
+                                aria-current={isPageActive ? "page" : undefined}
+                                aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
+                                title={`${page.name} · ${project.name}`}
+                                className={cn(
+                                  SIDEBAR_NAV_ITEM_BASE,
+                                  "sidebar-tree-child-row",
+                                  isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
+                                )}
+                              >
+                                <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
+                                  <FileText size={16} aria-hidden="true" />
+                                </span>
+                                <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
+                              </Link>
+                            )}
                           </li>
                         );
                       })}
@@ -489,7 +533,7 @@ export function SidebarProjectsSection({
       {editingProject
         ? createPortal(
             <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
-              <div className="absolute inset-0" onClick={closeEdit} />
+              <div className="absolute inset-0" onClick={closeEdit} aria-hidden="true" />
               <article
                 ref={editDialogRef}
                 role="dialog"
@@ -566,7 +610,7 @@ export function SidebarProjectsSection({
       {deletingProject
         ? createPortal(
             <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
-              <div className="absolute inset-0" onClick={closeDelete} />
+              <div className="absolute inset-0" onClick={closeDelete} aria-hidden="true" />
               <article
                 ref={deleteDialogRef}
                 role="dialog"

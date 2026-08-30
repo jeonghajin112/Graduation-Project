@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { domAnimation, LazyMotion, m, useReducedMotion } from "framer-motion";
 
 /**
  * Motion rules for the landing page.
@@ -22,19 +22,23 @@ export function useLandingReducedMotion() {
 
 export function LandingMotionProvider({ children }: { children: ReactNode }) {
   const reduce = Boolean(useReducedMotion());
-  return <ReducedMotionContext.Provider value={reduce}>{children}</ReducedMotionContext.Provider>;
+  return (
+    <LazyMotion features={domAnimation} strict>
+      <ReducedMotionContext.Provider value={reduce}>{children}</ReducedMotionContext.Provider>
+    </LazyMotion>
+  );
 }
 
 const MOTION_TAGS = {
-  div: motion.div,
-  section: motion.section,
-  article: motion.article,
-  figure: motion.figure,
-  header: motion.header,
-  ol: motion.ol,
-  ul: motion.ul,
-  li: motion.li,
-  p: motion.p,
+  div: m.div,
+  section: m.section,
+  article: m.article,
+  figure: m.figure,
+  header: m.header,
+  ol: m.ol,
+  ul: m.ul,
+  li: m.li,
+  p: m.p,
 } as const;
 
 type MotionTag = keyof typeof MOTION_TAGS;

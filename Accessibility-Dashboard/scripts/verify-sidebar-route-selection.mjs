@@ -1,23 +1,34 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { installDashboardApiFixture } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const registryKey = "uni-access.quick-analysis-results.v2";
 const browser = await chromium.launch({ headless: true });
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const fixture = await installDashboardApiFixture(page);
   const consoleErrors = [];
   const externalFontErrors = [];
+  const expectedArtifactMisses = [];
   const pageErrors = [];
-  const sidebar = page.locator("aside");
+  const sidebar = page.getByRole("complementary");
+  const main = page.getByRole("main");
   const currentItems = () => sidebar.locator('[aria-current="page"]');
-  const recentPageItems = () => sidebar.locator('button[aria-label*="페이지 열기"]');
-  const projectPageItems = () => sidebar.locator('a[href*="/projects/"][href*="/pages/"]');
+  const recentPageItems = () => sidebar.getByRole("button", { name: /페이지 열기 \(.+ 프로젝트\)$/ });
 
   page.on("console", (message) => {
     if (message.type() === "error") {
       const locationUrl = message.location().url;
+      if (
+        locationUrl.endsWith(`/api/results/requests/${fixture.request.id}/artifact`) &&
+        message.text().includes("404 (Not Found)")
+      ) {
+        expectedArtifactMisses.push(message.text());
+        return;
+      }
       if (
         locationUrl.startsWith(
           "https://cdn.jsdelivr.net/gh/orioncactus/pretendard/"
@@ -42,14 +53,15 @@ try {
 
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
 
-  const analyzeItem = sidebar.locator(".sidebar-nav-link").first();
-  assert.equal((await analyzeItem.innerText()).trim(), "새 페이지 분석");
+  const analyzeItem = sidebar.getByRole("button", { name: "새 페이지 분석", exact: true });
   assert.equal(await currentItems().count(), 1);
   assert.equal(await analyzeItem.getAttribute("aria-current"), "page");
 
-  const firstProject = sidebar.locator('button[title]:not([aria-label])').first();
-  assert.equal(await firstProject.count(), 1, "project fixture is required");
-  const projectTitle = await firstProject.getAttribute("title");
+  const firstProject = sidebar.getByRole("button", {
+    name: fixture.organization.name,
+    exact: true
+  });
+  const projectTitle = fixture.organization.name;
   await firstProject.click();
   await page.waitForURL(/\/projects\/\d+$/);
   await page.waitForFunction(() => {
@@ -61,10 +73,10 @@ try {
   assert.equal(await currentItems().count(), 1);
   assert.equal(await currentItems().first().getAttribute("title"), projectTitle);
 
-  const firstPageEntry = page
-    .locator('#dashboard-main-content .dashboard-project-card button[aria-label$=" 상세 보기"]')
-    .first();
-  assert.equal(await firstPageEntry.count(), 1, "project page fixture is required");
+  const firstPageEntry = main.getByRole("button", {
+    name: `${fixture.target.name} 상세 보기`,
+    exact: true
+  });
   await firstPageEntry.focus();
   await page.keyboard.press("Enter");
   await page.waitForURL(/\/projects\/\d+\/pages\/\d+$/);
@@ -132,7 +144,7 @@ try {
   assert.equal(await currentItems().count(), 1);
   assert.equal(await firstRecentPage.getAttribute("aria-current"), "page");
 
-  const accountTrigger = page.locator(".dashboard-account-menu-trigger");
+  const accountTrigger = sidebar.locator('button[aria-haspopup="menu"]');
   await accountTrigger.click();
   const accountMenuItems = page.getByRole("menuitem");
   const accountMenuItemCount = await accountMenuItems.count();
@@ -142,23 +154,30 @@ try {
     ["설정", "로그아웃"]
   );
   assert.equal(await page.getByRole("menuitem", { name: "프로필", exact: true }).count(), 0);
-  const loadedDashboardPanelResourceCount = await page.evaluate(
-    () =>
-      performance
-        .getEntriesByType("resource")
-        .filter((entry) => entry.name.includes("/panels/dashboard-panel")).length
+  // Let the component's menu-open focus frame settle before taking explicit
+  // keyboard ownership. Otherwise that queued frame can race ArrowDown and
+  // move focus back to the first item under a busy CI event loop.
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
   );
-  assert.equal(loadedDashboardPanelResourceCount, 0);
-  await accountMenuItems.first().focus();
+  const firstAccountMenuItem = accountMenuItems.first();
+  const secondAccountMenuItem = accountMenuItems.nth(1);
+  await firstAccountMenuItem.focus();
   await page.keyboard.press("ArrowDown");
+  const secondAccountMenuItemHandle = await secondAccountMenuItem.elementHandle();
+  assert.ok(secondAccountMenuItemHandle);
+  await page.waitForFunction(
+    (element) => document.activeElement === element,
+    secondAccountMenuItemHandle
+  );
   assert.equal(
-    await accountMenuItems.nth(1).evaluate((element) => document.activeElement === element),
+    await secondAccountMenuItem.evaluate((element) => document.activeElement === element),
     true
   );
   await page.keyboard.press("Escape");
   assert.equal(await page.getByRole("menu").count(), 0);
   await page.waitForFunction(
-    () => document.activeElement?.classList.contains("dashboard-account-menu-trigger")
+    () => document.activeElement?.getAttribute("aria-haspopup") === "menu"
   );
   const escapeFocusRestored = await accountTrigger.evaluate(
     (element) => document.activeElement === element
@@ -166,6 +185,7 @@ try {
   assert.equal(escapeFocusRestored, true);
   assert.deepEqual(consoleErrors, []);
   assert.deepEqual(pageErrors, []);
+  fixture.assertIsolated();
 
   console.log(
     JSON.stringify({
@@ -175,10 +195,10 @@ try {
       fixtureRecentCount: await recentPageItems().count(),
       ariaCurrentCount: await currentItems().count(),
       accountMenuItemCount,
-      loadedDashboardPanelResourceCount,
       escapeFocusRestored,
       consoleErrorCount: consoleErrors.length,
       externalFontErrorCount: externalFontErrors.length,
+      expectedArtifactMissCount: expectedArtifactMisses.length,
       pageErrorCount: pageErrors.length
     })
   );

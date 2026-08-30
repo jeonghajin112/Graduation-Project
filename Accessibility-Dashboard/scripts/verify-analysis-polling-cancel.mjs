@@ -2,18 +2,20 @@
  * Regression check: the analysis polling loop must stop when the panel that
  * started it unmounts.
  *
- * The quick-analyze panel polls `GET /api/requests/{id}` every 1.5s for up to
- * 120 attempts. Before the AbortSignal wiring, a client-side route change left
- * that loop running for the remaining attempts. This script keeps the request
- * permanently PENDING, navigates away mid-analysis, and asserts that no further
- * polls reach the network.
+ * The quick-analyze panel polls `GET /api/requests/{id}` with an adaptive
+ * delay while the document is visible. Before the AbortSignal wiring, a
+ * client-side route change left that loop running for the remaining attempts.
+ * This script keeps the request permanently PENDING, navigates away
+ * mid-analysis, and asserts that no further polls reach the network.
  *
- * Usage: BASE_URL=http://127.0.0.1:41901 node scripts/verify-analysis-polling-cancel.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:41901";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-07-28T10:00:00.000Z";
 const POLL_INTERVAL_MS = 1500;
 const QUIET_WINDOW_MS = 6000;
@@ -74,6 +76,15 @@ try {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
 
+    if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
+      await fulfillJson(route, createDashboardOverview({
+        organizations: [organization],
+        evaluationTargets: [target],
+        evaluationRequests: []
+      }));
+      return;
+    }
+
     if (pathname === POLL_PATH) {
       observed.polls += 1;
     }
@@ -94,7 +105,7 @@ try {
       observed.unknownPaths.add(`${request.method()} ${pathname}`);
     }
 
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    await fulfillJson(route, body);
   });
 
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });

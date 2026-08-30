@@ -16,6 +16,7 @@ import com.accessibility.platform.target.domain.TargetType;
 import com.accessibility.platform.target.repository.EvaluationTargetRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +42,9 @@ class AiEvaluationIngestionLocatorIntegrationTest {
 
     @Autowired
     EvaluationArtifactRepository artifactRepository;
+
+    @Autowired
+    LegacyIssueStandardMigrationRunner legacyIssueStandardMigrationRunner;
 
     @Autowired
     OrganizationRepository organizationRepository;
@@ -97,11 +101,34 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                         }]
                       }]
                     },
-                    "text_difficulty":{"meta":{"page_score":90,"flagged_count":0,"suggestion_needed":0},"results":[]},
-                    "text_suggestions":{"results":[]},
+                    "text_difficulty":{
+                      "meta":{"page_score":90,"flagged_count":1,"suggestion_needed":1},
+                      "results":[{
+                        "text":"어려운 안내 문장",
+                        "category":"paragraph",
+                        "selector":"p.guide",
+                        "flags":["어려운 어휘 과다","위치 참조"],
+                        "needs_suggestion":true,
+                        "standard_issues":[
+                          {
+                            "type":"hard_vocab_ratio",
+                            "priority":"medium",
+                            "wcag":{"id":"3.1.5","name":"읽기 수준","standard":"WCAG","version":"2.2"},
+                            "kwcag_items":[]
+                          },
+                          {
+                            "type":"location_dependency",
+                            "priority":"high",
+                            "wcag":{"id":"1.3.3","name":"감각적 특성","standard":"WCAG","version":"2.2"},
+                            "kwcag_items":[{"id":"5.3.3","name":"명확한 지시사항 제공","standard":"KWCAG","version":"2.2"}]
+                          }
+                        ]
+                      }]
+                    },
+                    "text_suggestions":{"status":"failed"},
                     "cv_visual":{
                       "summary":{"pass_rate":70,"fail_count":1},
-                      "kwcag_item":{"id":"5.3.3","name":"Contrast"},
+                      "kwcag_item":{"id":"5.4.3","name":"텍스트 콘텐츠의 명도 대비"},
                       "violations":[{
                         "text":"Checkout",
                         "contrast_ratio":2.0,
@@ -132,6 +159,18 @@ class AiEvaluationIngestionLocatorIntegrationTest {
         assertThat(ruleIssue.locator().x()).isEqualTo(20.0);
         assertThat(ruleIssue.locator().htmlSnippet()).contains("button");
 
+        List<EvaluationIssueResponse> textIssues = issues.stream()
+                .filter(issue -> issue.module().equals("text_difficulty"))
+                .toList();
+        assertThat(textIssues)
+                .extracting(EvaluationIssueResponse::wcagCode)
+                .containsExactlyInAnyOrder("WCAG 3.1.5", "5.3.3");
+        assertThat(textIssues)
+                .filteredOn(issue -> issue.wcagCode().equals("5.3.3"))
+                .singleElement()
+                .extracting(EvaluationIssueResponse::title)
+                .isEqualTo("명확한 지시사항 제공");
+
         EvaluationIssueResponse cvIssue = issues.stream()
                 .filter(issue -> issue.module().equals("cv_visual"))
                 .findFirst()
@@ -140,6 +179,56 @@ class AiEvaluationIngestionLocatorIntegrationTest {
         assertThat(cvIssue.locator().kind()).isEqualTo("BOUNDING_BOX");
         assertThat(cvIssue.locator().coordinateSpace()).isEqualTo("SCREENSHOT_PX");
         assertThat(cvIssue.locator().width()).isEqualTo(80.0);
+        assertThat(cvIssue.wcagCode()).isEqualTo("5.4.3");
+    }
+
+    @Test
+    void migratesLegacyTextFlagsAndCvCodeWithoutCollapsingDifferentStandards() {
+        EvaluationRequest request = createRequest();
+        // The CV entry deliberately reproduces the former 5.3.3 misclassification so
+        // this test can prove that the startup migration corrects it to KWCAG 5.4.3.
+        String resultJson = """
+                {
+                  "url":"https://example.com/legacy",
+                  "request_id":%d,
+                  "analyzed_at":"2026-08-11T12:00:00",
+                  "total_score":75,
+                  "score_breakdown":{"module_scores":{"rule_based":100,"difficulty":50,"cv":75}},
+                  "modules":{
+                    "rule_based":{"summary":{"total_violations":0,"total_passes":1},"violations":[]},
+                    "text_difficulty":{
+                      "meta":{"page_score":50,"flagged_count":1,"suggestion_needed":1},
+                      "results":[{
+                        "text":"복잡한 링크 안내",
+                        "category":"link",
+                        "selector":"a.legacy",
+                        "flags":["어려운 어휘 과다","위치 참조","link 텍스트 길이 과다"],
+                        "needs_suggestion":true
+                      }]
+                    },
+                    "text_suggestions":{"status":"failed"},
+                    "cv_visual":{
+                      "summary":{"pass_rate":75,"fail_count":1},
+                      "kwcag_item":{"id":"5.3.3","name":"콘텐츠의 명도 대비"},
+                      "violations":[{
+                        "text":"Legacy contrast","contrast_ratio":2,"required_ratio":4.5,
+                        "location":{"x":1,"y":2,"width":3,"height":4}
+                      }]
+                    }
+                  }
+                }
+                """.formatted(request.getId());
+
+        ingestionService.save(resultJson);
+        assertThat(resultQueryService.getIssues(request.getId()))
+                .extracting(EvaluationIssueResponse::wcagCode)
+                .containsExactlyInAnyOrder("TEXT_DIFFICULTY", "5.3.3");
+
+        legacyIssueStandardMigrationRunner.run(new DefaultApplicationArguments(new String[0]));
+
+        assertThat(resultQueryService.getIssues(request.getId()))
+                .extracting(EvaluationIssueResponse::wcagCode)
+                .containsExactlyInAnyOrder("WCAG 3.1.5", "5.3.3", "6.4.3", "5.4.3");
     }
 
     private EvaluationRequest createRequest() {

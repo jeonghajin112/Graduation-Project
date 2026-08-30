@@ -1,134 +1,91 @@
-import { useEffect, useMemo, useState } from "react";
-import { Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
+import { useMemo } from "react";
+import { Area, ComposedChart, XAxis, YAxis } from "recharts";
 
 import { ChartContainer, ChartTooltip } from "@/components/ui/line-charts-6";
-import {
-  fetchDashboardViewModel,
-  getApiErrorMessage,
-  isAbortError
-} from "@/services/backend-api";
+import type {
+  EvaluationRequestModel,
+  EvaluationResultSummary,
+  ScoreResult
+} from "@/types/accessibility-domain";
 
 import { chartConfig } from "./constants";
 import type { ScoreChartItem } from "./types";
 import { formatDateLabel, formatShortDate } from "./utils";
 
 type AnalysisTrendPanelProps = {
-  requestId: number | null;
-};
-
-type TrendState = {
-  data: ScoreChartItem[];
-  errorMessage: string;
-  requestId: number | null;
-  status: "idle" | "loading" | "ready" | "error";
-};
-
-const EMPTY_STATE: TrendState = {
-  data: [],
-  errorMessage: "",
-  requestId: null,
-  status: "idle"
+  evaluationRequests: EvaluationRequestModel[];
+  evaluationTargetId: number;
+  resultSummaries: EvaluationResultSummary[];
+  scoreResults: ScoreResult[];
 };
 
 function formatScore(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-export function AnalysisTrendPanel({ requestId }: AnalysisTrendPanelProps) {
-  const [retryRevision, setRetryRevision] = useState(0);
-  const [state, setState] = useState<TrendState>(EMPTY_STATE);
+const TREND_SLOT_COUNT = 7;
 
-  useEffect(() => {
-    if (requestId === null) {
-      setState(EMPTY_STATE);
-      return;
-    }
+export function AnalysisTrendPanel({
+  evaluationRequests,
+  evaluationTargetId,
+  resultSummaries,
+  scoreResults
+}: AnalysisTrendPanelProps) {
+  const data = useMemo(() => {
+    const scoreByRequestId = new Map(
+      scoreResults.map((scoreResult) => [
+        scoreResult.evaluationRequestId,
+        scoreResult.totalScore
+      ])
+    );
+    const summaryByRequestId = new Map(
+      resultSummaries.map((summary) => [summary.requestId, summary])
+    );
 
-    const controller = new AbortController();
-    setState({ data: [], errorMessage: "", requestId, status: "loading" });
-
-    void fetchDashboardViewModel(controller.signal)
-      .then((dashboard) => {
-        if (controller.signal.aborted) {
-          return;
+    const recentItems = evaluationRequests
+      .filter((request) => request.evaluationTargetId === evaluationTargetId)
+      .map((request) => {
+        const summary = summaryByRequestId.get(request.id);
+        const score = summary?.totalScore ?? scoreByRequestId.get(request.id) ?? null;
+        if (score === null || !Number.isFinite(score)) {
+          return null;
         }
 
-        const currentRequest = dashboard.evaluationRequests.find((request) => request.id === requestId);
-        if (!currentRequest) {
-          throw new Error("현재 분석 요청 정보를 찾지 못했습니다.");
-        }
-
-        const scoreByRequestId = new Map(
-          dashboard.scoreResults.map((scoreResult) => [
-            scoreResult.evaluationRequestId,
-            scoreResult.totalScore
-          ])
-        );
-        const summaryByRequestId = new Map(
-          dashboard.resultSummaries.map((summary) => [summary.requestId, summary])
-        );
-        const issueCountByRequestId = new Map<number, number>();
-
-        for (const issue of dashboard.evaluationIssues) {
-          issueCountByRequestId.set(
-            issue.requestId,
-            (issueCountByRequestId.get(issue.requestId) ?? 0) + 1
-          );
-        }
-
-        const data = dashboard.evaluationRequests
-          .filter((request) => request.evaluationTargetId === currentRequest.evaluationTargetId)
-          .map((request) => {
-            const summary = summaryByRequestId.get(request.id);
-            const score = summary?.totalScore ?? scoreByRequestId.get(request.id) ?? null;
-            if (score === null || !Number.isFinite(score)) {
-              return null;
-            }
-
-            const date = summary?.requestedAt ?? request.requestedAt ?? request.updatedAt;
-            return {
-              slot: 0,
-              date,
-              label: formatShortDate(date),
-              score: Math.round(score * 10) / 10,
-              issueCount: summary?.totalIssueCount ?? issueCountByRequestId.get(request.id) ?? 0
-            } satisfies ScoreChartItem;
-          })
-          .filter((item): item is ScoreChartItem => item !== null)
-          .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
-          .slice(-6)
-          .map((item, slot) => ({ ...item, slot }));
-
-        setState({ data, errorMessage: "", requestId, status: "ready" });
+        const date = summary?.requestedAt ?? request.requestedAt ?? request.updatedAt;
+        return {
+          slot: 0,
+          date,
+          label: formatShortDate(date),
+          score: Math.round(score * 10) / 10,
+          issueCount: summary?.totalIssueCount ?? 0
+        } satisfies ScoreChartItem;
       })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted || isAbortError(error)) {
-          return;
-        }
-        setState({
-          data: [],
-          errorMessage: getApiErrorMessage(error, "분석 추이를 불러오지 못했습니다."),
-          requestId,
-          status: "error"
-        });
-      });
+      .filter((item): item is ScoreChartItem => item !== null)
+      .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
+      .slice(-TREND_SLOT_COUNT);
 
-    return () => controller.abort();
-  }, [requestId, retryRevision]);
+    const emptySlotCount = TREND_SLOT_COUNT - recentItems.length;
+    const emptySlots = Array.from({ length: emptySlotCount }, (_, slot) => ({
+      slot,
+      date: "",
+      label: "",
+      score: 0,
+      issueCount: 0,
+      isPlaceholder: true
+    } satisfies ScoreChartItem));
 
-  const visibleState = state.requestId === requestId ? state : {
-    data: [],
-    errorMessage: "",
-    requestId,
-    status: requestId === null ? "idle" as const : "loading" as const
-  };
-  const latest = visibleState.data[visibleState.data.length - 1] ?? null;
-  const issueAxisMax = useMemo(
-    () => Math.max(1, ...visibleState.data.map((item) => item.issueCount)),
-    [visibleState.data]
-  );
+    return [
+      ...emptySlots,
+      ...recentItems.map((item, index) => ({
+        ...item,
+        slot: emptySlotCount + index
+      }))
+    ];
+  }, [evaluationRequests, evaluationTargetId, resultSummaries, scoreResults]);
+  const completedCount = data.filter((item) => !item.isPlaceholder).length;
+  const latest = completedCount > 0 ? data[data.length - 1] : null;
   const chartSummary = latest
-    ? `최근 ${visibleState.data.length}회 분석 기준. 최신 점수 ${formatScore(latest.score)}점, 문제 ${latest.issueCount}건.`
+    ? `최근 ${completedCount}회 분석 기준. 최신 점수 ${formatScore(latest.score)}점, 문제 ${latest.issueCount}건.`
     : "완료된 분석 기록이 없어 추이 차트를 표시할 수 없습니다.";
 
   return (
@@ -155,70 +112,46 @@ export function AnalysisTrendPanel({ requestId }: AnalysisTrendPanelProps) {
 
       <p className="sr-only">{chartSummary}</p>
 
-      {visibleState.status === "loading" ? (
-        <div className="site-page-evidence-trend-empty" role="status">분석 추이를 불러오는 중입니다.</div>
-      ) : visibleState.status === "error" ? (
-        <div className="site-page-evidence-trend-empty" role="alert">
-          <span>{visibleState.errorMessage}</span>
-          <button type="button" onClick={() => setRetryRevision((current) => current + 1)}>
-            다시 시도
-          </button>
-        </div>
-      ) : visibleState.data.length > 0 ? (
+      {data.length > 0 ? (
         <ChartContainer config={chartConfig} className="site-page-evidence-trend-chart">
           <ComposedChart
-            data={visibleState.data}
-            margin={{ top: 18, right: 4, bottom: 8, left: 0 }}
+            data={data}
+            margin={{ top: 18, right: 16, bottom: 0, left: 16 }}
             accessibilityLayer
           >
-            <CartesianGrid vertical={false} stroke="var(--site-score-grid-color)" strokeOpacity={0.8} />
+            <defs>
+              <linearGradient id="site-trend-score-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--site-score-line-color)" stopOpacity={0.14} />
+                <stop offset="100%" stopColor="var(--site-score-line-color)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <XAxis
-              dataKey="label"
-              axisLine={false}
-              tickLine={false}
-              tick={{ fontSize: 10, fill: "var(--dashboard-text-muted)" }}
-              tickMargin={8}
-              interval={0}
-              minTickGap={0}
+              dataKey="slot"
+              hide
             />
             <YAxis
               yAxisId="score"
-              axisLine={false}
-              tickLine={false}
-              domain={[0, 100]}
-              ticks={[0, 50, 100]}
-              width={30}
-              tick={{ fontSize: 10, fill: "var(--dashboard-text-muted)" }}
+              hide
+              domain={[-5, 100]}
             />
-            <YAxis
-              yAxisId="issues"
-              orientation="right"
-              axisLine={false}
-              tickLine={false}
-              allowDecimals={false}
-              domain={[0, Math.ceil(issueAxisMax * 1.2)]}
-              width={26}
-              tick={{ fontSize: 10, fill: "var(--dashboard-text-muted)" }}
-            />
-            <Bar
-              yAxisId="issues"
-              dataKey="issueCount"
-              fill="var(--site-issue-bar-color)"
-              barSize={12}
-              radius={[3, 3, 0, 0]}
-              isAnimationActive={false}
-            />
-            <Line
+            {/* Score only. The issue count is still reported in the metrics row,
+                the tooltip and the screen-reader summary, so dropping the bar
+                series removes a duplicate reading rather than information. */}
+            <Area
               yAxisId="score"
               type="monotone"
               dataKey="score"
               stroke="var(--site-score-line-color)"
               strokeWidth={2.25}
-              dot={{ r: 2.75, fill: "var(--site-score-line-color)", strokeWidth: 0 }}
-              activeDot={{ r: 4, fill: "var(--site-score-line-color)", strokeWidth: 0 }}
+              fill="url(#site-trend-score-fill)"
+              // Points appear on hover only: no dot is painted at rest, and
+              // activeDot draws one under the cursor. Verified that the tooltip
+              // and the active point still fire with dots disabled.
+              dot={false}
+              activeDot={<TrendActiveDot />}
               isAnimationActive={false}
             />
-            <ChartTooltip content={<AnalysisTrendTooltip />} />
+            <ChartTooltip cursor={false} content={<AnalysisTrendTooltip />} />
           </ComposedChart>
         </ChartContainer>
       ) : (
@@ -227,10 +160,9 @@ export function AnalysisTrendPanel({ requestId }: AnalysisTrendPanelProps) {
         </div>
       )}
 
-      <ul className="site-page-evidence-trend-legend" aria-label="차트 범례">
-        <li><span className="site-page-evidence-trend-line-key" aria-hidden="true" />점수</li>
-        <li><span className="site-page-evidence-trend-bar-key" aria-hidden="true" />문제 수</li>
-      </ul>
+      {/* No legend: a single series needs no key, and the metrics row above
+          already names the value. The sr-only summary keeps the non-visual
+          description of what the chart plots. */}
     </aside>
   );
 }
@@ -240,7 +172,7 @@ function AnalysisTrendTooltip({ active, payload }: {
   payload?: Array<{ payload?: ScoreChartItem }>;
 }) {
   const item = payload?.find((entry) => entry.payload)?.payload;
-  if (!active || !item) return null;
+  if (!active || !item || item.isPlaceholder) return null;
 
   return (
     <div className="site-page-evidence-trend-tooltip" role="tooltip">
@@ -250,5 +182,26 @@ function AnalysisTrendTooltip({ active, payload }: {
         <div><dt>문제 수</dt><dd>{item.issueCount}건</dd></div>
       </dl>
     </div>
+  );
+}
+
+function TrendActiveDot({ cx, cy, payload }: {
+  cx?: number;
+  cy?: number;
+  payload?: ScoreChartItem;
+}) {
+  if (!payload || payload.isPlaceholder || !Number.isFinite(cx) || !Number.isFinite(cy)) {
+    return null;
+  }
+
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={4}
+      fill="var(--site-score-line-color)"
+      stroke="var(--card, #ffffff)"
+      strokeWidth={2}
+    />
   );
 }

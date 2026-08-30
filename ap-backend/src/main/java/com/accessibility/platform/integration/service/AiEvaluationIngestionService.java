@@ -35,7 +35,9 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -228,16 +230,30 @@ public class AiEvaluationIngestionService {
             }
 
             String message = buildTextIssueMessage(block);
-            IssueResult issue = new IssueResult(
-                    analysis,
-                    "TEXT_DIFFICULTY",
-                    "텍스트 난이도 개선 필요",
-                    textSeverity(block),
-                    text(block, "selector", null),
-                    message
-            );
-            issue.applyLocator(issueLocatorParser.fromTextBlock(block));
-            issues.add(issue);
+            List<TextCriterion> criteria = textCriteria(block);
+
+            // Compatibility for external/legacy engine payloads that do not
+            // yet expose standard_issues. Do not invent a KWCAG number.
+            if (criteria.isEmpty()) {
+                criteria = List.of(new TextCriterion(
+                        "TEXT_DIFFICULTY",
+                        "분류되지 않은 텍스트 접근성 이슈",
+                        null
+                ));
+            }
+
+            for (TextCriterion criterion : criteria) {
+                IssueResult issue = new IssueResult(
+                        analysis,
+                        criterion.code(),
+                        criterion.title(),
+                        textSeverity(criterion.priority(), block),
+                        text(block, "selector", null),
+                        message
+                );
+                issue.applyLocator(issueLocatorParser.fromTextBlock(block));
+                issues.add(issue);
+            }
         }
         issueResultRepository.saveAll(issues);
     }
@@ -258,8 +274,8 @@ public class AiEvaluationIngestionService {
         for (JsonNode violation : module.path("violations")) {
             IssueResult issue = new IssueResult(
                     analysis,
-                    module.path("kwcag_item").path("id").asText("5.3.3"),
-                    module.path("kwcag_item").path("name").asText("콘텐츠의 명도 대비"),
+                    module.path("kwcag_item").path("id").asText("5.4.3"),
+                    module.path("kwcag_item").path("name").asText("텍스트 콘텐츠의 명도 대비"),
                     cvSeverity(violation.path("contrast_ratio").asDouble(0), violation.path("required_ratio").asDouble(4.5)),
                     locationPath(violation.path("location")),
                     "text=" + text(violation, "text", "")
@@ -301,6 +317,76 @@ public class AiEvaluationIngestionService {
         };
     }
 
+    private List<TextCriterion> textCriteria(JsonNode block) {
+        JsonNode standardIssues = block.path("standard_issues");
+        if (!standardIssues.isArray()) {
+            return List.of();
+        }
+
+        Map<String, TextCriterion> criteria = new LinkedHashMap<>();
+        for (JsonNode standardIssue : standardIssues) {
+            String priority = text(standardIssue, "priority", null);
+            JsonNode kwcagItems = standardIssue.path("kwcag_items");
+            if (kwcagItems.isArray() && !kwcagItems.isEmpty()) {
+                for (JsonNode item : kwcagItems) {
+                    String code = text(item, "id", null);
+                    if (code != null && !code.isBlank()) {
+                        mergeTextCriterion(criteria, new TextCriterion(
+                                code,
+                                text(item, "name", "KWCAG " + code),
+                                priority
+                        ));
+                    }
+                }
+                continue;
+            }
+
+            JsonNode wcag = standardIssue.path("wcag");
+            String wcagId = text(wcag, "id", null);
+            if (wcagId != null && !wcagId.isBlank()) {
+                String code = "WCAG " + wcagId;
+                mergeTextCriterion(criteria, new TextCriterion(
+                        code,
+                        text(wcag, "name", "WCAG " + wcagId),
+                        priority
+                ));
+            }
+        }
+        return List.copyOf(criteria.values());
+    }
+
+    private void mergeTextCriterion(Map<String, TextCriterion> criteria, TextCriterion candidate) {
+        criteria.merge(candidate.code(), candidate, (existing, incoming) ->
+                textPriorityRank(incoming.priority()) > textPriorityRank(existing.priority())
+                        ? incoming
+                        : existing
+        );
+    }
+
+    private int textPriorityRank(String priority) {
+        if (priority == null) {
+            return 0;
+        }
+        return switch (priority.toLowerCase()) {
+            case "high" -> 3;
+            case "medium" -> 2;
+            case "low" -> 1;
+            default -> 0;
+        };
+    }
+
+    private Severity textSeverity(String priority, JsonNode block) {
+        if (priority != null) {
+            return switch (priority.toLowerCase()) {
+                case "high" -> Severity.HIGH;
+                case "medium" -> Severity.MEDIUM;
+                case "low" -> Severity.LOW;
+                default -> textSeverity(block);
+            };
+        }
+        return textSeverity(block);
+    }
+
     private Severity textSeverity(JsonNode block) {
         double score = block.path("difficulty_score").asDouble(0);
         if (score >= 70) {
@@ -310,6 +396,9 @@ public class AiEvaluationIngestionService {
             return Severity.MEDIUM;
         }
         return Severity.LOW;
+    }
+
+    private record TextCriterion(String code, String title, String priority) {
     }
 
     private Severity cvSeverity(double ratio, double requiredRatio) {

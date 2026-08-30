@@ -1,28 +1,5 @@
 import type { ScanStatus } from "./constants";
 
-export function buildMetricSparklinePoints(series: number[]): string {
-  if (series.length === 0) {
-    return "";
-  }
-
-  const width = 64;
-  const height = 28;
-  const padding = 2;
-  const min = Math.min(...series);
-  const max = Math.max(...series);
-  const range = max - min;
-  const denominator = Math.max(series.length - 1, 1);
-
-  return series
-    .map((value, index) => {
-      const x = (width / denominator) * index;
-      const normalized = range === 0 ? 0.5 : (value - min) / range;
-      const y = height - padding - normalized * (height - padding * 2);
-      return `${x},${y}`;
-    })
-    .join(" ");
-}
-
 export function buildCumulativeCountSeries(dateStrings: string[], months: number): number[] {
   const monthKeys = buildRecentMonthKeys(months);
   const countsByMonth = new Map<string, number>();

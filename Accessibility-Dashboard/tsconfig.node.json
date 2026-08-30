@@ -4,6 +4,8 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM"],
     "allowSyntheticDefaultImports": true,
     "noEmit": true
   },

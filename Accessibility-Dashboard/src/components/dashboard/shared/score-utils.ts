@@ -1,8 +1,15 @@
-import type { IssueResultModel, ScoreDetail, ScoreResult, SeverityLevel } from "@/types/accessibility-domain";
+import type {
+  DashboardIssueGroup,
+  IssueResultModel,
+  ScoreDetail,
+  ScoreResult,
+  SeverityLevel
+} from "@/types/accessibility-domain";
 import { toMonthKey } from "./utils";
 
 export type TopIssueSummary = {
   issueCode: string;
+  issueTitle?: string;
   severity: SeverityLevel;
   count: number;
 };
@@ -51,6 +58,7 @@ export function buildTopIssueSummaries(issueResults: IssueResultModel[]): TopIss
     } else {
       topIssueMap.set(key, {
         issueCode: issue.issueCode,
+        issueTitle: issue.issueTitle,
         severity: issue.severity,
         count: 1
       });
@@ -58,6 +66,33 @@ export function buildTopIssueSummaries(issueResults: IssueResultModel[]): TopIss
   }
 
   return [...topIssueMap.values()].sort((a, b) => b.count - a.count).slice(0, 5);
+}
+
+export function buildIssueGroupSummaries(groups: DashboardIssueGroup[]): TopIssueSummary[] {
+  const summaryByKey = new Map<string, TopIssueSummary>();
+
+  for (const group of groups) {
+    const key = `${group.issueCode}:${group.severity}`;
+    const current = summaryByKey.get(key);
+    if (current) {
+      current.count += group.count;
+      if (!current.issueTitle && group.issueTitle) {
+        current.issueTitle = group.issueTitle;
+      }
+      continue;
+    }
+
+    summaryByKey.set(key, {
+      issueCode: group.issueCode,
+      issueTitle: group.issueTitle,
+      severity: group.severity,
+      count: group.count
+    });
+  }
+
+  return [...summaryByKey.values()].sort(
+    (left, right) => right.count - left.count || left.issueCode.localeCompare(right.issueCode)
+  );
 }
 
 export function buildMonthlyScoreSummaries(scoreResults: ScoreResult[]): MonthlyScoreSummary[] {

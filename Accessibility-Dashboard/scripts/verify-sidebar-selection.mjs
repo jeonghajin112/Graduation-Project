@@ -23,8 +23,8 @@ assert.deepEqual(parseDashboardRoute("/recent-pages/101").sidebarSelection, {
 assert.equal(parseDashboardRoute("/projects/not-a-number").sidebarSelection, null);
 assert.equal(parseDashboardRoute("/recent-pages/0").sidebarSelection, null);
 assert.deepEqual(parseDashboardRoute("/dashboard"), {
-  kind: "dashboard",
-  menu: "dashboard",
+  kind: "analyze",
+  menu: "analyze",
   selectedOrganizationModelId: null,
   selectedEvaluationTargetModelId: null,
   sidebarSelection: null

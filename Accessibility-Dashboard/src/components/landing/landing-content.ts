@@ -21,13 +21,10 @@ export const actionLabels = {
 } as const;
 
 export const hero = {
-  name: brand.wordmark,
   /* Split explicitly so the display line breaks where the meaning breaks. */
   headline: ["찾고, 고치고,", "다시 확인합니다"],
   subcopy:
     "규칙 기반·텍스트 난이도·시각 명암비 분석을 한 번에 실행하고, 발견 위치와 KWCAG 기준, 권장 수정까지 이어서 보여줍니다.",
-  stageCaption:
-    "예시 페이지를 분석해 대체 텍스트와 명도 대비 이슈를 찾은 화면입니다. 발견한 요소가 오른쪽 결과로 이어집니다.",
 } as const;
 
 export const navLinks = [

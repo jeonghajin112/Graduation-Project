@@ -86,8 +86,8 @@ function assertMarkerAvoidsTargetRects(marker, targetRects, message) {
   }
 }
 
-async function getSelectionGeometry(page, targetSelector, markerLabels = []) {
-  return page.evaluate(({ selector, labels }) => {
+async function getSelectionGeometry(page, targetSelector, markerIndices = []) {
+  return page.evaluate(({ selector, indices }) => {
     const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
     const target = document.querySelector(selector);
     const rectFact = (rect) => ({
@@ -102,8 +102,9 @@ async function getSelectionGeometry(page, targetSelector, markerLabels = []) {
     return {
       targetRects: [...target.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0).map(rectFact),
       markers: [...root.querySelectorAll(".marker")]
-        .filter((marker) => labels.includes(marker.textContent))
+        .filter((marker) => indices.includes(marker.dataset.markerIndex))
         .map((marker) => ({
+          index: marker.dataset.markerIndex,
           text: marker.textContent,
           hidden: marker.hidden,
           ...rectFact(marker.getBoundingClientRect())
@@ -131,7 +132,7 @@ async function getSelectionGeometry(page, targetSelector, markerLabels = []) {
         outlineOffsetPriority: target.style.getPropertyPriority("outline-offset")
       }
     };
-  }, { selector: targetSelector, labels: markerLabels });
+  }, { selector: targetSelector, indices: markerIndices });
 }
 
 function assertSelectionFragmentsMatch(geometry, message) {
@@ -301,6 +302,7 @@ try {
     return [...root.querySelectorAll(".marker")].map((marker) => {
       const rect = marker.getBoundingClientRect();
       return {
+        index: marker.dataset.markerIndex,
         text: marker.textContent,
         hidden: marker.hidden,
         display: getComputedStyle(marker).display,
@@ -316,73 +318,59 @@ try {
   });
   const markerFacts = allMarkerFacts.filter((marker) => !marker.hidden);
 
-  assert.deepEqual(markerFacts.map((marker) => marker.text), ["1", "2", "3", "4", "5", "7", "8", "9", "10", "11"]);
-  const hiddenMarker = allMarkerFacts.find((marker) => marker.text === "6");
+  assert.deepEqual(markerFacts.map((marker) => marker.index), ["1", "2", "3", "4", "5", "7", "8", "9", "10", "11"]);
+  assert.ok(allMarkerFacts.every((marker) => marker.text === ""), "markers must not expose visual sequence numbers");
+  const hiddenMarker = allMarkerFacts.find((marker) => marker.index === "6");
   assert.equal(hiddenMarker?.hidden, true);
   assert.equal(hiddenMarker?.display, "none");
   assert.equal(hiddenMarker?.width, 0);
   assert.equal(hiddenMarker?.height, 0);
   assert.equal(markerFacts[0].selected, "true");
   assert.ok(markerFacts.every((marker) => marker.width === markerSize && marker.height === markerSize));
-  const markerLabelAlignment = await page.evaluate(() => {
+  const issuePointGeometry = await page.evaluate(() => {
     const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
     const markers = [...root.querySelectorAll(".marker:not([hidden])")].slice(0, 3);
-    const labels = ["7", "100", "117"];
-    return markers.map((marker, index) => {
-      const originalText = marker.textContent;
-      marker.textContent = labels[index];
-      const markerRect = marker.getBoundingClientRect();
-      const textRange = document.createRange();
-      textRange.selectNodeContents(marker);
-      const textRect = textRange.getBoundingClientRect();
+    return markers.map((marker) => {
       const style = getComputedStyle(marker);
-      const result = {
-        label: labels[index],
+      const badge = marker.querySelector(".marker__badge");
+      const icon = badge?.querySelector(".marker__icon");
+      const badgeStyle = badge ? getComputedStyle(badge) : null;
+      const iconStyle = icon ? getComputedStyle(icon) : null;
+      return {
+        index: marker.dataset.markerIndex,
+        text: marker.textContent,
         display: style.display,
         placeItems: style.placeItems,
         padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft],
-        fitsHorizontally:
-          textRect.left >= markerRect.left + Number.parseFloat(style.borderLeftWidth) - 0.5
-          && textRect.right <= markerRect.right - Number.parseFloat(style.borderRightWidth) + 0.5,
-        fitsVertically:
-          textRect.top >= markerRect.top + Number.parseFloat(style.borderTopWidth) - 0.5
-          && textRect.bottom <= markerRect.bottom - Number.parseFloat(style.borderBottomWidth) + 0.5,
-        horizontalOffset: Math.abs(
-          (textRect.left + textRect.right) / 2 - (markerRect.left + markerRect.right) / 2
-        ),
-        verticalOffset: Math.abs(
-          (textRect.top + textRect.bottom) / 2 - (markerRect.top + markerRect.bottom) / 2
-        )
+        badgeWidth: badgeStyle?.width ?? null,
+        badgeHeight: badgeStyle?.height ?? null,
+        badgeBackgroundColor: badgeStyle?.backgroundColor ?? null,
+        iconWidth: iconStyle?.width ?? null,
+        iconHeight: iconStyle?.height ?? null,
+        iconPathCount: icon?.querySelectorAll("path").length ?? 0,
+        iconCircleCount: icon?.querySelectorAll("circle").length ?? 0
       };
-      marker.textContent = originalText;
-      return result;
     });
   });
-  assert.ok(markerLabelAlignment.every((marker) => marker.display === "grid"));
-  assert.ok(markerLabelAlignment.every((marker) => marker.placeItems === "center"));
-  assert.ok(markerLabelAlignment.every((marker) => marker.padding.every((value) => value === "0px")));
-  assert.ok(markerLabelAlignment.every((marker) => marker.fitsHorizontally), "7/100/117 labels must fit inside the compact marker border");
-  assert.ok(markerLabelAlignment.every((marker) => marker.fitsVertically), "7/100/117 labels must fit vertically inside the compact marker border");
-  assert.ok(markerLabelAlignment.every((marker) => marker.horizontalOffset <= 0.5));
-  assert.ok(markerLabelAlignment.every((marker) => marker.verticalOffset <= 0.5));
+  assert.ok(issuePointGeometry.every((marker) => marker.text === ""));
+  assert.ok(issuePointGeometry.every((marker) => marker.display === "grid"));
+  assert.ok(issuePointGeometry.every((marker) => marker.placeItems === "center"));
+  assert.ok(issuePointGeometry.every((marker) => marker.padding.every((value) => value === "0px")));
+  assert.ok(issuePointGeometry.every((marker) => marker.badgeWidth === "20px"));
+  assert.ok(issuePointGeometry.every((marker) => marker.badgeHeight === "20px"));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconWidth === "14px"));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconHeight === "14px"));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconPathCount === 5));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconCircleCount === 1));
+  assert.ok(issuePointGeometry.every((marker) => marker.badgeBackgroundColor === "rgba(0, 102, 204, 0.94)"));
   const compactMarkerScreenshotPath = path.join(
     dashboardDirectory,
     "artifacts",
     "page-evidence",
-    "marker-compact-labels.png"
+    "marker-issue-points.png"
   );
   await mkdir(path.dirname(compactMarkerScreenshotPath), { recursive: true });
-  await page.evaluate(() => {
-    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
-    [...root.querySelectorAll(".marker:not([hidden])")].slice(0, 3)
-      .forEach((marker, index) => { marker.textContent = ["7", "100", "117"][index]; });
-  });
   await page.screenshot({ path: compactMarkerScreenshotPath, fullPage: false });
-  await page.evaluate(() => {
-    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
-    [...root.querySelectorAll(".marker:not([hidden])")].slice(0, 3)
-      .forEach((marker, index) => { marker.textContent = String(index + 1); });
-  });
   const documentSize = await page.evaluate(() => ({
     width: Math.max(window.innerWidth, document.documentElement.scrollWidth, document.body.scrollWidth),
     height: Math.max(window.innerHeight, document.documentElement.scrollHeight, document.body.scrollHeight)
@@ -447,8 +435,8 @@ try {
   assertInlineStyleUnchanged(anchorGeometry.targetStyle, originalInlineStyles.anchor, "selected anchor");
   assertInlineStyleUnchanged(parentGeometry.targetStyle, originalInlineStyles.parent, "unselected parent");
 
-  const parentMarker = parentGeometry.markers.find((marker) => marker.text === "7");
-  const anchorMarker = anchorGeometry.markers.find((marker) => marker.text === "8");
+  const parentMarker = parentGeometry.markers.find((marker) => marker.index === "7");
+  const anchorMarker = anchorGeometry.markers.find((marker) => marker.index === "8");
   assert.ok(parentMarker && anchorMarker);
   assert.ok(!parentMarker.hidden && !anchorMarker.hidden);
   assert.ok(parentMarker.width === markerSize && parentMarker.height === markerSize);
@@ -519,7 +507,7 @@ try {
   assertSelectionFragmentsMatch(anchorGeometry, "selection after window scroll");
   assert.ok(Math.abs(anchorGeometry.fragments[0].top - (beforeWindowScroll.fragments[0].top - 120)) <= 0.75);
   assertMarkerAvoidsTargetRects(
-    anchorGeometry.markers.find((marker) => marker.text === "8"),
+    anchorGeometry.markers.find((marker) => marker.index === "8"),
     anchorGeometry.targetRects,
     "anchor marker after window scroll must remain outside both lines"
   );
@@ -552,7 +540,7 @@ try {
   });
   await page.waitForFunction((previousTop) => {
     const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
-    const marker = [...(root?.querySelectorAll(".marker") ?? [])].find((candidate) => candidate.textContent === "10");
+    const marker = root?.querySelector('.marker[data-marker-index="10"]');
     return marker && Math.abs(marker.getBoundingClientRect().top - previousTop) >= 20;
   }, nestedMarkerBefore.top);
   const nestedAfter = await getSelectionGeometry(page, "#nested-target", ["10"]);
@@ -571,7 +559,7 @@ try {
   await page.waitForFunction(() => {
     const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
     const relevantMarkers = [...(root?.querySelectorAll(".marker") ?? [])]
-      .filter((marker) => marker.textContent === "7" || marker.textContent === "8");
+      .filter((marker) => marker.dataset.markerIndex === "7" || marker.dataset.markerIndex === "8");
     return root?.querySelectorAll(".selection-fragment").length === 0
       && relevantMarkers.length === 2
       && relevantMarkers.every((marker) => marker.hidden);

@@ -1,30 +1,18 @@
 import type { AnalyzerType, ImprovementGuide, IssueResultModel, SeverityLevel } from "@/types/accessibility-domain";
 
-export type ChartSeriesKey = "score" | "issueCount";
-
 export type ScoreChartItem = {
   slot: number;
   date: string;
   label: string;
   score: number;
   issueCount: number;
-};
-
-export type SiteSummaryItem = {
-  label: string;
-  value: string;
-  unit: string;
+  isPlaceholder?: boolean;
 };
 
 export type SeverityChartItem = {
   key: SeverityLevel;
   label: string;
   color: string;
-};
-
-export type IssueSeverityRow = SeverityChartItem & {
-  count: number;
-  percent: number;
 };
 
 export type WcagCriterion = {

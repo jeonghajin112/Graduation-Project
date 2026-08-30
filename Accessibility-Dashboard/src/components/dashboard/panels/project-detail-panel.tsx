@@ -5,10 +5,8 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type {
-  AnalysisResult,
   EvaluationTargetModel,
   EvaluationRequestModel,
-  IssueResultModel,
   OrganizationModel,
   ScoreResult
 } from "@/types/accessibility-domain";
@@ -40,17 +38,17 @@ export function OrganizationModelDetailPanel({
   isDarkMode,
   onOpenCreateSiteModal,
   onSiteClick,
-  onDeleteEvaluationTargetModel
+  onDeleteEvaluationTargetModel,
+  readOnly = false
 }: {
   organization: OrganizationModel;
   evaluationRequests: EvaluationRequestModel[];
-  analysisResults: AnalysisResult[];
   scoreResults: ScoreResult[];
-  issueResults: IssueResultModel[];
   isDarkMode: boolean;
   onOpenCreateSiteModal: () => void;
   onSiteClick: (siteId: number) => void;
   onDeleteEvaluationTargetModel: (input: { projectId: number; siteId: number }) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [siteSortConfig, setSiteSortConfig] = useState<{
     key: ProjectDetailSiteSortKey;
@@ -287,7 +285,9 @@ export function OrganizationModelDetailPanel({
         <button
           type="button"
           onClick={onOpenCreateSiteModal}
-          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40"
+          disabled={readOnly}
+          title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
+          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"
         >
           페이지 추가
         </button>
@@ -304,7 +304,7 @@ export function OrganizationModelDetailPanel({
           등록된 페이지가 없습니다.
         </div>
       ) : (
-        <div className="dashboard-project-content dashboard-project-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="dashboard-project-content dashboard-project-grid grid">
           {sortedSiteRows.map((row) => (
             <article
               key={row.id}
@@ -321,7 +321,7 @@ export function OrganizationModelDetailPanel({
                 className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/45"
               />
 
-              <div className="dashboard-project-card-delete absolute z-10">
+              {!readOnly ? <div className="dashboard-project-card-delete absolute z-10">
                 <button
                   type="button"
                   onClick={(event) => {
@@ -340,7 +340,7 @@ export function OrganizationModelDetailPanel({
                 >
                   <Trash2 size={13} aria-hidden="true" />
                 </button>
-              </div>
+              </div> : null}
 
               <div className="dashboard-project-card-header pointer-events-none relative z-[1] flex min-w-0 items-start">
                 <span
@@ -382,8 +382,8 @@ export function OrganizationModelDetailPanel({
                 </div>
               </div>
 
-              <div className="dashboard-project-card-main relative z-[1] flex items-center justify-between">
-                {row.accessUrl ? (
+              <div className="dashboard-project-card-main pointer-events-none relative z-[1] flex items-center justify-between">
+                {row.accessUrl && !readOnly ? (
                   <a
                     href={row.accessUrl}
                     target="_blank"
@@ -397,6 +397,15 @@ export function OrganizationModelDetailPanel({
                     <span className="truncate">{row.accessUrl}</span>
                     <ExternalLink size={10} className="shrink-0" aria-hidden="true" />
                   </a>
+                ) : row.accessUrl ? (
+                  <p
+                    className={`dashboard-project-card-url min-w-0 truncate ${
+                      isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"
+                    }`}
+                    title={row.accessUrl}
+                  >
+                    {row.accessUrl}
+                  </p>
                 ) : (
                   <p className={`dashboard-project-card-url min-w-0 truncate ${isDarkMode ? "text-[#6e6e73]" : "text-[#a1a1a6]"}`}>
                     등록된 주소 없음
@@ -617,7 +626,7 @@ export function OrganizationModelDetailPanel({
             </div>
           </div>
       </div>
-      {deletingEvaluationTargetModel
+      {!readOnly && deletingEvaluationTargetModel
         ? createPortal(
             <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
               <div

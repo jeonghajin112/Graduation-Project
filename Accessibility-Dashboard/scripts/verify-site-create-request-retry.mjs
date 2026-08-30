@@ -3,12 +3,14 @@
  * request polling must resume from that stage instead of creating a duplicate
  * target (or a duplicate in-flight request).
  *
- * Usage: BASE_URL=http://127.0.0.1:5173 node scripts/verify-site-create-request-retry.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-10T10:00:00.000Z";
 
 const organization = {
@@ -33,6 +35,18 @@ const target = {
   status: "ACTIVE",
   createdAt: timestamp,
   updatedAt: timestamp
+};
+
+const inactiveTarget = {
+  ...target,
+  id: 100,
+  status: "INACTIVE"
+};
+
+const lateInactiveTarget = {
+  ...target,
+  id: 102,
+  status: "INACTIVE"
 };
 
 const pendingRequest = {
@@ -74,6 +88,9 @@ const score = {
 };
 
 const observed = {
+  events: [],
+  targetGets: 0,
+  targetStatusGets: 0,
   targetPosts: 0,
   requestPosts: 0,
   requestStatusGets: 0,
@@ -82,8 +99,9 @@ const observed = {
   unknownRequests: new Set()
 };
 
-let targets = [];
+let targets = [inactiveTarget];
 let requests = [];
+let targetLookupStatus = "ACTIVE";
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -94,30 +112,57 @@ try {
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
 
-    if (method === "GET" && pathname === "/api/organizations") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([organization])
+    if (method === "GET" && pathname === "/api/dashboard/overview") {
+      const hasCompletedRequest = requests.some((candidate) => candidate.status === "COMPLETED");
+      const overview = createDashboardOverview({
+        organizations: [organization],
+        evaluationTargets: targets.filter((candidate) => candidate.status === "ACTIVE"),
+        evaluationRequests: requests,
+        resultSummaries: hasCompletedRequest ? [summary] : [],
+        scoreResults: hasCompletedRequest ? [score] : [],
+        latestIssueCounts: hasCompletedRequest
+          ? [{
+              evaluationTargetId: target.id,
+              requestId: completedRequest.id,
+              totalIssueCount: 0,
+              criticalIssueCount: 0,
+              highIssueCount: 0,
+              mediumIssueCount: 0,
+              lowIssueCount: 0,
+              groups: []
+            }]
+          : []
       });
+      await fulfillJson(
+        route,
+        (observed.targetPosts === 1 && observed.requestPosts === 0) ||
+          (observed.requestPosts === 2 && observed.requestStatusGets === 0)
+          ? { ...overview, organizations: "unrelated malformed overview" }
+          : overview
+      );
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/organizations") {
+      await fulfillJson(route, [organization]);
       return;
     }
 
     if (method === "GET" && pathname === `/api/organizations/${organization.id}/evaluation-targets`) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(targets)
-      });
+      observed.targetGets += 1;
+      observed.events.push({ method, pathname, targetIds: targets.map((candidate) => candidate.id) });
+      await fulfillJson(route, targets);
       return;
     }
 
     if (method === "GET" && pathname === "/api/requests") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(requests)
-      });
+      await fulfillJson(route, requests);
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/targets/${target.id}`) {
+      observed.targetStatusGets += 1;
+      await fulfillJson(route, { ...target, status: targetLookupStatus });
       return;
     }
 
@@ -126,13 +171,17 @@ try {
       pathname === `/api/organizations/${organization.id}/evaluation-targets`
     ) {
       observed.targetPosts += 1;
+      observed.events.push({ method, pathname });
       observed.targetPostBody = JSON.parse(request.postData() ?? "null");
-      targets = [target];
-      await route.fulfill({
-        status: 201,
-        contentType: "application/json",
-        body: JSON.stringify(target)
-      });
+      targets = [inactiveTarget, lateInactiveTarget, target];
+      // The target was committed, but the otherwise valid response points to
+      // an ID that existed before the POST. The client must reconcile the list
+      // instead of attaching analysis to that pre-existing target.
+      await fulfillJson(
+        route,
+        { ...target, id: inactiveTarget.id },
+        { status: 201 }
+      );
       return;
     }
 
@@ -154,9 +203,11 @@ try {
 
       requests = [pendingRequest];
       await route.fulfill({
-        status: 201,
+        // The request committed but its response was lost. Recovery must use
+        // the targeted request list even while overview is malformed.
+        status: 503,
         contentType: "application/json",
-        body: JSON.stringify(pendingRequest)
+        body: JSON.stringify({ message: "request response lost after commit" })
       });
       return;
     }
@@ -174,31 +225,32 @@ try {
       }
 
       requests = [completedRequest];
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(completedRequest)
-      });
+      await fulfillJson(route, completedRequest);
       return;
     }
 
     if (method === "GET" && pathname === `/api/results/requests/${completedRequest.id}/summary`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(summary) });
+      await fulfillJson(route, summary);
       return;
     }
 
     if (method === "GET" && pathname === `/api/results/requests/${completedRequest.id}/issues`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      await fulfillJson(route, []);
       return;
     }
 
     if (method === "GET" && pathname === `/api/scores/requests/${completedRequest.id}`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(score) });
+      await fulfillJson(route, score);
       return;
     }
 
-    observed.unknownRequests.add(`${method} ${pathname}`);
-    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+    const requestLabel = `${method} ${pathname}`;
+    observed.unknownRequests.add(requestLabel);
+    await fulfillJson(
+      route,
+      { requestLabel },
+      { status: 500 }
+    );
   });
 
   await page.goto(`${baseUrl}/projects/${organization.id}`, { waitUntil: "networkidle" });
@@ -206,7 +258,31 @@ try {
   await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
 
   const dialog = page.getByRole("dialog", { name: "페이지 추가", exact: true });
+  await dialog.getByLabel("페이지 이름", { exact: true }).evaluate((input) => {
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set;
+    valueSetter?.call(input, "가".repeat(101));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await dialog.getByLabel("페이지 주소", { exact: true }).fill(target.accessUrl);
+  await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지 이름은 100자 이하" })
+    .waitFor();
+  assert.equal(observed.targetPosts, 0, "oversized names must be rejected before POST");
+
   await dialog.getByLabel("페이지 이름", { exact: true }).fill(target.name);
+  await dialog.getByLabel("페이지 주소", { exact: true }).fill("javascript:alert(document.domain)");
+  await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "올바른 페이지 주소를 입력해주세요" })
+    .waitFor();
+  assert.equal(observed.targetPosts, 0, "unsafe URL schemes must be rejected before POST");
+
   await dialog.getByLabel("페이지 주소", { exact: true }).fill(target.accessUrl);
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
 
@@ -219,9 +295,16 @@ try {
 
   assert.equal(observed.targetPosts, 1);
   assert.equal(observed.requestPosts, 1);
-  assert.equal(
-    await page.getByRole("button", { name: `${target.name} 상세 보기`, exact: true }).count(),
-    1
+  const targetPostEventIndex = observed.events.findIndex((event) => event.method === "POST");
+  assert.ok(targetPostEventIndex > 0, "target creation must read the targeted baseline before POST");
+  assert.deepEqual(
+    observed.events[targetPostEventIndex - 1],
+    {
+      method: "GET",
+      pathname: `/api/organizations/${organization.id}/evaluation-targets`,
+      targetIds: [inactiveTarget.id]
+    },
+    "the pre-POST baseline must include existing inactive targets omitted from overview"
   );
 
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
@@ -235,6 +318,19 @@ try {
   assert.equal(observed.targetPosts, 1);
   assert.equal(observed.requestPosts, 1);
 
+  targetLookupStatus = "INACTIVE";
+  await requestRetryButton.click();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "등록된 페이지가 비활성화되었거나 복구 정보와 일치하지 않아" })
+    .waitFor();
+  assert.equal(
+    observed.requestPosts,
+    1,
+    "an inactive recovered target must be rejected before another analysis POST"
+  );
+
+  targetLookupStatus = "ACTIVE";
   await requestRetryButton.click();
   const pollRetryButton = dialog.getByRole("button", {
     name: "상태 확인 다시 시도",
@@ -244,6 +340,7 @@ try {
 
   assert.equal(observed.targetPosts, 1);
   assert.equal(observed.requestPosts, 2);
+  assert.equal(observed.targetStatusGets, 3);
   assert.equal(observed.requestStatusGets, 1);
 
   await pollRetryButton.click();
@@ -260,10 +357,12 @@ try {
     observed.requestPostBodies.every((body) => body?.evaluationTargetId === target.id),
     "every analysis request must reuse the created target"
   );
-  assert.equal(
-    await page.getByRole("button", { name: `${target.name} 상세 보기`, exact: true }).count(),
-    1
-  );
+  const createdTargetDetailButton = page.getByRole("button", {
+    name: `${target.name} 상세 보기`,
+    exact: true
+  });
+  await createdTargetDetailButton.waitFor({ state: "visible", timeout: 10_000 });
+  assert.equal(await createdTargetDetailButton.count(), 1);
   assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
   assert.deepEqual([...observed.unknownRequests], []);
 
@@ -271,6 +370,8 @@ try {
     JSON.stringify(
       {
         result: "PASS",
+        targetGets: observed.targetGets,
+        targetStatusGets: observed.targetStatusGets,
         targetPosts: observed.targetPosts,
         requestPosts: observed.requestPosts,
         requestStatusGets: observed.requestStatusGets,

@@ -341,5 +341,16 @@ for (const [kwcagId, item] of Object.entries(kwcagItems)) {
   }
 }
 
-// 세 가지 객체를 다른 파일에서 쓸 수 있게 추출
-module.exports = { kwcagItems, axeRuleToKwcag, wcagToKwcag };
+const standard = {
+  name: 'KWCAG',
+  version: '2.2',
+};
+
+// Python 기반 분석기도 이 파일을 단일 매핑 소스로 사용할 수 있도록
+// 직접 실행할 때는 기계 판독 가능한 JSON을 출력한다.
+if (require.main === module) {
+  process.stdout.write(JSON.stringify({ standard, kwcagItems, wcagToKwcag }));
+}
+
+// 다른 Node 모듈과 Python 매핑 브리지에서 공유한다.
+module.exports = { standard, kwcagItems, axeRuleToKwcag, wcagToKwcag };

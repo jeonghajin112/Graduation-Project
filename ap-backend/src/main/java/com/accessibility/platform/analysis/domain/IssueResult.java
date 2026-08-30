@@ -11,7 +11,13 @@ import java.util.List;
 
 @Getter
 @Entity
-@Table(name = "issue_result")
+@Table(
+        name = "issue_result",
+        indexes = @Index(
+                name = "idx_issue_result_analysis_severity_code",
+                columnList = "analysis_result_id,severity,issue_code"
+        )
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class IssueResult extends BaseTimeEntity {
 
@@ -86,6 +92,14 @@ public class IssueResult extends BaseTimeEntity {
         this.locatorCoordinateSpace = locator.coordinateSpace();
         this.locatorVisible = locator.visible();
         this.locatorHtmlSnippet = locator.htmlSnippet();
+    }
+
+    public void reclassify(String issueCode, String issueTitle) {
+        if (issueCode == null || issueCode.isBlank() || issueTitle == null || issueTitle.isBlank()) {
+            throw new IllegalArgumentException("Issue classification must include a code and title");
+        }
+        this.issueCode = issueCode;
+        this.issueTitle = issueTitle;
     }
 
     public IssueLocator getLocator() {

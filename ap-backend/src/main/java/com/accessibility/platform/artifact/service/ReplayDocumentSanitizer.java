@@ -79,6 +79,7 @@ public class ReplayDocumentSanitizer {
               const ANIMATIONS_PAUSED_ATTRIBUTE = 'data-uni-accessibility-replay-animations-paused';
               const AUTO_HIDDEN_POPUP_ATTRIBUTE = 'data-uni-accessibility-replay-auto-hidden-popup';
               const MAX_ISSUES = 5000;
+              const MARKER_BLUE_GLASS = 'rgba(0,102,204,.94)';
               const MARKER_SIZE = 24;
               const MARKER_HALO = 6;
               const MARKER_GAP = 8;
@@ -104,11 +105,12 @@ public class ReplayDocumentSanitizer {
               const POPOVER_VIEWPORT_MARGIN = 12;
               const POPOVER_TARGET_CLEARANCE = 6;
               const POPOVER_PREFERRED_MAX_MARKER_DISTANCE = 48;
-              const POPOVER_MAX_MARKER_DISTANCE = MARKER_SLOT_STEP + POPOVER_GAP;
               const POPOVER_DENSITIES = ['normal', 'compact', 'minimal'];
               const POPOVER_WIDE_WIDTHS = [840, 760, 680, 600, 560];
               const POPOVER_MAX_LAYOUT_CANDIDATES = POPOVER_DENSITIES.length + POPOVER_WIDE_WIDTHS.length;
               const POPOVER_LEAVE_GRACE_MS = 120;
+              const POPOVER_MAX_LEAVE_GRACE_MS = 700;
+              const POPOVER_POINTER_TRAVEL_MS_PER_PX = 1.5;
               const MAX_SEVERITY_LENGTH = 32;
               const MAX_SEVERITY_LABEL_LENGTH = 32;
               const MAX_CODE_LENGTH = 128;
@@ -139,6 +141,7 @@ public class ReplayDocumentSanitizer {
               let issuePopover = null;
               let issuePopoverElements = null;
               let popoverIssueId = null;
+              let popoverLeaveGraceMs = POPOVER_LEAVE_GRACE_MS;
               let issueDetailFallbackId = null;
               let selectedTargetResizeObserver = null;
               let positionFrame = 0;
@@ -189,6 +192,11 @@ public class ReplayDocumentSanitizer {
               const issueKey = (id) => String(id);
               const boundedText = (value, maximum) =>
                 typeof value === 'string' ? value.slice(0, maximum) : '';
+              const formatIssueCodeLabel = (code) => {
+                if (!code) return '';
+                if (/^(?:KWCAG|WCAG)\\s+/i.test(code)) return code;
+                return /^[0-9]+(?:[.][0-9]+)+$/.test(code) ? `KWCAG ${code}` : code;
+              };
 
               const normalizeIssue = (issue) => ({
                 id: issue.id,
@@ -255,14 +263,6 @@ public class ReplayDocumentSanitizer {
                   return { target: null, reason: 'INVALID_SELECTOR' };
                 }
                 return { target: current, reason: null };
-              };
-
-              const markerColor = (severity) => {
-                const value = String(severity || '').toUpperCase();
-                if (value === 'CRITICAL') return '#b42318';
-                if (value === 'SERIOUS' || value === 'HIGH') return '#d92d20';
-                if (value === 'MODERATE' || value === 'MEDIUM') return '#b54708';
-                return '#175cd3';
               };
 
               const targetComposedParent = (element) => {
@@ -400,9 +400,44 @@ public class ReplayDocumentSanitizer {
 
               const issueAccessibleLabel = (issue) => [
                 issue.severityLabel || issue.severity || 'ISSUE',
-                issue.code ? `KWCAG ${issue.code}` : '',
+                formatIssueCodeLabel(issue.code),
                 issue.title || 'Accessibility issue'
               ].filter(Boolean).join('. ');
+
+              // Lucide ScanSearch geometry. The glyph makes the marker read as an
+              // inspection affordance while the button keeps its numberless label.
+              const createMarkerBadge = () => {
+                const svgNamespace = 'http://www.w3.org/2000/svg';
+                const badge = document.createElement('span');
+                badge.className = 'marker__badge';
+                badge.setAttribute('aria-hidden', 'true');
+                const icon = document.createElementNS(svgNamespace, 'svg');
+                icon.classList.add('marker__icon');
+                icon.setAttribute('viewBox', '0 0 24 24');
+                icon.setAttribute('fill', 'none');
+                icon.setAttribute('stroke', 'currentColor');
+                icon.setAttribute('stroke-width', '2');
+                icon.setAttribute('stroke-linecap', 'round');
+                icon.setAttribute('stroke-linejoin', 'round');
+                [
+                  'M3 7V5a2 2 0 0 1 2-2h2',
+                  'M17 3h2a2 2 0 0 1 2 2v2',
+                  'M21 17v2a2 2 0 0 1-2 2h-2',
+                  'M7 21H5a2 2 0 0 1-2-2v-2',
+                  'm16 16-1.9-1.9'
+                ].forEach((pathData) => {
+                  const path = document.createElementNS(svgNamespace, 'path');
+                  path.setAttribute('d', pathData);
+                  icon.appendChild(path);
+                });
+                const lens = document.createElementNS(svgNamespace, 'circle');
+                lens.setAttribute('cx', '12');
+                lens.setAttribute('cy', '12');
+                lens.setAttribute('r', '3');
+                icon.insertBefore(lens, icon.lastChild);
+                badge.appendChild(icon);
+                return badge;
+              };
 
               const markerPreviewIsActive = (preview) => Boolean(preview && (
                 preview.pointer
@@ -432,7 +467,7 @@ public class ReplayDocumentSanitizer {
                   markerPreviewClearTimer = window.setTimeout(() => {
                     markerPreviewClearTimer = 0;
                     completeMarkerPreviewClear(key);
-                  }, POPOVER_LEAVE_GRACE_MS);
+                  }, popoverLeaveGraceMs);
                   return;
                 }
                 markerPreviewClearFrame = requestAnimationFrame(() => {
@@ -474,13 +509,14 @@ public class ReplayDocumentSanitizer {
                 issuePopover.removeAttribute('data-layout');
                 issuePopover.removeAttribute('data-issue-id');
                 issuePopover.removeAttribute('data-placement');
+                popoverLeaveGraceMs = POPOVER_LEAVE_GRACE_MS;
               };
 
               const setIssuePopoverContent = (issue) => {
                 if (!issuePopover || !issuePopoverElements) return;
                 issuePopoverElements.severity.textContent = issue.severityLabel || issue.severity || 'ISSUE';
                 issuePopoverElements.severity.dataset.severity = issue.severity.toUpperCase();
-                issuePopoverElements.code.textContent = issue.code ? `KWCAG ${issue.code}` : 'KWCAG';
+                issuePopoverElements.code.textContent = formatIssueCodeLabel(issue.code) || 'KWCAG';
                 issuePopoverElements.title.textContent = issue.title || 'Accessibility issue';
                 issuePopoverElements.message.textContent = issue.message;
                 issuePopoverElements.message.hidden = !issue.message;
@@ -587,8 +623,7 @@ public class ReplayDocumentSanitizer {
                           const rect = { left, top, right: left + width, bottom: top + height };
                           if (overlapsPopoverObstacle(rect)) continue;
                           const markerDistance = rectangleDistance(rect, markerRect);
-                          if (markerDistance < POPOVER_GAP - 1
-                              || markerDistance > POPOVER_MAX_MARKER_DISTANCE) continue;
+                          if (markerDistance < POPOVER_GAP - 1) continue;
                           const centerDistance = Math.hypot(
                             left + width / 2 - markerCenterX,
                             top + height / 2 - markerCenterY
@@ -629,6 +664,13 @@ public class ReplayDocumentSanitizer {
                 const placeIssuePopoverCandidate = (selected) => {
                   issuePopover.removeAttribute('data-presentation');
                   clearIssueDetailFallback();
+                  popoverLeaveGraceMs = Math.min(
+                    POPOVER_MAX_LEAVE_GRACE_MS,
+                    Math.max(
+                      POPOVER_LEAVE_GRACE_MS,
+                      Math.ceil(selected.markerDistance * POPOVER_POINTER_TRAVEL_MS_PER_PX)
+                    )
+                  );
                   issuePopover.dataset.placement = selected.placement;
                   issuePopover.style.transform = `translate(${Math.round(selected.left)}px, ${Math.round(selected.top)}px)`;
                   issuePopover.style.visibility = 'visible';
@@ -642,6 +684,7 @@ public class ReplayDocumentSanitizer {
                   issuePopover.removeAttribute('data-layout');
                   issuePopover.removeAttribute('data-placement');
                   issuePopover.dataset.presentation = 'external-description';
+                  popoverLeaveGraceMs = POPOVER_LEAVE_GRACE_MS;
                   issuePopover.hidden = false;
                   issuePopover.style.visibility = 'visible';
                   issuePopover.setAttribute('aria-hidden', 'false');
@@ -659,7 +702,9 @@ public class ReplayDocumentSanitizer {
                   const selected = findIssuePopoverCandidate(width, height);
                   if (!selected) return false;
                   if (!selected.preferred) {
-                    if (!fallbackLayout && selected.fallback) {
+                    if (selected.fallback && (
+                      !fallbackLayout || selected.fallback.score < fallbackLayout.selected.score
+                    )) {
                       fallbackLayout = { layout, selected: selected.fallback };
                     }
                     return false;
@@ -1269,12 +1314,13 @@ public class ReplayDocumentSanitizer {
                   const button = document.createElement('button');
                   button.type = 'button';
                   button.className = 'marker';
-                  button.textContent = String(index + 1);
-                  button.style.setProperty('--marker-color', markerColor(issue.severity));
+                  button.dataset.markerIndex = String(index + 1);
+                  button.style.setProperty('--marker-color', MARKER_BLUE_GLASS);
                   button.hidden = true;
                   button.dataset.selected = 'false';
                   button.setAttribute('aria-label', issueAccessibleLabel(issue));
                   button.setAttribute('aria-pressed', 'false');
+                  button.appendChild(createMarkerBadge());
                   let lastPointerType = '';
                   button.addEventListener('pointerdown', (event) => {
                     lastPointerType = event.pointerType;
@@ -1968,21 +2014,47 @@ public class ReplayDocumentSanitizer {
                   :host::before,:host::after { content:none !important; display:none !important; pointer-events:none !important; }
                   .selection-layer { position:absolute; left:0; top:0; width:0; height:0; overflow:visible; pointer-events:none; }
                   .selection-fragment { box-sizing:border-box; position:absolute; left:0; top:0; border:3px solid #e5484d; pointer-events:none; transform-origin:top left; }
-                  .marker { appearance:none; -webkit-appearance:none; box-sizing:border-box; display:grid; place-items:center; position:absolute; left:0; top:0; width:24px; height:24px; margin:0; padding:0; border:2px solid white; border-radius:999px; background:var(--marker-color); color:white; font:700 11px/1 system-ui,sans-serif; font-variant-numeric:tabular-nums; text-align:center; direction:ltr; unicode-bidi:isolate; box-shadow:0 2px 8px rgba(0,0,0,.35); cursor:pointer; pointer-events:auto; transform-origin:top left; }
+                  /* The marker identifies an inspectable issue, not a list position. Keep
+                     the 24px hit target and show a scan glyph instead of a sequence number. */
+                  .marker { appearance:none; -webkit-appearance:none; box-sizing:border-box; display:grid; place-items:center; position:absolute; left:0; top:0; width:24px; height:24px; margin:0; padding:0; border:0; border-radius:999px; background:transparent; color:transparent; cursor:pointer; pointer-events:auto; transform-origin:top left; }
+                  .marker__badge { box-sizing:border-box; display:grid; place-items:center; width:20px; height:20px; border-radius:999px; background:var(--marker-color,#0066cc); color:#fff; box-shadow:0 0 0 2px rgba(255,255,255,.94),0 2px 5px rgba(16,24,40,.32); transition:transform 120ms ease,box-shadow 120ms ease; }
+                  .marker__icon { display:block; width:14px; height:14px; overflow:visible; pointer-events:none; }
                   .marker[hidden] { display:none !important; }
+                  .marker:hover .marker__badge { transform:scale(1.12); }
                   .marker[data-selected='true'] { z-index:2; }
+                  .marker[data-selected='true'] .marker__badge { transform:scale(1.2); box-shadow:0 0 0 2px #fff,0 0 0 5px rgba(0,102,204,.22),0 2px 6px rgba(16,24,40,.34); }
                   .marker:focus-visible { outline:3px solid #101828; outline-offset:3px; }
-                  .issue-popover { all:initial; box-sizing:border-box; display:block; position:absolute; left:0; top:0; z-index:3; width:clamp(220px,34vw,360px); max-width:calc(100vw - 24px); overflow:visible; touch-action:manipulation; padding:14px; border:1px solid #d0d5dd; border-radius:12px; background:#fff; color:#101828; box-shadow:0 12px 32px rgba(16,24,40,.2); font:400 13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:left; direction:ltr; unicode-bidi:isolate; overflow-wrap:anywhere; word-break:break-word; pointer-events:auto; transform-origin:top left; }
+                  @media (prefers-reduced-motion:reduce) {
+                    .marker__badge { transition:none; }
+                  }
+                  /* Glassmorphism to match the dashboard shell. The tint is held at
+                     78% white because the popover floats over arbitrary captured
+                     pages: composited over black that still leaves the muted body ink
+                     (#3f4b5e) at 5.22:1, so AA survives the worst backdrop. */
+                  .issue-popover { all:initial; box-sizing:border-box; display:block; position:absolute; left:0; top:0; z-index:3; width:clamp(220px,34vw,360px); max-width:calc(100vw - 24px); overflow:visible; touch-action:manipulation; padding:14px; border:0; border-radius:14px; background:rgba(255,255,255,.78); -webkit-backdrop-filter:blur(24px) saturate(180%); backdrop-filter:blur(24px) saturate(180%); color:#101828; box-shadow:0 18px 44px rgba(16,24,40,.24), inset 0 1px 0 rgba(255,255,255,.86), inset 0 0 0 1px rgba(16,24,40,.05); font:400 13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; text-align:left; direction:ltr; unicode-bidi:isolate; overflow-wrap:anywhere; word-break:break-word; pointer-events:auto; transform-origin:top left; }
+                  /* Without backdrop-filter the translucent fill alone loses contrast. */
+                  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+                    .issue-popover { background:#fff; }
+                  }
+                  /* No prefers-reduced-transparency opt-out here, matching the landing
+                     header (.ua-header) which also ships glass unconditionally. Windows
+                     reports that preference whenever "transparency effects" is off, which
+                     would silently disable the glass for a large share of users. The 78%
+                     tint is legible without the blur anyway: over black it still leaves
+                     the muted ink at 5.22:1, so nothing depends on the backdrop filter
+                     for contrast. forced-colors below remains the accessibility escape
+                     hatch. */
                   .issue-popover[hidden] { display:none !important; }
                   .issue-popover * { box-sizing:border-box; }
                   .issue-popover__tags { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
-                  .issue-popover__tag { display:inline-flex; align-items:center; min-width:0; max-width:100%; min-height:24px; margin:0; padding:3px 8px; overflow:visible; border-radius:999px; background:#f2f4f7; color:#344054; font:700 11px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
-                  .issue-popover__severity[data-severity='CRITICAL'],.issue-popover__severity[data-severity='SERIOUS'],.issue-popover__severity[data-severity='HIGH'] { background:#fef3f2; color:#b42318; }
-                  .issue-popover__severity[data-severity='MODERATE'],.issue-popover__severity[data-severity='MEDIUM'] { background:#fffaeb; color:#b54708; }
-                  .issue-popover__severity[data-severity='LOW'] { background:#ecfdf3; color:#027a48; }
+                  /* Nested boxes use translucent fills so the blur never stacks. */
+                  .issue-popover__tag { display:inline-flex; align-items:center; min-width:0; max-width:100%; min-height:24px; margin:0; padding:3px 8px; overflow:visible; border-radius:999px; background:rgba(242,244,247,.78); color:#344054; font:700 11px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
+                  .issue-popover__severity[data-severity='CRITICAL'],.issue-popover__severity[data-severity='SERIOUS'],.issue-popover__severity[data-severity='HIGH'] { background:rgba(254,243,242,.82); color:#b42318; }
+                  .issue-popover__severity[data-severity='MODERATE'],.issue-popover__severity[data-severity='MEDIUM'] { background:rgba(255,250,235,.82); color:#b54708; }
+                  .issue-popover__severity[data-severity='LOW'] { background:rgba(236,253,243,.82); color:#026b3f; }
                   .issue-popover__title { display:block; margin:0 0 8px; overflow:visible; color:#101828; font:700 15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; text-wrap:balance; word-break:keep-all; overflow-wrap:anywhere; }
-                  .issue-popover__message { display:block; margin:0 0 10px; overflow:visible; color:#475467; font:400 13px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; white-space:normal; }
-                  .issue-popover__path { display:block; width:100%; margin:0; padding:9px 10px; overflow:visible; border-radius:8px; background:#f9fafb; color:#344054; font:400 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
+                  .issue-popover__message { display:block; margin:0 0 10px; overflow:visible; color:#3f4b5e; font:400 13px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; white-space:normal; }
+                  .issue-popover__path { display:block; width:100%; margin:0; padding:9px 10px; overflow:visible; border-radius:8px; background:rgba(249,250,251,.66); color:#344054; font:400 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
                   .issue-popover__message[hidden],.issue-popover__path[hidden] { display:none !important; }
                   .issue-popover[data-density='compact'] { padding:12px; }
                   .issue-popover[data-density='compact'] .issue-popover__tags { margin-bottom:8px; }
@@ -2004,6 +2076,8 @@ public class ReplayDocumentSanitizer {
                    @media (forced-colors:active) {
                     .issue-popover { border:2px solid CanvasText; background:Canvas; color:CanvasText; box-shadow:none; }
                     .issue-popover__tag,.issue-popover__title,.issue-popover__message,.issue-popover__path { border:1px solid CanvasText; background:Canvas; color:CanvasText; }
+                    .marker__badge { background:CanvasText; color:Canvas; box-shadow:0 0 0 2px Canvas; }
+                    .marker:focus-visible { outline-color:CanvasText; }
                   }
                 `;
                 shadowRoot.appendChild(style);

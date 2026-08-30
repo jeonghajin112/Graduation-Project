@@ -50,6 +50,8 @@ import sys
 import os
 import MeCab
 
+from text_standard_mapper import classify_text_block
+
 
 # ─────────────────────────────────────────
 # 0. 어휘 사전 로딩 (국립국어원 학습용 어휘 등급)
@@ -350,6 +352,10 @@ def analyze_block(block):
                 f'문장 길이 과다: 평균 {avg_sent_len:.1f}어절 (기준: {THRESHOLD_SENTENCE_LENGTH}어절)')
             result['needs_suggestion'] = True
 
+    # Standards metadata is produced before the optional suggestion/LLM step,
+    # so the backend can persist correct criterion codes even if that later
+    # step is unavailable.
+    result['standard_issues'] = classify_text_block(result)
     return result
 
 

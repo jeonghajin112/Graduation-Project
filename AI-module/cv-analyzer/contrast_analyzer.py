@@ -13,7 +13,7 @@ ai-analysis/cv/contrast_analyzer.py
   - AA 큰 텍스트(18pt 이상):     3.0:1 이상
   - AAA 일반 텍스트:             7.0:1 이상
   - AAA 큰 텍스트:               4.5:1 이상
-  KWCAG 5.3.3(콘텐츠의 명도 대비)은 WCAG AA 수준을 요구하므로,
+  KWCAG 5.4.3(텍스트 콘텐츠의 명도 대비)은 WCAG AA 수준을 요구하므로,
   이 모듈의 기본 판정 기준은 AA(4.5:1 / 3.0:1)
 
 [사용법]
@@ -138,7 +138,7 @@ def check_wcag_compliance(ratio: float) -> Dict[str, bool]:
     AAA 일반 텍스트:             7.0:1 이상 → 가장 엄격한 기준
     AAA 큰 텍스트:               4.5:1 이상
     
-    KWCAG 5.3.3은 AA 수준을 요구하므로,
+    KWCAG 5.4.3은 AA 수준을 요구하므로,
     이 프로젝트에서는 aa_normal_text(4.5:1)를 주요 판정 기준으로 사용
     """
     return {
@@ -260,7 +260,7 @@ class ContrastAnalyzer:
     1. vision_ocr.py로부터 텍스트 내용 + 바운딩박스(위치) 목록을 받음
     2. 각 바운딩박스 위치에서 전경색(글자색)과 배경색을 픽셀 분석으로 추출
     3. WCAG 명암비 공식으로 두 색상의 대비율을 계산
-    4. KWCAG 5.3.3 기준(AA: 4.5:1 / 큰 텍스트: 3.0:1)으로 통과/위반을 판정
+    4. KWCAG 5.4.3 기준(AA: 4.5:1 / 큰 텍스트: 3.0:1)으로 통과/위반을 판정
     5. 위반 항목에 대해서는 기준을 충족하는 대체 색상을 추천
     
     [이 모듈에서 AI가 사용되는 부분]
@@ -269,7 +269,7 @@ class ContrastAnalyzer:
     텍스트 위치 인식에만 사용됨.
     """
     
-    # KWCAG 5.3.3 (콘텐츠의 명도 대비) 기준값
+    # KWCAG 5.4.3 (텍스트 콘텐츠의 명도 대비) 기준값
     # KWCAG는 WCAG AA 수준을 요구함
     KWCAG_NORMAL_THRESHOLD = 4.5   # 일반 텍스트: 4.5:1 이상
     KWCAG_LARGE_THRESHOLD = 3.0    # 큰 텍스트(18pt 이상): 3.0:1 이상
@@ -297,7 +297,7 @@ class ContrastAnalyzer:
             "aa_large_text": true,         ← AA 큰 텍스트 통과 여부
             "aaa_normal_text": true,       ← AAA 일반 텍스트 통과 여부
             "aaa_large_text": true,        ← AAA 큰 텍스트 통과 여부
-            "kwcag_pass": true             ← KWCAG 5.3.3 기준 통과 여부
+            "kwcag_pass": true             ← KWCAG 5.4.3 기준 통과 여부
           }
         """
         ratio = contrast_ratio(fg, bg)

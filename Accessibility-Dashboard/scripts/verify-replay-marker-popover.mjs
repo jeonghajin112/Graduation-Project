@@ -296,7 +296,8 @@ async function shadowFact(page) {
         };
       })() : null,
       markers: [...(root?.querySelectorAll(".marker") ?? [])].map((marker) => ({
-        label: marker.textContent,
+        index: marker.dataset.markerIndex,
+        text: marker.textContent,
         ariaLabel: marker.getAttribute("aria-label"),
         ariaDescribedBy: marker.getAttribute("aria-describedby"),
         hidden: marker.hidden || getComputedStyle(marker).display === "none",
@@ -307,6 +308,7 @@ async function shadowFact(page) {
       outbound: (window.__popoverOutbound ?? []).map((message) => JSON.parse(JSON.stringify(message))),
       activeElementIsMarker: document.activeElement === document.getElementById("__uni_accessibility_replay_host"),
       shadowActiveClass: root?.activeElement?.className ?? null,
+      shadowActiveIndex: root?.activeElement?.dataset.markerIndex ?? null,
       shadowActiveText: root?.activeElement?.textContent ?? null,
       xssFlag: window.__popoverXss ?? null,
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -523,9 +525,14 @@ async function assertSafePopover(
 }
 
 function boundedIssueText(issue) {
+  const code = typeof issue.code === "string" ? issue.code.slice(0, 128) : "";
+  const codeLabel = /^(?:KWCAG|WCAG)\s+/i.test(code)
+    ? code
+    : (/^[0-9]+(?:[.][0-9]+)+$/.test(code) ? `KWCAG ${code}` : code);
+
   return {
     severity: typeof issue.severityLabel === "string" ? issue.severityLabel.slice(0, 32) : "",
-    code: `KWCAG ${typeof issue.code === "string" ? issue.code.slice(0, 128) : ""}`,
+    code: codeLabel,
     title: typeof issue.title === "string" ? issue.title.slice(0, 300) : "",
     message: typeof issue.message === "string" ? issue.message.slice(0, 1600) : "",
     path: typeof issue.path === "string" ? issue.path.slice(0, 2048) : ""
@@ -653,11 +660,12 @@ for (const pattern of [
   /placement: 'bottom'/,
   /placement: 'top'/,
   /POPOVER_PREFERRED_MAX_MARKER_DISTANCE = 48/,
-  /POPOVER_MAX_MARKER_DISTANCE = MARKER_SLOT_STEP \+ POPOVER_GAP/,
   /candidate\.markerDistance <= POPOVER_PREFERRED_MAX_MARKER_DISTANCE/,
   /fallback: candidates\[0\] \|\| null/,
+  /selected\.fallback\.score < fallbackLayout\.selected\.score/,
   /if \(fallbackLayout\)/,
   /placeIssuePopoverCandidate\(fallbackLayout\.selected\)/,
+  /Math\.ceil\(selected\.markerDistance \* POPOVER_POINTER_TRAVEL_MS_PER_PX\)/,
   /const POPOVER_DENSITIES = \['normal', 'compact', 'minimal'\]/,
   /const POPOVER_WIDE_WIDTHS = \[840, 760, 680, 600, 560\]/,
   /const POPOVER_MAX_LAYOUT_CANDIDATES = POPOVER_DENSITIES\.length \+ POPOVER_WIDE_WIDTHS\.length/,
@@ -674,6 +682,35 @@ for (const pattern of [
 ]) {
   assert.match(bridgeScript, pattern, `bridge contract missing ${pattern}`);
 }
+assert.doesNotMatch(
+  bridgeScript,
+  /markerDistance\s*>\s*POPOVER_MAX_MARKER_DISTANCE/,
+  "safe viewport placements must not be rejected only because they are farther from the marker"
+);
+
+// Glassmorphism contract: the popover must stay translucent and blurred to match
+// the dashboard shell, and must fall back to an opaque surface where the blur is
+// unsupported. The 78% tint is what keeps the muted body ink above AA when a dark
+// capture shows through (5.22:1 over black), so guard the exact value. There is
+// deliberately no prefers-reduced-transparency opt-out: Windows reports that
+// preference whenever transparency effects are off, and the tint is legible
+// without the blur, so forced-colors is the only escape hatch.
+for (const pattern of [
+  /\.issue-popover \{[^}]*background:rgba\(255,255,255,\.78\)/,
+  /\.issue-popover \{[^}]*backdrop-filter:blur\(24px\) saturate\(180%\)/,
+  /\.issue-popover \{[^}]*border:0/,
+  /@supports not \(\(backdrop-filter: blur\(1px\)\)[^}]*\{\s*\.issue-popover \{ background:#fff/,
+  /@media \(forced-colors:active\)[\s\S]*?\.issue-popover \{ border:2px solid CanvasText/,
+  /\.issue-popover__message \{[^}]*color:#3f4b5e/
+]) {
+  assert.match(bridgeScript, pattern, `popover glass contract missing ${pattern}`);
+}
+
+assert.doesNotMatch(
+  bridgeScript,
+  /@media \(prefers-reduced-transparency:reduce\)[\s\S]{0,400}?\.issue-popover \{ background:#fff/,
+  "the popover must not silently drop its glass when Windows disables transparency effects"
+);
 assert.doesNotMatch(
   bridgeScript,
   /issue-popover__(?:title|message|path)[^{}]*\{[^}]*-webkit-line-clamp/,
@@ -725,9 +762,8 @@ assert.equal(
 assert.equal(
   bridgeMarkerSlotStep + bridgePopoverGap,
   MAX_ADJACENT_GAP,
-  "the fallback distance must be exactly one marker slot plus the popover gap"
+  "ordinary edge fixtures should still resolve within one marker slot plus the base gap"
 );
-assert.equal(MAX_ADJACENT_GAP, 52, "the marker-distance fallback contract must remain 52px");
 assert.equal(densityCandidates.length, 3, "natural vertical placement must try exactly three density candidates");
 assert.deepEqual(wideCandidates, [840, 760, 680, 600, 560], "wide layout widths must stay curated and bounded");
 assert.equal(densityCandidates.length + wideCandidates.length, 8, "one placement pass may measure at most eight layouts");
@@ -752,7 +788,7 @@ const issues = [
     id: 101,
     severity: "LOW",
     severityLabel: "낮음",
-    code: "TEXT_DIFFICULTY",
+    code: "WCAG 3.1.5",
     title: "왼쪽 후보 배치",
     message: "오른쪽의 문제 요소를 가리지 않고 마커 왼쪽에 표시합니다. ".repeat(4),
     path: "#left-candidate",
@@ -862,12 +898,23 @@ const transformedClipIssue = {
   pathSteps: [{ context: "DOCUMENT", selector: "#transformed-target" }]
 };
 
+const distantSafeIssue = {
+  id: 112,
+  severity: "LOW",
+  severityLabel: "낮음",
+  code: "7.3.2",
+  title: "큰 대상 옆 안전한 원거리 배치",
+  message: "마커 인접 공간은 부족하지만 화면 안의 다른 영역에는 상세 정보를 전체로 표시할 수 있습니다.",
+  path: "#distant-safe-target",
+  pathSteps: [{ context: "DOCUMENT", selector: "#distant-safe-target" }]
+};
+
 const artifactBottomIssue = {
   id: 2,
   severity: "LOW",
   severityLabel: "낮음",
-  code: "TEXT_DIFFICULTY",
-  title: "텍스트 난이도 개선 필요",
+  code: "WCAG 3.1.5",
+  title: "읽기 수준",
   message: "text=건축학부의 제70회 졸업 전시회가 지난 6월 22일부터 27일까지 본교 서울캠퍼스에서 개최되었다.\nflags=[\"어려운 어휘 과다: 쉬운 단어 비율 50.0% (어려운 단어 50.0%, C등급+미등재 기준)\"]",
   path: "section#cms-content > div:nth-of-type(1) > div > div > div:nth-of-type(1) > div:nth-of-type(1) > div > p:nth-of-type(2)",
   pathSteps: [{ context: "DOCUMENT", selector: "#artifact-bottom-target" }]
@@ -917,8 +964,8 @@ const artifactSlideTwoIssue = {
   id: 2323,
   severity: "LOW",
   severityLabel: "낮음",
-  code: "TEXT_DIFFICULTY",
-  title: "텍스트 난이도 개선 필요",
+  code: "7.3.2",
+  title: "레이블 제공",
   message: "text=세계적인 디자인 공모전인 2026 Red Dot Design Award에서 본교 산업디자인과 학우들이 우수한 성과를 거두며 글로벌 디자인 경쟁력을 입증했다. 바로가기\nflags=[\"form_guide 텍스트 길이 과다: 92글자 (기준: 50글자)\"]",
   path: "section#cms-content > div:nth-of-type(1) > div > div > div:nth-of-type(1) > div:nth-of-type(2) > div > p:nth-of-type(2) > a",
   pathSteps: [{ context: "DOCUMENT", selector: "#artifact-slide-two-description-link" }]
@@ -1046,8 +1093,8 @@ const artifactTopIssue = {
   id: 34,
   severity: "LOW",
   severityLabel: "낮음",
-  code: "TEXT_DIFFICULTY",
-  title: "텍스트 난이도 개선 필요",
+  code: "6.4.3",
+  title: "적절한 링크 텍스트",
   message: "text=몽골의 푸른 하늘 아래 피어난 희망… 본교 세종캠퍼스 '몽땅' 봉사단, 하계 봉사활동 성료 본교 세종캠퍼스 몽골 국제사회봉사단 ‘몽땅’이 몽골 현지에서 따뜻한 나눔과 교류의 결실을 맺었다. 일반 2026.08.10\nflags=[\"link 텍스트 길이 과다: 119글자 (기준: 30글자)\",\"위치 참조: \\\"아래(의)\\\" 사용\"]",
   path: "section#cms-content > div:nth-of-type(2) > div > div:nth-of-type(1) > div:nth-of-type(1) > ul > li:nth-of-type(1) > a",
   pathSteps: [{ context: "DOCUMENT", selector: "#artifact-top-target" }]
@@ -1133,6 +1180,7 @@ try {
           .narrow-mode #multiline-wrap,
           .narrow-mode #nested-scroll,
           .narrow-mode #transformed-clip,
+          .narrow-mode #distant-safe-target,
           .narrow-mode #impossible-target { display: none; }
           #nested-scroll { position: absolute; left: 180px; top: 850px; width: 520px; height: 240px; overflow: auto; border: 2px solid #94a3b8; background: #fff; }
           #nested-content { position: relative; width: 760px; height: 700px; }
@@ -1143,6 +1191,7 @@ try {
           #inactive-slide { display: none; }
           #inactive-target { left: 420px; top: 300px; width: 120px; height: 60px; }
           #offcanvas-target { left: -4000px; top: 200px; width: 100px; height: 60px; }
+          #distant-safe-target { position: absolute; left: 260px; top: 60px; width: 560px; height: 310px; }
           #impossible-target { position: absolute; left: 12px; top: 60px; width: 876px; height: 570px; }
           #focus-anchor { position: fixed; right: 12px; bottom: 12px; width: 120px; height: 44px; }
           #__uni_accessibility_replay_host::before,
@@ -1164,6 +1213,7 @@ try {
         </div>
         <section id="inactive-slide"><div id="inactive-target" class="target">비활성 슬라이드</div></section>
         <div id="offcanvas-target" class="target">화면 밖 대상</div>
+        <div id="distant-safe-target" class="target">인접 공간은 부족하지만 아래쪽은 빈 큰 대상</div>
         <div id="impossible-target" class="target">팝오버를 위한 안전한 인접 공간이 없는 대상</div>
         <button id="focus-anchor" type="button">포커스 기준</button>
       </body>
@@ -1181,6 +1231,7 @@ try {
       "#transformed-target",
       "#inactive-target",
       "#offcanvas-target"
+      ,"#distant-safe-target"
       ,"#impossible-target"
     ];
     return Object.fromEntries(selectors.map((selector) => [selector, document.querySelector(selector).outerHTML]));
@@ -1288,6 +1339,61 @@ try {
   }
   assert.ok(observedSides.includes("bottom"), `edge scenarios must execute a bottom placement: ${JSON.stringify(edgeFacts)}`);
 
+  await sendCommand(page, {
+    type: "INIT_ISSUES",
+    markersVisible: true,
+    selectedIssueId: null,
+    issues: [distantSafeIssue]
+  });
+  await page.waitForFunction(() =>
+    document.getElementById("__uni_accessibility_replay_host")?.shadowRoot?.querySelectorAll(".marker").length === 1
+  );
+  await hoverMarker(page, 0);
+  const distantPlacement = await assertSafePopover(
+    page,
+    distantSafeIssue.id,
+    0,
+    "#distant-safe-target",
+    "large edge target uses distant safe viewport space",
+    { maxAdjacentGap: 900 }
+  );
+  assert.ok(
+    distantPlacement.gap > MAX_ADJACENT_GAP,
+    `the regression fixture must require a genuinely distant placement: ${JSON.stringify({
+      gap: distantPlacement.gap,
+      placement: distantPlacement.placement,
+      popover: distantPlacement.fact.popover.rect,
+      marker: distantPlacement.fact.markers[0].rect,
+      target: distantPlacement.targetRects
+    })}`
+  );
+  assert.equal(
+    distantPlacement.fact.outbound.some(
+      (message) => message.type === "ISSUE_DETAIL_FALLBACK" && message.issueId === distantSafeIssue.id
+    ),
+    false,
+    "available viewport space must be used before the external bottom detail fallback"
+  );
+  const travelPoint = {
+    x: (distantPlacement.fact.markers[0].rect.right + distantPlacement.fact.popover.rect.left) / 2,
+    y: (distantPlacement.fact.markers[0].rect.bottom + distantPlacement.fact.popover.rect.top) / 2
+  };
+  await page.mouse.move(travelPoint.x, travelPoint.y);
+  await page.waitForTimeout(180);
+  assert.equal(
+    (await shadowFact(page)).visiblePopoverCount,
+    1,
+    "distance-aware pointer grace must keep a remote card open while the pointer crosses the gap"
+  );
+  await page.mouse.move(
+    distantPlacement.fact.popover.rect.left + distantPlacement.fact.popover.rect.width / 2,
+    distantPlacement.fact.popover.rect.top + Math.min(48, distantPlacement.fact.popover.rect.height / 2)
+  );
+  await page.waitForTimeout(40);
+  assert.equal((await shadowFact(page)).visiblePopoverCount, 1, "remote card must accept pointer arrival");
+  await page.mouse.move(890, 10);
+  await waitForClearedPopover(page);
+
   await page.setViewportSize({ width: 768, height: 620 });
   await sendCommand(page, {
     type: "INIT_ISSUES",
@@ -1307,7 +1413,7 @@ try {
   );
   assert.ok(impossibleState.selectionFragmentCount > 0, "external fallback must retain target highlighting");
   assert.ok(impossibleState.markers[0].ariaLabel.includes(impossibleIssue.severityLabel));
-  assert.ok(impossibleState.markers[0].ariaLabel.includes(`KWCAG ${impossibleIssue.code}`));
+  assert.ok(impossibleState.markers[0].ariaLabel.includes(boundedIssueText(impossibleIssue).code));
   assert.ok(impossibleState.markers[0].ariaLabel.includes(impossibleIssue.title));
   assert.equal(impossibleState.markers[0].ariaLabel.includes(impossibleIssue.message), false);
   assert.equal(impossibleState.markers[0].ariaLabel.includes(impossibleIssue.path), false);
@@ -1347,7 +1453,7 @@ try {
   const multiline = await assertSafePopover(page, 105, 4, "#multiline-target", "multiline hostile content");
   assert.ok(multiline.targetRects.length >= 2, "multiline fixture must expose multiple target rectangles");
   assert.equal(multiline.fact.popover.severity, "낮음");
-  assert.equal(multiline.fact.popover.code, "KWCAG HTML_ESCAPE");
+  assert.equal(multiline.fact.popover.code, "HTML_ESCAPE");
   assert.equal(multiline.fact.popover.title, hostileTitle);
   assert.equal(multiline.fact.popover.message, hostileMessage);
   assert.equal(multiline.fact.popover.path, hostilePath);
@@ -1463,7 +1569,8 @@ try {
   escapeState = await shadowFact(page);
   assert.equal(escapeState.visiblePopoverCount, 0, "Escape marker focus restoration must not reopen the popover");
   assert.equal(escapeState.shadowActiveClass, "marker", "Escape must restore focus to the originating marker");
-  assert.equal(escapeState.shadowActiveText, "2", "Escape must restore the matching marker, not an adjacent marker");
+  assert.equal(escapeState.shadowActiveIndex, "2", "Escape must restore the matching marker, not an adjacent marker");
+  assert.equal(escapeState.shadowActiveText, "", "focused markers must not expose a visual sequence number");
   assert.equal(escapeState.markers[1].pressed, "false", "Escape must clear marker selection state");
   assert.equal(escapeState.markers[1].ariaDescribedBy, null, "Escape must remove the transient description link");
   assert.equal(escapeState.selectionFragmentCount, 0, "Escape must clear target highlighting");
@@ -1802,7 +1909,7 @@ try {
     "artifact fixture must reproduce marker 2 at its captured coordinates"
   );
   assert.deepEqual(
-    artifactGeometry.markers.map((marker) => marker.label),
+    artifactGeometry.markers.map((marker) => marker.index),
     ["2", "3", "98"],
     "artifact fixture must retain the captured neighboring marker obstacles"
   );
@@ -1992,30 +2099,30 @@ try {
 
   const slideTwoGeometry = await shadowFact(page);
   assert.deepEqual(
-    slideTwoGeometry.markers.map((marker) => marker.label),
+    slideTwoGeometry.markers.map((marker) => marker.index),
     ["4", "5", "6", "7", "34", "62", "81", "99", "100", "109", "117"],
     "artifact 66 slide 2 fixture must retain every captured visible marker obstacle"
   );
   assert.deepEqual(
     slideTwoGeometry.markers.map((marker) => ({
-      label: marker.label,
+      index: marker.index,
       left: Math.round(marker.rect.left),
       top: Math.round(marker.rect.top),
       right: Math.round(marker.rect.right),
       bottom: Math.round(marker.rect.bottom)
     })),
     [
-      { label: "4", left: 52 - MARKER_SIZE, top: -21, right: 52, bottom: -21 + MARKER_SIZE },
-      { label: "5", left: 52 - MARKER_SIZE, top: 20, right: 52, bottom: 20 + MARKER_SIZE },
-      { label: "6", left: 52 - MARKER_SIZE, top: 111, right: 52, bottom: 111 + MARKER_SIZE },
-      { label: "7", left: 52 - MARKER_SIZE, top: 154, right: 52, bottom: 154 + MARKER_SIZE },
-      { label: "34", left: 32 - MARKER_SIZE, top: 329, right: 32, bottom: 329 + MARKER_SIZE },
-      { label: "62", left: 651 - MARKER_SIZE, top: 329, right: 651, bottom: 329 + MARKER_SIZE },
-      { label: "81", left: 961 - MARKER_SIZE, top: 329, right: 961, bottom: 329 + MARKER_SIZE },
-      { label: "99", left: 80, top: 297, right: 80 + MARKER_SIZE, bottom: 297 + MARKER_SIZE },
-      { label: "100", left: 52 - MARKER_SIZE, top: 194, right: 52, bottom: 194 + MARKER_SIZE },
-      { label: "109", left: 32 - MARKER_SIZE, top: 369, right: 32, bottom: 369 + MARKER_SIZE },
-      { label: "117", left: 961 - MARKER_SIZE, top: 369, right: 961, bottom: 369 + MARKER_SIZE }
+      { index: "4", left: 52 - MARKER_SIZE, top: -21, right: 52, bottom: -21 + MARKER_SIZE },
+      { index: "5", left: 52 - MARKER_SIZE, top: 20, right: 52, bottom: 20 + MARKER_SIZE },
+      { index: "6", left: 52 - MARKER_SIZE, top: 111, right: 52, bottom: 111 + MARKER_SIZE },
+      { index: "7", left: 52 - MARKER_SIZE, top: 154, right: 52, bottom: 154 + MARKER_SIZE },
+      { index: "34", left: 32 - MARKER_SIZE, top: 329, right: 32, bottom: 329 + MARKER_SIZE },
+      { index: "62", left: 651 - MARKER_SIZE, top: 329, right: 651, bottom: 329 + MARKER_SIZE },
+      { index: "81", left: 961 - MARKER_SIZE, top: 329, right: 961, bottom: 329 + MARKER_SIZE },
+      { index: "99", left: 80, top: 297, right: 80 + MARKER_SIZE, bottom: 297 + MARKER_SIZE },
+      { index: "100", left: 52 - MARKER_SIZE, top: 194, right: 52, bottom: 194 + MARKER_SIZE },
+      { index: "109", left: 32 - MARKER_SIZE, top: 369, right: 32, bottom: 369 + MARKER_SIZE },
+      { index: "117", left: 961 - MARKER_SIZE, top: 369, right: 961, bottom: 369 + MARKER_SIZE }
     ],
     "artifact 66 slide 2 fixture must reproduce marker 100 and all visible halo obstacles"
   );
@@ -2046,24 +2153,30 @@ try {
     artifactSlideTwoIssue.id,
     8,
     "#artifact-slide-two-description-link",
-    "artifact 66 slide 2 marker 100 fallback placement",
+    "artifact 66 slide 2 marker 100 nearest safe placement",
     { maxAdjacentGap: MAX_ADJACENT_GAP }
   );
   await assertFullPopoverContent(page, artifactSlideTwoIssue, "artifact 66 slide 2 marker 100 content", {
     layout: "wide"
   });
   assert.equal(slideTwoPlacement.fact.popover.density, "normal", "marker 100 must retain full content density");
-  assert.equal(slideTwoPlacement.fact.popover.placement, "bottom", "marker 100 must use the captured bottom placement");
-  assert.ok(
-    slideTwoPlacement.gap > bridgePreferredMaxMarkerDistance
-      && slideTwoPlacement.gap <= MAX_ADJACENT_GAP,
-    `marker 100 must exercise only the bounded 48px-to-52px fallback: ${slideTwoPlacement.gap}`
+  assert.equal(
+    slideTwoPlacement.fact.popover.placement,
+    "right",
+    "marker 100 must use the nearest safe placement with the shorter custom-code label"
   );
+  assert.equal(
+    slideTwoPlacement.gap,
+    bridgePopoverGap,
+    "marker 100 must stay at the standard popover gap"
+  );
+  // The glass popover is borderless, so the card is 2px shorter than the
+  // bordered version and its top edge sits 1px lower at the same gap.
   assert.ok(
-    Math.abs(slideTwoPlacement.fact.popover.rect.left - 108) <= 1
-      && Math.abs(slideTwoPlacement.fact.popover.rect.top - 193) <= 1
+    Math.abs(slideTwoPlacement.fact.popover.rect.left - 70) <= 1
+      && Math.abs(slideTwoPlacement.fact.popover.rect.top - 202) <= 1
       && Math.abs(slideTwoPlacement.fact.popover.rect.width - 840) <= 1
-      && Math.abs(slideTwoPlacement.fact.popover.rect.height - 91) <= 1,
+      && Math.abs(slideTwoPlacement.fact.popover.rect.height - 88) <= 1,
     `marker 100 must reproduce the captured safe wide card: ${JSON.stringify(slideTwoPlacement.fact.popover.rect)}`
   );
   assert.equal(slideTwoPlacement.fact.selectionFragmentCount, 2, "marker 100 must highlight both target lines");
@@ -2144,12 +2257,13 @@ try {
     layout: "wide"
   });
   assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveClass, "marker", "marker 100 keyboard preview retains focus");
-  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveText, "100", "keyboard focus must remain on marker 100");
+  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveIndex, "100", "keyboard focus must remain on marker 100");
+  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveText, "", "keyboard-focused markers remain numberless");
   await page.mouse.move(1200, 20);
   assert.equal((await shadowFact(page)).visiblePopoverCount, 1, "pointer leave must not close focused marker 100 details");
   await page.keyboard.press("Escape");
   slideTwoCleared = await waitForClearedPopover(page);
-  assert.equal(slideTwoCleared.shadowActiveText, "100", "Escape restores focus to marker 100");
+  assert.equal(slideTwoCleared.shadowActiveIndex, "100", "Escape restores focus to marker 100");
   assert.equal(slideTwoCleared.markers[8].ariaDescribedBy, null, "Escape clears marker 100's description link");
   assert.equal(slideTwoCleared.selectionFragmentCount, 0, "Escape clears marker 100 highlighting");
   assert.equal(slideTwoCleared.scroll.y, 300, "marker 100 keyboard lifecycle preserves the replay scroll offset");
@@ -2235,7 +2349,7 @@ try {
     "top-edge artifact fixture must reproduce the viewport-spanning image target"
   );
   assert.deepEqual(
-    artifactTopGeometry.markers.map((marker) => marker.label),
+    artifactTopGeometry.markers.map((marker) => marker.index),
     ["3", "34", "98", "109"],
     "top-edge artifact fixture must retain the captured marker numbering"
   );
@@ -2692,7 +2806,7 @@ try {
     },
     noSafeTopEdge: {
       visiblePopoverCount: noSafeTopState.visiblePopoverCount,
-      markerLabels: noSafeTopState.markers.map((marker) => marker.label),
+      markerIndices: noSafeTopState.markers.map((marker) => marker.index),
       selectionFragmentCount: noSafeTopState.selectionFragmentCount
     },
     narrow: {

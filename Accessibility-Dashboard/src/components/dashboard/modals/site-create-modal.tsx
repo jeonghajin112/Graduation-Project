@@ -6,7 +6,10 @@ import { Input } from "@/components/ui/input";
 import { throwIfAborted, wait } from "@/services/async-cancellation";
 import { fetchEvaluationRequest, getApiErrorMessage, isAbortError } from "@/services/backend-api";
 import {
+  SITE_NAME_MAX_LENGTH,
+  SITE_URL_MAX_LENGTH,
   clearSiteCreateRecovery,
+  isValidEvaluationTargetAccessUrl,
   readSiteCreateRecovery,
   writeSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
@@ -17,12 +20,20 @@ import type {
   OrganizationModel
 } from "@/types/accessibility-domain";
 
+import {
+  ANALYSIS_POLL_ATTEMPTS,
+  getAnalysisPollDelayMs,
+  runMutationRequestWithDeadline,
+  waitForDocumentVisible
+} from "../shared/mutation-recovery";
+import {
+  evaluationRequestPhaseFromStatus,
+  isFinalEvaluationRequestStatus
+} from "../shared/evaluation-request-status";
 import { useCancellationScope } from "../shared/use-cancellation-scope";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
+import { useExclusiveOperation } from "../shared/use-exclusive-operation";
 
-const ANALYSIS_POLL_INTERVAL_MS = 1500;
-const ANALYSIS_POLL_ATTEMPTS = 120;
-const ANALYSIS_NETWORK_TIMEOUT_MS = 15_000;
 const ANALYSIS_NETWORK_TIMEOUT_MESSAGE = "서버 응답 대기 시간이 초과되었습니다.";
 const SITE_RECOVERY_PERSISTENCE_MESSAGE =
   "브라우저에 안전한 복구 정보를 저장하지 못했습니다. 저장 공간 또는 브라우저 설정을 확인해 주세요.";
@@ -41,33 +52,11 @@ async function runWithAnalysisNetworkDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   callerSignal: AbortSignal
 ): Promise<T> {
-  throwIfAborted(callerSignal);
-  const controller = new AbortController();
-  let didTimeout = false;
-  const forwardCallerAbort = () => controller.abort();
-  callerSignal.addEventListener("abort", forwardCallerAbort, { once: true });
-  const timeoutId = window.setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-  }, ANALYSIS_NETWORK_TIMEOUT_MS);
-
-  try {
-    const value = await operation(controller.signal);
-    throwIfAborted(callerSignal);
-    if (didTimeout) {
-      throw new Error(ANALYSIS_NETWORK_TIMEOUT_MESSAGE);
-    }
-    return value;
-  } catch (error) {
-    throwIfAborted(callerSignal);
-    if (didTimeout) {
-      throw new Error(ANALYSIS_NETWORK_TIMEOUT_MESSAGE);
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-    callerSignal.removeEventListener("abort", forwardCallerAbort);
-  }
+  return runMutationRequestWithDeadline({
+    operation,
+    signal: callerSignal,
+    timeoutMessage: ANALYSIS_NETWORK_TIMEOUT_MESSAGE
+  });
 }
 
 type AnalysisProgressPhase = "idle" | "creating" | "requesting" | "queued" | "running" | "saving" | "completed" | "failed";
@@ -154,24 +143,12 @@ const progressSteps = [
   { key: "completed", label: "완료", description: "대시보드에 최신 결과를 표시합니다." }
 ] as const;
 
-function isFinalRequestStatus(status: string | null) {
-  return status === "COMPLETED" || status === "FAILED";
-}
-
 function phaseFromRequestStatus(status: EvaluationStatus | string): AnalysisProgressPhase {
-  if (status === "PENDING") {
-    return "queued";
-  }
-
-  if (status === "COMPLETED") {
+  const phase = evaluationRequestPhaseFromStatus(status);
+  if (phase === "completed") {
     return "saving";
   }
-
-  if (status === "FAILED") {
-    return "failed";
-  }
-
-  return "running";
+  return phase;
 }
 
 function messageFromRequestStatus(status: EvaluationStatus | string): string {
@@ -258,12 +235,16 @@ export function SiteCreateModal({
   const [isRecoveryBlocked, setIsRecoveryBlocked] = useState(false);
   const [canDiscardRecovery, setCanDiscardRecovery] = useState(false);
   const { beginScope, cancelScope } = useCancellationScope();
+  const {
+    beginOperation,
+    cancelOperation,
+    finishOperation,
+    isOperationCurrent,
+    isOperationLocked
+  } = useExclusiveOperation();
   const autoCloseTimeoutRef = useRef<number | null>(null);
-  const submissionLockRef = useRef(false);
-  const activeOperationIdRef = useRef<symbol | null>(null);
   const recoveryRawValueRef = useRef<string | null>(null);
   const discardLockRef = useRef(false);
-  const isMountedRef = useRef(false);
   const dialogRef = useDialogAccessibility({
     isOpen,
     onClose,
@@ -337,8 +318,7 @@ export function SiteCreateModal({
       // Closing the modal must stop the analysis polling loop as well, otherwise
       // it keeps hitting the backend until the 120 attempts run out.
       cancelScope();
-      activeOperationIdRef.current = null;
-      submissionLockRef.current = false;
+      cancelOperation();
       discardLockRef.current = false;
       if (autoCloseTimeoutRef.current !== null) {
         window.clearTimeout(autoCloseTimeoutRef.current);
@@ -352,15 +332,11 @@ export function SiteCreateModal({
         setAnalysisProgress(emptyProgress);
       }
     }
-  }, [cancelScope, isOpen, resumePoint.kind]);
+  }, [cancelOperation, cancelScope, isOpen, resumePoint.kind]);
 
   useEffect(
     () => {
-      isMountedRef.current = true;
       return () => {
-        isMountedRef.current = false;
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
         if (autoCloseTimeoutRef.current !== null) {
           window.clearTimeout(autoCloseTimeoutRef.current);
           autoCloseTimeoutRef.current = null;
@@ -373,7 +349,7 @@ export function SiteCreateModal({
   const handleDiscardRecovery = () => {
     if (
       discardLockRef.current ||
-      submissionLockRef.current ||
+      isOperationLocked() ||
       (!isRecoveryBlocked && !canDiscardRecovery)
     ) {
       return;
@@ -410,7 +386,7 @@ export function SiteCreateModal({
   };
 
   const handleAddSite = async () => {
-    if (submissionLockRef.current) {
+    if (isOperationLocked()) {
       return;
     }
     if (isRecoveryBlocked) {
@@ -425,12 +401,20 @@ export function SiteCreateModal({
       setSiteCreateError("페이지 이름과 주소를 입력해주세요.");
       return;
     }
+    if (resumePoint.kind === "create" && name.length > SITE_NAME_MAX_LENGTH) {
+      setSiteCreateError(`페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.`);
+      return;
+    }
+    if (resumePoint.kind === "create" && !isValidEvaluationTargetAccessUrl(accessUrl)) {
+      setSiteCreateError("올바른 페이지 주소를 입력해주세요. 예: https://example.com");
+      return;
+    }
 
-    submissionLockRef.current = true;
-    const operationId = Symbol("site-create-operation");
-    activeOperationIdRef.current = operationId;
-    const isActiveOperation = () =>
-      isMountedRef.current && activeOperationIdRef.current === operationId;
+    const operationId = beginOperation("site-create-operation");
+    if (operationId === null) {
+      return;
+    }
+    const isActiveOperation = () => isOperationCurrent(operationId);
     let keepLockedUntilAutoClose = false;
 
     // Aborts when the modal closes or unmounts.
@@ -510,8 +494,10 @@ export function SiteCreateModal({
 
       let finalStatus: string | null = null;
       for (let attempt = 0; attempt < ANALYSIS_POLL_ATTEMPTS; attempt += 1) {
+        await waitForDocumentVisible(signal);
         if (attempt > 0) {
-          await wait(ANALYSIS_POLL_INTERVAL_MS, signal);
+          await wait(getAnalysisPollDelayMs(attempt), signal);
+          await waitForDocumentVisible(signal);
         }
 
         const request = await runWithAnalysisNetworkDeadline(
@@ -530,7 +516,7 @@ export function SiteCreateModal({
           message: messageFromRequestStatus(request.status)
         });
 
-        if (isFinalRequestStatus(request.status)) {
+        if (isFinalEvaluationRequestStatus(request.status)) {
           break;
         }
       }
@@ -563,7 +549,7 @@ export function SiteCreateModal({
         throw new Error("분석 엔진 실행에 실패했습니다. 대상 사이트가 자동 브라우저 접속을 차단했거나 다른 페이지로 이동했을 수 있습니다.");
       }
 
-      if (!isFinalRequestStatus(finalStatus)) {
+      if (!isFinalEvaluationRequestStatus(finalStatus)) {
         throw new Error("분석 상태 확인 시간이 초과되었습니다.");
       }
 
@@ -610,15 +596,10 @@ export function SiteCreateModal({
       keepLockedUntilAutoClose = true;
       autoCloseTimeoutRef.current = window.setTimeout(() => {
         autoCloseTimeoutRef.current = null;
-        if (activeOperationIdRef.current !== operationId) {
-          return;
-        }
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
+        if (finishOperation(operationId)) {
           setIsSubmittingSite(false);
+          onClose();
         }
-        onClose();
       }, 900);
     } catch (error) {
       if (isAbortError(error) || !isActiveOperation()) {
@@ -634,6 +615,14 @@ export function SiteCreateModal({
       );
       setSiteCreateError(message);
       if (nextResumePoint.kind === "create") {
+        const unresolvedRecovery = readSiteCreateRecovery();
+        if (
+          unresolvedRecovery.kind === "valid" &&
+          unresolvedRecovery.attempt.projectId === project.id
+        ) {
+          recoveryRawValueRef.current = unresolvedRecovery.rawValue;
+          setCanDiscardRecovery(true);
+        }
         setAnalysisProgress(emptyProgress);
       } else {
         setAnalysisProgress((current) => ({
@@ -643,12 +632,8 @@ export function SiteCreateModal({
         }));
       }
     } finally {
-      if (!keepLockedUntilAutoClose && activeOperationIdRef.current === operationId) {
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
-          setIsSubmittingSite(false);
-        }
+      if (!keepLockedUntilAutoClose && finishOperation(operationId)) {
+        setIsSubmittingSite(false);
       }
     }
   };
@@ -661,6 +646,7 @@ export function SiteCreateModal({
     <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-6">
       <div
         className="absolute inset-0"
+        aria-hidden="true"
         onClick={() => {
           if (!isSubmittingSite) {
             onClose();
@@ -691,6 +677,7 @@ export function SiteCreateModal({
 
         {siteCreateError.length > 0 && (
           <div
+            role="alert"
             className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
               isDarkMode
                 ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
@@ -717,7 +704,7 @@ export function SiteCreateModal({
                 value={siteName}
                 onChange={(event) => setSiteName(event.target.value)}
                 disabled={isRecoveryBlocked}
-                maxLength={100}
+                maxLength={SITE_NAME_MAX_LENGTH}
                 placeholder="페이지 이름 입력"
                 className={
                   isDarkMode
@@ -739,7 +726,7 @@ export function SiteCreateModal({
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
                 disabled={isRecoveryBlocked}
-                maxLength={2048}
+                maxLength={SITE_URL_MAX_LENGTH}
                 placeholder="https://example.com"
                 className={
                   isDarkMode

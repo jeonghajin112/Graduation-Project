@@ -1,6 +1,3 @@
-import { chartConfig } from "./constants";
-import type { ScoreChartItem } from "./types";
-
 export function getAnalyzerTypeLabel(analyzerType: string | undefined): string {
   if (!analyzerType) {
     return "출처 미확인";
@@ -21,37 +18,6 @@ export function getAnalyzerTypeLabel(analyzerType: string | undefined): string {
   }
 
   return analyzerType;
-}
-
-export function normalizeChartData(data: ScoreChartItem[]): ScoreChartItem[] {
-  if (data.length >= 2) {
-    return data;
-  }
-
-  if (data.length === 1) {
-    return [
-      {
-        ...data[0]!,
-        slot: 0,
-        label: "이전"
-      },
-      {
-        ...data[0]!,
-        slot: 1
-      }
-    ];
-  }
-
-  return [createEmptyChartItem("이전", 0), createEmptyChartItem("현재", 1)];
-}
-
-export function getChartLabel(key: keyof typeof chartConfig): string {
-  const label = chartConfig[key]?.label;
-  return typeof label === "string" ? label : String(key);
-}
-
-export function getChartValueSuffix(key: keyof typeof chartConfig): "점" | "건" {
-  return key === "issueCount" ? "건" : "점";
 }
 
 export function formatShortDate(value: string): string {
@@ -84,14 +50,4 @@ export function formatDateLabel(value: string): string {
   }
 
   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
-}
-
-function createEmptyChartItem(label: string, slot: number): ScoreChartItem {
-  return {
-    slot,
-    date: "",
-    label,
-    score: 0,
-    issueCount: 0
-  };
 }

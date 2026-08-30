@@ -20,7 +20,8 @@ import {
   type LensId,
 } from "./landing-content";
 import { LandingMotionProvider, Reveal, useLandingReducedMotion } from "./landing-motion";
-import { HighlightArt, LensResult, SamplePage, ScanStage, StoryArt } from "./landing-visuals";
+import { HighlightArt, LensResult, SamplePage, StoryArt } from "./landing-visuals";
+import { ProductDemoPreview } from "./product-demo-preview";
 
 type LandingPageProps = {
   /** Enters the analysis app. Wired to `/analyze` by the route component. */
@@ -92,9 +93,6 @@ function HeroSectionBlock({ onEnterApp }: { onEnterApp?: () => void }) {
     <section className="ua-section ua-section--fog ua-hero" data-section="hero" aria-labelledby="ua-hero-title">
       <div className="ua-hero__inner" data-container="true">
         <Reveal className="ua-hero__copy" immediate distance={16}>
-          <p className="ua-hero__name" data-hero-eyebrow="true">
-            {hero.name}
-          </p>
           <h1 className="ua-hero__headline" id="ua-hero-title" data-hero-headline="true">
             {hero.headline.map((line) => (
               <span key={line}>{line}</span>
@@ -109,8 +107,7 @@ function HeroSectionBlock({ onEnterApp }: { onEnterApp?: () => void }) {
         </Reveal>
 
         <Reveal className="ua-hero__media" immediate distance={22} delay={0.08} as="figure">
-          <ScanStage />
-          <figcaption className="ua-hero__caption">{hero.stageCaption}</figcaption>
+          <ProductDemoPreview />
         </Reveal>
       </div>
     </section>

@@ -2,7 +2,7 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useId } from "react";
 
-import type { ThemeMode } from "@/components/ui/toggle-theme";
+import type { ThemeMode } from "@/types/theme";
 
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 

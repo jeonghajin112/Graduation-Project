@@ -1,19 +1,21 @@
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
-import { ChevronDown, ChevronRight, LogOut, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleAlert, LogOut, RotateCcw, Settings } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { AccountSettingsModal } from "./modals/account-settings-modal";
-import { OrganizationModelCreateModal } from "./modals/organization-model-create-modal";
-import { SiteCreateModal } from "./modals/site-create-modal";
+import {
+  ErrorBoundary,
+  isLazyChunkLoadError
+} from "@/components/shared/error-boundary";
+import type { QuickAnalysisResultRecord } from "@/services/quick-analysis-registry";
+
 import { useDashboardController } from "./shared/use-dashboard-controller";
+import type { SiteDashboardPreviewEvidence } from "./panels/site-dashboard-panel";
+import { ModalErrorFallback, ModalLoadFallback } from "./shared/modal-load-fallback";
 import type { SidebarDemoProps } from "./shared/types";
 import { SidebarProjectsSection } from "./sidebar-projects";
 
 const QuickAnalyzePanel = lazy(() =>
   import("./panels/quick-analyze-panel").then((module) => ({ default: module.QuickAnalyzePanel }))
-);
-const DashboardPanel = lazy(() =>
-  import("./panels/dashboard-panel").then((module) => ({ default: module.DashboardPanel }))
 );
 const OrganizationModelDetailPanel = lazy(() =>
   import("./panels/project-detail-panel").then((module) => ({ default: module.OrganizationModelDetailPanel }))
@@ -21,25 +23,115 @@ const OrganizationModelDetailPanel = lazy(() =>
 const SiteDashboardPanel = lazy(() =>
   import("./panels/site-dashboard-panel").then((module) => ({ default: module.SiteDashboardPanel }))
 );
+const AccountSettingsModal = lazy(() =>
+  import("./modals/account-settings-modal").then((module) => ({ default: module.AccountSettingsModal }))
+);
+const OrganizationModelCreateModal = lazy(() =>
+  import("./modals/organization-model-create-modal").then((module) => ({
+    default: module.OrganizationModelCreateModal
+  }))
+);
+const SiteCreateModal = lazy(() =>
+  import("./modals/site-create-modal").then((module) => ({ default: module.SiteCreateModal }))
+);
 const ACCOUNT_MENU_ITEM_COUNT = 2;
 
 function RoutePanelFallback() {
   return (
-    <article className="rounded-[28px] border border-slate-200 bg-white p-5 text-sm text-slate-600">
+    <article
+      className="rounded-[28px] border border-slate-200 bg-white p-5 text-sm text-slate-600"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-busy="true"
+    >
       화면을 불러오는 중...
     </article>
   );
 }
 
+function RoutePanelErrorFallback({
+  error,
+  resetErrorBoundary
+}: {
+  error: Error;
+  resetErrorBoundary: () => void;
+}) {
+  const isChunkError = isLazyChunkLoadError(error);
+
+  return (
+    <article
+      role="alert"
+      aria-labelledby="route-panel-error-title"
+      className="rounded-[28px] border border-rose-200 bg-rose-50 p-5 text-sm"
+    >
+      <h2 id="route-panel-error-title" className="font-bold text-rose-800">
+        화면을 표시할 수 없습니다
+      </h2>
+      <p className="mt-2 leading-6 text-rose-700">
+        {isChunkError
+          ? "필요한 화면 파일을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해 주세요."
+          : "화면을 표시하는 중 문제가 발생했습니다. 다시 시도하거나 페이지를 새로고침해 주세요."}
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {!isChunkError ? (
+          <button
+            type="button"
+            onClick={resetErrorBoundary}
+            className="rounded-lg bg-rose-700 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+          >
+            다시 시도
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-lg bg-white px-4 py-2 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+        >
+          페이지 새로고침
+        </button>
+      </div>
+    </article>
+  );
+}
+
+export type DashboardController = ReturnType<typeof useDashboardController>;
+
 export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: SidebarDemoProps) {
   const dashboard = useDashboardController({ onBootstrapComplete });
+
+  return <DashboardSurface dashboard={dashboard} onLogout={onLogout} userName={userName} />;
+}
+
+export function DashboardSurface({
+  dashboard,
+  isPreview = false,
+  onLogout,
+  previewEvidenceByTargetId,
+  previewQuickAnalysisResults,
+  userName
+}: {
+  dashboard: DashboardController;
+  isPreview?: boolean;
+  onLogout?: () => void;
+  previewEvidenceByTargetId?: ReadonlyMap<number, SiteDashboardPreviewEvidence>;
+  previewQuickAnalysisResults?: readonly QuickAnalysisResultRecord[];
+  userName: string;
+}) {
+  const mainContentRef = useRef<HTMLElement>(null);
   const isProjectDetailView =
     dashboard.menu === "projects" && Boolean(dashboard.selectedOrganizationModel) && !dashboard.selectedEvaluationTargetModel;
   const isSiteDetailView =
     dashboard.menu === "projects" && Boolean(dashboard.selectedOrganizationModel) && Boolean(dashboard.selectedEvaluationTargetModel);
-  // Analyze home has no large page title — keep top/content zones clean white.
-  const shouldShowHeaderTitle = isProjectDetailView;
-  const hasCompactTopZone = !shouldShowHeaderTitle;
+  // Page detail currently starts directly with its evidence card. Keep only the
+  // project title in the visual header until the page-detail header is redesigned.
+  const hasCompactTopZone = !isProjectDetailView;
+  const routePanelKey = `${dashboard.menu}:${dashboard.selectedOrganizationModel?.id ?? "none"}:${
+    dashboard.selectedEvaluationTargetModel?.id ?? "none"
+  }`;
+  const selectedOrganizationName = dashboard.selectedOrganizationModel?.name ?? "";
+  const selectedEvaluationTargetName = dashboard.selectedEvaluationTargetModel?.name ?? "";
+  const mainContentId = isPreview ? "dashboard-product-preview-main" : "dashboard-main-content";
 
   const accountMenuId = useId();
   const accountTriggerRef = useRef<HTMLButtonElement>(null);
@@ -48,6 +140,26 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
   const accountMenuInitialFocusIndexRef = useRef(0);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (isPreview) {
+      return;
+    }
+
+    const pageLabel = selectedEvaluationTargetName.length > 0
+      ? `${selectedEvaluationTargetName} 접근성 분석`
+      : selectedOrganizationName.length > 0
+        ? `${selectedOrganizationName} 프로젝트`
+        : dashboard.menu === "projects"
+          ? "프로젝트"
+          : "새 페이지 분석";
+    document.title = `${pageLabel} | UNI ACCESS`;
+  }, [
+    dashboard.menu,
+    isPreview,
+    selectedEvaluationTargetName,
+    selectedOrganizationName
+  ]);
 
   const openAccountMenu = useCallback((initialFocusIndex = 0) => {
     accountMenuInitialFocusIndexRef.current = initialFocusIndex;
@@ -72,6 +184,13 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
   const closeAccountSettings = useCallback(() => {
     setIsAccountSettingsOpen(false);
   }, []);
+
+  const handleDashboardRetry = useCallback(async () => {
+    const refreshedData = await dashboard.refreshDashboard();
+    if (refreshedData !== null) {
+      mainContentRef.current?.focus({ preventScroll: true });
+    }
+  }, [dashboard.refreshDashboard]);
 
   useEffect(() => {
     if (!isAccountMenuOpen) {
@@ -159,9 +278,12 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
         isSiteDetailView ? "dashboard-site-detail" : ""
       } min-h-[100dvh] w-full overflow-x-hidden p-0 ${
         dashboard.isDarkMode ? "" : "bg-white"
-      } ${dashboard.isDarkMode ? "theme-dark" : "theme-light"}`}
+      } ${dashboard.isDarkMode ? "theme-dark" : "theme-light"} ${
+        isPreview ? "dashboard-embedded-preview" : ""
+      }`}
+      data-dashboard-product-preview={isPreview ? "true" : undefined}
     >
-      <a className="dashboard-skip-link" href="#dashboard-main-content">
+      <a className="dashboard-skip-link" href={`#${mainContentId}`}>
         본문으로 바로가기
       </a>
       <div className="dashboard-shell flex min-h-[100dvh] w-full flex-col bg-transparent md:flex-row">
@@ -226,8 +348,15 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
                     }}
                     type="button"
                     role="menuitem"
-                    className="dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset"
+                    aria-disabled={isPreview}
+                    title={isPreview ? "읽기 전용 미리보기에서는 로그아웃할 수 없습니다" : undefined}
+                    className={`dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset ${
+                      isPreview ? "cursor-not-allowed" : ""
+                    }`}
                     onClick={() => {
+                      if (isPreview) {
+                        return;
+                      }
                       closeAccountMenu();
                       onLogout?.();
                     }}
@@ -255,13 +384,17 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
                 onCreateProject={dashboard.openOrganizationCreateModal}
                 onUpdateProject={dashboard.handleUpdateOrganizationModel}
                 onDeleteProject={dashboard.handleDeleteOrganizationModel}
+                onSelectPage={({ pageId }) => dashboard.goToSite(pageId)}
+                quickAnalysisResultsOverride={previewQuickAnalysisResults}
+                readOnly={isPreview}
               />
             </div>
           </SidebarBody>
         </Sidebar>
 
         <main
-          id="dashboard-main-content"
+          ref={mainContentRef}
+          id={mainContentId}
           tabIndex={-1}
           className={`min-w-0 flex-1 overflow-visible ${
             dashboard.menu === "analyze" ? "dashboard-analyze-view" : ""
@@ -269,58 +402,26 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
         >
           <div className="dashboard-top-zone relative px-4 sm:px-7 lg:px-10">
             <header className="dashboard-fixed-header absolute top-4 right-4 left-4 z-30 flex items-start justify-end gap-5 sm:top-7 sm:right-7 sm:left-7 lg:top-10 lg:right-10 lg:left-10">
-              {shouldShowHeaderTitle && (
-                <div
-                  className={`pointer-events-auto absolute flex min-w-0 items-start justify-between gap-6 ${
-                    isProjectDetailView
-                      ? "dashboard-project-header-content top-[calc(var(--dashboard-control-size)-2.25rem)]"
-                      : "dashboard-site-header-content left-0 right-0 top-[calc(var(--dashboard-control-size)+4.25rem)]"
-                  }`}
-                >
+              {isProjectDetailView && (
+                <div className="dashboard-project-header-content pointer-events-auto absolute top-[calc(var(--dashboard-control-size)-2.25rem)] flex min-w-0 items-start justify-between gap-6">
                   <div className="min-w-0">
-                    {isProjectDetailView && (
-                      <nav
-                        aria-label="프로젝트 경로"
-                        className={`dashboard-project-breadcrumb mb-1 flex items-center overflow-visible gap-0.5 font-semibold ${
-                          dashboard.isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"
-                        }`}
-                      >
-                        <span className="dashboard-project-breadcrumb-label inline-flex items-center">프로젝트</span>
-                        <ChevronRight
-                          className="dashboard-project-breadcrumb-chevron block shrink-0"
-                          strokeWidth={2}
-                          aria-hidden="true"
-                        />
-                      </nav>
-                    )}
-                    <div className="flex min-w-0 flex-wrap items-end gap-x-5 gap-y-2">
-                      <h1
-                        id={isSiteDetailView ? "dashboard-site-page-title" : undefined}
-                        className={`dashboard-home-title shrink-0 font-black tracking-tight text-slate-900 ${
-                          isProjectDetailView
-                            ? "dashboard-project-title"
-                            : isSiteDetailView
-                              ? "dashboard-site-title"
-                              : ""
-                        }`}
-                      >
-                        {dashboard.headerTitle}
-                      </h1>
-                      {/* Site detail only: page URL. Project org description is not rendered. */}
-                      {dashboard.headerDescriptionHref.length > 0 && (
-                        <a
-                          href={dashboard.headerDescriptionHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="dashboard-site-header-url -mb-1 inline-flex max-w-[42rem] truncate text-[0.95rem] font-medium text-[#8b95a1] underline underline-offset-4 transition-colors hover:text-slate-700"
-                          title={dashboard.headerDescription}
-                        >
-                          {dashboard.headerDescription}
-                        </a>
-                      )}
-                    </div>
+                    <nav
+                      aria-label="프로젝트 경로"
+                      className={`dashboard-project-breadcrumb mb-1 flex items-center overflow-visible gap-0.5 font-semibold ${
+                        dashboard.isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"
+                      }`}
+                    >
+                      <span className="dashboard-project-breadcrumb-label inline-flex items-center">프로젝트</span>
+                      <ChevronRight
+                        className="dashboard-project-breadcrumb-chevron block shrink-0"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      />
+                    </nav>
+                    <h1 className="dashboard-home-title dashboard-project-title shrink-0 font-black tracking-tight text-slate-900">
+                      {dashboard.headerTitle}
+                    </h1>
                   </div>
-
                 </div>
               )}
 
@@ -333,98 +434,158 @@ export function SidebarDemo({ onLogout, userName, onBootstrapComplete }: Sidebar
               isSiteDetailView ? "dashboard-site-content-zone" : ""
             }`}
           >
-            <Suspense fallback={<RoutePanelFallback />}>
-              {dashboard.menu === "analyze" && (
-                <QuickAnalyzePanel
-                  isDarkMode={dashboard.isDarkMode}
-                  onAnalysisComplete={dashboard.handleQuickAnalyzeComplete}
-                />
-              )}
+            {dashboard.menu === "analyze" || isSiteDetailView ? (
+              <h1 className="sr-only">{dashboard.headerTitle}</h1>
+            ) : null}
+            {dashboard.dashboardError.length > 0 ? (
+              <article
+                role="alert"
+                aria-busy={dashboard.isDashboardLoading}
+                className="mb-4 flex flex-col items-start gap-3 rounded-[28px] border border-rose-200 bg-rose-50 p-5 text-sm"
+              >
+                <p className="flex items-center gap-2 font-semibold text-rose-700">
+                  <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+                  대시보드 연결 실패
+                </p>
+                <p className="text-rose-600">{dashboard.dashboardError}</p>
+                <button
+                  type="button"
+                  disabled={dashboard.isDashboardLoading}
+                  onClick={() => void handleDashboardRetry()}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <RotateCcw size={13} strokeWidth={2.4} aria-hidden="true" />
+                  {dashboard.isDashboardLoading ? "다시 불러오는 중" : "다시 시도"}
+                </button>
+              </article>
+            ) : null}
 
-              {dashboard.menu === "dashboard" && (
-                <DashboardPanel
-                  data={dashboard.dashboardData}
-                  isLoading={dashboard.isDashboardLoading}
-                  errorMessage={dashboard.dashboardError}
-                  isDarkMode={dashboard.isDarkMode}
-                  onSiteClick={({ siteId }) => dashboard.goToRecentPage(siteId)}
-                  onRetry={dashboard.refreshDashboard}
-                  onCreateProject={dashboard.openOrganizationCreateModal}
-                  onStartEvaluation={dashboard.goToProjectsRoot}
-                />
-              )}
-
-              {dashboard.menu === "projects" && dashboard.selectedOrganizationModel && dashboard.selectedEvaluationTargetModel && (
-                <SiteDashboardPanel
-                  evaluationTarget={dashboard.selectedEvaluationTargetModel}
-                  evaluationRequests={dashboard.dashboardData?.evaluationRequests ?? []}
-                  resultSummaries={dashboard.dashboardData?.resultSummaries ?? []}
-                  analysisResults={dashboard.dashboardData?.analysisResults ?? []}
-                  scoreResults={dashboard.dashboardData?.scoreResults ?? []}
-                  issueResults={dashboard.dashboardData?.issueResults ?? []}
-                  improvementGuides={dashboard.dashboardData?.improvementGuides ?? []}
-                />
-              )}
-
-              {dashboard.menu === "projects" &&
-                dashboard.selectedOrganizationModel &&
-                !dashboard.selectedEvaluationTargetModel && (
-                  <OrganizationModelDetailPanel
-                    organization={dashboard.selectedOrganizationModel}
-                    evaluationRequests={dashboard.dashboardData?.evaluationRequests ?? []}
-                    analysisResults={dashboard.dashboardData?.analysisResults ?? []}
-                    scoreResults={dashboard.dashboardData?.scoreResults ?? []}
-                    issueResults={dashboard.dashboardData?.issueResults ?? []}
+            <ErrorBoundary resetKey={routePanelKey} fallback={RoutePanelErrorFallback}>
+              <Suspense fallback={<RoutePanelFallback />}>
+                {dashboard.menu === "analyze" && (
+                  <QuickAnalyzePanel
                     isDarkMode={dashboard.isDarkMode}
-                    onDeleteEvaluationTargetModel={dashboard.handleDeleteEvaluationTargetModel}
-                    onOpenCreateSiteModal={dashboard.openSiteCreateModal}
-                    onSiteClick={dashboard.goToSite}
+                    onAnalysisComplete={dashboard.handleQuickAnalyzeComplete}
+                    readOnly={isPreview}
                   />
                 )}
 
-            </Suspense>
+                {dashboard.menu === "projects" && dashboard.selectedOrganizationModel && dashboard.selectedEvaluationTargetModel && (
+                  <SiteDashboardPanel
+                    evaluationTarget={dashboard.selectedEvaluationTargetModel}
+                    evaluationRequests={dashboard.dashboardData?.evaluationRequests ?? []}
+                    resultSummaries={dashboard.dashboardData?.resultSummaries ?? []}
+                    scoreResults={dashboard.dashboardData?.scoreResults ?? []}
+                    previewEvidence={previewEvidenceByTargetId?.get(
+                      dashboard.selectedEvaluationTargetModel.id
+                    )}
+                  />
+                )}
+
+                {dashboard.menu === "projects" &&
+                  dashboard.selectedOrganizationModel &&
+                  !dashboard.selectedEvaluationTargetModel && (
+                    <OrganizationModelDetailPanel
+                      organization={dashboard.selectedOrganizationModel}
+                      evaluationRequests={dashboard.dashboardData?.evaluationRequests ?? []}
+                      scoreResults={dashboard.dashboardData?.scoreResults ?? []}
+                      isDarkMode={dashboard.isDarkMode}
+                      onDeleteEvaluationTargetModel={dashboard.handleDeleteEvaluationTargetModel}
+                      onOpenCreateSiteModal={dashboard.openSiteCreateModal}
+                      onSiteClick={dashboard.goToSite}
+                      readOnly={isPreview}
+                    />
+                  )}
+              </Suspense>
+            </ErrorBoundary>
           </div>
 
-          {dashboard.selectedOrganizationModel && (
-            <SiteCreateModal
-              key={dashboard.selectedOrganizationModel.id}
-              isOpen={dashboard.isSiteCreateOpen}
-              isDarkMode={dashboard.isDarkMode}
-              project={dashboard.selectedOrganizationModel}
-              onCreateEvaluationTargetModel={dashboard.handleCreateEvaluationTargetModel}
-              onRequestEvaluationTargetAnalysis={dashboard.handleRequestEvaluationTargetAnalysis}
-              onAnalysisComplete={dashboard.refreshDashboardForSiteCreate}
-              onClose={() => dashboard.setIsSiteCreateOpen(false)}
-            />
+          {!isPreview && dashboard.selectedOrganizationModel && dashboard.isSiteCreateOpen && (
+            <ErrorBoundary
+              resetKey={`site-create:${dashboard.selectedOrganizationModel.id}`}
+              fallback={({ error, resetErrorBoundary }) => (
+                <ModalErrorFallback
+                  isChunkError={isLazyChunkLoadError(error)}
+                  onDismiss={() => dashboard.setIsSiteCreateOpen(false)}
+                  onRetry={resetErrorBoundary}
+                  onReload={() => window.location.reload()}
+                />
+              )}
+            >
+              <Suspense fallback={<ModalLoadFallback />}>
+                <SiteCreateModal
+                  key={dashboard.selectedOrganizationModel.id}
+                  isOpen
+                  isDarkMode={dashboard.isDarkMode}
+                  project={dashboard.selectedOrganizationModel}
+                  onCreateEvaluationTargetModel={dashboard.handleCreateEvaluationTargetModel}
+                  onRequestEvaluationTargetAnalysis={dashboard.handleRequestEvaluationTargetAnalysis}
+                  onAnalysisComplete={dashboard.refreshDashboardForSiteCreate}
+                  onClose={() => dashboard.setIsSiteCreateOpen(false)}
+                />
+              </Suspense>
+            </ErrorBoundary>
           )}
 
-          <OrganizationModelCreateModal
-            isOpen={dashboard.isOrganizationCreateOpen}
-            isDarkMode={dashboard.isDarkMode}
-            name={dashboard.newOrganizationModelName}
-            isSubmitting={dashboard.isCreatingOrganizationModel}
-            hasCreatedOrganization={dashboard.hasCreatedOrganization}
-            canDiscardRecovery={dashboard.canDiscardOrganizationCreateRecovery}
-            isRecoveryBlocked={dashboard.isOrganizationCreateRecoveryBlocked}
-            errorMessage={dashboard.projectCreateError}
-            onNameChange={dashboard.setNewOrganizationModelName}
-            onClose={() => {
-              if (dashboard.isCreatingOrganizationModel) {
-                return;
-              }
-              dashboard.setIsOrganizationCreateOpen(false);
-            }}
-            onSubmit={dashboard.handleCreateOrganizationModel}
-            onDiscardRecovery={dashboard.discardOrganizationCreateRecovery}
-          />
+          {!isPreview && dashboard.isOrganizationCreateOpen && (
+            <ErrorBoundary
+              resetKey="organization-create"
+              fallback={({ error, resetErrorBoundary }) => (
+                <ModalErrorFallback
+                  isChunkError={isLazyChunkLoadError(error)}
+                  onDismiss={() => dashboard.setIsOrganizationCreateOpen(false)}
+                  onRetry={resetErrorBoundary}
+                  onReload={() => window.location.reload()}
+                />
+              )}
+            >
+              <Suspense fallback={<ModalLoadFallback />}>
+                <OrganizationModelCreateModal
+                  isOpen
+                  isDarkMode={dashboard.isDarkMode}
+                  name={dashboard.newOrganizationModelName}
+                  isSubmitting={dashboard.isCreatingOrganizationModel}
+                  hasCreatedOrganization={dashboard.hasCreatedOrganization}
+                  canDiscardRecovery={dashboard.canDiscardOrganizationCreateRecovery}
+                  isRecoveryBlocked={dashboard.isOrganizationCreateRecoveryBlocked}
+                  errorMessage={dashboard.projectCreateError}
+                  onNameChange={dashboard.setNewOrganizationModelName}
+                  onClose={() => {
+                    if (dashboard.isCreatingOrganizationModel) {
+                      return;
+                    }
+                    dashboard.setIsOrganizationCreateOpen(false);
+                  }}
+                  onSubmit={dashboard.handleCreateOrganizationModel}
+                  onDiscardRecovery={dashboard.discardOrganizationCreateRecovery}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          )}
 
-          <AccountSettingsModal
-            isOpen={isAccountSettingsOpen}
-            isDarkMode={dashboard.isDarkMode}
-            themeMode={dashboard.themeMode}
-            onThemeModeChange={dashboard.setThemeMode}
-            onClose={closeAccountSettings}
-          />
+          {isAccountSettingsOpen && (
+            <ErrorBoundary
+              resetKey="account-settings"
+              fallback={({ error, resetErrorBoundary }) => (
+                <ModalErrorFallback
+                  isChunkError={isLazyChunkLoadError(error)}
+                  onDismiss={closeAccountSettings}
+                  onRetry={resetErrorBoundary}
+                  onReload={() => window.location.reload()}
+                />
+              )}
+            >
+              <Suspense fallback={<ModalLoadFallback />}>
+                <AccountSettingsModal
+                  isOpen
+                  isDarkMode={dashboard.isDarkMode}
+                  themeMode={dashboard.themeMode}
+                  onThemeModeChange={dashboard.setThemeMode}
+                  onClose={closeAccountSettings}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          )}
 
         </main>
       </div>

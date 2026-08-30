@@ -71,28 +71,6 @@ function assertRectClose(actual, expected, message, tolerance = 0.75) {
   }
 }
 
-function parseRgb(value) {
-  const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
-  assert.equal(channels?.length, 3, `expected an rgb color, received ${value}`);
-  return channels;
-}
-
-function contrastRatio(foreground, background) {
-  const luminance = (value) => {
-    const channels = parseRgb(value).map((channel) => {
-      const normalized = channel / 255;
-      return normalized <= 0.04045
-        ? normalized / 12.92
-        : ((normalized + 0.055) / 1.055) ** 2.4;
-    });
-    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-  };
-  const foregroundLuminance = luminance(foreground);
-  const backgroundLuminance = luminance(background);
-  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
-    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
-}
-
 async function sendCommand(page, message) {
   await page.evaluate((command) => {
     window.postMessage({ source: "accessibility-dashboard", ...command }, "*");
@@ -125,8 +103,13 @@ async function readReplayState(page) {
       markers: [...(root?.querySelectorAll(".marker") ?? [])].map((marker) => {
         const rect = marker.getBoundingClientRect();
         const style = getComputedStyle(marker);
+        const badge = marker.querySelector(".marker__badge");
+        const icon = badge?.querySelector(".marker__icon");
+        const badgeStyle = badge ? getComputedStyle(badge) : null;
+        const iconStyle = icon ? getComputedStyle(icon) : null;
         return {
-          label: marker.textContent,
+          index: marker.dataset.markerIndex,
+          text: marker.textContent,
           hidden: marker.hidden,
           pressed: marker.getAttribute("aria-pressed"),
           selected: marker.dataset.selected,
@@ -144,7 +127,15 @@ async function readReplayState(page) {
             borderTopWidth: style.borderTopWidth,
             borderTopStyle: style.borderTopStyle,
             borderTopColor: style.borderTopColor,
-            boxShadow: style.boxShadow
+            boxShadow: style.boxShadow,
+            badgeBackgroundColor: badgeStyle?.backgroundColor ?? null,
+            badgeWidth: badgeStyle?.width ?? null,
+            badgeHeight: badgeStyle?.height ?? null,
+            badgeBoxShadow: badgeStyle?.boxShadow ?? null,
+            iconWidth: iconStyle?.width ?? null,
+            iconHeight: iconStyle?.height ?? null,
+            iconPathCount: icon?.querySelectorAll("path").length ?? 0,
+            iconCircleCount: icon?.querySelectorAll("circle").length ?? 0
           }
         };
       }),
@@ -183,21 +174,21 @@ async function hoverWithoutLocatorScroll(page, marker, message) {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 }
 
-function assertVisuallySelected(state, markerLabel, message) {
-  const marker = state.markers.find((candidate) => candidate.label === markerLabel);
-  assert.ok(marker, `${message}: marker ${markerLabel} must exist`);
-  assert.equal(marker.hidden, false, `${message}: marker ${markerLabel} must remain visible`);
-  assert.equal(marker.pressed, "true", `${message}: aria-pressed must identify marker ${markerLabel}`);
-  assert.equal(marker.selected, "true", `${message}: visual selected state must identify marker ${markerLabel}`);
+function assertVisuallySelected(state, markerIndex, message) {
+  const marker = state.markers.find((candidate) => candidate.index === markerIndex);
+  assert.ok(marker, `${message}: marker ${markerIndex} must exist`);
+  assert.equal(marker.hidden, false, `${message}: marker ${markerIndex} must remain visible`);
+  assert.equal(marker.pressed, "true", `${message}: aria-pressed must identify marker ${markerIndex}`);
+  assert.equal(marker.selected, "true", `${message}: visual selected state must identify marker ${markerIndex}`);
   assert.ok(
-    state.markers.filter((candidate) => candidate.label !== markerLabel)
+    state.markers.filter((candidate) => candidate.index !== markerIndex)
       .every((candidate) => candidate.pressed === "false" && candidate.selected === "false"),
     `${message}: every other marker must be deselected`
   );
 }
 
-function assertPreviewed(state, markerLabel, issueId, message) {
-  assertVisuallySelected(state, markerLabel, message);
+function assertPreviewed(state, markerIndex, issueId, message) {
+  assertVisuallySelected(state, markerIndex, message);
   assert.equal(
     state.selectedMessages.at(-1)?.issueId,
     issueId,
@@ -205,8 +196,8 @@ function assertPreviewed(state, markerLabel, issueId, message) {
   );
 }
 
-function assertCommitted(state, markerLabel, issueId, message) {
-  assertVisuallySelected(state, markerLabel, message);
+function assertCommitted(state, markerIndex, issueId, message) {
+  assertVisuallySelected(state, markerIndex, message);
   assert.equal(
     state.selectedMessages.at(-1)?.issueId,
     issueId,
@@ -244,6 +235,60 @@ assert.match(bridgeScript, /pointerType === 'touch'/, "touch pointer entry must 
 assert.match(bridgeScript, /button\.addEventListener\('blur'/, "keyboard preview must clear on blur");
 assert.match(bridgeScript, /button\.addEventListener\('click'/, "click activation must remain available");
 assert.match(bridgeScript, /ISSUE_SELECTED/, "hover preview must use the replay selection message");
+
+// Numberless issue-marker contract: preserve a 24px input target while rendering
+// a 20px scan-search badge. Selection may emphasize the badge without changing
+// collision geometry.
+assert.match(
+  bridgeScript,
+  /\.marker \{[^}]*border:0/,
+  "the marker must not use a hard outer ring"
+);
+assert.match(
+  bridgeScript,
+  /const MARKER_BLUE_GLASS = 'rgba\(0,102,204,\.94\)'/,
+  "the issue point must use the shared brand blue"
+);
+assert.match(
+  bridgeScript,
+  /setProperty\('--marker-color', MARKER_BLUE_GLASS\)/,
+  "every issue point must receive the shared brand blue"
+);
+assert.match(
+  bridgeScript,
+  /\.marker \{[^}]*background:transparent[^}]*color:transparent/,
+  "the 24px marker button must not render a numbered surface"
+);
+assert.match(
+  bridgeScript,
+  /\.marker__badge \{[^}]*width:20px; height:20px[^}]*background:var\(--marker-color,#0066cc\)[^}]*color:#fff/,
+  "the marker must render a recognizable inspection badge without a sequence number"
+);
+assert.match(
+  bridgeScript,
+  /const createMarkerBadge = \(\) =>[\s\S]*?classList\.add\('marker__icon'\)[\s\S]*?'M3 7V5a2 2 0 0 1 2-2h2'[\s\S]*?lens\.setAttribute\('r', '3'\)/,
+  "the marker badge must use the Lucide ScanSearch geometry"
+);
+assert.match(
+  bridgeScript,
+  /\.marker\[data-selected='true'\] \.marker__badge \{[^}]*transform:scale\(1\.2\)/,
+  "selection must emphasize the point without adding a numeral"
+);
+assert.match(
+  bridgeScript,
+  /@media \(prefers-reduced-motion:reduce\)[^}]*\{\s*\.marker__badge \{ transition:none/,
+  "the issue point must remove its scale transition when reduced motion is requested"
+);
+assert.match(
+  bridgeScript,
+  /@media \(forced-colors:active\)[\s\S]*?\.marker__badge \{ background:CanvasText; color:Canvas; box-shadow:0 0 0 2px Canvas/,
+  "forced colors must retain a visible issue symbol"
+);
+assert.doesNotMatch(
+  bridgeScript,
+  /--marker-glow|markerGlowColor/,
+  "the previous severity-colored outer glow must be removed"
+);
 bridgeScript = bridgeScript.replace(
   "host.attachShadow({ mode: 'closed' })",
   "host.attachShadow({ mode: 'open' })"
@@ -374,9 +419,17 @@ try {
     "every rendered replay marker must use the parsed compact marker size"
   );
   for (const marker of initialState.markers.filter((candidate) => !candidate.hidden)) {
-    assert.ok(
-      contrastRatio(marker.visual.color, marker.visual.backgroundColor) >= 4.5,
-      `marker ${marker.label} text contrast must meet WCAG AA: ${JSON.stringify(marker.visual)}`
+    assert.equal(marker.text, "", `marker ${marker.index} must not expose a visual sequence number`);
+    assert.equal(marker.visual.badgeWidth, "20px", `marker ${marker.index} badge width`);
+    assert.equal(marker.visual.badgeHeight, "20px", `marker ${marker.index} badge height`);
+    assert.equal(marker.visual.iconWidth, "14px", `marker ${marker.index} icon width`);
+    assert.equal(marker.visual.iconHeight, "14px", `marker ${marker.index} icon height`);
+    assert.equal(marker.visual.iconPathCount, 5, `marker ${marker.index} scan icon paths`);
+    assert.equal(marker.visual.iconCircleCount, 1, `marker ${marker.index} scan icon lens`);
+    assert.equal(
+      marker.visual.badgeBackgroundColor,
+      "rgba(0, 102, 204, 0.94)",
+      `marker ${marker.index} must use the shared issue-point color`
     );
   }
   assert.ok(
@@ -399,10 +452,15 @@ try {
   assertHoverDoesNotMoveViewportOrFocus(initialState, afterHoverB, "hovering marker B");
   assert.equal(afterHoverB.selectionFragments.length, 1, "marker B must highlight its target");
   assertRectClose(afterHoverB.markers[1].rect, beforeHoverB.markers[1].rect, "hover must not change marker B geometry");
-  assert.deepEqual(
-    afterHoverB.markers[1].visual,
-    beforeHoverB.markers[1].visual,
-    "data-selected hover state must not change marker background, border, or box shadow"
+  assert.equal(
+    afterHoverB.markers[1].visual.badgeWidth,
+    beforeHoverB.markers[1].visual.badgeWidth,
+    "data-selected hover state must not change the issue-point width"
+  );
+  assert.equal(
+    afterHoverB.markers[1].visual.badgeHeight,
+    beforeHoverB.markers[1].visual.badgeHeight,
+    "data-selected hover state must not change the issue-point height"
   );
   assertRectClose(afterHoverB.selectionFragments[0], await targetRect(page, "#target-b"), "marker B highlight");
   assert.equal(

@@ -2,223 +2,42 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { API_BASE_URL } from "@/config/api";
 import {
-  ApiRequestError,
   createOrganizationModel,
   getApiErrorMessage
 } from "@/services/backend-api";
-import { ORGANIZATION_CREATE_STORAGE_KEY } from "@/services/organization-create-recovery-storage";
+import {
+  ORGANIZATION_NAME_MAX_LENGTH,
+  clearBlockedOrganizationCreateRecovery,
+  clearPersistedOrganizationCreateAttempt,
+  isPersistedOrganizationCreateAttemptStale as isPersistedAttemptStale,
+  readOrganizationCreateRecovery as readPersistedOrganizationCreateRecovery,
+  readPersistedOrganizationCreateAttempt,
+  writePersistedOrganizationCreateAttempt
+} from "@/services/organization-create-recovery-storage";
+import type { PersistedOrganizationCreateAttempt } from "@/services/organization-create-recovery-storage";
 import type { DashboardViewModel } from "@/types/accessibility-domain";
 
+import {
+  isDefinitiveMutationRejection,
+  runMutationRequestWithDeadline
+} from "./mutation-recovery";
 import type { DirectoryRecoveryToken, LoadDashboard } from "./use-dashboard-data";
 
 type OrganizationCreateCheckpoint =
   | { kind: "known"; organizationId: number }
   | { kind: "indeterminate"; name: string; previousOrganizationIds: number[] };
 
-type PersistedOrganizationCreateAttempt = {
-  version: 1;
-  attemptId: string;
-  apiScope: string;
-  name: string;
-  previousOrganizationIds: number[];
-  startedAt: number;
-} & (
-  | { phase: "posting" }
-  | { phase: "reconciling"; organizationId: number | null }
-);
-
-type PersistedOrganizationCreateRecovery =
-  | { kind: "none" }
-  | { kind: "valid"; attempt: PersistedOrganizationCreateAttempt }
-  | { kind: "blocked"; rawValue: string };
-
 const REFRESH_FAILURE_MESSAGE =
   "프로젝트는 생성되었지만 목록을 불러오지 못했습니다. 생성 요청을 다시 보내지 않고 프로젝트 목록만 다시 불러와 주세요.";
 const INDETERMINATE_REFRESH_FAILURE_MESSAGE =
   "프로젝트 생성 결과를 확인하지 못했습니다. 중복 생성을 막기 위해 생성 요청은 다시 보내지 않습니다. 프로젝트 목록만 다시 불러와 주세요.";
-const PROJECT_CREATE_TIMEOUT_MS = 15_000;
 const PROJECT_REFRESH_TIMEOUT_MS = 15_000;
-const ORGANIZATION_NAME_MAX_LENGTH = 100;
-const PREVIOUS_ORGANIZATION_IDS_MAX_LENGTH = 10_000;
-const RECOVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1_000;
-const RECOVERY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const PERSISTENCE_FAILURE_MESSAGE =
   "브라우저에 안전한 복구 정보를 저장하지 못해 프로젝트 생성을 시작하지 않았습니다. 저장 공간 또는 브라우저 설정을 확인해 주세요.";
 const RECOVERY_DISCARD_FAILURE_MESSAGE =
   "오래된 복구 정보를 지우지 못했습니다. 브라우저 저장 공간을 확인하거나 로그아웃 후 다시 시도해 주세요.";
 const BLOCKED_RECOVERY_MESSAGE =
   "이전 버전, 다른 서버 또는 손상된 프로젝트 생성 복구 정보가 남아 있어 새 생성을 잠갔습니다. 서버에 이미 생성된 프로젝트가 없는지 확인한 뒤 복구 정보를 삭제해 주세요.";
-const DEFINITIVE_CREATE_REJECTION_STATUSES = new Set([
-  400, 401, 402, 403, 404, 405, 406, 407, 410, 411, 413, 414, 415, 416, 417, 418,
-  421, 422, 423, 424, 426, 428, 431, 451
-]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function normalizePersistedOrganizationCreateAttempt(
-  value: unknown
-): PersistedOrganizationCreateAttempt | null {
-  if (
-    !isRecord(value) ||
-    value.version !== 1 ||
-    typeof value.attemptId !== "string" ||
-    value.attemptId.length === 0 ||
-    value.attemptId.length > 100 ||
-    value.apiScope !== API_BASE_URL ||
-    typeof value.name !== "string" ||
-    value.name.trim().length === 0 ||
-    value.name.trim().length > ORGANIZATION_NAME_MAX_LENGTH ||
-    !Array.isArray(value.previousOrganizationIds) ||
-    value.previousOrganizationIds.length > PREVIOUS_ORGANIZATION_IDS_MAX_LENGTH ||
-    !value.previousOrganizationIds.every(
-      (id) => Number.isSafeInteger(id) && (id as number) > 0
-    ) ||
-    new Set(value.previousOrganizationIds).size !== value.previousOrganizationIds.length ||
-    !Number.isSafeInteger(value.startedAt) ||
-    (value.startedAt as number) <= 0
-  ) {
-    return null;
-  }
-
-  const base = {
-    version: 1 as const,
-    attemptId: value.attemptId,
-    apiScope: API_BASE_URL,
-    name: value.name.trim(),
-    previousOrganizationIds: value.previousOrganizationIds as number[],
-    startedAt: value.startedAt as number
-  };
-  if (value.phase === "posting") {
-    return { ...base, phase: "posting" };
-  }
-  if (
-    value.phase === "reconciling" &&
-    (value.organizationId === null ||
-      (Number.isSafeInteger(value.organizationId) && (value.organizationId as number) > 0))
-  ) {
-    return {
-      ...base,
-      phase: "reconciling",
-      organizationId: value.organizationId as number | null
-    };
-  }
-
-  return null;
-}
-
-function clearPersistedOrganizationCreateAttempt(
-  expectedAttemptId?: string
-): boolean {
-  try {
-    if (expectedAttemptId !== undefined) {
-      const currentRawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizePersistedOrganizationCreateAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    window.sessionStorage.removeItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    return window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
-}
-
-function readPersistedOrganizationCreateAttempt(): PersistedOrganizationCreateAttempt | null {
-  try {
-    const rawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    if (rawValue === null) {
-      return null;
-    }
-
-    const attempt = normalizePersistedOrganizationCreateAttempt(
-      JSON.parse(rawValue) as unknown
-    );
-    return attempt;
-  } catch {
-    return null;
-  }
-}
-
-function readPersistedOrganizationCreateRecovery(): PersistedOrganizationCreateRecovery {
-  try {
-    const rawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    if (rawValue === null) {
-      return { kind: "none" };
-    }
-
-    const attempt = normalizePersistedOrganizationCreateAttempt(
-      JSON.parse(rawValue) as unknown
-    );
-    return attempt === null
-      ? { kind: "blocked", rawValue }
-      : { kind: "valid", attempt };
-  } catch {
-    try {
-      const rawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-      return rawValue === null
-        ? { kind: "none" }
-        : { kind: "blocked", rawValue };
-    } catch {
-      return { kind: "blocked", rawValue: "" };
-    }
-  }
-}
-
-function clearBlockedOrganizationCreateRecovery(expectedRawValue: string): boolean {
-  try {
-    if (window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) !== expectedRawValue) {
-      return false;
-    }
-    window.sessionStorage.removeItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    return window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
-}
-
-function writePersistedOrganizationCreateAttempt(
-  attempt: PersistedOrganizationCreateAttempt,
-  expectedAttemptId: string | null
-): boolean {
-  try {
-    const normalizedAttempt = normalizePersistedOrganizationCreateAttempt(attempt);
-    if (normalizedAttempt === null) {
-      return false;
-    }
-
-    const currentRawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    if (expectedAttemptId === null) {
-      if (currentRawValue !== null) {
-        return false;
-      }
-    } else {
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizePersistedOrganizationCreateAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    const serializedAttempt = JSON.stringify(normalizedAttempt);
-    window.sessionStorage.setItem(ORGANIZATION_CREATE_STORAGE_KEY, serializedAttempt);
-    return window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) === serializedAttempt;
-  } catch {
-    return false;
-  }
-}
 
 function checkpointFromPersistedAttempt(
   attempt: PersistedOrganizationCreateAttempt
@@ -233,24 +52,6 @@ function checkpointFromPersistedAttempt(
     name: attempt.name,
     previousOrganizationIds: attempt.previousOrganizationIds
   };
-}
-
-function isPersistedAttemptStale(
-  attempt: PersistedOrganizationCreateAttempt,
-  now = Date.now()
-): boolean {
-  return (
-    attempt.startedAt < now - RECOVERY_STALE_AFTER_MS ||
-    attempt.startedAt > now + RECOVERY_MAX_FUTURE_SKEW_MS
-  );
-}
-
-function isDefinitiveCreateRejection(error: unknown): boolean {
-  return (
-    error instanceof ApiRequestError &&
-    error.status !== null &&
-    DEFINITIVE_CREATE_REJECTION_STATUSES.has(error.status)
-  );
 }
 
 function findCheckpointOrganizationId(
@@ -298,7 +99,8 @@ export function useOrganizationModelCreateForm({
 }) {
   const [restoredRecovery] = useState(readPersistedOrganizationCreateRecovery);
   const restoredAttempt =
-    restoredRecovery.kind === "valid" ? restoredRecovery.attempt : null;
+    restoredRecovery.kind === "valid" ? restoredRecovery.value : null;
+  const isRestoredRecoveryBlocked = restoredRecovery.kind === "blocked";
   const restoredBlockedRawValue =
     restoredRecovery.kind === "blocked" ? restoredRecovery.rawValue : null;
   const restoredCheckpoint = restoredAttempt
@@ -310,7 +112,7 @@ export function useOrganizationModelCreateForm({
     restoredAttempt?.name ?? ""
   );
   const [projectCreateError, setProjectCreateError] = useState(
-    restoredBlockedRawValue !== null
+    isRestoredRecoveryBlocked
       ? BLOCKED_RECOVERY_MESSAGE
       : restoredCheckpoint
         ? getRefreshFailureMessage(restoredCheckpoint)
@@ -325,7 +127,7 @@ export function useOrganizationModelCreateForm({
         (restoredAttempt ? isPersistedAttemptStale(restoredAttempt) : false)
     );
   const [isOrganizationCreateRecoveryBlocked, setIsOrganizationCreateRecoveryBlocked] =
-    useState(restoredBlockedRawValue !== null);
+    useState(isRestoredRecoveryBlocked);
   const createCheckpointRef = useRef<OrganizationCreateCheckpoint | null>(restoredCheckpoint);
   const persistedAttemptRef = useRef<PersistedOrganizationCreateAttempt | null>(restoredAttempt);
   const blockedRecoveryRawValueRef = useRef<string | null>(restoredBlockedRawValue);
@@ -375,8 +177,7 @@ export function useOrganizationModelCreateForm({
     }
 
     // A restored attempt can be mounted in the same document after a route
-    // change, where the module-level directory cache is still warm. Reconcile
-    // it immediately instead of waiting for the next five-second poll. The
+    // change. Reconcile it immediately against a fresh overview snapshot. The
     // effect owns its controller so StrictMode cleanup can abort and restart
     // the request without marking the attempt as completed.
     const restoreController = new AbortController();
@@ -387,7 +188,6 @@ export function useOrganizationModelCreateForm({
     void loadDashboard({
       refreshAfterInFlight: true,
       clearOnError: false,
-      forceDirectoryRefresh: true,
       signal: restoreController.signal
     })
       .catch(() => null)
@@ -597,30 +397,36 @@ export function useOrganizationModelCreateForm({
         setCanDiscardOrganizationCreateRecovery(false);
         const createController = new AbortController();
         createAbortControllerRef.current = createController;
-        const createTimeoutId = window.setTimeout(() => {
-          createController.abort();
-        }, PROJECT_CREATE_TIMEOUT_MS);
         try {
-          const created = await createOrganizationModel(
-            {
-              name,
-              description: ""
-            },
-            createController.signal
-          );
+          const created = await runMutationRequestWithDeadline({
+            signal: createController.signal,
+            timeoutMessage: "프로젝트 생성 응답을 기다리는 시간이 초과되었습니다.",
+            operation: (requestSignal) =>
+              createOrganizationModel(
+                {
+                  name,
+                  description: ""
+                },
+                requestSignal
+              )
+          });
           if (!isActiveOperation()) {
             return;
           }
 
           operationCheckpoint =
-            Number.isSafeInteger(created?.id) && created.id > 0
+            Number.isSafeInteger(created?.id) &&
+            created.id > 0 &&
+            !previousOrganizationIds.includes(created.id) &&
+            created.name.trim() === name &&
+            created.status === "ACTIVE"
               ? { kind: "known", organizationId: created.id }
               : { kind: "indeterminate", name, previousOrganizationIds };
         } catch (error) {
           if (!isActiveOperation()) {
             return;
           }
-          if (isDefinitiveCreateRejection(error)) {
+          if (isDefinitiveMutationRejection(error)) {
             throw error;
           }
 
@@ -629,7 +435,6 @@ export function useOrganizationModelCreateForm({
           // retry must reconcile the directory instead of repeating the POST.
           operationCheckpoint = { kind: "indeterminate", name, previousOrganizationIds };
         } finally {
-          window.clearTimeout(createTimeoutId);
           if (createAbortControllerRef.current === createController) {
             createAbortControllerRef.current = null;
           }
@@ -682,7 +487,6 @@ export function useOrganizationModelCreateForm({
         refreshedDashboard = await loadDashboard({
           refreshAfterInFlight: true,
           clearOnError: false,
-          forceDirectoryRefresh: true,
           signal: refreshController.signal
         });
       } finally {

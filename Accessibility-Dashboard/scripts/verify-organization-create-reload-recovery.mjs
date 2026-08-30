@@ -4,12 +4,14 @@
  * - a committed project is reconciled silently from the fresh directory;
  * - an uncommitted outcome restores a disabled, GET-only recovery form.
  *
- * Usage: BASE_URL=http://127.0.0.1:5173 node scripts/verify-organization-create-reload-recovery.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const storageKey = "accessibility-dashboard.organization-create-attempt.v1";
 const timestamp = "2026-08-11T10:00:00.000Z";
 
@@ -101,27 +103,14 @@ async function runScenario(browser, { commitBeforeReload, createdProject }) {
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (method === "GET" && pathname === "/api/organizations") {
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
         observed.organizationGets += 1;
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(observed.serverCommitted ? [createdProject] : [])
-        });
+        await fulfillJson(route, createDashboardOverview({
+          organizations: observed.serverCommitted ? [createdProject] : []
+        }));
         if (observed.retryArmed) {
           retryOrganizationGet.resolve();
         }
-        return;
-      }
-      if (
-        method === "GET" &&
-        pathname === `/api/organizations/${createdProject.id}/evaluation-targets`
-      ) {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
         return;
       }
 
@@ -245,12 +234,8 @@ async function runStorageFailureScenario(browser) {
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (method === "GET" && pathname === "/api/organizations") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
+        await fulfillJson(route, createDashboardOverview());
         return;
       }
       if (method === "POST" && pathname === "/api/organizations") {
@@ -327,13 +312,9 @@ async function runSameDocumentRestoreScenario(browser) {
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && pathname === "/api/requests") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-        return;
-      }
-      if (method === "GET" && pathname === "/api/organizations") {
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
         organizationGets += 1;
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+        await fulfillJson(route, createDashboardOverview());
         if (restoreArmed) {
           restoredDirectoryGet.resolve();
         }
@@ -383,8 +364,8 @@ async function runStaleRecoveryDiscardScenario(browser) {
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && (pathname === "/api/requests" || pathname === "/api/organizations")) {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
+        await fulfillJson(route, createDashboardOverview());
         return;
       }
       if (method === "POST" && pathname === "/api/organizations") {
@@ -450,8 +431,8 @@ async function runIncompatibleRecoveryDiscardScenario(browser) {
       const request = route.request();
       const method = request.method();
       const pathname = new URL(request.url()).pathname;
-      if (method === "GET" && (pathname === "/api/requests" || pathname === "/api/organizations")) {
-        await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
+        await fulfillJson(route, createDashboardOverview());
         return;
       }
       if (method === "POST" && pathname === "/api/organizations") {

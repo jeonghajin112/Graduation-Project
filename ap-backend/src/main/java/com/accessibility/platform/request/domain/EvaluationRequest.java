@@ -11,7 +11,13 @@ import java.time.LocalDateTime;
 
 @Getter
 @Entity
-@Table(name = "evaluation_request")
+@Table(
+        name = "evaluation_request",
+        indexes = @Index(
+                name = "idx_evaluation_request_target_status_updated",
+                columnList = "evaluation_target_id,status,updated_at"
+        )
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class EvaluationRequest extends BaseTimeEntity {
 

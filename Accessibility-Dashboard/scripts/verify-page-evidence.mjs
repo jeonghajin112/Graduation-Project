@@ -4,14 +4,22 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const dashboardDirectory = path.resolve(scriptDirectory, "..");
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const outDir = process.env.OUT_DIR ?? "artifacts/page-evidence";
+const verificationScope = process.env.PAGE_EVIDENCE_SCOPE?.trim() || "full";
 const capturedAt = "2026-08-11T03:30:00.000Z";
 const FALLBACK_DETAIL_SELECTOR = ".site-page-evidence-fallback-detail";
 const removedReplayControlPattern = /SET_DISMISS_MODE|UNDO_HIDDEN_ELEMENT|RESET_HIDDEN_ELEMENTS|dismissMode|hiddenCount|REPLAY_UI_STATE|SLIDER_PREVIOUS|SLIDER_NEXT|sliderAvailable|sliderIndex|sliderCount/;
+
+assert.ok(
+  verificationScope === "core" || verificationScope === "full",
+  `PAGE_EVIDENCE_SCOPE must be "core" or "full": ${verificationScope}`
+);
 
 const [protocolSource, evidenceCardSource] = await Promise.all([
   readFile(path.join(
@@ -32,6 +40,11 @@ assert.doesNotMatch(
   evidenceCardSource,
   /SET_DISMISS_MODE|UNDO_HIDDEN_ELEMENT|RESET_HIDDEN_ELEMENTS|팝업 숨기기|SLIDER_PREVIOUS|SLIDER_NEXT|site-page-evidence-slider-|이전 슬라이드|다음 슬라이드/,
   "the page evidence toolbar must retain neither popup controls nor the external carousel pager"
+);
+assert.doesNotMatch(
+  evidenceCardSource,
+  /site-page-evidence-(?:toolbar|view-switch|filter|marker-toggle|code-view|code-heading|code-empty)|SET_MARKERS_VISIBLE|severityFilter|EvidenceView/,
+  "removed page/code, severity-filter, and marker-toggle controls must not remain hidden in the component"
 );
 assert.match(
   protocolSource,
@@ -151,7 +164,12 @@ const scoreResult = {
 
 const locator = (selector, htmlSnippet) => ({
   kind: "DOM_PATH",
-  pathSteps: [{ context: "DOCUMENT", selector }],
+  pathSteps: [{ context: "DOCUMENT", selector, frameUrl: null }],
+  x: null,
+  y: null,
+  width: null,
+  height: null,
+  coordinateSpace: null,
   visible: true,
   htmlSnippet
 });
@@ -199,7 +217,7 @@ const issues = [
   {
     id: 9004,
     requestId: 501,
-    module: "text_analysis",
+    module: "text_difficulty",
     severity: "MINOR",
     title: "요소 경로가 없는 텍스트 문제",
     description: "이 문제에는 저장된 DOM 경로가 없습니다.",
@@ -208,30 +226,6 @@ const issues = [
     locator: null,
     wcagCode: "3.1.5",
     createdAt: capturedAt
-  }
-];
-
-const semanticallyChangedIssues = issues.map((issue) =>
-  issue.id === 9002
-    ? {
-        ...issue,
-        description: `${issue.description} [semantic revision]`,
-        selector: "#search-button",
-        locator: locator("#search-button", '<button id="search-button">검색</button>')
-      }
-    : issue
-);
-
-const lowOnlyIssueTitle = "LOW_ONLY_STALE_SELECTION_SENTINEL";
-const lowOnlyIssueSnippet = '<p id="search-copy">LOW_ONLY_CODE_SENTINEL</p>';
-const lowOnlyIssues = [
-  {
-    ...issues[1],
-    severity: "MINOR",
-    title: lowOnlyIssueTitle,
-    description: "낮음 필터 선택 상태 정리 회귀 검증용 이슈입니다.",
-    recommendation: "빈 심각도 필터에서는 이 이슈를 선택 상태로 유지하지 않습니다.",
-    locator: locator("#search-copy", lowOnlyIssueSnippet)
   }
 ];
 
@@ -499,11 +493,38 @@ const replayHtml = `<!doctype html>
 </html>`;
 
 let artifactResponseMode = "replay";
-let issueResponseMode = "replay";
 let holdNextReplayReady = false;
 let dropNextReplayInitialLoading = false;
 let dashboardRequestFetchCount = 0;
 let issueResponseFetchCount = 0;
+const overview = createDashboardOverview({
+  organizations: [organization],
+  evaluationTargets: [target],
+  evaluationRequests: [request],
+  resultSummaries: [summary],
+  scoreResults: [scoreResult],
+  latestIssueCounts: [{
+    evaluationTargetId: target.id,
+    requestId: request.id,
+    totalIssueCount: issues.length,
+    criticalIssueCount: 1,
+    highIssueCount: 1,
+    mediumIssueCount: 1,
+    lowIssueCount: 1,
+    groups: issues.map((issue) => ({
+      issueCode: issue.wcagCode,
+      issueTitle: issue.title,
+      severity: issue.severity === "SERIOUS"
+        ? "HIGH"
+        : issue.severity === "MODERATE"
+          ? "MEDIUM"
+          : issue.severity === "MINOR"
+            ? "LOW"
+            : "CRITICAL",
+      count: 1
+    }))
+  }]
+});
 
 function payloadFor(pathname) {
   if (pathname === "/api/requests") {
@@ -515,8 +536,6 @@ function payloadFor(pathname) {
   if (pathname === "/api/results/requests/501/summary") return summary;
   if (pathname === "/api/results/requests/501/issues") {
     issueResponseFetchCount += 1;
-    if (issueResponseMode === "semantic-change") return semanticallyChangedIssues;
-    if (issueResponseMode === "low-only") return lowOnlyIssues;
     return issues;
   }
   if (pathname === "/api/results/requests/501/artifact") {
@@ -533,6 +552,11 @@ function payloadFor(pathname) {
 async function installFixture(page) {
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
+      dashboardRequestFetchCount += 1;
+      await fulfillJson(route, overview);
+      return;
+    }
     if (pathname === "/api/results/artifacts/77/content") {
       const holdReady = holdNextReplayReady;
       const dropInitialLoading = dropNextReplayInitialLoading;
@@ -548,34 +572,12 @@ async function installFixture(page) {
       return;
     }
 
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(payloadFor(pathname))
-    });
+    await fulfillJson(route, payloadFor(pathname));
   });
 }
 
 async function getReplayMessages(frame) {
   return frame.locator("html").evaluate(() => window.__replayMessages ?? []);
-}
-
-async function waitForDashboardRequestFetch(minimumCount, timeoutMs = 7_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (dashboardRequestFetchCount >= minimumCount) return;
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  }
-  throw new Error(`Timed out waiting for dashboard request fetch ${minimumCount}`);
-}
-
-async function waitForIssueResponseFetch(minimumCount, timeoutMs = 7_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (issueResponseFetchCount >= minimumCount) return;
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  }
-  throw new Error(`Timed out waiting for issue response fetch ${minimumCount}`);
 }
 
 async function advanceBrowserClockPastResultCache(page) {
@@ -970,7 +972,10 @@ async function assertFallbackDetail(page, evidence, issue, viewportWidth) {
   assert.ok(fact.columnScrollHeight <= fact.columnClientHeight + 1, `${viewportWidth}px replay column clips the fallback`);
   assert.ok(fact.documentScrollWidth <= fact.documentClientWidth + 1, `${viewportWidth}px fallback causes page overflow`);
   assert.ok(fact.text.includes(issue.severityLabel));
-  assert.ok(fact.text.includes(`KWCAG ${issue.code}`));
+  const codeLabel = /^(?:KWCAG|WCAG)\s+/i.test(issue.code)
+    ? issue.code
+    : (/^[0-9]+(?:[.][0-9]+)+$/.test(issue.code) ? `KWCAG ${issue.code}` : issue.code);
+  assert.ok(fact.text.includes(codeLabel));
   for (const [name, expected] of [
     ["title", issue.title],
     ["message", issue.message],
@@ -1109,12 +1114,98 @@ async function verifyDesktop(page) {
   assert.ok(initialFocusMessageCount >= 1, "the initial dashboard selection must still be focused in the replay");
 
   assert.equal(await page.locator(".site-score-trend-card, .site-recent-issues-card").count(), 0);
-  assert.equal(await page.locator("#dashboard-site-page-title, .dashboard-site-scan-action").count(), 0);
+  assert.equal(
+    await page.locator(".dashboard-site-header-content, #dashboard-site-page-title, .dashboard-site-header-url").count(),
+    0,
+    "the deferred page-detail title and URL must not overlap the replay surface"
+  );
+  assert.equal(
+    await page.locator("#dashboard-main-content > .dashboard-content-zone > h1.sr-only").count(),
+    1,
+    "page detail must retain a non-visual level-one heading"
+  );
+  assert.equal(await page.locator(".dashboard-site-scan-action").count(), 0);
   assert.equal(await page.locator(".dashboard-site-content-zone .dashboard-card").count(), 1);
   assert.equal(
     await evidence.locator(".site-page-evidence-inspector, [class*='site-page-evidence-selection-']").count(),
     0,
     "the removed right inspector must contribute no page-view DOM"
+  );
+
+  const trendLayout = await page.locator(".site-page-evidence-trend-panel").evaluate((panel) => {
+    const chart = panel.querySelector(".site-page-evidence-trend-chart");
+    const panelRect = panel.getBoundingClientRect();
+    const chartRect = chart?.getBoundingClientRect();
+
+    return {
+      chartHeight: chartRect?.height ?? 0,
+      // The legend was removed: a single score series needs no key, so the chart
+      // is now the last element in the card.
+      legendCount: panel.querySelectorAll(".site-page-evidence-trend-legend").length,
+      barCount: chart ? chart.querySelectorAll(".recharts-bar-rectangle").length : 0,
+      restingDotCount: chart ? chart.querySelectorAll(".recharts-area-dot").length : 0,
+      // A single-point series has no curve to draw, so recharts renders the dot
+      // regardless of dot={false}. Track the curve count to tell the two cases
+      // apart instead of asserting a bare zero.
+      curveCount: chart ? chart.querySelectorAll(".recharts-area-curve").length : 0,
+      reservedHeight: chartRect ? panelRect.bottom - chartRect.bottom : 0
+    };
+  });
+  assert.ok(
+    trendLayout.chartHeight >= 136 && trendLayout.chartHeight <= 144,
+    `desktop trend chart must stay compact: ${JSON.stringify(trendLayout)}`
+  );
+  assert.equal(
+    trendLayout.legendCount,
+    0,
+    `single-series trend chart must not render a legend: ${JSON.stringify(trendLayout)}`
+  );
+  assert.equal(
+    trendLayout.barCount,
+    0,
+    `trend chart plots score only, with no issue-count bars: ${JSON.stringify(trendLayout)}`
+  );
+  // Points appear on hover through activeDot, so a multi-point line paints no
+  // dots at rest. With only one analysis there is no line, and recharts draws
+  // that lone point so the value stays visible at all.
+  if (trendLayout.curveCount > 0) {
+    assert.equal(
+      trendLayout.restingDotCount,
+      0,
+      `multi-point trend line must not paint resting dots: ${JSON.stringify(trendLayout)}`
+    );
+  } else {
+    assert.equal(
+      trendLayout.restingDotCount,
+      1,
+      `single-analysis trend must still show its one point: ${JSON.stringify(trendLayout)}`
+    );
+  }
+  // The trend card no longer reserves empty space for future detail content:
+  // the rail carries that content in sibling cards, so the card closes up right
+  // after the chart.
+  assert.ok(
+    trendLayout.reservedHeight >= 8 && trendLayout.reservedHeight <= 40,
+    `trend card must close up right after its chart: ${JSON.stringify(trendLayout)}`
+  );
+  const railLayout = await page.locator(".site-dashboard-rail").evaluate((rail) => {
+    const cards = Array.from(rail.children);
+    const railRect = rail.getBoundingClientRect();
+    const lastRect = cards.at(-1)?.getBoundingClientRect();
+
+    return {
+      cardCount: cards.length,
+      // Trailing slack between the last card and the rail box.
+      trailingSlack: lastRect ? Math.round(railRect.bottom - lastRect.bottom) : 0
+    };
+  });
+  assert.ok(
+    railLayout.cardCount >= 2,
+    `the rail must stack the trend card with detail cards: ${JSON.stringify(railLayout)}`
+  );
+  assert.ok(
+    railLayout.trailingSlack <= 4,
+    `the rail must not end in dead space: ${JSON.stringify(railLayout)}`
   );
 
   const markerA = frame.locator('[data-issue-id="9001"]');
@@ -1317,46 +1408,56 @@ async function verifyDesktop(page) {
     "aria-describedby must reference a live marker description"
   );
 
-  const requestFetchCountBeforeIdentityPoll = dashboardRequestFetchCount;
-  const issueFetchCountBeforeIdentityPoll = issueResponseFetchCount;
-  await advanceBrowserClockPastResultCache(page);
-  await waitForDashboardRequestFetch(requestFetchCountBeforeIdentityPoll + 1);
-  await waitForIssueResponseFetch(issueFetchCountBeforeIdentityPoll + 1);
-  await page.waitForTimeout(500);
-  assert.equal(
-    await frame.locator("html").evaluate(() =>
-      window.__replayMessages.filter((message) => message.type === "INIT_ISSUES").length
-    ),
-    1,
-    "a poll that remaps identical semantic rows must not reinitialize the replay"
-  );
-  assert.equal(
-    await markerA.evaluate((marker) => marker === window.__stableReplayMarkerA),
-    true,
-    "an identical semantic poll must preserve marker DOM identity"
-  );
-  assert.equal(
-    await markerA.evaluate((marker) => document.activeElement === marker),
-    true,
-    "an identical semantic poll must preserve keyboard focus"
-  );
-  assert.equal(
-    await markerA.getAttribute("aria-describedby"),
-    keyboardDescriptionId,
-    "an identical semantic poll must preserve the marker tooltip relationship"
-  );
-  assert.equal(
-    await frame.locator(`[id="${keyboardDescriptionId}"]`).count(),
-    1,
-    "an identical semantic poll must keep the described tooltip mounted"
-  );
-  assert.equal(
-    await frame.locator("html").evaluate(() =>
-      window.__replayOutboundMessages.filter((message) => message.type === "LOCATOR_STATUS").length
-    ),
-    initialLocatorStatusCount,
-    "an identical semantic poll must not reconnect every locator"
-  );
+  if (verificationScope === "full") {
+    const requestFetchCountBeforeStabilityWindow = dashboardRequestFetchCount;
+    const issueFetchCountBeforeStabilityWindow = issueResponseFetchCount;
+    await advanceBrowserClockPastResultCache(page);
+    await page.waitForTimeout(5_500);
+    assert.equal(
+      dashboardRequestFetchCount,
+      requestFetchCountBeforeStabilityWindow,
+      "a terminal result must not restart dashboard overview polling after cache expiry"
+    );
+    assert.equal(
+      issueResponseFetchCount,
+      issueFetchCountBeforeStabilityWindow,
+      "a terminal result must keep its detail payload instead of refetching unchanged issues"
+    );
+    assert.equal(
+      await frame.locator("html").evaluate(() =>
+        window.__replayMessages.filter((message) => message.type === "INIT_ISSUES").length
+      ),
+      1,
+      "a terminal result stability window must not reinitialize the replay"
+    );
+    assert.equal(
+      await markerA.evaluate((marker) => marker === window.__stableReplayMarkerA),
+      true,
+      "a terminal result stability window must preserve marker DOM identity"
+    );
+    assert.equal(
+      await markerA.evaluate((marker) => document.activeElement === marker),
+      true,
+      "a terminal result stability window must preserve keyboard focus"
+    );
+    assert.equal(
+      await markerA.getAttribute("aria-describedby"),
+      keyboardDescriptionId,
+      "a terminal result stability window must preserve the marker tooltip relationship"
+    );
+    assert.equal(
+      await frame.locator(`[id="${keyboardDescriptionId}"]`).count(),
+      1,
+      "a terminal result stability window must keep the described tooltip mounted"
+    );
+    assert.equal(
+      await frame.locator("html").evaluate(() =>
+        window.__replayOutboundMessages.filter((message) => message.type === "LOCATOR_STATUS").length
+      ),
+      initialLocatorStatusCount,
+      "a terminal result stability window must not reconnect every locator"
+    );
+  }
 
   await page.mouse.move(0, 0);
   await markerB.hover();
@@ -1384,44 +1485,32 @@ async function verifyDesktop(page) {
   await page.waitForTimeout(100);
   await waitForMarkerPressed(frame, 9002);
 
-  await evidence.locator(".site-page-evidence-filter select").selectOption("HIGH");
-  const filteredInit = await waitForReplayMessage(
-    frame,
-    (message) => message.type === "INIT_ISSUES" && message.issues.length === 1
-  );
-  assert.equal(filteredInit.issues[0].id, 9002);
-  assert.equal(await frame.locator(".replay-marker").count(), 1);
-
-  await evidence.getByRole("button", { name: "마커 숨기기" }).click();
-  await waitForReplayMessage(
-    frame,
-    (message) => message.type === "SET_MARKERS_VISIBLE" && message.markersVisible === false
-  );
-  await frame.locator(".replay-marker").waitFor({ state: "detached" });
-  await evidence.getByRole("button", { name: "마커 표시" }).click();
-  await waitForReplayMessage(
-    frame,
-    (message) => message.type === "SET_MARKERS_VISIBLE" && message.markersVisible === true
-  );
-  await frame.locator(".replay-marker").waitFor({ state: "visible" });
-
   await frame.locator("#blocked-link").click();
   await page.waitForTimeout(100);
   assert.equal(page.url(), `${baseUrl}/projects/1/pages/101`);
   assert.equal(await evidence.getByText(/검사 화면 안의 링크 이동은 차단했어요/).count(), 0);
 
-  await frame.locator(".replay-marker").first().evaluate((marker) => marker.click());
+  await frame.locator('[data-issue-id="9002"]').evaluate((marker) => marker.click());
   await waitForMarkerPressed(frame, 9002);
 
-  await evidence.getByRole("button", { name: "코드", exact: true }).click();
-  const code = evidence.locator(".site-page-evidence-code-view pre code");
-  await code.waitFor();
-  assert.match(await code.textContent(), /search-copy/);
-  assert.equal(await evidence.locator(".site-page-evidence-code-view pre button").count(), 0);
-
-  await evidence.getByRole("button", { name: "페이지", exact: true }).click();
-  await waitForReplayReady(evidence);
+  assert.equal(await evidence.locator(".site-page-evidence-toolbar").count(), 0);
+  assert.equal(await evidence.locator(".site-page-evidence-code-view").count(), 0);
+  assert.equal(
+    (await getReplayMessages(frame)).filter((message) => message.type === "SET_MARKERS_VISIBLE").length,
+    0,
+    "the dashboard must not send the removed marker-visibility command"
+  );
   await verifyNoExternalReplayControls(evidence, frame);
+
+  if (verificationScope === "core") {
+    mkdirSync(outDir, { recursive: true });
+    await evidence.screenshot({ path: `${outDir}/core.png` });
+    return {
+      scope: verificationScope,
+      issueCount: initialMessage.issues.length,
+      markerCount: await frame.locator(".replay-marker").count()
+    };
+  }
 
   const dimensions = await evidence.evaluate((element) => {
     const preview = element.querySelector(".site-page-evidence-preview");
@@ -1437,10 +1526,19 @@ async function verifyDesktop(page) {
       ? contentRect.bottom - Number.parseFloat(contentStyle?.paddingBottom || "0")
       : cardRect.bottom;
     const contentInnerHeight = Math.max(1, contentInnerBottom - contentInnerTop);
+    const contentInnerWidth = contentRect
+      ? Math.max(
+          1,
+          contentRect.width -
+            Number.parseFloat(contentStyle?.paddingLeft || "0") -
+            Number.parseFloat(contentStyle?.paddingRight || "0")
+        )
+      : cardRect.width;
     return {
       cardWidth: cardRect.width,
       cardHeight: cardRect.height,
       cardFillRatio: cardRect.height / contentInnerHeight,
+      contentInnerWidth,
       unusedBottom: Math.max(0, contentInnerBottom - cardRect.bottom),
       viewportHeight: window.innerHeight,
       previewWidth: preview?.getBoundingClientRect().width ?? 0,
@@ -1453,7 +1551,10 @@ async function verifyDesktop(page) {
         : 0
     };
   });
-  assert.ok(dimensions.cardWidth > 900);
+  assert.ok(
+    dimensions.cardWidth >= dimensions.contentInnerWidth * 0.65,
+    `desktop evidence dimensions: ${JSON.stringify(dimensions)}`
+  );
   assert.ok(dimensions.cardFillRatio >= 0.9);
   assert.ok(dimensions.unusedBottom <= Math.max(4, dimensions.viewportHeight * 0.01));
   assert.ok(dimensions.previewHeight >= dimensions.viewportHeight * 0.75);
@@ -1466,266 +1567,9 @@ async function verifyDesktop(page) {
   mkdirSync(outDir, { recursive: true });
   await evidence.screenshot({ path: `${outDir}/desktop.png` });
 
-  const initCountBeforeSemanticChange = await frame.locator("html").evaluate(() =>
-    window.__replayMessages.filter((message) => message.type === "INIT_ISSUES").length
-  );
-  const requestFetchCountBeforeSemanticChange = dashboardRequestFetchCount;
-  const issueFetchCountBeforeSemanticChange = issueResponseFetchCount;
-  issueResponseMode = "semantic-change";
-  await advanceBrowserClockPastResultCache(page);
-  await waitForDashboardRequestFetch(requestFetchCountBeforeSemanticChange + 1);
-  await waitForIssueResponseFetch(issueFetchCountBeforeSemanticChange + 1);
-  const changedInit = await waitForReplayMessage(
-    frame,
-    (message) =>
-      message.type === "INIT_ISSUES" &&
-      message.issues.some(
-        (issue) =>
-          issue.id === 9002 &&
-          issue.message.includes("[semantic revision]") &&
-          issue.pathSteps?.[0]?.selector === "#search-button"
-      ),
-    7_000
-  );
-  assert.equal(changedInit.issues.length, 1, "the active HIGH filter must remain applied after a semantic poll");
-  assert.equal(
-    await frame.locator("html").evaluate(() =>
-      window.__replayMessages.filter((message) => message.type === "INIT_ISSUES").length
-    ),
-    initCountBeforeSemanticChange + 1,
-    "a real issue payload and locator change must initialize the replay exactly once"
-  );
-  issueResponseMode = "replay";
   return dimensions;
 }
 
-async function verifySeverityFilterClearsStaleSelection(page) {
-  issueResponseMode = "low-only";
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.reload({ waitUntil: "domcontentloaded" });
-
-  const evidence = page.locator(".site-page-evidence-card");
-  await evidence.waitFor({ state: "visible" });
-  await waitForReplayReady(evidence);
-  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
-  const severitySelect = evidence.locator(".site-page-evidence-filter select");
-  const lowIssue = lowOnlyIssues[0];
-
-  const initialInit = await waitForReplayMessage(
-    frame,
-    (message) => message.type === "INIT_ISSUES" && message.issues.length === 1
-  );
-  assert.equal(initialInit.issues[0].id, lowIssue.id);
-  assert.equal(initialInit.issues[0].severity, "LOW");
-  assert.equal(initialInit.selectedIssueId, lowIssue.id);
-
-  await severitySelect.selectOption("LOW");
-  await page.waitForTimeout(80);
-  assert.equal(
-    (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
-    1,
-    "ALL -> LOW must not reinitialize an identical visible issue list"
-  );
-
-  let lowMarker = frame.locator(`[data-issue-id="${lowIssue.id}"]`);
-  await lowMarker.hover();
-  await waitForMarkerPressed(frame, lowIssue.id);
-  await lowMarker.focus();
-  const keyboardDescriptionId = await lowMarker.getAttribute("aria-describedby");
-  assert.ok(keyboardDescriptionId, "keyboard focus must expose the LOW marker description");
-  assert.equal(await frame.locator(`[id="${keyboardDescriptionId}"]`).count(), 1);
-
-  const retiredDocumentToken = await frame.locator("html").evaluate(() => window.__replayDocumentToken);
-  await frame.locator("html").evaluate(() => {
-    setTimeout(() => window.location.reload(), 0);
-  });
-  const activeDocumentToken = await waitForNewReplayDocumentToken(frame, retiredDocumentToken);
-  assert.notEqual(activeDocumentToken, retiredDocumentToken);
-  await waitForReplayConnectionState(evidence, "ready");
-  await waitForReplayReady(evidence);
-
-  lowMarker = frame.locator(`[data-issue-id="${lowIssue.id}"]`);
-  await lowMarker.hover();
-  await waitForMarkerPressed(frame, lowIssue.id);
-  await lowMarker.focus();
-  assert.ok(await lowMarker.getAttribute("aria-describedby"));
-
-  const messagesBeforeEmptyFilter = await getReplayMessages(frame);
-  const initCountBeforeEmptyFilter = messagesBeforeEmptyFilter.filter(
-    (message) => message.type === "INIT_ISSUES"
-  ).length;
-  const focusCountBeforeEmptyFilter = messagesBeforeEmptyFilter.filter(
-    (message) => message.type === "FOCUS_ISSUE"
-  ).length;
-
-  await severitySelect.evaluate((select) => {
-    select.value = "CRITICAL";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
-  const criticalInit = await waitForReplayMessage(
-    frame,
-    (message) => message.type === "INIT_ISSUES" && message.issues.length === 0
-  );
-  assert.equal(criticalInit.selectedIssueId, null, "an empty severity filter must clear selection");
-  assert.equal(await severitySelect.inputValue(), "CRITICAL");
-  assert.equal(await frame.locator(".replay-marker").count(), 0);
-  assert.equal(await frame.locator("[data-replay-selected]").count(), 0);
-  assert.equal(await frame.locator("[data-replay-marker-description]").count(), 0);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
-
-  const messagesAfterCritical = await getReplayMessages(frame);
-  assert.equal(
-    messagesAfterCritical.filter((message) => message.type === "INIT_ISSUES").length,
-    initCountBeforeEmptyFilter + 1,
-    "LOW -> empty CRITICAL must initialize the semantically changed issue list once"
-  );
-  const criticalFocusMessages = messagesAfterCritical
-    .filter((message) => message.type === "FOCUS_ISSUE")
-    .slice(focusCountBeforeEmptyFilter);
-  assert.ok(criticalFocusMessages.length <= 1, "empty filtering must not churn FOCUS_ISSUE");
-  assert.equal(
-    criticalFocusMessages.every((message) => message.issueId === null),
-    true,
-    "the only optional focus update for an empty filter is an explicit clear"
-  );
-
-  const initCountBeforeEquivalentEmptyFilter = messagesAfterCritical.filter(
-    (message) => message.type === "INIT_ISSUES"
-  ).length;
-  const focusCountBeforeEquivalentEmptyFilter = messagesAfterCritical.filter(
-    (message) => message.type === "FOCUS_ISSUE"
-  ).length;
-  await severitySelect.selectOption("HIGH");
-  await page.waitForTimeout(120);
-  const messagesAfterHigh = await getReplayMessages(frame);
-  assert.equal(await severitySelect.inputValue(), "HIGH");
-  assert.equal(
-    messagesAfterHigh.filter((message) => message.type === "INIT_ISSUES").length,
-    initCountBeforeEquivalentEmptyFilter,
-    "CRITICAL -> HIGH must not reinitialize the same empty issue list"
-  );
-  assert.equal(
-    messagesAfterHigh.filter((message) => message.type === "FOCUS_ISSUE").length,
-    focusCountBeforeEquivalentEmptyFilter,
-    "switching between equivalent empty filters must not repeat focus clearing"
-  );
-
-  await sendRawReplayTestMessage(frame, {
-    type: "ISSUE_SELECTED",
-    issueId: lowIssue.id,
-    documentToken: retiredDocumentToken
-  });
-  await page.waitForTimeout(100);
-  const messagesAfterRetiredSelection = await getReplayMessages(frame);
-  assert.equal(
-    messagesAfterRetiredSelection.filter((message) => message.type === "FOCUS_ISSUE").length,
-    focusCountBeforeEquivalentEmptyFilter,
-    "a retired document token must not restore the filtered LOW selection"
-  );
-  assert.equal(await frame.locator(".replay-marker").count(), 0);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
-
-  const focusCountBeforeActiveSelection = messagesAfterRetiredSelection.filter(
-    (message) => message.type === "FOCUS_ISSUE"
-  ).length;
-  await sendRawReplayTestMessage(frame, {
-    type: "ISSUE_SELECTED",
-    issueId: lowIssue.id,
-    documentToken: activeDocumentToken
-  });
-  await page.waitForTimeout(100);
-  assert.equal(
-    (await getReplayMessages(frame)).filter((message) => message.type === "FOCUS_ISSUE").length,
-    focusCountBeforeActiveSelection,
-    "the active replay document must not restore an issue excluded by the current filter"
-  );
-  assert.equal(await frame.locator(".replay-marker").count(), 0);
-  assert.equal(await frame.locator("[data-replay-selected]").count(), 0);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
-
-  const viewButtons = evidence.locator(".site-page-evidence-view-switch button");
-  await viewButtons.nth(1).click();
-  let codeView = evidence.locator(".site-page-evidence-code-view");
-  await codeView.waitFor({ state: "visible" });
-  assert.equal(await codeView.locator("pre").count(), 0, "empty HIGH must not expose stale LOW code");
-  assert.equal(await codeView.locator(".site-page-evidence-code-empty").count(), 1);
-  const filteredCodeText = await codeView.textContent();
-  assert.doesNotMatch(filteredCodeText ?? "", new RegExp(lowOnlyIssueTitle));
-  assert.doesNotMatch(filteredCodeText ?? "", /LOW_ONLY_CODE_SENTINEL/);
-
-  await viewButtons.nth(0).click();
-  await waitForReplayConnectionState(evidence, "ready");
-  const emptyRemountInit = await waitForReplayMessage(
-    frame,
-    (message) => message.type === "INIT_ISSUES" && message.issues.length === 0
-  );
-  assert.equal(emptyRemountInit.selectedIssueId, null);
-
-  await page.mouse.move(0, 0);
-  const initCountBeforeAll = (await getReplayMessages(frame)).filter(
-    (message) => message.type === "INIT_ISSUES"
-  ).length;
-  await severitySelect.selectOption("ALL");
-  const restoredInit = await waitForReplayMessage(
-    frame,
-    (message) =>
-      message.type === "INIT_ISSUES" &&
-      message.issues.length === 1 &&
-      message.selectedIssueId === null
-  );
-  assert.equal(restoredInit.issues[0].id, lowIssue.id);
-  assert.equal(
-    (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
-    initCountBeforeAll + 1,
-    "empty -> ALL must restore the marker list with one semantic INIT"
-  );
-  lowMarker = frame.locator(`[data-issue-id="${lowIssue.id}"]`);
-  await lowMarker.waitFor({ state: "visible" });
-  assert.equal(await lowMarker.getAttribute("aria-pressed"), "false");
-  assert.equal(await frame.locator("[data-replay-selected]").count(), 0);
-  assert.equal(await frame.locator("[data-replay-marker-description]").count(), 0);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
-
-  await viewButtons.nth(1).click();
-  codeView = evidence.locator(".site-page-evidence-code-view");
-  await codeView.waitFor({ state: "visible" });
-  assert.equal(await codeView.locator("pre").count(), 0, "ALL restore must keep code detail empty");
-  assert.equal(await codeView.locator(".site-page-evidence-code-empty").count(), 1);
-  const emptyCodeText = await codeView.textContent();
-  assert.doesNotMatch(emptyCodeText ?? "", new RegExp(lowOnlyIssueTitle));
-  assert.doesNotMatch(emptyCodeText ?? "", /LOW_ONLY_CODE_SENTINEL/);
-
-  await viewButtons.nth(0).click();
-  await waitForReplayReady(evidence);
-  const restoredFrame = page.frameLocator("iframe.site-page-evidence-replay-frame");
-  const restoredFrameMessages = await getReplayMessages(restoredFrame);
-  const initCountBeforeLowSelection = restoredFrameMessages.filter(
-    (message) => message.type === "INIT_ISSUES"
-  ).length;
-  await severitySelect.selectOption("LOW");
-  await waitForMarkerPressed(restoredFrame, lowIssue.id);
-  const messagesAfterLowSelection = await getReplayMessages(restoredFrame);
-  assert.equal(
-    messagesAfterLowSelection.filter((message) => message.type === "INIT_ISSUES").length,
-    initCountBeforeLowSelection,
-    "ALL -> LOW must keep the identical marker list mounted"
-  );
-  assert.equal(
-    messagesAfterLowSelection.filter(
-      (message) => message.type === "FOCUS_ISSUE" && message.issueId === lowIssue.id
-    ).length,
-    1,
-    "a concrete non-empty filter may select its deterministic first valid issue once"
-  );
-
-  await viewButtons.nth(1).click();
-  const selectedCode = evidence.locator(".site-page-evidence-code-view");
-  await selectedCode.locator("pre code").waitFor({ state: "visible" });
-  assert.match(await selectedCode.textContent(), new RegExp(lowOnlyIssueTitle));
-  assert.match(await selectedCode.locator("pre code").textContent(), /LOW_ONLY_CODE_SENTINEL/);
-
-  issueResponseMode = "replay";
-}
 
 async function verifyLegacyArtifactRejected(page) {
   artifactResponseMode = "legacy-png";
@@ -1734,7 +1578,10 @@ async function verifyLegacyArtifactRejected(page) {
   await evidence.waitFor({ state: "visible" });
   const artifactAlert = evidence.getByRole("alert");
   await artifactAlert.waitFor({ state: "visible" });
-  assert.match(await artifactAlert.textContent(), /페이지 재현 화면 응답 형식이 올바르지 않습니다/);
+  assert.match(
+    await artifactAlert.textContent(),
+    /서버 응답 계약이 올바르지 않습니다.*captureMode/
+  );
   assert.equal(await evidence.locator("iframe").count(), 0);
   artifactResponseMode = "replay";
 }
@@ -1759,56 +1606,17 @@ async function verifyResponsiveWidths(page) {
 
     const facts = await page.evaluate(() => {
       const card = document.querySelector(".site-page-evidence-card");
-      const toolbar = document.querySelector(".site-page-evidence-toolbar");
       const preview = document.querySelector(".site-page-evidence-preview");
       const frameElement = document.querySelector(".site-page-evidence-replay-frame");
-      const controls = [...document.querySelectorAll(
-        ".site-page-evidence-toolbar button, .site-page-evidence-toolbar select"
-      )];
-      const controlRects = controls.map((control) => {
-        const rect = control.getBoundingClientRect();
-        return {
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height
-        };
-      });
-      const overlaps = [];
-      for (let index = 0; index < controlRects.length; index += 1) {
-        for (let candidateIndex = index + 1; candidateIndex < controlRects.length; candidateIndex += 1) {
-          const first = controlRects[index];
-          const second = controlRects[candidateIndex];
-          if (
-            first.left < second.right - 1 &&
-            first.right > second.left + 1 &&
-            first.top < second.bottom - 1 &&
-            first.bottom > second.top + 1
-          ) {
-            overlaps.push([index, candidateIndex]);
-          }
-        }
-      }
       const cardRect = card?.getBoundingClientRect();
-      const toolbarRect = toolbar?.getBoundingClientRect();
       return {
         viewportWidth: window.innerWidth,
         documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
         cardLeft: cardRect?.left ?? 0,
         cardRight: cardRect?.right ?? 0,
-        toolbarScrollOverflow: toolbar ? toolbar.scrollWidth - toolbar.clientWidth : 0,
-        clippedControls: controlRects.filter((rect) =>
-          toolbarRect && (
-            rect.left < toolbarRect.left - 1 ||
-            rect.right > toolbarRect.right + 1 ||
-            rect.top < toolbarRect.top - 1 ||
-            rect.bottom > toolbarRect.bottom + 1
-          )
+        removedToolbarFeatureCount: document.querySelectorAll(
+          ".site-page-evidence-toolbar, .site-page-evidence-view-switch, .site-page-evidence-filter, .site-page-evidence-marker-toggle, .site-page-evidence-code-view"
         ).length,
-        overlaps,
-        controlCount: controls.length,
         externalPagerCount: document.querySelectorAll(
           ".site-page-evidence-slider-controls, .site-page-evidence-slider-status, .site-page-evidence-slider-button"
         ).length,
@@ -1825,13 +1633,10 @@ async function verifyResponsiveWidths(page) {
 
     assert.ok(facts.documentOverflow <= 1, `${viewport.width}px viewport has document overflow`);
     assert.ok(facts.cardLeft >= -1 && facts.cardRight <= facts.viewportWidth + 1);
-    assert.ok(facts.toolbarScrollOverflow <= 1, `${viewport.width}px toolbar is horizontally clipped`);
-    assert.equal(facts.clippedControls, 0, `${viewport.width}px toolbar clips a control`);
-    assert.deepEqual(facts.overlaps, [], `${viewport.width}px toolbar controls overlap`);
+    assert.equal(facts.removedToolbarFeatureCount, 0, `${viewport.width}px must not render removed toolbar features`);
     assert.equal(facts.externalPagerCount, 0, `${viewport.width}px must not render an external replay pager`);
     assert.equal(facts.inspectorCount, 0, `${viewport.width}px must not render the removed inspector`);
     assert.equal(facts.gridColumnCount, 1, `${viewport.width}px replay layout must remain single-column`);
-    assert.equal(facts.controlCount, 4, `${viewport.width}px must expose only the page/code/filter/marker controls`);
     assert.ok(facts.previewFrameDelta <= 2);
     let fallback = null;
     if (viewport.width <= 768) {
@@ -1912,13 +1717,14 @@ async function verifyMobile(page) {
     const evidenceElement = document.querySelector(".site-page-evidence-card");
     const preview = document.querySelector(".site-page-evidence-preview");
     const frameElement = document.querySelector(".site-page-evidence-replay-frame");
-    const toolbarButtons = [...document.querySelectorAll(".site-page-evidence-toolbar button")];
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       evidenceWidth: evidenceElement?.getBoundingClientRect().width ?? 0,
       previewWidth: preview?.getBoundingClientRect().width ?? 0,
       frameWidth: frameElement?.getBoundingClientRect().width ?? 0,
-      controlHeights: toolbarButtons.map((button) => button.getBoundingClientRect().height),
+      removedToolbarFeatureCount: document.querySelectorAll(
+        ".site-page-evidence-toolbar, .site-page-evidence-view-switch, .site-page-evidence-filter, .site-page-evidence-marker-toggle, .site-page-evidence-code-view"
+      ).length,
       externalPagerCount: document.querySelectorAll(
         ".site-page-evidence-slider-controls, .site-page-evidence-slider-status, .site-page-evidence-slider-button"
       ).length
@@ -1928,8 +1734,7 @@ async function verifyMobile(page) {
   assert.ok(facts.evidenceWidth <= 320);
   assert.ok(Math.abs(facts.previewWidth - facts.frameWidth) <= 2);
   assert.equal(facts.externalPagerCount, 0, "mobile must not render an external replay pager");
-  assert.equal(facts.controlHeights.length, 3, "mobile must expose only page/code/marker buttons");
-  assert.ok(facts.controlHeights.every((height) => height >= 44));
+  assert.equal(facts.removedToolbarFeatureCount, 0, "mobile must not render removed toolbar features");
 
   const initialMessages = (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES");
   const initialInitCount = initialMessages.length;
@@ -1944,17 +1749,16 @@ async function verifyMobile(page) {
   );
   await evidence.screenshot({ path: `${outDir}/mobile-fallback.png` });
 
+  await sendReplayTestMessage(frame, { type: "ISSUE_DETAIL_FALLBACK", issueId: null });
+  await waitForNoFallbackDetail(evidence);
   const scrollBeforeSelection = await page.evaluate(() => {
-    const select = document.querySelector(".site-page-evidence-filter select");
-    select.focus({ preventScroll: true });
     const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
     window.scrollTo(0, Math.min(240, Math.floor(maxScroll / 2)));
-    const before = window.scrollY;
-    select.value = "HIGH";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    return before;
+    return window.scrollY;
   });
   assert.ok(scrollBeforeSelection > 0, "mobile fixture must have an outer scroll range");
+  await frame.locator('[data-issue-id="9002"]').evaluate((marker) => marker.click());
+  await waitForMarkerPressed(frame, 9002);
   await page.waitForTimeout(150);
   const scrollAfterSelection = await page.evaluate(() => window.scrollY);
   assert.ok(
@@ -1962,35 +1766,10 @@ async function verifyMobile(page) {
     `issue synchronization moved the outer page: ${scrollBeforeSelection} -> ${scrollAfterSelection}`
   );
   assert.equal(
-    await evidence.locator(".site-page-evidence-filter select").evaluate((element) => document.activeElement === element),
-    true,
-    "issue synchronization stole focus from the dashboard control"
-  );
-  await waitForNoFallbackDetail(evidence);
-  await evidence.locator(".site-page-evidence-filter select").selectOption("ALL");
-  await page.waitForTimeout(80);
-  assert.equal(
     await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(),
     0,
-    "restoring a filtered issue must not resurrect stale fallback details"
+    "issue synchronization must not resurrect stale fallback details"
   );
-
-  await sendReplayTestMessage(frame, { type: "ISSUE_DETAIL_FALLBACK", issueId: 9001 });
-  await evidence.locator(FALLBACK_DETAIL_SELECTOR).waitFor({ state: "visible" });
-  await evidence.getByRole("button", { name: "마커 숨기기" }).click();
-  await waitForNoFallbackDetail(evidence);
-  await evidence.getByRole("button", { name: "마커 표시" }).click();
-  await page.waitForTimeout(80);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0, "marker restore must not resurrect details");
-
-  await sendReplayTestMessage(frame, { type: "ISSUE_DETAIL_FALLBACK", issueId: 9001 });
-  await evidence.locator(FALLBACK_DETAIL_SELECTOR).waitFor({ state: "visible" });
-  await evidence.getByRole("button", { name: "코드", exact: true }).click();
-  await waitForNoFallbackDetail(evidence);
-  await evidence.getByRole("button", { name: "페이지", exact: true }).click();
-  await waitForReplayReady(evidence);
-  await page.waitForTimeout(80);
-  assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0, "view restore must not resurrect details");
 
   let reloadedFrame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   await sendReplayTestMessage(reloadedFrame, { type: "ISSUE_DETAIL_FALLBACK", issueId: 9001 });
@@ -2026,12 +1805,15 @@ page.on("pageerror", (error) => pageErrors.push(error.message));
 try {
   await installFixture(page);
   const desktop = await verifyDesktop(page);
-  await verifySeverityFilterClearsStaleSelection(page);
-  await verifyLegacyArtifactRejected(page);
-  const responsive = await verifyResponsiveWidths(page);
-  const mobile = await verifyMobile(page);
+  let responsive = null;
+  let mobile = null;
+  if (verificationScope === "full") {
+    await verifyLegacyArtifactRejected(page);
+    responsive = await verifyResponsiveWidths(page);
+    mobile = await verifyMobile(page);
+  }
   assert.deepEqual(pageErrors, []);
-  console.log(JSON.stringify({ result: "PASS", desktop, responsive, mobile }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, desktop, responsive, mobile }, null, 2));
 } finally {
   await page.close();
   await browser.close();

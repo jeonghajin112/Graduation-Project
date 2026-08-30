@@ -1,23 +1,28 @@
 /**
  * Verifies the current editorial landing surface: responsive display type,
  * 44px actions, rounded stage surface, off-black ink, 3px keyboard focus,
- * and no horizontal overflow from 320 to 1440.
+ * and no horizontal overflow from 320 through 4K.
  *
- * Usage: BASE_URL=http://localhost:41920 node scripts/verify-landing-design.mjs
+ * Usage: npm run test:visual
  */
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { installDashboardApiFixture } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://localhost:41920";
+const baseUrl = resolveTestBaseUrl();
 const outDir = process.env.OUT_DIR ?? "artifacts/design-migration/landing";
+mkdirSync(outDir, { recursive: true });
 
-const HERO_MIN_PX = 36;
-const HERO_MAX_PX = 136;
+const HERO_MIN_PX = 30;
+const HERO_MAX_PX = 86;
+const HERO_ULTRAWIDE_MAX_PX = 100;
 const CONTROL_MIN_HEIGHT_PX = 44;
 const STAGE_MIN_RADIUS_PX = 20;
 
 const viewports = [
+  { width: 3840, height: 2160 },
   { width: 1440, height: 900 },
   { width: 1024, height: 900 },
   { width: 768, height: 900 },
@@ -115,14 +120,183 @@ async function readLandingFacts(page) {
       heroHeadline: read(".ua-hero__headline", ["fontSize"]),
       hero: read(".ua-hero", ["backgroundColor"]),
       principles: read(".ua-boundary", ["backgroundColor"]),
-      stage: read(".ua-stage__page", ["borderTopLeftRadius"]),
+      stage: read(".ua-stage__surface", ["borderTopLeftRadius"]),
       primaryAction: read(".ua-hero__copy .ua-action", ["borderTopLeftRadius", "minHeight", "display"]),
       outlineAction: read(".ua-rail-button", ["borderTopLeftRadius", "minHeight", "display"]),
       heroLogin: read(".ua-text-action[data-login-cta]", ["borderTopLeftRadius", "minHeight", "display"]),
-      eyebrow: read(".ua-hero__name", ["borderTopLeftRadius"]),
       severity,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
+  });
+}
+
+async function readDashboardSignature(root) {
+  return root.evaluate((rootElement) => {
+    const documentElement = rootElement.ownerDocument.documentElement;
+    const view = rootElement.ownerDocument.defaultView;
+    const rootRect = rootElement.getBoundingClientRect();
+    const round = (value) => Math.round(value * 4) / 4;
+    const read = (selector, styleKeys = []) => {
+      const element = selector === ":scope"
+        ? rootElement
+        : rootElement.querySelector(selector);
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const result = {
+        x: round(rect.x - rootRect.x),
+        y: round(rect.y - rootRect.y),
+        width: round(rect.width),
+        height: round(rect.height)
+      };
+      for (const key of styleKeys) {
+        result[key] = style[key];
+      }
+      return result;
+    };
+    const cards = [...rootElement.querySelectorAll(".dashboard-project-card")];
+    const selectedItems = [...rootElement.querySelectorAll('[aria-current="page"]')];
+
+    return {
+      viewport: {
+        innerWidth: view?.innerWidth ?? null,
+        innerHeight: view?.innerHeight ?? null,
+        clientWidth: documentElement.clientWidth,
+        clientHeight: documentElement.clientHeight
+      },
+      root: read(":scope", ["fontSize", "lineHeight", "backgroundColor"]),
+      shell: read(".dashboard-shell", ["display", "flexDirection"]),
+      sidebar: read("aside", [
+        "position",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft"
+      ]),
+      accountTrigger: read(".dashboard-account-menu-trigger", ["fontSize", "columnGap"]),
+      analyzeNav: read(".sidebar-nav-link", [
+        "fontSize",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "borderTopLeftRadius"
+      ]),
+      projectRow: read(".sidebar-tree-parent-row", [
+        "fontSize",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "borderTopLeftRadius"
+      ]),
+      main: read("main"),
+      topZone: read(".dashboard-top-zone", ["paddingLeft", "paddingRight"]),
+      contentZone: read(".dashboard-content-zone", ["paddingLeft", "paddingRight"]),
+      projectTitle: read(".dashboard-project-title", ["fontSize", "lineHeight"]),
+      projectAddButton: read(".dashboard-project-add-button", ["fontSize", "borderTopLeftRadius"]),
+      grid: read(".dashboard-project-grid", ["gridTemplateColumns", "columnGap", "rowGap"]),
+      card: read(".dashboard-project-card", ["paddingTop", "paddingRight", "borderTopLeftRadius"]),
+      favicon: read(".dashboard-project-favicon", ["borderTopLeftRadius"]),
+      cardTitle: read(".dashboard-project-card-title", ["fontSize", "lineHeight", "whiteSpace"]),
+      cardMeta: read(".dashboard-project-card-meta", ["fontSize", "lineHeight"]),
+      cardUrl: read(".dashboard-project-card-url", ["fontSize", "lineHeight"]),
+      cardScore: read(".dashboard-project-card-score", ["fontSize", "lineHeight"]),
+      cardStatus: read(".dashboard-project-card-status", ["fontSize", "lineHeight"]),
+      cardWidths: cards.map((card) => round(card.getBoundingClientRect().width)),
+      selectedLabels: selectedItems.map((item) => item.textContent?.trim() ?? ""),
+      overflowX: documentElement.scrollWidth - documentElement.clientWidth
+    };
+  });
+}
+
+function readSharedDashboardLayout(signature) {
+  const select = (box, keys) => {
+    if (!box) return null;
+    return Object.fromEntries(keys.map((key) => [key, box[key]]));
+  };
+  const mainOriginY = signature.main?.y ?? 0;
+  const selectInMain = (box, keys) => {
+    const selected = select(box, keys);
+    return selected && "y" in selected
+      ? { ...selected, y: selected.y - mainOriginY }
+      : selected;
+  };
+
+  return {
+    viewport: signature.viewport,
+    root: select(signature.root, ["width", "fontSize", "lineHeight", "backgroundColor"]),
+    shell: select(signature.shell, ["x", "y", "width", "display", "flexDirection"]),
+    sidebar: select(signature.sidebar, [
+      "x",
+      "y",
+      "width",
+      "position",
+      "paddingTop",
+      "paddingRight",
+      "paddingBottom",
+      "paddingLeft"
+    ]),
+    accountTrigger: signature.accountTrigger,
+    analyzeNav: signature.analyzeNav,
+    projectRow: signature.projectRow,
+    main: selectInMain(signature.main, ["x", "y", "width"]),
+    topZone: selectInMain(signature.topZone, [
+      "x",
+      "y",
+      "width",
+      "height",
+      "paddingLeft",
+      "paddingRight"
+    ]),
+    contentZone: selectInMain(signature.contentZone, [
+      "x",
+      "y",
+      "width",
+      "paddingLeft",
+      "paddingRight"
+    ]),
+    projectTitle: selectInMain(signature.projectTitle, [
+      "x",
+      "y",
+      "fontSize",
+      "lineHeight"
+    ]),
+    projectAddButton: signature.projectAddButton,
+    grid: signature.grid
+      ? {
+          ...selectInMain(signature.grid, ["x", "y", "width", "columnGap", "rowGap"]),
+          columnWidths: signature.grid.gridTemplateColumns
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((value) => Math.round(Number.parseFloat(value) * 4) / 4)
+        }
+      : null,
+    card: selectInMain(signature.card, [
+      "x",
+      "y",
+      "width",
+      "height",
+      "paddingTop",
+      "paddingRight",
+      "borderTopLeftRadius"
+    ]),
+    cardTitle: select(signature.cardTitle, ["fontSize", "lineHeight", "whiteSpace"]),
+    favicon: select(signature.favicon, ["width", "height", "borderTopLeftRadius"]),
+    cardMeta: select(signature.cardMeta, ["fontSize", "lineHeight"]),
+    cardUrl: select(signature.cardUrl, ["fontSize", "lineHeight"]),
+    cardScore: select(signature.cardScore, ["fontSize", "lineHeight"]),
+    cardStatus: select(signature.cardStatus, ["fontSize", "lineHeight"]),
+    overflowX: signature.overflowX
+  };
+}
+
+async function settleDocument(locator) {
+  await locator.evaluate(async (element) => {
+    await element.ownerDocument.fonts.ready;
+    const view = element.ownerDocument.defaultView;
+    await new Promise((resolve) => view?.requestAnimationFrame(() => resolve()));
+    await new Promise((resolve) => view?.requestAnimationFrame(() => resolve()));
   });
 }
 
@@ -146,24 +320,74 @@ const report = [];
 
 try {
   for (const viewport of viewports) {
-    const page = await browser.newPage({ viewport });
+    const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
+    let unexpectedApiRequestCount = 0;
+    await page.route("**/api/**", async (route) => {
+      unexpectedApiRequestCount += 1;
+      await route.abort("blockedbyclient");
+    });
     await page.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
     await page.locator(".ua-hero__headline").waitFor();
-    await page.waitForTimeout(300);
+    const productPreviewRoot = page
+      .frameLocator(".ua-stage__frame")
+      .locator('[data-dashboard-product-preview="true"]');
+    await productPreviewRoot.waitFor();
+    await settleDocument(productPreviewRoot);
 
     const facts = await readLandingFacts(page);
     const label = `${viewport.width}x${viewport.height}`;
+    const frameViewport = await page.locator(".ua-stage__frame").evaluate((frame) => ({
+      width: frame.clientWidth,
+      height: frame.clientHeight
+    }));
+    const embeddedDashboard = await readDashboardSignature(productPreviewRoot);
+    const referencePage = await browser.newPage({
+      viewport: frameViewport,
+      reducedMotion: "reduce"
+    });
+    const referenceFixture = await installDashboardApiFixture(referencePage);
+    await referencePage.goto(
+      `${baseUrl}/projects/${referenceFixture.organization.id}`,
+      { waitUntil: "networkidle" }
+    );
+    const actualDashboardRoot = referencePage.locator(".bridge-dashboard");
+    await actualDashboardRoot.waitFor();
+    await actualDashboardRoot.locator(".dashboard-project-grid").waitFor();
+    await settleDocument(actualDashboardRoot);
+    const referenceDashboard = await readDashboardSignature(actualDashboardRoot);
+    referenceFixture.assertIsolated();
+    await referencePage.close();
+
+    const productPreview = {
+      cardCount: embeddedDashboard.cardWidths.length,
+      cardWidths: embeddedDashboard.cardWidths,
+      columnCount: embeddedDashboard.grid?.gridTemplateColumns.split(/\s+/).filter(Boolean).length ?? 0,
+      gridWidth: embeddedDashboard.grid?.width ?? 0,
+      titleWhiteSpace: embeddedDashboard.cardTitle?.whiteSpace ?? null
+    };
 
     assert.ok(facts.heroHeadline, `${label}: hero headline missing`);
     assert.ok(facts.hero, `${label}: hero section missing`);
     assert.ok(facts.stage, `${label}: stage surface missing`);
     assert.ok(facts.primaryAction, `${label}: primary CTA missing`);
+    assert.ok(productPreview.cardCount > 0, `${label}: product preview missing`);
+    assert.deepEqual(
+      readSharedDashboardLayout(embeddedDashboard),
+      readSharedDashboardLayout(referenceDashboard),
+      `${label}: embedded dashboard layout differs from the live project route at ${frameViewport.width}x${frameViewport.height}`
+    );
+    assert.equal(
+      unexpectedApiRequestCount,
+      0,
+      `${label}: the read-only product preview unexpectedly requested a live API`
+    );
 
     // Responsive Korean display range from the current landing type scale.
     const heroFontSize = Number.parseFloat(facts.heroHeadline.fontSize);
+    const heroMaxPx = viewport.width >= 3840 ? HERO_ULTRAWIDE_MAX_PX : HERO_MAX_PX;
     assert.ok(
-      heroFontSize >= HERO_MIN_PX && heroFontSize <= HERO_MAX_PX,
-      `${label}: hero ${heroFontSize}px outside ${HERO_MIN_PX}-${HERO_MAX_PX}px range`
+      heroFontSize >= HERO_MIN_PX && heroFontSize <= heroMaxPx,
+      `${label}: hero ${heroFontSize}px outside ${HERO_MIN_PX}-${heroMaxPx}px range`
     );
 
     // Off-black, not pure black.
@@ -217,6 +441,59 @@ try {
     }
 
     assert.ok(facts.overflow <= 0, `${label}: horizontal overflow ${facts.overflow}px`);
+    assert.equal(
+      productPreview.titleWhiteSpace,
+      "nowrap",
+      `${label}: landing typography leaked into the product card title`
+    );
+
+    if (viewport.width >= 768) {
+      assert.ok(
+        Math.min(...productPreview.cardWidths) >= 240,
+        `${label}: product cards are too narrow (${productPreview.cardWidths.join(", ")}px)`
+      );
+    }
+
+    if (viewport.width === 3840) {
+      assert.ok(
+        productPreview.columnCount >= 3,
+        `${label}: product grid did not expand for its ${frameViewport.width}px internal viewport`
+      );
+      assert.ok(
+        productPreview.cardCount >= productPreview.columnCount,
+        `${label}: project preview must fill its first card row`
+      );
+      const accountTrigger = productPreviewRoot.locator(".dashboard-account-menu-trigger");
+      await accountTrigger.click();
+      const accountMenu = productPreviewRoot.locator(".dashboard-account-menu");
+      await accountMenu.waitFor();
+      const accountMenuMetrics = await accountMenu.evaluate((menu) => {
+        const item = menu.querySelector(".dashboard-account-menu-item");
+        const icon = item?.querySelector("svg");
+        if (!item || !icon) return null;
+        return {
+          width: Math.round(menu.getBoundingClientRect().width),
+          itemFontSize: Number.parseFloat(getComputedStyle(item).fontSize),
+          iconWidth: Math.round(icon.getBoundingClientRect().width)
+        };
+      });
+      assert.ok(accountMenuMetrics, `${label}: account dropdown metrics missing`);
+      assert.ok(
+        accountMenuMetrics.width <= 240,
+        `${label}: account dropdown is too wide (${accountMenuMetrics.width}px)`
+      );
+      assert.ok(
+        accountMenuMetrics.itemFontSize <= 16,
+        `${label}: account dropdown text is too large (${accountMenuMetrics.itemFontSize}px)`
+      );
+      assert.ok(
+        accountMenuMetrics.iconWidth <= 20,
+        `${label}: account dropdown icon is too large (${accountMenuMetrics.iconWidth}px)`
+      );
+      await page.locator(".ua-stage").screenshot({ path: `${outDir}/after-account-menu-${label}.png` });
+      await accountTrigger.click();
+      await page.locator(".ua-stage").screenshot({ path: `${outDir}/after-product-preview-${label}.png` });
+    }
 
     if (viewport.width === 1440 || viewport.width === 390) {
       await page.screenshot({ path: `${outDir}/after-landing-${label}.png`, fullPage: false });
@@ -231,8 +508,7 @@ try {
       ctaRadius: {
         primary: facts.primaryAction?.borderTopLeftRadius ?? null,
         outline: facts.outlineAction?.borderTopLeftRadius ?? null,
-        login: facts.heroLogin?.borderTopLeftRadius ?? null,
-        eyebrowPill: facts.eyebrow?.borderTopLeftRadius ?? null
+        login: facts.heroLogin?.borderTopLeftRadius ?? null
       },
       ctaHeight: {
         primary: facts.primaryAction?.height ?? null,
@@ -240,6 +516,11 @@ try {
         login: facts.heroLogin?.height ?? null
       },
       severity: facts.severity ? { text: facts.severity.text, ratio: severityRatio } : null,
+      productPreview,
+      dashboardParity: {
+        frameViewport,
+        matched: true
+      },
       focus,
       overflow: facts.overflow
     });
