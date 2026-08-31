@@ -19,8 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -247,7 +249,14 @@ class EvaluationArtifactServiceIntegrationTest {
         mockMvc.perform(get("/api/results/artifacts/{artifactId}/content", artifact.getId()))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("text/html;charset=UTF-8"))
-                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("no-cache"),
+                        org.hamcrest.Matchers.containsString("private")
+                )))
+                .andExpect(header().string(HttpHeaders.ETAG, org.hamcrest.Matchers.matchesPattern(
+                        "W/\\\"sha256-[0-9a-f]{64}\\\""
+                )))
+                .andExpect(this::assertVaryAcceptEncoding)
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
                 .andExpect(header().string("Referrer-Policy", "no-referrer"))
                 .andExpect(header().string("Content-Security-Policy", org.hamcrest.Matchers.allOf(
@@ -264,6 +273,45 @@ class EvaluationArtifactServiceIntegrationTest {
                         org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("<iframe")),
                         org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("bad()"))
                 )));
+    }
+
+    @Test
+    void revalidatesCachedReplayAndChangesEtagWhenContentIsReplaced() throws Exception {
+        EvaluationRequest request = createRequest();
+        EvaluationArtifactResponse first = artifactService.replace(
+                request.getId(), metadata(), document("<main id=\"first\">First replay</main>")
+        );
+
+        MvcResult firstResponse = mockMvc.perform(get(
+                        "/api/results/artifacts/{artifactId}/content", first.id()
+                ))
+                .andExpect(status().isOk())
+                .andReturn();
+        String firstEtag = firstResponse.getResponse().getHeader(HttpHeaders.ETAG);
+        String storedSha256 = artifactRepository.findById(first.id()).orElseThrow().getSha256();
+        assertThat(firstEtag).isEqualTo("W/\"sha256-" + storedSha256 + "\"");
+
+        mockMvc.perform(get("/api/results/artifacts/{artifactId}/content", first.id())
+                        .header(HttpHeaders.IF_NONE_MATCH, firstEtag))
+                .andExpect(status().isNotModified())
+                .andExpect(header().string(HttpHeaders.ETAG, firstEtag))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("no-cache"),
+                        org.hamcrest.Matchers.containsString("private")
+                )))
+                .andExpect(this::assertVaryAcceptEncoding)
+                .andExpect(content().bytes(new byte[0]));
+
+        EvaluationArtifactResponse replacement = artifactService.replace(
+                request.getId(), metadata(), document("<main id=\"replacement\">Replacement replay</main>")
+        );
+        assertThat(replacement.id()).isEqualTo(first.id());
+
+        mockMvc.perform(get("/api/results/artifacts/{artifactId}/content", replacement.id())
+                        .header(HttpHeaders.IF_NONE_MATCH, firstEtag))
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ETAG, org.hamcrest.Matchers.not(firstEtag)))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"replacement\"")));
     }
 
     @Test
@@ -356,5 +404,10 @@ class EvaluationArtifactServiceIntegrationTest {
                 ("<!doctype html><html><head><title>Replay</title></head><body>" + html + "</body></html>")
                         .getBytes(StandardCharsets.UTF_8)
         );
+    }
+
+    private void assertVaryAcceptEncoding(MvcResult result) {
+        assertThat(result.getResponse().getHeaders(HttpHeaders.VARY))
+                .anySatisfy(value -> assertThat(value).containsIgnoringCase(HttpHeaders.ACCEPT_ENCODING));
     }
 }

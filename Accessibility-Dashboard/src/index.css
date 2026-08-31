@@ -1484,7 +1484,7 @@
   overflow: visible;
   color: #475467;
   font: 400 0.8125rem/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
-  white-space: normal;
+  white-space: pre-line;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-fallback-detail__path {
@@ -1564,6 +1564,14 @@
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-connection[data-state="error"] {
   color: var(--site-severity-high-text);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-locator-status {
+  margin: 0;
+  color: var(--dashboard-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 @container (min-width: 64rem) {

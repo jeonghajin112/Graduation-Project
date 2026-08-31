@@ -35,13 +35,19 @@ public class EvaluationArtifactQueryController {
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "html", StandardCharsets.UTF_8))
                 .contentLength(content.sizeBytes())
-                .cacheControl(CacheControl.noStore())
+                .cacheControl(CacheControl.noCache().cachePrivate())
+                .eTag(weakReplayEtag(content.sha256()))
+                .varyBy(HttpHeaders.ACCEPT_ENCODING)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"replay.html\"")
                 .header("X-Content-Type-Options", "nosniff")
                 .header("Referrer-Policy", "no-referrer")
                 .header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
                 .header("Content-Security-Policy", replayContentSecurityPolicy())
                 .body(content.resource());
+    }
+
+    private String weakReplayEtag(String sha256) {
+        return "W/\"sha256-" + sha256 + "\"";
     }
 
     private String replayContentSecurityPolicy() {

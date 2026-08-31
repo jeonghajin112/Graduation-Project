@@ -51,6 +51,20 @@ function extractBridgeScript(source) {
     .join("\n");
 }
 
+function extractBridgeStyle(source) {
+  const declaration = 'private static final String BRIDGE_STYLE = """';
+  const declarationIndex = source.indexOf(declaration);
+  assert.ok(declarationIndex >= 0, "bridge style declaration must exist");
+  const contentStart = source.indexOf("\n", declarationIndex) + 1;
+  const contentEnd = source.indexOf('\n            """;', contentStart);
+  assert.ok(contentStart > 0 && contentEnd > contentStart, "bridge style text block must be complete");
+  return source
+    .slice(contentStart, contentEnd)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^ {12}/, ""))
+    .join("\n");
+}
+
 async function sendCommand(page, message) {
   await page.evaluate((command) => {
     window.postMessage({ source: "accessibility-dashboard", ...command }, "*");
@@ -85,6 +99,7 @@ async function getSlideDomState(page) {
 }
 
 const sanitizerSource = await readFile(sanitizerPath, "utf8");
+const bridgeStyle = extractBridgeStyle(sanitizerSource);
 let bridgeScript = extractBridgeScript(sanitizerSource);
 const markerSize = extractBridgeNumber(bridgeScript, "MARKER_SIZE");
 assert.equal(markerSize, 24, "the compact replay marker contract is 24px");
@@ -173,7 +188,7 @@ try {
           .main-vi-next { right: 8px; }
         </style>
       </head>
-      <body>
+      <body style="overflow-x:scroll!important">
         <header id="fixed-header">고정 헤더</header>
         <div id="static-target">고정된 이슈</div>
         <div id="animated-target">정지 대상</div>
@@ -193,6 +208,7 @@ try {
           <div class="main-vi-prev">이전</div>
           <div class="main-vi-next">다음</div>
         </div>
+        <div id="horizontal-overflow-probe" style="position:absolute;left:0;top:760px;width:1400px;height:1px"></div>
         <a id="blocked-link" data-uni-accessibility-replay-href="https://example.com/next">차단 링크</a>
       </body>
     </html>`);
@@ -222,6 +238,7 @@ try {
       }
     });
   });
+  await page.addStyleTag({ content: bridgeStyle });
   await page.addScriptTag({ content: bridgeScript });
 
   await page.waitForFunction(() =>
@@ -262,9 +279,23 @@ try {
   );
   const unlockedScrollPosition = await page.evaluate(() => {
     window.scrollTo(0, 120);
-    return window.scrollY;
+    return {
+      x: window.scrollX,
+      y: window.scrollY,
+      hasHorizontalOverflow: document.scrollingElement.scrollWidth > document.scrollingElement.clientWidth,
+      htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+      bodyOverflowX: getComputedStyle(document.body).overflowX
+    };
   });
-  assert.ok(unlockedScrollPosition > 0, "the replay document must be scrollable after popup removal");
+  assert.equal(unlockedScrollPosition.x, 0);
+  assert.equal(
+    unlockedScrollPosition.hasHorizontalOverflow,
+    true,
+    "the regression fixture must contain content wider than the replay viewport"
+  );
+  assert.ok(["hidden", "clip"].includes(unlockedScrollPosition.htmlOverflowX));
+  assert.ok(["hidden", "clip"].includes(unlockedScrollPosition.bodyOverflowX));
+  assert.ok(unlockedScrollPosition.y > 0, "the replay document must be vertically scrollable after popup removal");
 
   const animationPositionBefore = await page.locator("#animated-target").evaluate(
     (element) => element.getBoundingClientRect().left
@@ -344,7 +375,6 @@ try {
   const pagePreviousButton = page.getByRole("button", { name: "Previous slide" });
   const pageNextButton = page.getByRole("button", { name: "Next slide" });
   await page.evaluate(() => {
-    document.body.style.setProperty("overflow", "auto", "important");
     document.body.style.setProperty("overflow-y", "auto", "important");
     window.scrollTo(0, 180);
   });

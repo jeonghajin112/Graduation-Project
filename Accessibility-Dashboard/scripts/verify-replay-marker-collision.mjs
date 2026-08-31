@@ -71,6 +71,17 @@ function overlaps(left, right) {
   );
 }
 
+function rectangleDistance(left, right) {
+  return Math.hypot(
+    Math.max(right.left - left.right, left.left - right.right, 0),
+    Math.max(right.top - left.bottom, left.top - right.bottom, 0)
+  );
+}
+
+function markerTargetDistance(marker, targetRects) {
+  return Math.min(...targetRects.map((targetRect) => rectangleDistance(marker, targetRect)));
+}
+
 function assertRectClose(actual, expected, message, tolerance = 0.75) {
   for (const edge of ["left", "top", "right", "bottom", "width", "height"]) {
     assert.ok(
@@ -146,7 +157,7 @@ function assertSelectionFragmentsMatch(geometry, message) {
     assert.equal(fragment.pointerEvents, "none");
     assert.equal(fragment.borderWidth, "3px");
     assert.equal(fragment.borderStyle, "solid");
-    assert.equal(fragment.borderColor, "rgb(229, 72, 77)");
+    assert.equal(fragment.borderColor, "rgb(0, 102, 204)");
     assert.equal(fragment.tabIndex, -1);
     assert.equal(fragment.hasTabIndex, false);
   });
@@ -241,6 +252,14 @@ try {
             width: 80px;
             font: 8px/4px system-ui, sans-serif;
           }
+          #weather-label, #weather-temperature, #stock-strip {
+            box-sizing: border-box;
+            position: absolute;
+            display: block;
+          }
+          #weather-label { left: 120px; top: 620px; width: 20px; height: 20px; }
+          #weather-temperature { left: 146px; top: 620px; width: 70px; height: 20px; }
+          #stock-strip { left: 100px; top: 658px; width: 200px; height: 28px; }
           @media (min-width: 700px) {
             #inline-parent { font-size: 24px; line-height: 32px; }
           }
@@ -260,12 +279,21 @@ try {
           <div id="nested-content"><span id="nested-target">Nested scroll target</span></div>
         </div>
         <div id="fragment-stress-wrap"><span id="fragment-stress"></span></div>
+        <span id="weather-label">맑음</span>
+        <span id="weather-temperature">24°</span>
+        <div id="stock-strip">KOSPI 2,600 · USD/KRW 1,350</div>
         <script>${bridgeScript}</script>
       </body>
     </html>`);
 
   await page.waitForFunction(() => document.getElementById("__uni_accessibility_replay_host")?.shadowRoot);
   await page.evaluate(() => {
+    window.__replayOutbound = [];
+    window.addEventListener("message", (event) => {
+      if (event.data?.source === "accessibility-page-replay") {
+        window.__replayOutbound.push(JSON.parse(JSON.stringify(event.data)));
+      }
+    });
     const stressTarget = document.getElementById("fragment-stress");
     for (let index = 0; index < 129; index += 1) {
       stressTarget.append(document.createTextNode("x"));
@@ -277,9 +305,9 @@ try {
       markersVisible: true,
       selectedIssueId: 1,
       issues: [
-        { id: 1, severity: "HIGH", title: "첫 번째", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
-        { id: 2, severity: "MEDIUM", title: "두 번째", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
-        { id: 3, severity: "LOW", title: "세 번째", pathSteps: [{ context: "DOCUMENT", selector: "#nearby" }] },
+        { id: 1, severity: "HIGH", severityLabel: "높음", category: "text", code: "WCAG 3.1.5", title: "첫 번째", message: "첫 번째 문제 설명", path: "#target:first", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
+        { id: 2, severity: "MEDIUM", severityLabel: "중간", category: "visual", code: "5.4.3", title: "두 번째", message: "두 번째 문제 설명은 첫 번째보다 훨씬 길어서 여러 줄로 표시되며, 이슈를 바꿔도 팝오버의 위치와 크기가 그대로 유지되어야 합니다.", path: "#target:second > .very-long-selector > span:nth-of-type(2) > a[aria-label='accessibility detail']", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
+        { id: 3, severity: "LOW", category: "navigation", code: "6.4.3", title: "세 번째", pathSteps: [{ context: "DOCUMENT", selector: "#nearby" }] },
         { id: 4, severity: "LOW", title: "시작 경계", pathSteps: [{ context: "DOCUMENT", selector: "#edge-start" }] },
         { id: 5, severity: "LOW", title: "끝 경계", pathSteps: [{ context: "DOCUMENT", selector: "#edge-end" }] },
         { id: 6, severity: "LOW", title: "화면 밖", pathSteps: [{ context: "DOCUMENT", selector: "#off-canvas" }] },
@@ -287,13 +315,14 @@ try {
         { id: 8, severity: "HIGH", title: "링크 이름", pathSteps: [{ context: "DOCUMENT", selector: "#inline-anchor" }] },
         { id: 9, severity: "LOW", title: "RTL 위치", pathSteps: [{ context: "DOCUMENT", selector: "#rtl-target" }] },
         { id: 10, severity: "LOW", title: "내부 스크롤", pathSteps: [{ context: "DOCUMENT", selector: "#nested-target" }] },
-        { id: 11, severity: "LOW", title: "조각 상한", pathSteps: [{ context: "DOCUMENT", selector: "#fragment-stress" }] }
+        { id: 11, severity: "LOW", title: "조각 상한", pathSteps: [{ context: "DOCUMENT", selector: "#fragment-stress" }] },
+        { id: 12, severity: "LOW", category: "navigation", code: "6.4.3", title: "같은 유형 추가", pathSteps: [{ context: "DOCUMENT", selector: "#nearby" }] }
       ]
     }, "*");
   });
 
   await page.waitForFunction(() =>
-    document.getElementById("__uni_accessibility_replay_host")?.shadowRoot?.querySelectorAll(".marker").length === 11
+    document.getElementById("__uni_accessibility_replay_host")?.shadowRoot?.querySelectorAll(".marker").length === 10
   );
   await page.waitForTimeout(100);
 
@@ -303,6 +332,11 @@ try {
       const rect = marker.getBoundingClientRect();
       return {
         index: marker.dataset.markerIndex,
+        groupSize: marker.dataset.groupSize,
+        grouped: marker.dataset.grouped,
+        category: marker.dataset.markerCategory,
+        severity: marker.dataset.markerSeverity,
+        ariaLabel: marker.getAttribute("aria-label"),
         text: marker.textContent,
         hidden: marker.hidden,
         display: getComputedStyle(marker).display,
@@ -318,7 +352,24 @@ try {
   });
   const markerFacts = allMarkerFacts.filter((marker) => !marker.hidden);
 
-  assert.deepEqual(markerFacts.map((marker) => marker.index), ["1", "2", "3", "4", "5", "7", "8", "9", "10", "11"]);
+  assert.deepEqual(markerFacts.map((marker) => marker.index), ["1", "3", "4", "5", "7", "8", "9", "10", "11"]);
+  const groupedMarker = markerFacts.find((marker) => marker.index === "1");
+  assert.equal(groupedMarker?.groupSize, "2", "issues resolved to the same element must share one marker");
+  assert.equal(groupedMarker?.grouped, "true");
+  assert.equal(groupedMarker?.category, "multiple");
+  assert.equal(groupedMarker?.severity, "HIGH");
+  assert.match(groupedMarker?.ariaLabel ?? "", /접근성 문제 2개/);
+  assert.match(groupedMarker?.ariaLabel ?? "", /첫 번째/);
+  assert.match(groupedMarker?.ariaLabel ?? "", /두 번째/);
+  assert.equal(
+    allMarkerFacts.some((marker) => marker.index === "2"),
+    false,
+    "the second issue on the same target must not create a second visual marker"
+  );
+  const sameTypeGroupedMarker = markerFacts.find((marker) => marker.index === "3");
+  assert.equal(sameTypeGroupedMarker?.groupSize, "2");
+  assert.equal(sameTypeGroupedMarker?.category, "navigation");
+  assert.equal(sameTypeGroupedMarker?.severity, "LOW");
   assert.ok(allMarkerFacts.every((marker) => marker.text === ""), "markers must not expose visual sequence numbers");
   const hiddenMarker = allMarkerFacts.find((marker) => marker.index === "6");
   assert.equal(hiddenMarker?.hidden, true);
@@ -347,6 +398,10 @@ try {
         badgeBackgroundColor: badgeStyle?.backgroundColor ?? null,
         iconWidth: iconStyle?.width ?? null,
         iconHeight: iconStyle?.height ?? null,
+        category: marker.dataset.markerCategory,
+        severity: marker.dataset.markerSeverity,
+        iconName: icon?.dataset.icon ?? null,
+        iconShapeCount: icon?.children.length ?? 0,
         iconPathCount: icon?.querySelectorAll("path").length ?? 0,
         iconCircleCount: icon?.querySelectorAll("circle").length ?? 0
       };
@@ -360,9 +415,20 @@ try {
   assert.ok(issuePointGeometry.every((marker) => marker.badgeHeight === "20px"));
   assert.ok(issuePointGeometry.every((marker) => marker.iconWidth === "14px"));
   assert.ok(issuePointGeometry.every((marker) => marker.iconHeight === "14px"));
-  assert.ok(issuePointGeometry.every((marker) => marker.iconPathCount === 5));
-  assert.ok(issuePointGeometry.every((marker) => marker.iconCircleCount === 1));
-  assert.ok(issuePointGeometry.every((marker) => marker.badgeBackgroundColor === "rgba(0, 102, 204, 0.94)"));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconShapeCount > 0));
+  assert.ok(issuePointGeometry.every((marker) => marker.iconName === marker.category));
+  assert.deepEqual(
+    issuePointGeometry.map(({ category, severity, badgeBackgroundColor }) => ({
+      category,
+      severity,
+      badgeBackgroundColor
+    })),
+    [
+      { category: "multiple", severity: "HIGH", badgeBackgroundColor: "rgba(180, 35, 24, 0.96)" },
+      { category: "navigation", severity: "LOW", badgeBackgroundColor: "rgba(2, 107, 63, 0.96)" },
+      { category: "general", severity: "LOW", badgeBackgroundColor: "rgba(2, 107, 63, 0.96)" }
+    ]
+  );
   const compactMarkerScreenshotPath = path.join(
     dashboardDirectory,
     "artifacts",
@@ -392,6 +458,15 @@ try {
     window.dispatchEvent(new Event("resize"));
   });
   await page.waitForTimeout(100);
+  const groupedSelection = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    return {
+      selected: marker?.dataset.selected,
+      pressed: marker?.getAttribute("aria-pressed")
+    };
+  });
+  assert.deepEqual(groupedSelection, { selected: "true", pressed: "true" });
   const positionsAfterFocus = await page.evaluate(() => {
     const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
     return [...root.querySelectorAll(".marker:not([hidden])")].map((marker) => {
@@ -403,6 +478,311 @@ try {
     positionsAfterFocus,
     markerFacts.map((marker) => ({ left: marker.left, top: marker.top, width: marker.width, height: marker.height }))
   );
+
+  await page.evaluate(() => {
+    window.__replayOutbound.length = 0;
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    marker.dispatchEvent(new PointerEvent("pointerenter", { bubbles: true, pointerType: "mouse" }));
+  });
+  await page.waitForTimeout(80);
+  const groupedHoverState = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    const popover = root.querySelector(".issue-popover:not([hidden])");
+    return {
+      selected: marker.dataset.selected,
+      pressed: marker.getAttribute("aria-pressed"),
+      expanded: marker.getAttribute("aria-expanded"),
+      describedBy: marker.getAttribute("aria-describedby"),
+      dockHidden: root.querySelector(".issue-dock")?.hidden ?? true,
+      popover: popover ? {
+        id: popover.id,
+        issueId: popover.dataset.issueId,
+        grouped: popover.dataset.grouped,
+        group: popover.querySelector(".issue-popover__group")?.textContent,
+        severity: popover.querySelector(".issue-popover__severity")?.textContent,
+        code: popover.querySelector(".issue-popover__code")?.textContent,
+        title: popover.querySelector(".issue-popover__title")?.textContent,
+        message: popover.querySelector(".issue-popover__message")?.textContent,
+        path: popover.querySelector(".issue-popover__path")?.textContent,
+        relatedIssues: [...popover.querySelectorAll(".issue-popover__issue")].map((issue) => ({
+          issueId: issue.dataset.issueId,
+          severity: issue.querySelector(".issue-popover__issue-severity")?.textContent,
+          code: issue.querySelector(".issue-popover__issue-code")?.textContent,
+          title: issue.querySelector(".issue-popover__issue-title")?.textContent
+        })),
+        more: popover.querySelector(".issue-popover__issues-more")?.textContent ?? null
+      } : null,
+      selectedMessages: window.__replayOutbound
+        .filter((message) => message.type === "ISSUE_SELECTED")
+        .map((message) => message.issueId ?? null)
+    };
+  });
+  assert.deepEqual(groupedHoverState, {
+    selected: "true",
+    pressed: "true",
+    expanded: "true",
+    describedBy: null,
+    dockHidden: true,
+    popover: {
+      id: "__uni_accessibility_replay_issue_popover",
+      issueId: "2",
+      grouped: "true",
+      group: "같은 요소에서 발견된 문제 2개",
+      severity: "중간",
+      code: "KWCAG 5.4.3",
+      title: "두 번째",
+      message: "두 번째 문제 설명은 첫 번째보다 훨씬 길어서 여러 줄로 표시되며, 이슈를 바꿔도 팝오버의 위치와 크기가 그대로 유지되어야 합니다.",
+      path: "#target:second > .very-long-selector > span:nth-of-type(2) > a[aria-label='accessibility detail']",
+      relatedIssues: [
+        { issueId: "1", severity: "높음", code: "WCAG 3.1.5", title: "첫 번째" },
+        { issueId: "2", severity: "중간", code: "KWCAG 5.4.3", title: "두 번째" }
+      ],
+      more: null
+    },
+    selectedMessages: []
+  }, "hovering a grouped marker must expose one complete grouped popover without opening the legacy dock");
+
+  await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    marker.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true, pointerType: "mouse" }));
+  });
+  await page.waitForTimeout(220);
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root
+      && root.querySelector(".issue-popover").hidden
+      && (root.querySelector(".issue-dock")?.hidden ?? true)
+      && root.querySelector('.marker[data-marker-index="1"]').getAttribute("aria-describedby") === null;
+  });
+  const groupedHoverCleared = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    return {
+      selected: marker.dataset.selected,
+      pressed: marker.getAttribute("aria-pressed"),
+      describedBy: marker.getAttribute("aria-describedby"),
+      selectionFragments: root.querySelectorAll(".selection-fragment").length,
+      selectedMessages: window.__replayOutbound
+        .filter((message) => message.type === "ISSUE_SELECTED")
+        .map((message) => message.issueId ?? null)
+    };
+  });
+  assert.deepEqual(groupedHoverCleared, {
+    selected: "true",
+    pressed: "true",
+    describedBy: null,
+    selectionFragments: 1,
+    selectedMessages: []
+  }, "leaving a grouped marker must close its transient popover without clearing an externally owned group selection");
+
+  await sendReplayCommand(page, { type: "FOCUS_ISSUE", issueId: null });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.querySelector('.marker[data-marker-index="1"]')?.dataset.selected === "false"
+      && root.querySelectorAll(".selection-fragment").length === 0;
+  });
+
+  await page.evaluate(() => {
+    window.__replayOutbound.length = 0;
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    root.querySelector('.marker[data-marker-index="1"]').click();
+  });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    const popover = root?.querySelector(".issue-popover:not([hidden])");
+    return popover?.dataset.issueId === "1";
+  });
+  await page.waitForTimeout(100);
+  const groupedClickPopover = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    const popover = root.querySelector(".issue-popover:not([hidden])");
+    const rect = popover.getBoundingClientRect();
+    return {
+      outerRect: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      },
+      markerDescribedBy: marker.getAttribute("aria-describedby"),
+      markerExpanded: marker.getAttribute("aria-expanded"),
+      dockHidden: root.querySelector(".issue-dock")?.hidden ?? true,
+      grouped: popover.dataset.grouped,
+      group: popover.querySelector(".issue-popover__group")?.textContent,
+      severity: popover.querySelector(".issue-popover__severity")?.textContent,
+      code: popover.querySelector(".issue-popover__code")?.textContent,
+      title: popover.querySelector(".issue-popover__title")?.textContent,
+      message: popover.querySelector(".issue-popover__message")?.textContent,
+      path: popover.querySelector(".issue-popover__path")?.textContent,
+      relatedIssueIds: [...popover.querySelectorAll(".issue-popover__issue")].map((issue) => issue.dataset.issueId),
+      selectedMessages: window.__replayOutbound
+        .filter((outbound) => outbound.type === "ISSUE_SELECTED")
+        .map((outbound) => outbound.issueId ?? null)
+    };
+  });
+  const { outerRect: groupedPopoverRectBeforeSelection, ...groupedClickPopoverState } = groupedClickPopover;
+  assert.deepEqual(groupedClickPopoverState, {
+    markerDescribedBy: null,
+    markerExpanded: "true",
+    dockHidden: true,
+    grouped: "true",
+    group: "같은 요소에서 발견된 문제 2개",
+    severity: "높음",
+    code: "WCAG 3.1.5",
+    title: "첫 번째",
+    message: "첫 번째 문제 설명",
+    path: "#target:first",
+    relatedIssueIds: ["1", "2"],
+    selectedMessages: [1]
+  }, "clicking a grouped marker must open the same grouped popover without exposing the legacy dock");
+  await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    root.querySelector('.issue-popover__issue[data-issue-id="2"]').click();
+  });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    const popover = root?.querySelector(".issue-popover:not([hidden])");
+    return popover?.dataset.issueId === "2"
+      && popover.querySelector('.issue-popover__issue[data-issue-id="2"]')?.getAttribute("aria-pressed") === "true";
+  });
+  await page.waitForTimeout(100);
+  const secondGroupedIssue = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const popover = root.querySelector(".issue-popover:not([hidden])");
+    const rect = popover.getBoundingClientRect();
+    return {
+      outerRect: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      },
+      title: popover.querySelector(".issue-popover__title")?.textContent,
+      message: popover.querySelector(".issue-popover__message")?.textContent,
+      path: popover.querySelector(".issue-popover__path")?.textContent,
+      pressedIssueIds: [...popover.querySelectorAll('.issue-popover__issue[aria-pressed="true"]')]
+        .map((issue) => issue.dataset.issueId),
+      selectedMessages: window.__replayOutbound
+        .filter((outbound) => outbound.type === "ISSUE_SELECTED")
+        .map((outbound) => outbound.issueId ?? null)
+    };
+  });
+  const { outerRect: groupedPopoverRectAfterSelection, ...secondGroupedIssueState } = secondGroupedIssue;
+  assert.deepEqual(secondGroupedIssueState, {
+    title: "두 번째",
+    message: "두 번째 문제 설명은 첫 번째보다 훨씬 길어서 여러 줄로 표시되며, 이슈를 바꿔도 팝오버의 위치와 크기가 그대로 유지되어야 합니다.",
+    path: "#target:second > .very-long-selector > span:nth-of-type(2) > a[aria-label='accessibility detail']",
+    pressedIssueIds: ["2"],
+    selectedMessages: [1, 2]
+  }, "each grouped selector must update the complete detail and notify the selected issue");
+  assertRectClose(
+    groupedPopoverRectAfterSelection,
+    groupedPopoverRectBeforeSelection,
+    "switching issues on the same element must preserve the popover shell"
+  );
+  const groupedPopoverScreenshotPath = path.join(
+    dashboardDirectory,
+    "artifacts",
+    "page-evidence",
+    "marker-grouped-popover.png"
+  );
+  await mkdir(path.dirname(groupedPopoverScreenshotPath), { recursive: true });
+  await page.screenshot({ path: groupedPopoverScreenshotPath, fullPage: false });
+  await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    marker.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true, pointerType: "mouse" }));
+  });
+  await page.waitForTimeout(220);
+  assert.equal(
+    await page.evaluate(() => !document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-popover").hidden),
+    true,
+    "a grouped marker click must pin the popover across pointer leave"
+  );
+  await page.mouse.click(620, 460);
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root
+      && root.querySelector(".issue-popover").hidden
+      && (root.querySelector(".issue-dock")?.hidden ?? true)
+      && root.querySelector('.marker[data-marker-index="1"]').getAttribute("aria-describedby") === null;
+  });
+  const closedGroupedPopover = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    return {
+      selected: marker.dataset.selected,
+      pressed: marker.getAttribute("aria-pressed"),
+      describedBy: marker.getAttribute("aria-describedby"),
+      dockHidden: root.querySelector(".issue-dock")?.hidden ?? true,
+      selectionFragments: root.querySelectorAll(".selection-fragment").length,
+      selectedMessages: window.__replayOutbound
+        .filter((message) => message.type === "ISSUE_SELECTED")
+        .map((message) => message.issueId ?? null)
+    };
+  });
+  assert.deepEqual(closedGroupedPopover, {
+    selected: "false",
+    pressed: "false",
+    describedBy: null,
+    dockHidden: true,
+    selectionFragments: 0,
+    selectedMessages: [1, 2, null]
+  }, "an outside pointerdown must clear the pinned grouped popover without ever opening the legacy dock");
+
+  await page.evaluate(() => {
+    window.__replayOutbound.length = 0;
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    root.querySelector('.marker[data-marker-index="1"]').focus();
+  });
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.activeElement?.matches('.issue-popover__issue[data-issue-id="1"]')
+      && !root.querySelector(".issue-popover").hidden;
+  });
+  const keyboardGroupedSelector = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const marker = root.querySelector('.marker[data-marker-index="1"]');
+    return {
+      activeClass: root.activeElement?.className,
+      activeIssueId: root.activeElement?.dataset.issueId,
+      expanded: marker.getAttribute("aria-expanded"),
+      describedBy: marker.getAttribute("aria-describedby")
+    };
+  });
+  assert.deepEqual(keyboardGroupedSelector, {
+    activeClass: "issue-popover__issue",
+    activeIssueId: "1",
+    expanded: "true",
+    describedBy: null
+  }, "keyboard activation must move focus into the grouped issue selector");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  const keyboardDismissedState = await page.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return {
+      hidden: root?.querySelector(".issue-popover")?.hidden,
+      activeClass: root?.activeElement?.className ?? null,
+      activeMarkerIndex: root?.activeElement?.dataset.markerIndex ?? null,
+      expanded: root?.querySelector('.marker[data-marker-index="1"]')?.getAttribute("aria-expanded")
+    };
+  });
+  assert.deepEqual(keyboardDismissedState, {
+    hidden: true,
+    activeClass: "marker",
+    activeMarkerIndex: "1",
+    expanded: "false"
+  }, "Escape must close grouped details and restore focus to the originating marker");
 
   const originalInlineStyles = await page.evaluate(() => {
     const styleFact = (selector) => {
@@ -441,15 +821,13 @@ try {
   assert.ok(!parentMarker.hidden && !anchorMarker.hidden);
   assert.ok(parentMarker.width === markerSize && parentMarker.height === markerSize);
   assert.ok(anchorMarker.width === markerSize && anchorMarker.height === markerSize);
-  assert.ok(Math.abs(parentMarker.left - anchorMarker.left) <= 0.5, "P/A markers must share the left gutter");
-  assert.ok(Math.abs(parentMarker.top - anchorMarker.top) >= 40, "P/A markers must occupy separate vertical slots");
   assert.ok(
-    Math.min(...parentGeometry.targetRects.map((rect) => rect.left)) - parentMarker.right >= 7.5,
-    "the parent marker must leave the 8px target gutter"
+    markerTargetDistance(parentMarker, parentGeometry.targetRects) <= 8.75,
+    "the parent marker must stay adjacent to its target instead of drifting down one gutter"
   );
   assert.ok(
-    Math.min(...anchorGeometry.targetRects.map((rect) => rect.left)) - anchorMarker.right >= 7.5,
-    "the anchor marker must leave the 8px target gutter"
+    markerTargetDistance(anchorMarker, anchorGeometry.targetRects) <= 8.75,
+    "the anchor marker must stay adjacent to one of its rendered line fragments"
   );
   assertMarkerAvoidsTargetRects(parentMarker, parentGeometry.targetRects, "parent marker must not cover its target");
   assertMarkerAvoidsTargetRects(anchorMarker, anchorGeometry.targetRects, "anchor marker must not cover either line");
@@ -650,7 +1028,229 @@ try {
   const artifactDirectory = path.join(dashboardDirectory, "artifacts", "page-evidence");
   await mkdir(artifactDirectory, { recursive: true });
   await page.screenshot({ path: path.join(artifactDirectory, "marker-collision.png"), fullPage: false });
-  console.log(JSON.stringify({ result: "PASS", markers: markerFacts, compactMarkerScreenshotPath }, null, 2));
+
+  const denseIssues = [
+    { id: 31, severity: "HIGH", category: "visual", code: "5.4.3", title: "날씨 라벨", pathSteps: [{ context: "DOCUMENT", selector: "#weather-label" }] },
+    { id: 32, severity: "HIGH", category: "visual", code: "5.4.3", title: "날씨 온도", pathSteps: [{ context: "DOCUMENT", selector: "#weather-temperature" }] }
+  ];
+  const initializeDenseIssues = async () => {
+    await sendReplayCommand(page, {
+      type: "INIT_ISSUES",
+      markersVisible: true,
+      selectedIssueId: null,
+      issues: denseIssues
+    });
+    await page.waitForFunction(() =>
+      document.getElementById("__uni_accessibility_replay_host")?.shadowRoot
+        ?.querySelectorAll(".marker:not([hidden])").length === 2
+    );
+    await page.waitForTimeout(50);
+    return page.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      const rectFact = (rect) => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      });
+      return {
+        markers: [...root.querySelectorAll(".marker:not([hidden])")].map((marker) => ({
+          index: marker.dataset.markerIndex,
+          ...rectFact(marker.getBoundingClientRect())
+        })),
+        label: rectFact(document.getElementById("weather-label").getBoundingClientRect()),
+        temperature: rectFact(document.getElementById("weather-temperature").getBoundingClientRect()),
+        stock: rectFact(document.getElementById("stock-strip").getBoundingClientRect())
+      };
+    });
+  };
+  const denseGeometry = await initializeDenseIssues();
+  const denseGeometryRepeated = await initializeDenseIssues();
+  const denseTargets = [denseGeometry.label, denseGeometry.temperature];
+  denseGeometry.markers.forEach((marker, index) => {
+    assert.ok(
+      rectangleDistance(marker, denseTargets[index]) <= 9.5,
+      `dense inline marker ${index + 1} must remain next to its own target`
+    );
+    assert.equal(
+      overlaps(expandedRect(marker), denseGeometry.stock),
+      false,
+      `dense inline marker ${index + 1} must not drift onto the following stock row`
+    );
+  });
+  assert.equal(
+    overlaps(expandedRect(denseGeometry.markers[0]), expandedRect(denseGeometry.markers[1])),
+    false,
+    "dense inline marker halos must not overlap"
+  );
+  denseGeometry.markers.forEach((marker, index) => {
+    assertRectClose(
+      denseGeometryRepeated.markers[index],
+      marker,
+      `dense inline marker ${index + 1} must be deterministic after repeated initialization`
+    );
+  });
+
+  await page.evaluate(() => {
+    window.postMessage({
+      source: "accessibility-dashboard",
+      type: "INIT_ISSUES",
+      markersVisible: true,
+      selectedIssueId: null,
+      issues: [
+        { id: 22, severity: "LOW", category: "visual", code: "5.4.3", title: "시각", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
+        { id: 21, severity: "CRITICAL", category: "text", code: "WCAG 3.1.5", title: "텍스트", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] }
+      ]
+    }, "*");
+  });
+  await page.waitForFunction(() =>
+    document.getElementById("__uni_accessibility_replay_host")?.shadowRoot?.querySelectorAll(".marker").length === 1
+  );
+  const reversedMixedGroup = await page.evaluate(() => {
+    const marker = document.getElementById("__uni_accessibility_replay_host").shadowRoot.querySelector(".marker");
+    return {
+      category: marker?.dataset.markerCategory,
+      severity: marker?.dataset.markerSeverity,
+      icon: marker?.querySelector(".marker__icon")?.dataset.icon
+    };
+  });
+  assert.deepEqual(
+    reversedMixedGroup,
+    { category: "multiple", severity: "CRITICAL", icon: "multiple" },
+    "mixed groups must remain stable regardless of issue order and use their highest severity"
+  );
+  await page.evaluate(() => {
+    window.__replayOutbound.length = 0;
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    root.querySelector(".marker").click();
+  });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.querySelector(".issue-popover:not([hidden])")?.dataset.issueId === "21";
+  });
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      const popover = root.querySelector(".issue-popover:not([hidden])");
+      return {
+        title: popover.querySelector(".issue-popover__title")?.textContent,
+        severity: popover.querySelector(".issue-popover__severity")?.textContent,
+        selectedMessages: window.__replayOutbound
+          .filter((message) => message.type === "ISSUE_SELECTED")
+          .map((message) => message.issueId ?? null)
+      };
+    }),
+    { title: "텍스트", severity: "CRITICAL", selectedMessages: [21] },
+    "an unselected mixed group must open the same highest-severity issue represented by its marker color"
+  );
+
+  await page.evaluate(() => {
+    window.__replayOutbound.length = 0;
+    window.postMessage({
+      source: "accessibility-dashboard",
+      type: "REQUEST_DOCUMENT_STATE"
+    }, "*");
+  });
+  await page.waitForFunction(() =>
+    window.__replayOutbound.some((message) => message.type === "READY" && message.documentToken)
+  );
+  const replayDocumentToken = await page.evaluate(() =>
+    window.__replayOutbound.findLast((message) => message.type === "READY")?.documentToken
+  );
+  assert.equal(typeof replayDocumentToken, "string", "the scale regression needs the active replay token");
+  await page.setViewportSize({ width: 1280, height: 960 });
+  const scaledView = 0.5;
+  await page.evaluate(({ documentToken, scale }) => {
+    window.postMessage({
+      source: "accessibility-dashboard",
+      type: "SET_VIEW_SCALE",
+      documentToken,
+      scale,
+      visualWidth: 640
+    }, "*");
+    window.postMessage({
+      source: "accessibility-dashboard",
+      type: "INIT_ISSUES",
+      markersVisible: true,
+      selectedIssueId: 31,
+      issues: [
+        { id: 31, severity: "LOW", category: "text", code: "3.1.5", title: "축척 첫 번째", message: "축척 환경의 동일한 길이 상세", path: "#target:scale-one", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] },
+        { id: 32, severity: "LOW", category: "visual", code: "5.4.3", title: "축척 두 번째", message: "축척 환경의 동일한 길이 상세", path: "#target:scale-two", pathSteps: [{ context: "DOCUMENT", selector: "#target" }] }
+      ]
+    }, "*");
+  }, { documentToken: replayDocumentToken, scale: scaledView });
+  await page.waitForFunction((scale) => {
+    const marker = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot
+      ?.querySelector(".marker:not([hidden])");
+    return marker && Math.abs(marker.getBoundingClientRect().width * scale - 24) <= 0.1;
+  }, scaledView);
+  await page.evaluate(() => {
+    document.getElementById("__uni_accessibility_replay_host").shadowRoot.querySelector(".marker").click();
+  });
+  await page.waitForFunction(() => {
+    const popover = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot
+      ?.querySelector(".issue-popover:not([hidden])");
+    return popover?.dataset.issueId === "31"
+      && popover.dataset.presentation !== "external-description";
+  });
+  const scaledPopoverBeforeSelection = await page.evaluate((scale) => {
+    const popover = document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-popover:not([hidden])");
+    const inlineHeight = popover.style.height;
+    const lockedRect = popover.getBoundingClientRect();
+    popover.style.removeProperty("height");
+    const naturalRect = popover.getBoundingClientRect();
+    popover.style.height = inlineHeight;
+    const visualRect = (rect) => ({
+      left: rect.left * scale,
+      top: rect.top * scale,
+      right: rect.right * scale,
+      bottom: rect.bottom * scale,
+      width: rect.width * scale,
+      height: rect.height * scale
+    });
+    return {
+      locked: visualRect(lockedRect),
+      natural: visualRect(naturalRect)
+    };
+  }, scaledView);
+  assert.ok(
+    Math.abs(scaledPopoverBeforeSelection.locked.height - scaledPopoverBeforeSelection.natural.height) <= 1,
+    `inverse-scaled fixed height must match the natural visual height: ${JSON.stringify(scaledPopoverBeforeSelection)}`
+  );
+  await page.evaluate(() => {
+    document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector('.issue-popover__issue[data-issue-id="32"]').click();
+  });
+  await page.waitForFunction(() =>
+    document.getElementById("__uni_accessibility_replay_host")?.shadowRoot
+      ?.querySelector(".issue-popover:not([hidden])")?.dataset.issueId === "32"
+  );
+  const scaledPopoverAfterSelection = await page.evaluate((scale) => {
+    const rect = document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-popover:not([hidden])").getBoundingClientRect();
+    return {
+      left: rect.left * scale,
+      top: rect.top * scale,
+      right: rect.right * scale,
+      bottom: rect.bottom * scale,
+      width: rect.width * scale,
+      height: rect.height * scale
+    };
+  }, scaledView);
+  assertRectClose(
+    scaledPopoverAfterSelection,
+    scaledPopoverBeforeSelection.locked,
+    "same-element issue switching must preserve the visual shell under iframe scaling"
+  );
+  console.log(JSON.stringify({
+    result: "PASS",
+    markers: markerFacts,
+    compactMarkerScreenshotPath,
+    groupedPopoverScreenshotPath
+  }, null, 2));
 } finally {
   await page.close();
   await browser.close();

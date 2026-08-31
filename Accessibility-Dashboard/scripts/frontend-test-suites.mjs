@@ -40,6 +40,10 @@ const pageEvidenceFull = viteTest("verify-page-evidence.mjs", {
   environment: { PAGE_EVIDENCE_SCOPE: "full" },
   label: "verify-page-evidence.mjs (full)"
 });
+const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
+  environment: { PAGE_EVIDENCE_SCOPE: "scale" },
+  label: "verify-page-evidence.mjs (scale)"
+});
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
 
@@ -85,13 +89,15 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
   browser,
   recovery: [quickRecovery],
   visual: [landingDesign],
+  scale: [pageEvidenceScale],
   replay: [
     nodeTest("verify-replay-interactions.mjs", { crossStack: true }),
     nodeTest("verify-replay-interactive-obstacles.mjs", { crossStack: true }),
     nodeTest("verify-replay-marker-collision.mjs", { crossStack: true }),
     nodeTest("verify-replay-marker-hover.mjs", { crossStack: true }),
     nodeTest("verify-replay-marker-performance.mjs", { crossStack: true }),
-    nodeTest("verify-replay-marker-popover.mjs", { crossStack: true })
+    nodeTest("verify-replay-marker-popover.mjs", { crossStack: true }),
+    nodeTest("verify-replay-sector-grouping.mjs", { crossStack: true })
   ],
   backend: [
     viteTest("verify-sidebar-browser.mjs", { needsBackend: true }),

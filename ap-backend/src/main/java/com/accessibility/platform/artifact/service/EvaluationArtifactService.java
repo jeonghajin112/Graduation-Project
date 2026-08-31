@@ -169,7 +169,12 @@ public class EvaluationArtifactService {
         } catch (ArtifactFileStorage.ArtifactContentNotFoundException e) {
             throw new ResourceNotFoundException();
         }
-        return new ArtifactContent(new FileSystemResource(path), artifact.getContentType(), artifact.getSizeBytes());
+        return new ArtifactContent(
+                new FileSystemResource(path),
+                artifact.getContentType(),
+                artifact.getSizeBytes(),
+                artifact.getSha256()
+        );
     }
 
     private void validateMetadata(EvaluationArtifactMetadataRequest metadata) {
@@ -227,6 +232,6 @@ public class EvaluationArtifactService {
         });
     }
 
-    public record ArtifactContent(Resource resource, String contentType, long sizeBytes) {
+    public record ArtifactContent(Resource resource, String contentType, long sizeBytes, String sha256) {
     }
 }

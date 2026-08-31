@@ -175,9 +175,6 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
           analyzedAt={latestAnalyzedAt}
           faviconUrl={evaluationTarget.faviconUrl}
           name={evaluationTarget.name}
-          targetType={evaluationTarget.targetType}
-          viewportHeight={artifact?.viewportHeightCssPx ?? null}
-          viewportWidth={artifact?.viewportWidthCssPx ?? null}
         />
 
         <AnalysisTrendPanel

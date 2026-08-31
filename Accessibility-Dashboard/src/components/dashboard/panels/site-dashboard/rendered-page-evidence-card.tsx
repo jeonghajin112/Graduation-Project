@@ -8,9 +8,14 @@ import { formatDateTime } from "../../shared/utils";
 import { formatIssueCodeLabel } from "./constants";
 import {
   DASHBOARD_REPLAY_SOURCE,
+  REPLAY_VIEW_SCALE_MAX,
+  REPLAY_VIEW_SCALE_MIN,
+  REPLAY_VISUAL_WIDTH_MAX,
+  isValidReplayViewportMetrics,
   parsePageReplayMessage,
   toPageReplayIssue,
-  type DashboardToPageReplayMessage
+  type DashboardToPageReplayMessage,
+  type ReplayViewportMetrics
 } from "./page-replay-protocol";
 import type { RecentIssueRow } from "./types";
 import type { EvaluationArtifactLoadState } from "./use-evaluation-artifact";
@@ -30,7 +35,9 @@ type RenderedPageEvidenceCardProps = {
 };
 
 const REPLAY_READY_TIMEOUT_MS = 8_000;
-const REPLAY_SCROLLBAR_GUTTER_PX = 16;
+// Keep this in sync with ReplayDocumentSanitizer's root WebKit scrollbar width.
+// The gutter is part of the iframe's logical capture width while the frame is scaled.
+const REPLAY_SCROLLBAR_GUTTER_PX = 10;
 
 function EmptyEvidenceState({
   loadState,
@@ -77,7 +84,13 @@ export function RenderedPageEvidenceCard({
   const [fallbackIssueId, setFallbackIssueId] = useState<number | null>(null);
   const [replayConnectionState, setReplayConnectionState] = useState<ReplayConnectionState>("loading");
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const [replayScale, setReplayScale] = useState(1);
+  const [unavailableLocatorIssueIds, setUnavailableLocatorIssueIds] = useState<Set<number>>(
+    () => new Set()
+  );
+  const [replayViewportMetrics, setReplayViewportMetrics] = useState<ReplayViewportMetrics>({
+    scale: 1,
+    visualWidth: 0
+  });
   const previewRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeDocumentTokenRef = useRef<string | null>(null);
@@ -91,6 +104,11 @@ export function RenderedPageEvidenceCard({
     documentToken: string;
     issuesSignature: string;
   } | null>(null);
+  const sentReplayViewportRef = useRef<{
+    documentToken: string;
+    scale: number;
+    visualWidth: number;
+  } | null>(null);
   const replayOriginSelectionRef = useRef<{ issueId: number | null } | null>(null);
   const selectedIssueStateRef = useRef(selectedIssueId);
   selectedIssueStateRef.current = selectedIssueId;
@@ -103,12 +121,17 @@ export function RenderedPageEvidenceCard({
   const selectedVisibleIssueId = replayIssues.some((issue) => issue.id === selectedIssueId)
     ? selectedIssueId
     : null;
+  const unavailableLocatorCount = replayIssues.reduce(
+    (count, issue) => count + Number(unavailableLocatorIssueIds.has(issue.id)),
+    0
+  );
   const contentUrl = artifact
     ? artifactContentUrl ?? getEvaluationArtifactContentUrl(artifact.contentUrl)
     : null;
   const replaySourceWidth = artifact
     ? Math.max(artifact.viewportWidthCssPx, artifact.pageWidthCssPx) + REPLAY_SCROLLBAR_GUTTER_PX
     : 0;
+  const replayScale = replayViewportMetrics.scale;
   const replayFrameStyle = artifact && replayScale < 0.999
     ? {
         width: `${replaySourceWidth}px`,
@@ -162,6 +185,7 @@ export function RenderedPageEvidenceCard({
     readyAwaitingFrameLoadRef.current = null;
     frameLoadObservedRef.current = false;
     initializedReplayRef.current = null;
+    sentReplayViewportRef.current = null;
     replayOriginSelectionRef.current = null;
     if (resetRetiredTokens) {
       retiredDocumentTokensRef.current.clear();
@@ -179,17 +203,53 @@ export function RenderedPageEvidenceCard({
     });
   }
 
+  function sendReplayViewScale() {
+    const documentToken = activeDocumentTokenRef.current;
+    if (
+      documentToken === null
+      || !isValidReplayViewportMetrics(replayViewportMetrics)
+    ) {
+      return;
+    }
+
+    const previous = sentReplayViewportRef.current;
+    if (
+      previous?.documentToken === documentToken
+      && Math.abs(previous.scale - replayViewportMetrics.scale) < 0.001
+      && Math.abs(previous.visualWidth - replayViewportMetrics.visualWidth) < 0.5
+    ) {
+      return;
+    }
+
+    postToReplay({
+      source: DASHBOARD_REPLAY_SOURCE,
+      type: "SET_VIEW_SCALE",
+      documentToken,
+      scale: replayViewportMetrics.scale,
+      visualWidth: replayViewportMetrics.visualWidth
+    });
+    sentReplayViewportRef.current = {
+      documentToken,
+      scale: replayViewportMetrics.scale,
+      visualWidth: replayViewportMetrics.visualWidth
+    };
+  }
+
   function sendInitialIssues() {
     const documentToken = activeDocumentTokenRef.current;
     const initializedReplay = initializedReplayRef.current;
     if (
       documentToken === null ||
+      !isValidReplayViewportMetrics(replayViewportMetrics) ||
       (initializedReplay?.documentToken === documentToken &&
         initializedReplay.issuesSignature === replayIssuesSignature)
     ) {
       return;
     }
 
+    // The replay must learn the outer iframe transform before it creates marker
+    // DOM so the first painted frame uses screen-sized overlays.
+    sendReplayViewScale();
     postToReplay({
       source: DASHBOARD_REPLAY_SOURCE,
       type: "INIT_ISSUES",
@@ -210,8 +270,11 @@ export function RenderedPageEvidenceCard({
   useLayoutEffect(() => {
     const preview = previewRef.current;
     const sourceWidth = replaySourceWidth;
-    if (!preview || !sourceWidth) {
-      setReplayScale(1);
+    if (loadState !== "ready" || !preview || !sourceWidth) {
+      setReplayViewportMetrics({
+        scale: 1,
+        visualWidth: preview?.clientWidth ?? 0
+      });
       return;
     }
 
@@ -220,22 +283,36 @@ export function RenderedPageEvidenceCard({
       if (availableWidth <= 0) {
         return;
       }
-      const nextScale = Math.min(1, availableWidth / sourceWidth);
-      setReplayScale((currentScale) =>
-        Math.abs(currentScale - nextScale) < 0.001 ? currentScale : nextScale
+      const nextScale = Math.max(
+        REPLAY_VIEW_SCALE_MIN,
+        Math.min(REPLAY_VIEW_SCALE_MAX, availableWidth / sourceWidth)
       );
+      const nextVisualWidth = Math.min(REPLAY_VISUAL_WIDTH_MAX, availableWidth);
+      setReplayViewportMetrics((currentMetrics) => {
+        if (
+          Math.abs(currentMetrics.scale - nextScale) < 0.001
+          && Math.abs(currentMetrics.visualWidth - nextVisualWidth) < 0.5
+        ) {
+          return currentMetrics;
+        }
+        return {
+          scale: nextScale,
+          visualWidth: nextVisualWidth
+        };
+      });
     };
 
     updateReplayScale();
     const resizeObserver = new ResizeObserver(updateReplayScale);
     resizeObserver.observe(preview);
     return () => resizeObserver.disconnect();
-  }, [artifact?.id, replaySourceWidth]);
+  }, [artifact?.id, loadState, replaySourceWidth]);
 
   useLayoutEffect(() => {
     clearReplayReadyTimeout();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     setFallbackIssueId(null);
+    setUnavailableLocatorIssueIds(new Set());
     setReplayConnectionState("loading");
 
     if (loadState === "ready" && artifact) {
@@ -246,7 +323,7 @@ export function RenderedPageEvidenceCard({
       clearReplayReadyTimeout();
       invalidateReplayDocumentSession();
     };
-  }, [artifact?.contentUrl, artifact?.id, frameRevision, loadState]);
+  }, [artifact?.id, contentUrl, frameRevision, loadState]);
 
   useEffect(() => {
     setFallbackIssueId(null);
@@ -254,6 +331,7 @@ export function RenderedPageEvidenceCard({
 
   useEffect(() => {
     setFallbackIssueId(null);
+    setUnavailableLocatorIssueIds(new Set());
   }, [replayIssuesSignature]);
 
   useEffect(() => {
@@ -296,6 +374,7 @@ export function RenderedPageEvidenceCard({
         initializedReplayRef.current = null;
         replayOriginSelectionRef.current = null;
         setFallbackIssueId(null);
+        setUnavailableLocatorIssueIds(new Set());
         setReplayConnectionState("loading");
         armReplayReadyTimeout();
         return;
@@ -317,6 +396,7 @@ export function RenderedPageEvidenceCard({
         initializedReplayRef.current = null;
         replayOriginSelectionRef.current = null;
         setFallbackIssueId(null);
+        setUnavailableLocatorIssueIds(new Set());
         setReplayConnectionState("loading");
         armReplayReadyTimeout();
         return;
@@ -376,6 +456,24 @@ export function RenderedPageEvidenceCard({
       }
 
       if (message.type === "LOCATOR_STATUS") {
+        if (!replayIssues.some((issue) => issue.id === message.issueId)) {
+          return;
+        }
+
+        setUnavailableLocatorIssueIds((current) => {
+          const isUnavailable = message.status === "UNAVAILABLE";
+          if (current.has(message.issueId) === isUnavailable) {
+            return current;
+          }
+
+          const next = new Set(current);
+          if (isUnavailable) {
+            next.add(message.issueId);
+          } else {
+            next.delete(message.issueId);
+          }
+          return next;
+        });
         return;
       }
 
@@ -390,8 +488,27 @@ export function RenderedPageEvidenceCard({
       return;
     }
 
+    sendReplayViewScale();
+  }, [
+    replayConnectionState,
+    replayReadyEpoch,
+    replayViewportMetrics.scale,
+    replayViewportMetrics.visualWidth
+  ]);
+
+  useEffect(() => {
+    if (replayConnectionState !== "ready") {
+      return;
+    }
+
     sendInitialIssues();
-  }, [replayConnectionState, replayIssuesSignature, replayReadyEpoch]);
+  }, [
+    replayConnectionState,
+    replayIssuesSignature,
+    replayReadyEpoch,
+    replayViewportMetrics.scale,
+    replayViewportMetrics.visualWidth
+  ]);
 
   useEffect(() => {
     if (replayConnectionState !== "ready") {
@@ -499,12 +616,14 @@ export function RenderedPageEvidenceCard({
                 aria-label={`${targetName} 접근성 검사 페이지 재현 화면`}
                 aria-busy={replayConnectionState === "loading"}
                 data-connection-state={replayConnectionState}
+                data-unavailable-locator-count={unavailableLocatorCount}
               >
                 <iframe
                   key={`${artifact.id}:${frameRevision}`}
                   ref={iframeRef}
                   className="site-page-evidence-replay-frame"
                   data-replay-scale={replayScale.toFixed(4)}
+                  data-replay-visual-width={replayViewportMetrics.visualWidth.toFixed(2)}
                   src={contentUrl ?? undefined}
                   style={replayFrameStyle}
                   title={`${targetName} 접근성 검사 페이지 재현`}
@@ -543,16 +662,23 @@ export function RenderedPageEvidenceCard({
                 )}
               </div>
 
-              {replayConnectionState !== "ready" && (
+              {(replayConnectionState !== "ready" || unavailableLocatorCount > 0) && (
                 <div className="site-page-evidence-replay-feedback">
-                  <p
-                    className="site-page-evidence-connection"
-                    data-state={replayConnectionState}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {replayConnectionState === "error" ? "재현 페이지 연결 끊김" : "재현 페이지 연결 중"}
-                  </p>
+                  {replayConnectionState !== "ready" ? (
+                    <p
+                      className="site-page-evidence-connection"
+                      data-state={replayConnectionState}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {replayConnectionState === "error" ? "재현 페이지 연결 끊김" : "재현 페이지 연결 중"}
+                    </p>
+                  ) : (
+                    <p className="site-page-evidence-locator-status" role="status" aria-live="polite">
+                      문제 {unavailableLocatorCount}개의 위치를 재현 화면에 표시하지 못했습니다.{" "}
+                      분석 결과에는 정상적으로 포함되어 있습니다.
+                    </p>
+                  )}
                 </div>
               )}
 

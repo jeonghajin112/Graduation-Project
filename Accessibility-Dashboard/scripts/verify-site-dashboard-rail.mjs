@@ -76,6 +76,65 @@ function locator(selector, htmlSnippet) {
   };
 }
 
+async function readResponsiveRailMetrics(page) {
+  return page.evaluate(() => {
+    const layout = document.querySelector(".site-dashboard-layout");
+    const rail = document.querySelector(".site-dashboard-rail");
+    const evidence = document.querySelector(".site-page-evidence-grid-item");
+    const card = document.querySelector(".site-page-information");
+    const heading = document.querySelector(".site-rail-card__heading h3");
+    const body = document.querySelector(".site-page-evidence-trend-heading p");
+    const caption = document.querySelector(".site-page-information__title a");
+    const metric = document.querySelector(".site-page-evidence-trend-metrics strong");
+    const chart = document.querySelector(".site-page-evidence-trend-chart");
+    const severityTrack = document.querySelector(".site-rail-severity__track");
+    if (!(layout instanceof HTMLElement)
+        || !(rail instanceof HTMLElement)
+        || !(evidence instanceof HTMLElement)
+        || !(card instanceof HTMLElement)
+        || !(heading instanceof HTMLElement)
+        || !(body instanceof HTMLElement)
+        || !(caption instanceof HTMLElement)
+        || !(metric instanceof HTMLElement)
+        || !(chart instanceof HTMLElement)
+        || !(severityTrack instanceof HTMLElement)) {
+      return null;
+    }
+
+    const layoutStyle = getComputedStyle(layout);
+    const cardStyle = getComputedStyle(card);
+    return {
+      viewportWidth: window.innerWidth,
+      layoutWidth: layout.getBoundingClientRect().width,
+      evidenceWidth: evidence.getBoundingClientRect().width,
+      railWidth: rail.getBoundingClientRect().width,
+      cardWidth: card.getBoundingClientRect().width,
+      railCardWidths: Array.from(rail.children).map((element) =>
+        element.getBoundingClientRect().width
+      ),
+      railCardOverflows: Array.from(rail.children).map((element) =>
+        Math.max(0, element.scrollWidth - element.clientWidth)
+      ),
+      cardPaddingInline: Number.parseFloat(cardStyle.paddingLeft)
+        + Number.parseFloat(cardStyle.paddingRight),
+      headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
+      bodyFontSize: Number.parseFloat(getComputedStyle(body).fontSize),
+      captionFontSize: Number.parseFloat(getComputedStyle(caption).fontSize),
+      metricFontSize: Number.parseFloat(getComputedStyle(metric).fontSize),
+      chartHeight: chart.getBoundingClientRect().height,
+      severityTrackWidth: severityTrack.getBoundingClientRect().width,
+      severityTrackHeight: severityTrack.getBoundingClientRect().height,
+      columns: layoutStyle.gridTemplateColumns,
+      layoutOverflow: Math.max(0, layout.scrollWidth - layout.clientWidth),
+      railOverflow: Math.max(0, rail.scrollWidth - rail.clientWidth),
+      horizontalOverflow: Math.max(
+        0,
+        document.documentElement.scrollWidth - document.documentElement.clientWidth
+      )
+    };
+  });
+}
+
 // Wire-shaped EvaluationIssue records: the dashboard derives analysis results
 // and UI severities from these, so the fixture must match the /issues contract.
 // Use the identifiers emitted by the real backend: mapped findings use numeric
@@ -123,7 +182,13 @@ const artifact = {
 
 const replayHtml = `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>재현</title>
-<style>body{margin:0;min-height:1200px;background:#f4f6f9;font-family:Arial}
+<style>html{scrollbar-gutter:auto}
+@supports not selector(::-webkit-scrollbar){html{scrollbar-width:thin;scrollbar-color:rgba(99,99,102,.78) transparent}@media (forced-colors:active){html{scrollbar-width:auto;scrollbar-color:auto}}}
+@supports selector(::-webkit-scrollbar){html::-webkit-scrollbar{width:10px;height:10px}
+html::-webkit-scrollbar-track,html::-webkit-scrollbar-corner{background:transparent}
+html::-webkit-scrollbar-thumb{min-height:48px;border:1px solid transparent;border-radius:999px;background:rgba(99,99,102,.78);background-clip:padding-box}
+html::-webkit-scrollbar-button{display:none;width:0;height:0}}
+body{margin:0;min-height:1200px;background:#f4f6f9;font-family:Arial}
 section{margin:24px;padding:24px;border-radius:14px;background:#fff}</style></head>
 <body>
 <section><h1>재현된 페이지</h1><div id="a1">img1</div><div id="a2">img2</div><div id="a3">img3</div></section>
@@ -249,10 +314,10 @@ async function verifyRailWithoutArtifact(browser) {
       1,
       "page identity must remain available without a replay artifact"
     );
-    assert.equal(
-      await pageInformationCard.getByText("-", { exact: true }).count(),
-      1,
-      "missing replay dimensions must use an explicit fallback"
+    assert.deepEqual(
+      await pageInformationCard.locator(".site-page-information__metadata dt").allTextContents(),
+      ["최근 분석"],
+      "page information must omit target type and replay dimensions even without an artifact"
     );
     assert.deepEqual(pageErrors, [], "the artifact-empty page must render without runtime errors");
 
@@ -315,13 +380,9 @@ try {
     {
       name: "Rail Fixture Page",
       url: "https://example.com/fixture",
-      metadata: [
-        { label: "대상", value: "PC 웹" },
-        { label: "최근 분석", value: "2026-08-11 12:30" },
-        { label: "재현 화면", value: "1,280 × 720 px" }
-      ]
+      metadata: [{ label: "최근 분석", value: "2026-08-11 12:30" }]
     },
-    "page information must use the selected target and latest replay metadata"
+    "page information must keep only the selected page identity and latest analysis time"
   );
   const railCardOrder = await page.locator(".site-dashboard-rail > *").evaluateAll((cards) =>
     cards.map((card) => card.textContent?.trim() ?? "")
@@ -488,6 +549,87 @@ try {
   mkdirSync(outDir, { recursive: true });
   await page.screenshot({ path: path.join(outDir, "rail-desktop.png"), fullPage: false });
 
+  // The right rail must scale with the layout instead of staying frozen at its
+  // former 22rem cap on 4K-class viewports.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.waitForTimeout(300);
+  const fullHdRail = await readResponsiveRailMetrics(page);
+  assert.ok(fullHdRail, "the Full HD rail geometry must be measurable");
+
+  await page.setViewportSize({ width: 3840, height: 1800 });
+  await page.waitForTimeout(300);
+  const fourKRail = await readResponsiveRailMetrics(page);
+  assert.ok(fourKRail, "the 4K rail geometry must be measurable");
+  assert.equal(fullHdRail.horizontalOverflow, 0, "the Full HD rail must not overflow horizontally");
+  assert.equal(fourKRail.horizontalOverflow, 0, "the 4K rail must not overflow horizontally");
+  assert.equal(fullHdRail.columns.split(" ").length, 2, "Full HD must retain the two-column layout");
+  assert.equal(fourKRail.columns.split(" ").length, 2, "4K must retain the two-column layout");
+  assert.ok(
+    fullHdRail.railWidth >= 330 && fullHdRail.railWidth <= 360,
+    "Full HD must retain the established compact rail width: " + JSON.stringify(fullHdRail)
+  );
+  assert.ok(
+    fourKRail.railWidth >= fullHdRail.railWidth * 1.75,
+    "the 4K rail must grow in proportion to the larger evidence canvas: "
+      + JSON.stringify({ fullHdRail, fourKRail })
+  );
+  assert.ok(
+    fourKRail.railWidth >= 640,
+    "the 4K rail must provide a readable supporting column instead of stopping at 32rem: "
+      + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.railWidth / fourKRail.layoutWidth >= 0.21
+      && fourKRail.railWidth / fourKRail.layoutWidth <= 0.24,
+    "the 4K rail must stay balanced with the replay canvas: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.evidenceWidth >= fourKRail.layoutWidth * 0.74,
+    "the wider rail must still leave most of the 4K layout to the replay canvas: "
+      + JSON.stringify(fourKRail)
+  );
+  assert.equal(fullHdRail.layoutOverflow, 0, "the Full HD layout must not clip internal content");
+  assert.equal(fullHdRail.railOverflow, 0, "the Full HD rail must not clip internal content");
+  assert.equal(fourKRail.layoutOverflow, 0, "the 4K layout must not clip internal content");
+  assert.equal(fourKRail.railOverflow, 0, "the 4K rail must not clip internal content");
+  assert.ok(
+    fourKRail.railCardWidths.every((width) => Math.abs(width - fourKRail.railWidth) < 2),
+    "every rail card must consume the responsive rail width: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.railCardOverflows.every((overflow) => overflow === 0),
+    "responsive rail cards must not overflow internally: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.cardPaddingInline >= 52,
+    "4K cards must use proportionate internal padding: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.headingFontSize >= 17.5,
+    "4K rail headings must remain readable at normal viewing distance: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.captionFontSize >= 13.5,
+    "4K supporting text must not remain at the compact desktop size: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.bodyFontSize >= 14.5,
+    "4K explanatory text must scale with its card: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.metricFontSize >= 31,
+    "4K headline metrics must keep their visual hierarchy: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.chartHeight >= 188,
+    "the trend chart must scale with the wider 4K rail card: " + JSON.stringify(fourKRail)
+  );
+  assert.ok(
+    fourKRail.severityTrackWidth >= 20 && fourKRail.severityTrackHeight >= 136,
+    "the 4K severity chart must scale with the larger card: " + JSON.stringify(fourKRail)
+  );
+  await page.screenshot({ path: path.join(outDir, "rail-4k.png"), fullPage: false });
+
   // Narrow viewport: the rail stacks under the replay card without overflow.
   await page.setViewportSize({ width: 900, height: 1100 });
   await page.waitForTimeout(300);
@@ -509,6 +651,8 @@ try {
     pageInformation,
     severityCounts,
     geometry,
+    fullHdRail,
+    fourKRail,
     narrow
   }, null, 2));
 } finally {

@@ -188,6 +188,8 @@ async function markerFacts(page) {
       return {
         arrayIndex,
         markerIndex: marker.dataset.markerIndex,
+        issueIds: (marker.dataset.issueIds ?? "").split(",").filter(Boolean).map(Number),
+        groupSize: marker.dataset.groupSize,
         text: marker.textContent,
         hidden: marker.hidden,
         display: getComputedStyle(marker).display,
@@ -239,9 +241,10 @@ async function issueTargetFirstRects(page, issues) {
 async function assertVisibleMarkersRemainAnchored(page, markers, issues, message) {
   const targets = await issueTargetFirstRects(page, issues);
   const distances = [];
-  markers.forEach((marker, index) => {
+  markers.forEach((marker) => {
     if (marker.hidden) return;
-    const target = targets[index];
+    const issueIndex = issues.findIndex((issue) => issue.id === marker.issueIds[0]);
+    const target = targets[issueIndex];
     assert.ok(target, `${message}: visible marker ${marker.markerIndex} must have a rendered target`);
     const distance = rectangleDistance(marker.rect, target);
     assert.ok(
@@ -616,6 +619,7 @@ try {
     issue(37, "#excluded-opacity-target"),
     issue(38, "#excluded-visibility-target")
   ];
+  const expectedMarkerCount = issues.length - 1;
 
   const initStartedAt = performance.now();
   await sendCommand(page, {
@@ -624,7 +628,7 @@ try {
     selectedIssueId: null,
     issues
   });
-  await waitForMarkers(page, issues.length);
+  await waitForMarkers(page, expectedMarkerCount);
   const initMs = performance.now() - initStartedAt;
   assert.ok(initMs < 2500, `large interactive obstacle fixture INIT exceeded 2500ms: ${initMs.toFixed(1)}ms`);
 
@@ -644,7 +648,7 @@ try {
   }, MARKER_SIZE);
   await page.waitForTimeout(80);
 
-  const markerForIssue = (facts, issueId) => facts[issues.findIndex((entry) => entry.id === issueId)];
+  const markerForIssue = (facts, issueId) => facts.find((marker) => marker.issueIds.includes(issueId));
   await setFixtureControlsNeutralized(page, true);
   await sendCommand(page, {
     type: "INIT_ISSUES",
@@ -652,7 +656,7 @@ try {
     selectedIssueId: null,
     issues
   });
-  await waitForMarkers(page, issues.length);
+  await waitForMarkers(page, expectedMarkerCount);
   const staticBaselineFacts = await markerFacts(page);
   const staticBaseline = [39, 40].map((issueId) => markerForIssue(staticBaselineFacts, issueId));
   assert.ok(staticBaseline.every((marker) => marker && !marker.hidden), "static hero markers must be visible");
@@ -672,15 +676,17 @@ try {
     selectedIssueId: null,
     issues
   });
-  await waitForMarkers(page, issues.length);
+  await waitForMarkers(page, expectedMarkerCount);
   const actualLikeFacts = await markerFacts(page);
-  const carouselRelocationIssueIds = new Set([4, 16]);
+  const carouselRelocationIssueIds = new Set([4, 5, 16]);
   let legacyMarkersUnchanged = 0;
-  issues.forEach((entry, index) => {
+  issues.forEach((entry) => {
     if (carouselRelocationIssueIds.has(entry.id)) return;
+    const actualMarker = markerForIssue(actualLikeFacts, entry.id);
+    const baselineMarker = markerForIssue(staticBaselineFacts, entry.id);
     assert.deepEqual(
-      actualLikeFacts[index],
-      staticBaselineFacts[index],
+      actualMarker,
+      baselineMarker,
       `non-carousel control geometry must not alter issue ${entry.id} marker coordinates`
     );
     legacyMarkersUnchanged += 1;
@@ -751,11 +757,9 @@ try {
     issues,
     "initial interactive obstacle layout"
   );
-  const hongikMarker = markers[0];
-  const legacyHongikMarker = staticBaselineFacts[0];
-  const hongikMarkerFiveIndex = issues.findIndex((entry) => entry.id === 5);
-  const hongikMarkerFive = actualLikeFacts[hongikMarkerFiveIndex];
-  const legacyHongikMarkerFive = staticBaselineFacts[hongikMarkerFiveIndex];
+  const hongikMarker = markerForIssue(markers, 4);
+  const legacyHongikMarker = markerForIssue(staticBaselineFacts, 4);
+  const hongikMarkerFive = markerForIssue(actualLikeFacts, 5);
   assert.equal(hongikMarker.hidden, false, "Hongik target marker must find a nearby safe slot");
   assertClose(legacyHongikMarker.rect.left, legacyMarker.left, "neutralized Hongik legacy marker left");
   assertClose(legacyHongikMarker.rect.top, legacyMarker.top, "neutralized Hongik legacy marker top");
@@ -767,31 +771,15 @@ try {
   assertClose(hongikMarker.rect.left, legacyMarker.left, "Hongik marker retains its left gutter");
   assertClose(
     hongikMarker.rect.top,
-    legacyMarker.top + 80,
-    "Hongik marker must move exactly two 40px slots to clear the previous control"
+    legacyMarker.top + 40,
+    "the grouped Hongik marker must move one 40px slot to clear the previous control"
   );
-  assert.equal(hongikMarkerFive.hidden, false, "Hongik marker 5 must remain visible");
-  assertClose(hongikMarkerFive.rect.left, legacyMarker.left, "Hongik marker 5 legacy left gutter");
-  assertClose(hongikMarkerFive.rect.top, legacyMarker.top + 40, "Hongik marker 5 legacy adjacent slot");
-  assert.deepEqual(
-    hongikMarkerFive,
-    legacyHongikMarkerFive,
-    "non-colliding Hongik marker 5 must remain byte-for-byte at its legacy placement"
-  );
-  assert.equal(
-    overlaps(expandedRect(hongikMarkerFive.rect), previousProtectedRect),
-    false,
-    "legacy marker 5 halo must already clear the protected center hotspot"
-  );
-  assert.equal(
-    overlaps(expandedRect(hongikMarker.rect), expandedRect(hongikMarkerFive.rect)),
-    false,
-    "relocated marker 4 and legacy marker 5 halos must remain disjoint"
-  );
+  assert.equal(hongikMarkerFive, hongikMarker, "issues 4 and 5 on the same heading must share one marker object");
+  assert.equal(hongikMarker.groupSize, "2");
+  assert.deepEqual(hongikMarker.issueIds, [4, 5]);
 
-  const customCarouselIndex = issues.findIndex((entry) => entry.id === 16);
-  const legacyCustomCarouselMarker = staticBaselineFacts[customCarouselIndex];
-  const customCarouselMarker = actualLikeFacts[customCarouselIndex];
+  const legacyCustomCarouselMarker = markerForIssue(staticBaselineFacts, 16);
+  const customCarouselMarker = markerForIssue(actualLikeFacts, 16);
   const customCarouselControlRect = await elementDocumentRect(page, "#control-custom-carousel");
   const customCarouselProtectedRect = carouselCenterProtectedRect(customCarouselControlRect);
   assert.equal(customCarouselMarker.hidden, false, "known custom carousel control keeps its issue marker visible");
@@ -856,8 +844,8 @@ try {
   assert.equal(await previousControl.evaluate((element) => document.activeElement === element), true);
 
   markers = await markerFacts(page);
-  const ordinaryMarker = markers[issues.findIndex((entry) => entry.id === 18)];
-  const hiddenControlMarker = markers[issues.findIndex((entry) => entry.id === 19)];
+  const ordinaryMarker = markerForIssue(markers, 18);
+  const hiddenControlMarker = markerForIssue(markers, 19);
   assert.equal(ordinaryMarker.hidden, false, "ordinary content must not suppress a marker");
   assertClose(ordinaryMarker.rect.left, 1100 - MARKER_SIZE - 8, "ordinary content legacy marker left");
   assertClose(ordinaryMarker.rect.top, 1837, "ordinary content legacy marker top");
@@ -865,8 +853,8 @@ try {
   assertClose(hiddenControlMarker.rect.left, 1400 - MARKER_SIZE - 8, "hidden-control legacy marker left");
   assertClose(hiddenControlMarker.rect.top, 1977, "hidden-control legacy marker top");
 
-  const interactiveButtonMarker = markers[issues.findIndex((entry) => entry.id === 20)];
-  const interactiveLinkMarker = markers[issues.findIndex((entry) => entry.id === 21)];
+  const interactiveButtonMarker = markerForIssue(markers, 20);
+  const interactiveLinkMarker = markerForIssue(markers, 21);
   assert.equal(interactiveButtonMarker.hidden, false, "an issue on a button must retain a visible nearby marker");
   assert.equal(interactiveLinkMarker.hidden, false, "an issue on a link must retain a visible nearby marker");
   const interactiveButtonRect = await elementDocumentRect(page, "#interactive-target-button");
@@ -874,15 +862,15 @@ try {
   assert.equal(overlaps(expandedRect(interactiveButtonMarker.rect), interactiveButtonRect), false);
   assert.equal(overlaps(expandedRect(interactiveLinkMarker.rect), interactiveLinkRect), false);
 
-  const ancestorMarker = markers[issues.findIndex((entry) => entry.id === 22)];
-  const hugeAncestorMarker = markers[issues.findIndex((entry) => entry.id === 25)];
+  const ancestorMarker = markerForIssue(markers, 22);
+  const hugeAncestorMarker = markerForIssue(markers, 25);
   assert.equal(ancestorMarker.hidden, false, "a target enclosed by a generic clickable ancestor retains its marker");
   assert.equal(hugeAncestorMarker.hidden, false, "a target enclosed by a huge generic link retains its marker");
 
-  const descendantMarker = markers[issues.findIndex((entry) => entry.id === 23)];
+  const descendantMarker = markerForIssue(markers, 23);
   assert.equal(descendantMarker.hidden, false, "a generic button descendant must not suppress its container marker");
 
-  const shadowMarker = markers[issues.findIndex((entry) => entry.id === 24)];
+  const shadowMarker = markerForIssue(markers, 24);
   assert.equal(shadowMarker.hidden, false, "a generic Shadow DOM button must not suppress its nearby marker");
 
   for (const fixture of [
@@ -894,7 +882,7 @@ try {
     { id: 37, control: "#excluded-opacity", targetLeft: 3560, reason: "opacity:0" },
     { id: 38, control: "#excluded-visibility", targetLeft: 3860, reason: "visibility:hidden" }
   ]) {
-    const marker = markers[issues.findIndex((entry) => entry.id === fixture.id)];
+    const marker = markerForIssue(markers, fixture.id);
     const controlRect = await elementDocumentRect(page, fixture.control);
     assert.equal(marker.hidden, false, `${fixture.reason} must not suppress its nearby marker`);
     assertClose(marker.rect.left, fixture.targetLeft - MARKER_SIZE - 8, `${fixture.reason} preserves legacy left slot`);
@@ -926,11 +914,11 @@ try {
     "768px responsive interactive obstacle layout"
   );
 
-  const rtlMarker = markers[issues.findIndex((entry) => entry.id === 28)];
+  const rtlMarker = markerForIssue(markers, 28);
   assert.equal(rtlMarker.hidden, false, "RTL target must retain its marker");
 
-  const scrollMarkerIndex = issues.findIndex((entry) => entry.id === 29);
-  const scrollMarkerBefore = markers[scrollMarkerIndex];
+  const scrollMarkerBefore = markerForIssue(markers, 29);
+  const scrollMarkerIndex = scrollMarkerBefore.arrayIndex;
   await page.evaluate(() => {
     document.getElementById("nested-scroll").scrollTop = 220;
   });
@@ -941,7 +929,7 @@ try {
       && Math.abs(marker.getBoundingClientRect().top + window.scrollY - previousTop) >= 35;
   }, { previousTop: scrollMarkerBefore.rect.top, markerIndex: scrollMarkerIndex });
   markers = await markerFacts(page);
-  const scrollMarkerAfter = markers[scrollMarkerIndex];
+  const scrollMarkerAfter = markerForIssue(markers, 29);
   assert.equal(scrollMarkerAfter.hidden, false);
 
   await page.evaluate(() => {
@@ -966,7 +954,7 @@ try {
     selectedIssueId: null,
     issues
   });
-  await waitForMarkers(page, issues.length);
+  await waitForMarkers(page, expectedMarkerCount);
   const deterministicAfter = (await markerFacts(page))
     .filter((marker) => !marker.hidden)
     .map((marker) => ({ markerIndex: marker.markerIndex, rect: marker.rect }));
@@ -982,9 +970,10 @@ try {
       previousProtectedRect,
       legacyMarker,
       placedMarker: hongikMarker.rect,
-      markerFive: {
-        legacy: legacyHongikMarkerFive.rect,
-        placed: hongikMarkerFive.rect
+      groupedHongikMarker: {
+        issueIds: hongikMarker.issueIds,
+        groupSize: hongikMarker.groupSize,
+        placed: hongikMarker.rect
       },
       centerHit,
       actualLikeAnchorDistances,

@@ -6,8 +6,22 @@
     <title>UNI ACCESS 미리보기 재현 페이지</title>
     <style>
       * { box-sizing: border-box; }
-      html { color: #172033; font-family: Arial, "Noto Sans KR", sans-serif; }
+      html { --replay-overlay-inverse-scale: 1; --replay-visual-width: 100vw; color: #172033; font-family: Arial, "Noto Sans KR", sans-serif; }
       body { margin: 0; min-width: 680px; background: #fff; }
+      html, body { scrollbar-gutter: auto; }
+      @supports not selector(::-webkit-scrollbar) {
+        html, body { scrollbar-width: thin; scrollbar-color: rgba(99,99,102,.78) transparent; }
+        @media (forced-colors: active) { html, body { scrollbar-width: auto; scrollbar-color: auto; } }
+      }
+      @supports selector(::-webkit-scrollbar) {
+        html::-webkit-scrollbar, body::-webkit-scrollbar { width: 10px; height: 10px; }
+        html::-webkit-scrollbar-track, body::-webkit-scrollbar-track,
+        html::-webkit-scrollbar-corner, body::-webkit-scrollbar-corner { background: transparent; }
+        html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb { min-height: 48px; border: 1px solid transparent; border-radius: 999px; background: rgba(99,99,102,.78); background-clip: padding-box; }
+        html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover { background: rgba(72,72,74,.88); background-clip: padding-box; }
+        html::-webkit-scrollbar-thumb:active, body::-webkit-scrollbar-thumb:active { background: rgba(44,44,46,.94); background-clip: padding-box; }
+        html::-webkit-scrollbar-button, body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+      }
       button, input { font: inherit; }
       .utility { height: 34px; background: #172033; }
       .site-header { display: flex; height: 82px; align-items: center; justify-content: space-between; padding: 0 48px; border-bottom: 1px solid #dfe4ea; }
@@ -43,7 +57,7 @@
       .site-footer { display: flex; min-height: 118px; align-items: center; justify-content: space-between; gap: 24px; padding: 32px 48px; background: #172033; color: #c7d0dc; font-size: 13px; }
       .site-footer strong { color: #fff; font-size: 18px; }
       #preview-markers { position: fixed; inset: 0; z-index: 2147483646; pointer-events: none; }
-      .preview-marker { position: absolute; display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; pointer-events: auto; cursor: pointer; }
+      .preview-marker { position: absolute; display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; pointer-events: auto; cursor: pointer; transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
       .preview-marker__badge { box-sizing: border-box; display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: rgba(0,102,204,.94); box-shadow: 0 0 0 2px rgba(255,255,255,.94), 0 2px 5px rgba(16,24,40,.32); color: #fff; transition: transform 120ms ease, box-shadow 120ms ease; }
       .preview-marker__icon { display: block; width: 14px; height: 14px; overflow: visible; pointer-events: none; }
       .preview-marker:hover .preview-marker__badge { transform: scale(1.12); }
@@ -121,6 +135,7 @@
         const markerHost = document.getElementById("preview-markers");
         let issues = [];
         let selectedIssueId = null;
+        let replayViewScale = 1;
 
         const post = (message) => parent.postMessage({ source: SOURCE, documentToken, ...message }, "*");
         const sendState = () => {
@@ -178,8 +193,10 @@
             marker.setAttribute("aria-label", issue.title);
             marker.setAttribute("aria-pressed", String(issue.id === selectedIssueId));
             marker.appendChild(createMarkerBadge());
-            marker.style.left = `${Math.max(6, Math.min(window.innerWidth - 34, rect.left + 8))}px`;
-            marker.style.top = `${Math.max(6, Math.min(window.innerHeight - 34, rect.top + 8))}px`;
+            const markerInset = 6 / replayViewScale;
+            const markerExtent = 34 / replayViewScale;
+            marker.style.left = `${Math.max(markerInset, Math.min(window.innerWidth - markerExtent, rect.left + 8))}px`;
+            marker.style.top = `${Math.max(markerInset, Math.min(window.innerHeight - markerExtent, rect.top + 8))}px`;
             marker.addEventListener("click", () => {
               selectedIssueId = issue.id;
               renderMarkers();
@@ -194,6 +211,24 @@
         window.addEventListener("message", (event) => {
           if (event.source !== parent || !event.data || event.data.source !== DASHBOARD_SOURCE) return;
           if (event.data.type === "REQUEST_DOCUMENT_STATE") sendState();
+          if (event.data.type === "SET_VIEW_SCALE") {
+            const nextScale = event.data.scale;
+            const nextVisualWidth = event.data.visualWidth;
+            if (
+              event.data.documentToken === documentToken
+              && Number.isFinite(nextScale)
+              && nextScale >= 0.01
+              && nextScale <= 1
+              && Number.isFinite(nextVisualWidth)
+              && nextVisualWidth > 0
+              && nextVisualWidth <= 16384
+            ) {
+              replayViewScale = nextScale;
+              document.documentElement.style.setProperty("--replay-overlay-inverse-scale", String(1 / nextScale));
+              document.documentElement.style.setProperty("--replay-visual-width", `${nextVisualWidth}px`);
+              renderMarkers();
+            }
+          }
           if (event.data.type === "INIT_ISSUES") {
             issues = Array.isArray(event.data.issues) ? event.data.issues : [];
             selectedIssueId = event.data.selectedIssueId;

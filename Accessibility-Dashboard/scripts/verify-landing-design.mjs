@@ -300,6 +300,71 @@ async function settleDocument(locator) {
   });
 }
 
+async function readProjectFaviconPresentation(page) {
+  return page.locator(".dashboard-project-favicon").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      loaded: element.dataset.faviconLoaded,
+      borderTopWidth: style.borderTopWidth,
+      backgroundColor: style.backgroundColor,
+      fallbackIconCount: element.querySelectorAll("svg").length,
+      imageCount: element.querySelectorAll("img").length
+    };
+  });
+}
+
+async function verifyProjectFaviconPresentation(browser) {
+  const faviconUrl = `${baseUrl}/__test-assets__/favicon.svg`;
+  const missingFaviconUrl = `${baseUrl}/__test-assets__/missing-favicon.svg`;
+  const loadedPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await loadedPage.route("**/__test-assets__/favicon.svg", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#0071e3"/></svg>'
+    })
+  );
+  const loadedFixture = await installDashboardApiFixture(loadedPage);
+  loadedFixture.target.faviconUrl = faviconUrl;
+  await loadedPage.goto(`${baseUrl}/projects/${loadedFixture.organization.id}`, { waitUntil: "networkidle" });
+  await loadedPage.locator('.dashboard-project-favicon[data-favicon-loaded="true"]').waitFor();
+  const loaded = await readProjectFaviconPresentation(loadedPage);
+  loadedFixture.assertIsolated();
+  await loadedPage.close();
+
+  const fallbackPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await fallbackPage.route("**/__test-assets__/missing-favicon.svg", (route) =>
+    route.fulfill({ status: 404, contentType: "text/plain", body: "missing" })
+  );
+  const fallbackFixture = await installDashboardApiFixture(fallbackPage);
+  fallbackFixture.target.faviconUrl = missingFaviconUrl;
+  await fallbackPage.goto(`${baseUrl}/projects/${fallbackFixture.organization.id}`, { waitUntil: "networkidle" });
+  await fallbackPage.waitForFunction(() => {
+    const favicon = document.querySelector('.dashboard-project-favicon[data-favicon-loaded="false"]');
+    return favicon && !favicon.querySelector("img");
+  });
+  const fallback = await readProjectFaviconPresentation(fallbackPage);
+  fallbackFixture.assertIsolated();
+  await fallbackPage.close();
+
+  assert.equal(loaded.loaded, "true", "a successfully loaded favicon must enter the loaded state");
+  assert.equal(loaded.borderTopWidth, "0px", "a successfully loaded favicon must not keep its frame border");
+  assert.equal(parseAlpha(loaded.backgroundColor), 0, "a successfully loaded favicon must use a transparent surface");
+  assert.equal(loaded.fallbackIconCount, 0, "a successfully loaded favicon must hide the fallback icon");
+  assert.equal(loaded.imageCount, 1, "a successfully loaded favicon must remain visible");
+
+  assert.equal(fallback.loaded, "false", "a failed favicon must stay in the fallback state");
+  assert.ok(
+    Number.parseFloat(fallback.borderTopWidth) > 0,
+    "a failed favicon must retain the fallback frame border"
+  );
+  assert.equal(parseAlpha(fallback.backgroundColor), 1, "a failed favicon must retain its solid fallback surface");
+  assert.equal(fallback.fallbackIconCount, 1, "a failed favicon must render the target-type fallback icon");
+  assert.equal(fallback.imageCount, 0, "a failed favicon image must be removed from the rendered state");
+
+  return { loaded, fallback };
+}
+
 /**
  * Composites a paint stack ordered top-most first onto an opaque base, so the
  * measured ratio matches what a user actually sees through translucent tints.
@@ -315,8 +380,48 @@ function flattenStack(stack) {
   return result;
 }
 
+async function verifyProductReplayOverlayScale(productPreviewRoot) {
+  await productPreviewRoot
+    .getByRole("button", { name: "www.hongik.ac.kr 상세 보기", exact: true })
+    .click();
+
+  const outerFrame = productPreviewRoot.locator("iframe.site-page-evidence-replay-frame");
+  await outerFrame.waitFor();
+  const replayFrame = productPreviewRoot.frameLocator("iframe.site-page-evidence-replay-frame");
+  const marker = replayFrame.locator(".preview-marker").first();
+  await marker.waitFor({ state: "visible" });
+
+  const outerScale = Number.parseFloat(await outerFrame.getAttribute("data-replay-scale"));
+  const outerVisualWidth = Number.parseFloat(
+    await outerFrame.getAttribute("data-replay-visual-width")
+  );
+  const innerMetrics = await replayFrame.locator("html").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      inverseScale: Number.parseFloat(style.getPropertyValue("--replay-overlay-inverse-scale")),
+      visualWidth: Number.parseFloat(style.getPropertyValue("--replay-visual-width"))
+    };
+  });
+  const markerBox = await marker.boundingBox();
+
+  assert.ok(outerScale >= 0.01 && outerScale < 1, `product replay scale must fit: ${outerScale}`);
+  assert.ok(outerVisualWidth > 0, `product replay visual width must be positive: ${outerVisualWidth}`);
+  assert.ok(
+    Math.abs(outerScale * innerMetrics.inverseScale - 1) <= 0.01,
+    `product replay overlay scale must cancel the iframe scale: ${JSON.stringify({ outerScale, ...innerMetrics })}`
+  );
+  assert.ok(
+    Math.abs(innerMetrics.visualWidth - outerVisualWidth) <= 0.5,
+    `product replay visual width must match its parent: ${JSON.stringify({ outerVisualWidth, ...innerMetrics })}`
+  );
+  assert.ok(markerBox, "product replay marker must be visible");
+  assert.ok(Math.abs(markerBox.width - 24) <= 0.75, `product replay marker width: ${markerBox.width}px`);
+  assert.ok(Math.abs(markerBox.height - 24) <= 0.75, `product replay marker height: ${markerBox.height}px`);
+}
+
 const browser = await chromium.launch({ headless: true });
 const report = [];
+let faviconPresentation = null;
 
 try {
   for (const viewport of viewports) {
@@ -498,6 +603,9 @@ try {
     if (viewport.width === 1440 || viewport.width === 390) {
       await page.screenshot({ path: `${outDir}/after-landing-${label}.png`, fullPage: false });
     }
+    if (viewport.width === 1440) {
+      await verifyProductReplayOverlayScale(productPreviewRoot);
+    }
 
     report.push({
       viewport: label,
@@ -528,8 +636,13 @@ try {
     await page.close();
   }
 
-  console.log(JSON.stringify({ result: "PASS", report }, null, 2));
+  faviconPresentation = await verifyProjectFaviconPresentation(browser);
+  console.log(JSON.stringify({ result: "PASS", report, faviconPresentation }, null, 2));
 } finally {
-  writeFileSync(`${outDir}/landing-facts.json`, JSON.stringify({ report }, null, 2), "utf8");
+  writeFileSync(
+    `${outDir}/landing-facts.json`,
+    JSON.stringify({ report, faviconPresentation }, null, 2),
+    "utf8"
+  );
   await browser.close();
 }

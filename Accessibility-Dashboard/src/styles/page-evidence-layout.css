@@ -1,8 +1,20 @@
+.bridge-dashboard.dashboard-site-detail .site-dashboard-layout {
+  /* The evidence canvas grows substantially on wide desktop displays. Keep the
+     supporting rail in the same visual scale without inflating the Full HD
+     layout. The preferred values stay at their minimum around 1920px and grow
+     into the larger caps only on 4K-class canvases. */
+  --site-rail-card-padding: clamp(1rem, 0.375rem + 0.7cqi, 1.75rem);
+  --site-rail-heading-size: clamp(0.875rem, 0.625rem + 0.27cqi, 1.125rem);
+  --site-rail-body-size: clamp(0.75rem, 0.5rem + 0.23cqi, 0.9375rem);
+  --site-rail-caption-size: clamp(0.6875rem, 0.4375rem + 0.235cqi, 0.875rem);
+  --site-rail-section-space: clamp(0.875rem, 0.25rem + 0.65cqi, 1.5rem);
+}
+
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 1rem;
+  padding: var(--site-rail-card-padding);
   border: 1px solid var(--dashboard-card-border);
   border-radius: var(--dashboard-site-card-radius);
   background: var(--site-glass-bg-opaque);
@@ -10,7 +22,7 @@
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-heading h3 {
   color: var(--dashboard-text-strong);
-  font-size: 0.875rem;
+  font-size: var(--site-rail-heading-size);
   font-weight: 750;
   line-height: 1.4;
 }
@@ -18,20 +30,20 @@
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-heading p {
   margin-top: 0.25rem;
   color: var(--dashboard-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--site-rail-body-size);
   line-height: 1.45;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin-top: 1rem;
+  gap: clamp(0.5rem, 0.125rem + 0.4cqi, 1rem);
+  margin-top: var(--site-rail-section-space);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics > div {
   min-width: 0;
-  padding: 0.75rem;
+  padding: clamp(0.75rem, 0.25rem + 0.5cqi, 1.25rem);
   border-radius: var(--dashboard-site-nested-radius);
   background: var(--site-inset-surface);
 }
@@ -39,14 +51,14 @@
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics span {
   display: block;
   color: var(--dashboard-text-muted);
-  font-size: 0.6875rem;
+  font-size: var(--site-rail-caption-size);
   font-weight: 650;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics strong {
   margin-top: 0.2rem;
   color: var(--dashboard-text-strong);
-  font-size: clamp(1.35rem, 1.1vw, 1.75rem);
+  font-size: clamp(1.35rem, 0.875rem + 0.525cqi, 2.25rem);
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
@@ -54,14 +66,14 @@
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics small {
   margin-left: 0.15rem;
   color: var(--dashboard-text-muted);
-  font-size: 0.6875rem;
+  font-size: var(--site-rail-caption-size);
   font-weight: 650;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart {
   width: 100%;
-  height: 8.75rem;
-  margin-top: 0.75rem;
+  height: clamp(8.75rem, 2.5rem + 5cqi, 13rem);
+  margin-top: clamp(0.75rem, 0.4rem + 0.25cqi, 1rem);
   overflow: visible;
 }
 
@@ -136,7 +148,7 @@
 
 @container (min-width: 64rem) {
   .bridge-dashboard.dashboard-site-detail .site-dashboard-layout {
-    grid-template-columns: minmax(0, 1fr) clamp(17rem, 18vw, 22rem);
+    grid-template-columns: minmax(0, 1fr) clamp(17rem, 22cqi, 42rem);
     align-items: stretch;
   }
 
@@ -170,7 +182,7 @@
 
 .bridge-dashboard.dashboard-site-detail .site-rail-card {
   min-width: 0;
-  padding: 1rem;
+  padding: var(--site-rail-card-padding);
   border: 1px solid var(--dashboard-card-border);
   border-radius: var(--dashboard-site-card-radius);
   background: var(--site-glass-bg-opaque);
@@ -178,7 +190,7 @@
 
 .bridge-dashboard.dashboard-site-detail .site-rail-card__heading h3 {
   color: var(--dashboard-text-strong);
-  font-size: 0.875rem;
+  font-size: var(--site-rail-heading-size);
   font-weight: 750;
   line-height: 1.4;
 }
@@ -186,7 +198,7 @@
 .bridge-dashboard.dashboard-site-detail .site-rail-card__heading p {
   margin-top: 0.25rem;
   color: var(--dashboard-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--site-rail-body-size);
   line-height: 1.45;
 }
 
@@ -195,15 +207,15 @@
 .bridge-dashboard.dashboard-site-detail .site-page-information__identity {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  margin-top: 0.875rem;
+  gap: clamp(0.625rem, 0.25rem + 0.35cqi, 1.125rem);
+  margin-top: var(--site-rail-section-space);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-information__icon {
   position: relative;
   display: grid;
-  width: 2rem;
-  height: 2rem;
+  width: clamp(2rem, 0.5rem + 1.25cqi, 3rem);
+  height: clamp(2rem, 0.5rem + 1.25cqi, 3rem);
   border: 1px solid var(--dashboard-nested-border);
   border-radius: var(--dashboard-site-nested-radius);
   color: var(--dashboard-text-muted);
@@ -235,7 +247,7 @@
 
 .bridge-dashboard.dashboard-site-detail .site-page-information__title strong {
   color: var(--dashboard-text-strong);
-  font-size: 0.75rem;
+  font-size: var(--site-rail-body-size);
   font-weight: 750;
   line-height: 1.4;
 }
@@ -243,7 +255,7 @@
 .bridge-dashboard.dashboard-site-detail .site-page-information__title a {
   margin-top: 0.125rem;
   color: var(--dashboard-text-muted);
-  font-size: 0.6875rem;
+  font-size: var(--site-rail-caption-size);
   line-height: 1.4;
   transition: color 140ms ease;
 }
@@ -260,18 +272,18 @@
 
 .bridge-dashboard.dashboard-site-detail .site-page-information__metadata {
   display: grid;
-  gap: 0.5rem;
-  margin-top: 0.875rem;
-  padding-top: 0.75rem;
+  gap: clamp(0.5rem, 0.25rem + 0.2cqi, 0.75rem);
+  margin-top: var(--site-rail-section-space);
+  padding-top: clamp(0.75rem, 0.4rem + 0.25cqi, 1rem);
   border-top: 1px solid var(--site-divider);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-information__metadata > div {
   display: grid;
-  grid-template-columns: 4rem minmax(0, 1fr);
+  grid-template-columns: clamp(4rem, 2.5rem + 1.2cqi, 5rem) minmax(0, 1fr);
   align-items: start;
   gap: 0.75rem;
-  font-size: 0.6875rem;
+  font-size: var(--site-rail-caption-size);
   line-height: 1.45;
 }
 
@@ -294,8 +306,8 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
-  gap: 0.5rem;
-  margin-top: 0.875rem;
+  gap: clamp(0.5rem, 0.125rem + 0.45cqi, 1.125rem);
+  margin-top: var(--site-rail-section-space);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-rail-severity__row {
@@ -303,11 +315,11 @@
   grid-template-areas:
     "track"
     "name";
-  grid-template-rows: 5rem 1rem;
+  grid-template-rows: clamp(5rem, 1rem + 3.75cqi, 9rem) auto;
   justify-items: center;
   gap: 0.375rem;
   min-width: 0;
-  font-size: 0.6875rem;
+  font-size: var(--site-rail-caption-size);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-rail-severity__row:focus-visible {
@@ -326,8 +338,8 @@
   display: flex;
   grid-area: track;
   align-items: flex-end;
-  width: 0.75rem;
-  height: 5rem;
+  width: clamp(0.75rem, 0.125rem + 0.6cqi, 1.5rem);
+  height: clamp(5rem, 1rem + 3.75cqi, 9rem);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-rail-severity__fill {
@@ -352,7 +364,7 @@
   color: var(--dashboard-text-strong);
   background: var(--site-glass-bg-opaque);
   box-shadow: var(--site-glass-shadow);
-  font-size: 0.625rem;
+  font-size: clamp(0.625rem, 0.375rem + 0.2cqi, 0.75rem);
   font-weight: 750;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;

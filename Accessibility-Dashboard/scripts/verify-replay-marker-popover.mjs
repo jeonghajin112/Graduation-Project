@@ -175,6 +175,9 @@ async function shadowFact(page) {
         textOverflow: style.textOverflow,
         webkitLineClamp: style.getPropertyValue("-webkit-line-clamp"),
         maxHeight: style.maxHeight,
+        fontSize: Number.parseFloat(style.fontSize),
+        lineHeight: Number.parseFloat(style.lineHeight),
+        fontWeight: Number.parseInt(style.fontWeight, 10),
         clientWidth: element.clientWidth,
         clientHeight: element.clientHeight,
         scrollWidth: element.scrollWidth,
@@ -221,6 +224,7 @@ async function shadowFact(page) {
       popover: visiblePopover ? {
         id: visiblePopover.id || null,
         issueId: visiblePopover.dataset.issueId ?? null,
+        grouped: visiblePopover.dataset.grouped ?? null,
         placement: visiblePopover.dataset.placement ?? null,
         density: visiblePopover.dataset.density || "normal",
         layout: visiblePopover.dataset.layout || "vertical",
@@ -252,8 +256,22 @@ async function shadowFact(page) {
         ),
         severity: visiblePopover.querySelector(".issue-popover__severity")?.textContent ?? null,
         code: visiblePopover.querySelector(".issue-popover__code")?.textContent ?? null,
+        group: visiblePopover.querySelector(".issue-popover__group")?.textContent ?? null,
+        relatedIssues: [...visiblePopover.querySelectorAll(".issue-popover__issue")].map((issue) => ({
+          issueId: issue.dataset.issueId ?? null,
+          severity: issue.querySelector(".issue-popover__issue-severity")?.textContent ?? null,
+          code: issue.querySelector(".issue-popover__issue-code")?.textContent ?? null,
+          title: issue.querySelector(".issue-popover__issue-title")?.textContent ?? null
+        })),
+        remainingIssues: visiblePopover.querySelector(".issue-popover__issues-more")?.textContent ?? null,
         title: visiblePopover.querySelector(".issue-popover__title")?.textContent ?? null,
         message: visiblePopover.querySelector(".issue-popover__message")?.textContent ?? null,
+        messageSections: [...visiblePopover.querySelectorAll(".issue-popover__message-section")].map((section) => ({
+          label: section.querySelector(".issue-popover__message-label")?.textContent ?? null,
+          values: [
+            ...section.querySelectorAll(".issue-popover__message-value, .issue-popover__message-list > li")
+          ].map((value) => value.textContent ?? "")
+        })),
         path: visiblePopover.querySelector(".issue-popover__path")?.textContent ?? null,
         blocks: {
           title: textBlockFact(".issue-popover__title"),
@@ -261,9 +279,9 @@ async function shadowFact(page) {
           path: textBlockFact(".issue-popover__path")
         },
         injectedElementCount: visiblePopover.querySelectorAll("img,script,svg,iframe,object,embed").length,
-        focusableCount: visiblePopover.querySelectorAll(
+        focusableCount: [...visiblePopover.querySelectorAll(
           'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]'
-        ).length
+        )].filter((element) => !element.disabled && element.getClientRects().length > 0).length
       } : null,
       externalDescription: externalDescription ? (() => {
         const style = getComputedStyle(externalDescription);
@@ -286,13 +304,14 @@ async function shadowFact(page) {
           rect: rectFact(externalDescription.getBoundingClientRect()),
           severity: externalDescription.querySelector(".issue-popover__severity")?.textContent ?? null,
           code: externalDescription.querySelector(".issue-popover__code")?.textContent ?? null,
+          group: externalDescription.querySelector(".issue-popover__group")?.textContent ?? null,
           title: externalDescription.querySelector(".issue-popover__title")?.textContent ?? null,
           message: externalDescription.querySelector(".issue-popover__message")?.textContent ?? null,
           path: externalDescription.querySelector(".issue-popover__path")?.textContent ?? null,
           injectedElementCount: externalDescription.querySelectorAll("img,script,svg,iframe,object,embed").length,
-          focusableCount: externalDescription.querySelectorAll(
+          focusableCount: [...externalDescription.querySelectorAll(
             'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"]),[contenteditable="true"]'
-          ).length
+          )].filter((element) => !element.disabled && element.getClientRects().length > 0).length
         };
       })() : null,
       markers: [...(root?.querySelectorAll(".marker") ?? [])].map((marker) => ({
@@ -309,6 +328,7 @@ async function shadowFact(page) {
       activeElementIsMarker: document.activeElement === document.getElementById("__uni_accessibility_replay_host"),
       shadowActiveClass: root?.activeElement?.className ?? null,
       shadowActiveIndex: root?.activeElement?.dataset.markerIndex ?? null,
+      shadowActiveIssueId: root?.activeElement?.dataset.issueId ?? null,
       shadowActiveText: root?.activeElement?.textContent ?? null,
       xssFlag: window.__popoverXss ?? null,
       viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -339,6 +359,7 @@ async function waitForVisiblePopover(page, issueId) {
     return popover
       && !popover.hidden
       && getComputedStyle(popover).display !== "none"
+      && popover.dataset.presentation !== "external-description"
       && popover.dataset.issueId === String(expectedId);
   }, issueId);
   const fact = await shadowFact(page);
@@ -503,7 +524,10 @@ async function assertSafePopover(
     ? Math.min(840, fact.viewport.width - 24)
     : Math.min(360, fact.viewport.width - 24);
   assert.ok(popover.rect.width <= maximumPopoverWidth + 1, `${message}: width cap`);
-  assert.ok(popover.rect.height <= Math.min(320, fact.viewport.height - 24) + 1, `${message}: height cap`);
+  assert.ok(
+    popover.rect.height <= Math.min(320, fact.viewport.height - 24) + 1,
+    `${message}: height cap; geometry=${JSON.stringify(popover.rect)}`
+  );
   const side = rectSide(popover.rect, marker.rect);
   assert.notEqual(side, "overlap", `${message}: popover must occupy an adjacent side`);
   assert.ok(
@@ -562,17 +586,39 @@ function assertUnclampedBlock(block, expectedText, message) {
   );
 }
 
+function expectedTextAnalysisPresentation(detail) {
+  const sections = [];
+  if (detail.sourceText) sections.push({ label: "분석 문장", values: [detail.sourceText] });
+  if (detail.flags.length > 0) sections.push({ label: "개선 필요", values: detail.flags });
+  if (detail.suggestions.length > 0) sections.push({ label: "개선 제안", values: detail.suggestions });
+  if (detail.revision?.text) sections.push({ label: "수정 예시", values: [detail.revision.text] });
+  if (detail.revision?.reason) sections.push({ label: "수정 이유", values: [detail.revision.reason] });
+  return {
+    sections,
+    text: sections.map((section) => `${section.label}${section.values.join("")}`).join("")
+  };
+}
+
 async function assertFullPopoverContent(page, issue, message, { layout } = {}) {
   const fact = await shadowFact(page);
   assert.ok(fact.popover, `${message}: popover must be visible`);
   const expected = boundedIssueText(issue);
+  const textAnalysisPresentation = issue.textAnalysis
+    ? expectedTextAnalysisPresentation(issue.textAnalysis)
+    : null;
+  const expectedMessage = textAnalysisPresentation?.text ?? expected.message;
   assert.equal(fact.popover.severity, expected.severity, `${message}: severity safety bound`);
   assert.equal(fact.popover.code, expected.code, `${message}: code safety bound`);
   assert.equal(fact.popover.title, expected.title, `${message}: title safety bound`);
-  assert.equal(fact.popover.message, expected.message, `${message}: message safety bound`);
+  assert.equal(fact.popover.message, expectedMessage, `${message}: message safety bound`);
+  assert.deepEqual(
+    fact.popover.messageSections,
+    textAnalysisPresentation?.sections ?? [],
+    `${message}: structured text analysis sections`
+  );
   assert.equal(fact.popover.path, expected.path, `${message}: path safety bound`);
   assertUnclampedBlock(fact.popover.blocks.title, expected.title, `${message} title`);
-  assertUnclampedBlock(fact.popover.blocks.message, expected.message, `${message} message`);
+  assertUnclampedBlock(fact.popover.blocks.message, expectedMessage, `${message} message`);
   assertUnclampedBlock(fact.popover.blocks.path, expected.path, `${message} path`);
   for (const [name, block] of Object.entries(fact.popover.blocks)) {
     assert.equal(
@@ -606,10 +652,17 @@ async function assertFullPopoverContent(page, issue, message, { layout } = {}) {
   assert.notEqual(fact.popover.scrollable, "true", `${message}: legacy scrollable state must be absent`);
   assert.equal(fact.scrollIndicatorCount, 0, `${message}: custom scroll indicator must not exist`);
   assert.equal(fact.scrollIndicator, null, `${message}: custom scroll indicator state must be absent`);
-  assert.equal(fact.popover.role, "tooltip", `${message}: non-interactive details use tooltip semantics`);
-  assert.equal(fact.popover.tabIndex, -1, `${message}: tooltip must not become a separate tab stop`);
-  assert.equal(fact.popover.focused, false, `${message}: tooltip never steals marker focus`);
-  assert.equal(fact.popover.focusableCount, 0, `${message}: tooltip has no focusable descendants`);
+  if (fact.popover.grouped === "true") {
+    assert.equal(fact.popover.role, "dialog", `${message}: grouped details use interactive dialog semantics`);
+    assert.equal(fact.popover.tabIndex, -1, `${message}: the grouped dialog delegates focus to its selectors`);
+    assert.equal(fact.popover.focused, false, `${message}: grouped dialog container itself stays out of the tab order`);
+    assert.ok(fact.popover.focusableCount >= 2, `${message}: every grouped issue must have a focusable selector`);
+  } else {
+    assert.equal(fact.popover.role, "tooltip", `${message}: non-interactive details use tooltip semantics`);
+    assert.equal(fact.popover.tabIndex, -1, `${message}: tooltip must not become a separate tab stop`);
+    assert.equal(fact.popover.focused, false, `${message}: tooltip never steals marker focus`);
+    assert.equal(fact.popover.focusableCount, 0, `${message}: tooltip has no focusable descendants`);
+  }
   assert.ok(
     fact.popover.visibleContentBottom <= fact.popover.clientBottom + 1,
     `${message}: natural card must contain every visible content block`
@@ -624,6 +677,14 @@ async function assertFullPopoverContent(page, issue, message, { layout } = {}) {
         rect: fact.popover.rect
       })}`
     );
+  }
+  if (fact.popover.layout === "wide") {
+    assert.ok(fact.popover.blocks.title.fontSize >= 15, `${message}: wide title must remain readable`);
+    assert.ok(fact.popover.blocks.message.fontSize >= 12.5, `${message}: wide explanation must remain readable`);
+    assert.ok(fact.popover.blocks.message.lineHeight >= fact.popover.blocks.message.fontSize * 1.45,
+      `${message}: wide explanation needs relaxed line height`);
+    assert.ok(fact.popover.blocks.path.fontSize >= 11, `${message}: wide selector must remain readable`);
+    assert.ok(fact.popover.blocks.path.fontWeight >= 500, `${message}: wide selector needs sufficient stroke weight`);
   }
   return fact;
 }
@@ -641,12 +702,25 @@ async function movePointerFromMarkerToPopover(page, issueId) {
 const sanitizerSource = await readFile(sanitizerPath, "utf8");
 const bridgeStyle = extractJavaTextBlock(sanitizerSource, "BRIDGE_STYLE");
 let bridgeScript = extractBridgeScript(sanitizerSource);
+for (const pattern of [
+  /html,\s*body \{[^}]*scrollbar-gutter: auto !important/,
+  /@supports not selector\(::-webkit-scrollbar\) \{[\s\S]*?scrollbar-width: thin !important[\s\S]*?scrollbar-color: rgba\(99, 99, 102, \.78\) transparent !important/,
+  /@supports selector\(::-webkit-scrollbar\) \{[\s\S]*?html::\-webkit-scrollbar,\s*body::\-webkit-scrollbar \{[^}]*width: 10px !important/,
+  /html::\-webkit-scrollbar-thumb,\s*body::\-webkit-scrollbar-thumb \{[^}]*min-height: 48px !important/,
+  /border-radius: 999px !important/,
+  /background-clip: padding-box !important/,
+  /html::\-webkit-scrollbar-button,\s*body::\-webkit-scrollbar-button \{[^}]*display: none !important/,
+  /@media \(forced-colors: active\)[\s\S]*?scrollbar-width: auto !important[\s\S]*?scrollbar-color: auto !important/
+]) {
+  assert.match(bridgeStyle, pattern, `replay scrollbar contract missing ${pattern}`);
+}
 const MARKER_SIZE = extractBridgeNumber(bridgeScript, "MARKER_SIZE");
 assert.equal(MARKER_SIZE, 24, "the compact replay marker contract is 24px");
 for (const pattern of [
   /className\s*=\s*'issue-popover'/,
   /issue-popover__severity/,
   /issue-popover__code/,
+  /issue-popover__group/,
   /issue-popover__title/,
   /issue-popover__message/,
   /issue-popover__path/,
@@ -660,22 +734,25 @@ for (const pattern of [
   /placement: 'bottom'/,
   /placement: 'top'/,
   /POPOVER_PREFERRED_MAX_MARKER_DISTANCE = 48/,
-  /candidate\.markerDistance <= POPOVER_PREFERRED_MAX_MARKER_DISTANCE/,
+  /candidate\.markerDistance <= popoverPreferredMaxMarkerDistance/,
   /fallback: candidates\[0\] \|\| null/,
   /selected\.fallback\.score < fallbackLayout\.selected\.score/,
   /if \(fallbackLayout\)/,
   /placeIssuePopoverCandidate\(fallbackLayout\.selected\)/,
-  /Math\.ceil\(selected\.markerDistance \* POPOVER_POINTER_TRAVEL_MS_PER_PX\)/,
+  /Math\.ceil\(documentToScreenLength\(selected\.markerDistance\) \* POPOVER_POINTER_TRAVEL_MS_PER_PX\)/,
   /const POPOVER_DENSITIES = \['normal', 'compact', 'minimal'\]/,
+  /const POPOVER_GROUP_NARROW_WIDTHS = \[320, 280, 260, 240\]/,
   /const POPOVER_WIDE_WIDTHS = \[840, 760, 680, 600, 560\]/,
-  /const POPOVER_MAX_LAYOUT_CANDIDATES = POPOVER_DENSITIES\.length \+ POPOVER_WIDE_WIDTHS\.length/,
+  /const POPOVER_MAX_LAYOUT_CANDIDATES = POPOVER_DENSITIES\.length\s*\+ POPOVER_GROUP_NARROW_WIDTHS\.length\s*\+ POPOVER_WIDE_WIDTHS\.length/,
+  /if \(entry\.issues\.length > 1\) \{\s*for \(const width of POPOVER_GROUP_NARROW_WIDTHS\)/,
+  /const layout = \{ kind: 'vertical', density: 'minimal', width \}/,
   /layoutCandidateCount >= POPOVER_MAX_LAYOUT_CANDIDATES/,
   /dataset\.layout = 'wide'/,
   /setAttribute\('role', 'tooltip'\)/,
   /post\(\{ type: 'ISSUE_DETAIL_FALLBACK', issueId: nextIssueId \}\)/,
   /if \(issueDetailFallbackId === nextIssueId\) return/,
   /dataset\.presentation = 'external-description'/,
-  /postIssueDetailFallback\(entry\.issue\.id\)/,
+  /postIssueDetailFallback\(popoverIssueId\)/,
   /clearIssueDetailFallback\(\)/,
   /\.issue-popover\[data-presentation='external-description'\][^}]*clip-path:inset\(50%\)/,
   /SET_MARKERS_VISIBLE/
@@ -690,18 +767,24 @@ assert.doesNotMatch(
 
 // Glassmorphism contract: the popover must stay translucent and blurred to match
 // the dashboard shell, and must fall back to an opaque surface where the blur is
-// unsupported. The 78% tint is what keeps the muted body ink above AA when a dark
-// capture shows through (5.22:1 over black), so guard the exact value. There is
+// unsupported. The 92% surface keeps dense explanatory text visually separate
+// from arbitrary captured pages, so guard the exact value. There is
 // deliberately no prefers-reduced-transparency opt-out: Windows reports that
 // preference whenever transparency effects are off, and the tint is legible
 // without the blur, so forced-colors is the only escape hatch.
 for (const pattern of [
-  /\.issue-popover \{[^}]*background:rgba\(255,255,255,\.78\)/,
+  /\.issue-popover \{[^}]*background:rgba\(255,255,255,\.92\)/,
   /\.issue-popover \{[^}]*backdrop-filter:blur\(24px\) saturate\(180%\)/,
   /\.issue-popover \{[^}]*border:0/,
   /@supports not \(\(backdrop-filter: blur\(1px\)\)[^}]*\{\s*\.issue-popover \{ background:#fff/,
   /@media \(forced-colors:active\)[\s\S]*?\.issue-popover \{ border:2px solid CanvasText/,
-  /\.issue-popover__message \{[^}]*color:#3f4b5e/
+  /\.issue-popover__message \{[^}]*color:#344054/,
+  /\.issue-popover__message-label \{[^}]*color:#344054/,
+  /\.issue-popover__issue-title \{[^}]*font:700 13px\/1\.45/,
+  /\.issue-popover__issue\[aria-pressed='true'\] \{[^}]*box-shadow:inset 0 0 0 2px #0066cc/,
+  /\.issue-popover\[data-layout='wide'\] \.issue-popover__detail \{[^}]*grid-template-columns:minmax\(0,\.8fr\) minmax\(0,2\.1fr\) minmax\(0,1\.35fr\)/,
+  /\.issue-popover\[data-layout='wide'\] \.issue-popover__message \{[^}]*font-size:12\.5px; line-height:1\.5/,
+  /\.issue-popover\[data-layout='wide'\] \.issue-popover__path \{[^}]*font-size:11px; line-height:1\.45/
 ]) {
   assert.match(bridgeScript, pattern, `popover glass contract missing ${pattern}`);
 }
@@ -780,6 +863,16 @@ bridgeScript = bridgeScript.replace(
 const hostileTitle = '<img src=x onerror="window.__popoverXss=1">텍스트 난이도 개선 필요';
 const hostileMessage = '<script>window.__popoverXss=2</script> 건축학부 졸업 전시회에 포함된 긴 한국어 설명입니다.';
 const hostilePath = '<svg onload="window.__popoverXss=3"></svg> section#cms-content > div:nth-of-type(1) > p';
+const hostileTextAnalysis = {
+  kind: "text-analysis",
+  sourceText: '<img onerror="__xss4()">분석',
+  flags: ["<script>__xss5()</script>필요"],
+  suggestions: ['<iframe onload="__xss6()">제안'],
+  revision: {
+    text: '<object data="x">수정',
+    reason: '<svg onload="__xss8()">이유'
+  }
+};
 const longKorean = "접근성 문제를 설명하는 매우 긴 한국어 문장입니다. ".repeat(50);
 const longPath = `section#cms-content > ${"div:nth-of-type(1) > ".repeat(120)}p:nth-of-type(1)`;
 
@@ -831,6 +924,7 @@ const issues = [
     code: "HTML_ESCAPE",
     title: hostileTitle,
     message: hostileMessage,
+    textAnalysis: hostileTextAnalysis,
     path: hostilePath,
     pathSteps: [{ context: "DOCUMENT", selector: "#multiline-target" }]
   },
@@ -915,7 +1009,14 @@ const artifactBottomIssue = {
   severityLabel: "낮음",
   code: "WCAG 3.1.5",
   title: "읽기 수준",
-  message: "text=건축학부의 제70회 졸업 전시회가 지난 6월 22일부터 27일까지 본교 서울캠퍼스에서 개최되었다.\nflags=[\"어려운 어휘 과다: 쉬운 단어 비율 50.0% (어려운 단어 50.0%, C등급+미등재 기준)\"]",
+  message: "분석 문장\n건축학부의 제70회 졸업 전시회가 지난 6월 22일부터 27일까지 본교 서울캠퍼스에서 개최되었다.\n\n개선 필요\n• 어려운 어휘 과다: 쉬운 단어 비율 50.0% (어려운 단어 50.0%, C등급+미등재 기준)",
+  textAnalysis: {
+    kind: "text-analysis",
+    sourceText: "건축학부의 제70회 졸업 전시회가 지난 6월 22일부터 27일까지 본교 서울캠퍼스에서 개최되었다.",
+    flags: ["어려운 어휘 과다: 쉬운 단어 비율 50.0% (어려운 단어 50.0%, C등급+미등재 기준)"],
+    suggestions: [],
+    revision: null
+  },
   path: "section#cms-content > div:nth-of-type(1) > div > div > div:nth-of-type(1) > div:nth-of-type(1) > div > p:nth-of-type(2)",
   pathSteps: [{ context: "DOCUMENT", selector: "#artifact-bottom-target" }]
 };
@@ -1246,6 +1347,40 @@ try {
     });
   });
   await page.addStyleTag({ content: bridgeStyle });
+  const scrollbarStyle = await page.evaluate(() => {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const scrollbar = getComputedStyle(document.documentElement, "::-webkit-scrollbar");
+    const thumb = getComputedStyle(document.documentElement, "::-webkit-scrollbar-thumb");
+    const button = getComputedStyle(document.documentElement, "::-webkit-scrollbar-button");
+    return {
+      webkitSelectorSupported: CSS.supports("selector(::-webkit-scrollbar)"),
+      scrollbarWidth: rootStyle.scrollbarWidth,
+      scrollbarColor: rootStyle.scrollbarColor,
+      webkitWidth: scrollbar.width,
+      webkitThumbMinHeight: thumb.minHeight,
+      webkitThumbRadius: thumb.borderRadius,
+      webkitThumbColor: thumb.backgroundColor,
+      webkitButtonDisplay: button.display,
+      scrollHeight: document.documentElement.scrollHeight,
+      viewportHeight: window.innerHeight
+    };
+  });
+  assert.equal(scrollbarStyle.webkitSelectorSupported, true, "Chromium must take the WebKit scrollbar branch");
+  assert.equal(scrollbarStyle.scrollbarWidth, "auto", "Chromium must not receive the Firefox scrollbar-width override");
+  assert.equal(scrollbarStyle.scrollbarColor, "auto", "Chromium must not receive the Firefox scrollbar-color override");
+  assert.equal(scrollbarStyle.webkitWidth, "10px", "the WebKit scrollbar must use the compact 10px rail");
+  assert.equal(scrollbarStyle.webkitThumbMinHeight, "48px", "the WebKit thumb must retain its usable minimum height");
+  assert.equal(scrollbarStyle.webkitThumbRadius, "999px", "the WebKit thumb must keep the capsule radius");
+  assert.match(
+    scrollbarStyle.webkitThumbColor,
+    /rgba?\(99, 99, 102(?:, 0\.78)?\)/,
+    "the WebKit thumb must keep the neutral dark tint"
+  );
+  assert.equal(scrollbarStyle.webkitButtonDisplay, "none", "the WebKit scrollbar arrow buttons must stay hidden");
+  assert.ok(
+    scrollbarStyle.scrollHeight > scrollbarStyle.viewportHeight,
+    "the scrollbar fixture must remain vertically scrollable"
+  );
   await page.addScriptTag({ content: bridgeScript });
   await page.waitForFunction(() =>
     (window.__popoverOutbound ?? []).some((message) => message.type === "READY")
@@ -1281,8 +1416,31 @@ try {
   assert.equal(initial.markers[0].pressed, "true", "INIT may retain selection without opening the popover");
   assert.equal(initial.markers[7].hidden, true, "inactive slide marker must be hidden");
   assert.equal(initial.markers[8].hidden, true, "off-canvas marker must be hidden");
-  const initialLocatorCount = initial.outbound.filter((message) => message.type === "LOCATOR_STATUS").length;
-  assert.equal(initialLocatorCount, 9, "each fixture issue must resolve exactly once");
+  const initialLocatorStatuses = initial.outbound.filter((message) => message.type === "LOCATOR_STATUS");
+  assert.deepEqual(
+    initialLocatorStatuses
+      .filter((message) => message.status === "CONNECTED")
+      .map((message) => message.issueId),
+    issues.map((issue) => issue.id),
+    "each fixture selector must resolve exactly once"
+  );
+  const hiddenIssueIds = initial.markers
+    .filter((marker) => marker.hidden)
+    .map((marker) => issues[Number(marker.index) - 1].id);
+  assert.deepEqual(
+    initialLocatorStatuses
+      .filter((message) => message.status === "UNAVAILABLE")
+      .map(({ issueId, reason }) => ({ issueId, reason })),
+    hiddenIssueIds.map((issueId) => ({ issueId, reason: "NO_VISIBLE_MARKER_POSITION" })),
+    "every hidden marker must expose its final unavailable state"
+  );
+  assert.equal(
+    new Set(initialLocatorStatuses.map((message) =>
+      `${message.issueId}:${message.status}:${message.reason ?? ""}`
+    )).size,
+    initialLocatorStatuses.length,
+    "locator state transitions must not be emitted twice"
+  );
   await sendCommand(page, { type: "FOCUS_ISSUE", issueId: 102 });
   await page.waitForTimeout(50);
   assert.equal((await shadowFact(page)).visiblePopoverCount, 0, "external FOCUS_ISSUE must not open the hover popover");
@@ -1455,7 +1613,10 @@ try {
   assert.equal(multiline.fact.popover.severity, "낮음");
   assert.equal(multiline.fact.popover.code, "HTML_ESCAPE");
   assert.equal(multiline.fact.popover.title, hostileTitle);
-  assert.equal(multiline.fact.popover.message, hostileMessage);
+  assert.equal(
+    multiline.fact.popover.message,
+    expectedTextAnalysisPresentation(hostileTextAnalysis).text
+  );
   assert.equal(multiline.fact.popover.path, hostilePath);
   await assertFullPopoverContent(page, issues[4], "multiline hostile content");
   assert.equal(multiline.fact.popover.injectedElementCount, 0, "issue content must be inserted as text, never HTML");
@@ -1476,6 +1637,8 @@ try {
     markers[1].dispatchEvent(pointer("pointerenter", markers[0]));
   });
   const quick = await waitForVisiblePopover(page, 102);
+  assert.deepEqual(quick.popover.messageSections, [], "plain issue must clear prior structured sections");
+  assert.equal(quick.popover.message, issues[1].message, "plain issue message must remain unchanged");
   assert.deepEqual(
     quick.outbound
       .filter((message) => message.type === "ISSUE_SELECTED")
@@ -2093,15 +2256,15 @@ try {
   await page.waitForFunction(() => {
     const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
     const markers = [...(root?.querySelectorAll(".marker") ?? [])];
-    return markers.length === 11 && markers.every((marker) => !marker.hidden);
+    return markers.length === 8 && markers.every((marker) => !marker.hidden);
   });
   await page.waitForTimeout(80);
 
   const slideTwoGeometry = await shadowFact(page);
   assert.deepEqual(
     slideTwoGeometry.markers.map((marker) => marker.index),
-    ["4", "5", "6", "7", "34", "62", "81", "99", "100", "109", "117"],
-    "artifact 66 slide 2 fixture must retain every captured visible marker obstacle"
+    ["4", "5", "6", "7", "34", "62", "81", "99"],
+    "artifact 66 slide 2 fixture must group duplicate target issues into shared markers"
   );
   assert.deepEqual(
     slideTwoGeometry.markers.map((marker) => ({
@@ -2113,18 +2276,15 @@ try {
     })),
     [
       { index: "4", left: 52 - MARKER_SIZE, top: -21, right: 52, bottom: -21 + MARKER_SIZE },
-      { index: "5", left: 52 - MARKER_SIZE, top: 20, right: 52, bottom: 20 + MARKER_SIZE },
+      { index: "5", left: 1013, top: -20, right: 1013 + MARKER_SIZE, bottom: -20 + MARKER_SIZE },
       { index: "6", left: 52 - MARKER_SIZE, top: 111, right: 52, bottom: 111 + MARKER_SIZE },
-      { index: "7", left: 52 - MARKER_SIZE, top: 154, right: 52, bottom: 154 + MARKER_SIZE },
+      { index: "7", left: 1003, top: 114, right: 1003 + MARKER_SIZE, bottom: 114 + MARKER_SIZE },
       { index: "34", left: 32 - MARKER_SIZE, top: 329, right: 32, bottom: 329 + MARKER_SIZE },
       { index: "62", left: 651 - MARKER_SIZE, top: 329, right: 651, bottom: 329 + MARKER_SIZE },
       { index: "81", left: 961 - MARKER_SIZE, top: 329, right: 961, bottom: 329 + MARKER_SIZE },
-      { index: "99", left: 80, top: 297, right: 80 + MARKER_SIZE, bottom: 297 + MARKER_SIZE },
-      { index: "100", left: 52 - MARKER_SIZE, top: 194, right: 52, bottom: 194 + MARKER_SIZE },
-      { index: "109", left: 32 - MARKER_SIZE, top: 369, right: 32, bottom: 369 + MARKER_SIZE },
-      { index: "117", left: 961 - MARKER_SIZE, top: 369, right: 961, bottom: 369 + MARKER_SIZE }
+      { index: "99", left: 80, top: 297, right: 80 + MARKER_SIZE, bottom: 297 + MARKER_SIZE }
     ],
-    "artifact 66 slide 2 fixture must reproduce marker 100 and all visible halo obstacles"
+    "artifact 66 slide 2 fixture must retain deterministic grouped marker geometry"
   );
   const slideTwoTargetRects = await targetRects(page, "#artifact-slide-two-description-link");
   assert.deepEqual(
@@ -2147,43 +2307,70 @@ try {
     scrollY: window.scrollY,
     activeElementId: document.activeElement?.id ?? null
   }));
-  await hoverMarker(page, 8);
+  await sendCommand(page, { type: "FOCUS_ISSUE", issueId: artifactSlideTwoIssue.id });
+  const slideTwoGroupedMarker = await markerLocator(page, 3);
+  await slideTwoGroupedMarker.click();
   const slideTwoPlacement = await assertSafePopover(
     page,
     artifactSlideTwoIssue.id,
-    8,
+    3,
     "#artifact-slide-two-description-link",
     "artifact 66 slide 2 marker 100 nearest safe placement",
-    { maxAdjacentGap: MAX_ADJACENT_GAP }
+    { maxAdjacentGap: 100 }
   );
-  await assertFullPopoverContent(page, artifactSlideTwoIssue, "artifact 66 slide 2 marker 100 content", {
-    layout: "wide"
-  });
-  assert.equal(slideTwoPlacement.fact.popover.density, "normal", "marker 100 must retain full content density");
-  assert.equal(
-    slideTwoPlacement.fact.popover.placement,
-    "right",
-    "marker 100 must use the nearest safe placement with the shorter custom-code label"
+  const groupedSlideTwoContent = await assertFullPopoverContent(
+    page,
+    artifactSlideTwoIssue,
+    "artifact 66 slide 2 marker 100 content"
   );
-  assert.equal(
-    slideTwoPlacement.gap,
-    bridgePopoverGap,
-    "marker 100 must stay at the standard popover gap"
-  );
-  // The glass popover is borderless, so the card is 2px shorter than the
-  // bordered version and its top edge sits 1px lower at the same gap.
+  assert.equal(groupedSlideTwoContent.popover.grouped, "true");
+  assert.equal(groupedSlideTwoContent.popover.group, "같은 요소에서 발견된 문제 2개");
+  assert.deepEqual(groupedSlideTwoContent.popover.relatedIssues, [
+    {
+      issueId: "40007",
+      severity: "낮음",
+      code: "SLIDE_TWO_DESCRIPTION_LINK",
+      title: "슬라이드 2 설명 링크"
+    },
+    {
+      issueId: "2323",
+      severity: "낮음",
+      code: "KWCAG 7.3.2",
+      title: "레이블 제공"
+    }
+  ], "the grouped popover selector must include every issue connected to the shared target");
+  assert.equal(groupedSlideTwoContent.popover.remainingIssues, null);
   assert.ok(
-    Math.abs(slideTwoPlacement.fact.popover.rect.left - 70) <= 1
-      && Math.abs(slideTwoPlacement.fact.popover.rect.top - 202) <= 1
-      && Math.abs(slideTwoPlacement.fact.popover.rect.width - 840) <= 1
-      && Math.abs(slideTwoPlacement.fact.popover.rect.height - 88) <= 1,
-    `marker 100 must reproduce the captured safe wide card: ${JSON.stringify(slideTwoPlacement.fact.popover.rect)}`
+    ["normal", "compact"].includes(slideTwoPlacement.fact.popover.density),
+    "the grouped marker must retain a full-content density"
+  );
+  assert.ok(
+    ["right", "bottom", "top", "left"].includes(slideTwoPlacement.fact.popover.placement),
+    "the grouped marker must use a valid non-overlapping placement"
+  );
+  assert.ok(
+    slideTwoPlacement.gap <= 100,
+    `the grouped marker card must remain visually adjacent: ${slideTwoPlacement.gap}`
   );
   assert.equal(slideTwoPlacement.fact.selectionFragmentCount, 2, "marker 100 must highlight both target lines");
-  assert.equal(
-    slideTwoPlacement.fact.markers[8].ariaDescribedBy,
-    slideTwoPlacement.fact.popover.id,
-    "marker 100 must expose the visible full details as its description"
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      const marker = root.querySelector('.marker[data-marker-index="7"]');
+      return {
+        markerExpanded: marker.getAttribute("aria-expanded"),
+        markerDescribedBy: marker.getAttribute("aria-describedby"),
+        markerPressed: marker.getAttribute("aria-pressed"),
+        dockHidden: root.querySelector(".issue-dock")?.hidden ?? true
+      };
+    }),
+    {
+      markerExpanded: "true",
+      markerDescribedBy: null,
+      markerPressed: "true",
+      dockHidden: true
+    },
+    "the grouped marker itself must own the visible grouped issue description while the legacy dock stays hidden"
   );
   assert.deepEqual(
     await page.evaluate(() => ({
@@ -2191,16 +2378,26 @@ try {
       scrollY: window.scrollY,
       activeElementId: document.activeElement?.id ?? null
     })),
-    slideTwoBefore,
-    "marker 100 hover must preserve replay scroll and document focus"
+    { scrollX: slideTwoBefore.scrollX, scrollY: slideTwoBefore.scrollY, activeElementId: "__uni_accessibility_replay_host" },
+    "grouped popover selection must preserve replay scroll while focus remains on the marker"
   );
-  await movePointerFromMarkerToPopover(page, artifactSlideTwoIssue.id);
-  await page.mouse.move(1200, 20);
+  const slideTwoPointerPopover = await shadowFact(page);
+  await page.mouse.move(
+    slideTwoPointerPopover.popover.rect.left + slideTwoPointerPopover.popover.rect.width / 2,
+    slideTwoPointerPopover.popover.rect.top + Math.min(48, slideTwoPointerPopover.popover.rect.height / 2)
+  );
+  await page.waitForTimeout(40);
+  assert.equal((await shadowFact(page)).visiblePopoverCount, 1, "the pointer may travel from a grouped marker into its popover");
+  await page.mouse.click(1200, 20);
   let slideTwoCleared = await waitForClearedPopover(page);
-  assert.equal(slideTwoCleared.selectionFragmentCount, 0, "leaving marker 100 and its card clears highlighting");
-  assert.ok(
-    slideTwoCleared.markers.every((marker) => marker.pressed === "false" && marker.ariaDescribedBy === null),
-    "leaving marker 100 and its card clears marker state and descriptions"
+  assert.equal(slideTwoCleared.selectionFragmentCount, 2, "closing the pinned popover must retain an externally owned target highlight");
+  assert.equal(slideTwoCleared.markers[3].pressed, "true", "the externally selected grouped marker remains selected");
+  assert.equal(slideTwoCleared.markers[3].ariaDescribedBy, null, "closing the grouped popover removes only its transient description");
+  assert.equal(
+    await page.evaluate(() => document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-dock")?.hidden ?? true),
+    true,
+    "pointer interaction must never expose the legacy dock"
   );
   assert.deepEqual(
     await page.evaluate(() => ({
@@ -2208,30 +2405,45 @@ try {
       scrollY: window.scrollY,
       activeElementId: document.activeElement?.id ?? null
     })),
-    slideTwoBefore,
-    "marker 100 pointer lifecycle must preserve replay scroll and document focus"
+    { scrollX: slideTwoBefore.scrollX, scrollY: slideTwoBefore.scrollY, activeElementId: "" },
+    "grouped popover pointer lifecycle must preserve replay scroll"
   );
+  await sendCommand(page, { type: "FOCUS_ISSUE", issueId: null });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.querySelectorAll(".selection-fragment").length === 0
+      && root.querySelector('.marker[data-marker-index="7"]')?.getAttribute("aria-pressed") === "false";
+  });
 
-  const slideTwoTouchMarker = await markerLocator(page, 8);
+  await page.locator("#focus-anchor").focus();
+  await sendCommand(page, { type: "FOCUS_ISSUE", issueId: artifactSlideTwoIssue.id });
+  const slideTwoTouchMarker = await markerLocator(page, 3);
   await slideTwoTouchMarker.dispatchEvent("pointerenter", { pointerType: "touch", isPrimary: true });
   await page.waitForTimeout(40);
   assert.equal((await shadowFact(page)).visiblePopoverCount, 0, "marker 100 touch boundaries must not emulate hover");
   await slideTwoTouchMarker.dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true });
   await slideTwoTouchMarker.dispatchEvent("click", { pointerType: "touch", isPrimary: true });
-  await assertSafePopover(
+  const slideTwoTouchPlacement = await assertSafePopover(
     page,
     artifactSlideTwoIssue.id,
-    8,
+    3,
     "#artifact-slide-two-description-link",
     "artifact 66 slide 2 marker 100 touch placement",
-    { maxAdjacentGap: MAX_ADJACENT_GAP }
+    { maxAdjacentGap: 100 }
   );
-  await slideTwoTouchMarker.dispatchEvent("pointerleave", { pointerType: "touch", isPrimary: true });
-  await page.waitForTimeout(40);
-  assert.equal((await shadowFact(page)).popover?.issueId, "2323", "touch leave must retain marker 100's pinned details");
+  assert.equal(slideTwoTouchPlacement.fact.popover.grouped, "true");
+  assert.equal(slideTwoTouchPlacement.fact.popover.group, "같은 요소에서 발견된 문제 2개");
+  assert.equal(
+    await page.evaluate(() => document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-dock")?.hidden ?? true),
+    true,
+    "touch activation must open the grouped popover directly without the legacy dock"
+  );
   await page.locator("#focus-anchor").dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true });
   slideTwoCleared = await waitForClearedPopover(page);
-  assert.equal(slideTwoCleared.selectionFragmentCount, 0, "outside touch must clear marker 100 highlighting");
+  assert.equal(slideTwoCleared.selectionFragmentCount, 2, "outside touch closes details without clearing the externally selected target");
+  assert.equal(slideTwoCleared.markers[3].pressed, "true");
+  assert.equal(slideTwoCleared.markers[3].ariaDescribedBy, null);
   assert.deepEqual(
     await page.evaluate(() => ({
       scrollX: window.scrollX,
@@ -2242,31 +2454,68 @@ try {
     "marker 100 touch lifecycle must preserve replay scroll and document focus"
   );
 
-  const slideTwoKeyboardMarker = await markerLocator(page, 8);
+  await sendCommand(page, { type: "FOCUS_ISSUE", issueId: artifactSlideTwoIssue.id });
+  await page.locator("#focus-anchor").focus();
+  await page.mouse.move(4, 4);
+  await page.keyboard.press("ArrowLeft");
+  const slideTwoKeyboardMarker = await markerLocator(page, 3);
   await slideTwoKeyboardMarker.evaluate((marker) => marker.focus({ preventScroll: true }));
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.activeElement?.dataset.markerIndex === "7";
+  });
+  const slideTwoFocusPlacement = await assertSafePopover(
+    page,
+    artifactSlideTwoIssue.id,
+    3,
+    "#artifact-slide-two-description-link",
+    "artifact 66 slide 2 marker 100 focus-visible placement",
+    { maxAdjacentGap: 100 }
+  );
+  assert.equal(slideTwoFocusPlacement.fact.popover.grouped, "true", "keyboard focus must expose the grouped popover");
+  assert.equal(slideTwoFocusPlacement.fact.markers[3].ariaDescribedBy, null);
   await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.activeElement?.matches('.issue-popover__issue[data-issue-id="2323"]');
+  });
   const slideTwoKeyboardPlacement = await assertSafePopover(
     page,
     artifactSlideTwoIssue.id,
-    8,
+    3,
     "#artifact-slide-two-description-link",
     "artifact 66 slide 2 marker 100 keyboard placement",
-    { maxAdjacentGap: MAX_ADJACENT_GAP }
+    { maxAdjacentGap: 100 }
   );
-  await assertFullPopoverContent(page, artifactSlideTwoIssue, "artifact 66 slide 2 marker 100 keyboard content", {
-    layout: "wide"
-  });
-  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveClass, "marker", "marker 100 keyboard preview retains focus");
-  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveIndex, "100", "keyboard focus must remain on marker 100");
-  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveText, "", "keyboard-focused markers remain numberless");
+  const slideTwoKeyboardContent = await assertFullPopoverContent(
+    page,
+    artifactSlideTwoIssue,
+    "artifact 66 slide 2 shared marker keyboard content"
+  );
+  assert.deepEqual(slideTwoKeyboardContent.popover.relatedIssues.map((issue) => issue.issueId), ["40007", "2323"]);
+  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveClass, "issue-popover__issue", "keyboard activation moves focus into the grouped selector");
+  assert.equal(slideTwoKeyboardPlacement.fact.shadowActiveIssueId, "2323", "the selected issue receives initial grouped-selector focus");
+  assert.equal(
+    await page.evaluate(() => document.getElementById("__uni_accessibility_replay_host").shadowRoot
+      .querySelector(".issue-dock")?.hidden ?? true),
+    true,
+    "keyboard activation must not expose the legacy dock"
+  );
   await page.mouse.move(1200, 20);
-  assert.equal((await shadowFact(page)).visiblePopoverCount, 1, "pointer leave must not close focused marker 100 details");
+  assert.equal((await shadowFact(page)).visiblePopoverCount, 1, "pointer movement must not close keyboard-selected grouped details");
   await page.keyboard.press("Escape");
   slideTwoCleared = await waitForClearedPopover(page);
-  assert.equal(slideTwoCleared.shadowActiveIndex, "100", "Escape restores focus to marker 100");
-  assert.equal(slideTwoCleared.markers[8].ariaDescribedBy, null, "Escape clears marker 100's description link");
-  assert.equal(slideTwoCleared.selectionFragmentCount, 0, "Escape clears marker 100 highlighting");
+  assert.equal(slideTwoCleared.shadowActiveClass, "marker", "Escape keeps focus on the shared marker");
+  assert.equal(slideTwoCleared.shadowActiveIndex, "7", "Escape retains focus on the shared marker");
+  assert.equal(slideTwoCleared.markers[3].ariaDescribedBy, null, "Escape clears marker 100's description link");
+  assert.equal(slideTwoCleared.markers[3].pressed, "true", "Escape retains the externally owned marker selection");
+  assert.equal(slideTwoCleared.selectionFragmentCount, 2, "Escape closes only the transient grouped details");
   assert.equal(slideTwoCleared.scroll.y, 300, "marker 100 keyboard lifecycle preserves the replay scroll offset");
+  await sendCommand(page, { type: "FOCUS_ISSUE", issueId: null });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.querySelectorAll(".selection-fragment").length === 0;
+  });
 
   await page.evaluate(() => {
     for (const id of [

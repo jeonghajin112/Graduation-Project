@@ -109,6 +109,8 @@ async function readReplayState(page) {
         const iconStyle = icon ? getComputedStyle(icon) : null;
         return {
           index: marker.dataset.markerIndex,
+          category: marker.dataset.markerCategory,
+          severity: marker.dataset.markerSeverity,
           text: marker.textContent,
           hidden: marker.hidden,
           pressed: marker.getAttribute("aria-pressed"),
@@ -134,6 +136,8 @@ async function readReplayState(page) {
             badgeBoxShadow: badgeStyle?.boxShadow ?? null,
             iconWidth: iconStyle?.width ?? null,
             iconHeight: iconStyle?.height ?? null,
+            iconName: icon?.dataset.icon ?? null,
+            iconShapeCount: icon?.children.length ?? 0,
             iconPathCount: icon?.querySelectorAll("path").length ?? 0,
             iconCircleCount: icon?.querySelectorAll("circle").length ?? 0
           }
@@ -228,6 +232,21 @@ const sanitizerSource = await readFile(sanitizerPath, "utf8");
 let bridgeScript = extractBridgeScript(sanitizerSource);
 const markerSize = extractBridgeNumber(bridgeScript, "MARKER_SIZE");
 assert.equal(markerSize, 24, "the compact replay marker contract is 24px");
+assert.match(
+  bridgeScript,
+  /message\.type === 'SET_VIEW_SCALE'/,
+  "the replay bridge must accept the parent iframe scale"
+);
+assert.match(
+  bridgeScript,
+  /message\.documentToken[^\n]*replayDocumentToken|replayDocumentToken[^\n]*message\.documentToken/,
+  "the replay bridge must reject viewport metrics for a stale document"
+);
+assert.match(
+  bridgeScript,
+  /--replay-overlay-inverse-scale/,
+  "the replay bridge must inverse-scale marker overlays"
+);
 assert.match(bridgeScript, /button\.addEventListener\('pointerenter'/, "markers must support pointer hover preview");
 assert.match(bridgeScript, /button\.addEventListener\('pointerleave'/, "markers must clear hover preview on pointer leave");
 assert.match(bridgeScript, /button\.addEventListener\('pointercancel'/, "cancelled pointers must clear hover preview");
@@ -249,11 +268,8 @@ assert.match(
   /const MARKER_BLUE_GLASS = 'rgba\(0,102,204,\.94\)'/,
   "the issue point must use the shared brand blue"
 );
-assert.match(
-  bridgeScript,
-  /setProperty\('--marker-color', MARKER_BLUE_GLASS\)/,
-  "every issue point must receive the shared brand blue"
-);
+assert.match(bridgeScript, /const markerSeverityForIssues = \(issues\) =>/);
+assert.match(bridgeScript, /setProperty\('--marker-color', markerSeverity\.color\)/);
 assert.match(
   bridgeScript,
   /\.marker \{[^}]*background:transparent[^}]*color:transparent/,
@@ -266,13 +282,23 @@ assert.match(
 );
 assert.match(
   bridgeScript,
-  /const createMarkerBadge = \(\) =>[\s\S]*?classList\.add\('marker__icon'\)[\s\S]*?'M3 7V5a2 2 0 0 1 2-2h2'[\s\S]*?lens\.setAttribute\('r', '3'\)/,
-  "the marker badge must use the Lucide ScanSearch geometry"
+  /const MARKER_ICON_SHAPES = Object\.freeze\(\{[\s\S]*?visual:[\s\S]*?text:[\s\S]*?multiple:[\s\S]*?general:/,
+  "the marker badge must use a fixed semantic SVG catalog"
 );
 assert.match(
   bridgeScript,
   /\.marker\[data-selected='true'\] \.marker__badge \{[^}]*transform:scale\(1\.2\)/,
   "selection must emphasize the point without adding a numeral"
+);
+assert.doesNotMatch(
+  bridgeScript,
+  /\.marker\[data-selected='true'\] \.marker__badge \{[^}]*0 0 0 5px/,
+  "selection must not draw a second colored circle around the marker"
+);
+assert.match(
+  bridgeScript,
+  /\.selection-fragment \{[^}]*border:var\(--replay-selection-border-width,3px\) solid #0066cc/,
+  "the selection outline must retain a three-pixel visual border under iframe scaling"
 );
 assert.match(
   bridgeScript,
@@ -355,23 +381,34 @@ try {
   await page.waitForFunction(() =>
     (window.__replayOutbound ?? []).some((message) => message.type === "READY")
   );
+  const replayDocumentToken = await page.evaluate(() =>
+    window.__replayOutbound.find((message) => message.type === "READY")?.documentToken
+  );
+  assert.match(replayDocumentToken, /^[A-Za-z0-9_-]{1,128}$/);
 
   const replayIssues = [
     {
       id: 101,
       severity: "HIGH",
+      category: "visual",
+      code: "5.4.3",
       title: "첫 번째 문제",
       pathSteps: [{ context: "DOCUMENT", selector: "#target-a" }]
     },
     {
       id: 102,
       severity: "MEDIUM",
+      category: "text",
+      code: "WCAG 3.1.5",
       title: "두 번째 문제",
+      message: "축척된 팝오버 본문 가독성 검증",
       pathSteps: [{ context: "DOCUMENT", selector: "#target-b" }]
     },
     {
       id: 103,
       severity: "LOW",
+      category: "general",
+      code: "UNKNOWN",
       title: "숨겨진 문제",
       pathSteps: [{ context: "DOCUMENT", selector: "#hidden-target" }]
     }
@@ -424,21 +461,243 @@ try {
     assert.equal(marker.visual.badgeHeight, "20px", `marker ${marker.index} badge height`);
     assert.equal(marker.visual.iconWidth, "14px", `marker ${marker.index} icon width`);
     assert.equal(marker.visual.iconHeight, "14px", `marker ${marker.index} icon height`);
-    assert.equal(marker.visual.iconPathCount, 5, `marker ${marker.index} scan icon paths`);
-    assert.equal(marker.visual.iconCircleCount, 1, `marker ${marker.index} scan icon lens`);
-    assert.equal(
-      marker.visual.badgeBackgroundColor,
-      "rgba(0, 102, 204, 0.94)",
-      `marker ${marker.index} must use the shared issue-point color`
-    );
+    assert.equal(marker.visual.iconName, marker.category, `marker ${marker.index} semantic icon`);
+    assert.ok(marker.visual.iconShapeCount > 0, `marker ${marker.index} icon must contain vector geometry`);
   }
+  assert.deepEqual(
+    initialState.markers.map(({ category, severity, visual }) => ({
+      category,
+      severity,
+      color: visual.badgeBackgroundColor
+    })),
+    [
+      { category: "visual", severity: "HIGH", color: "rgba(180, 35, 24, 0.96)" },
+      { category: "text", severity: "MEDIUM", color: "rgba(181, 71, 8, 0.96)" },
+      { category: "general", severity: "LOW", color: "rgba(2, 107, 63, 0.96)" }
+    ],
+    "marker color must represent severity while its glyph represents issue type"
+  );
   assert.ok(
     initialState.markers.every((marker) => marker.pressed === "false" && marker.selected !== "true"),
     "INIT_ISSUES without a selected id must not select a marker"
   );
   assert.equal(initialState.selectionFragments.length, 0, "INIT_ISSUES must not create a highlight");
   assert.equal(initialState.selectedMessages.length, 0, "INIT_ISSUES must not masquerade as interaction");
-  assert.equal(initialState.locatorStatusCount, 3, "the fixture must resolve each issue exactly once");
+  assert.deepEqual(
+    initialState.outboundMessages
+      .filter((message) => message.type === "LOCATOR_STATUS")
+      .map(({ issueId, status, reason }) => ({ issueId, status, reason: reason ?? null })),
+    [
+      { issueId: 101, status: "CONNECTED", reason: null },
+      { issueId: 102, status: "CONNECTED", reason: null },
+      { issueId: 103, status: "CONNECTED", reason: null },
+      { issueId: 103, status: "UNAVAILABLE", reason: "NO_VISIBLE_MARKER_POSITION" }
+    ],
+    "each selector must resolve once and a hidden target must report its final marker state"
+  );
+
+  const readLocatorStatuses = () => page.evaluate(() =>
+    window.__replayOutbound
+      .filter((message) => message.type === "LOCATOR_STATUS")
+      .map(({ issueId, status, reason }) => ({
+        issueId,
+        status,
+        reason: reason ?? null
+      }))
+  );
+  const initialLocatorStatuses = await readLocatorStatuses();
+
+  await page.evaluate(() => {
+    for (let pass = 0; pass < 4; pass += 1) {
+      window.dispatchEvent(new Event("resize"));
+      document.dispatchEvent(new Event("scroll"));
+    }
+  });
+  await page.waitForTimeout(100);
+  assert.deepEqual(
+    await readLocatorStatuses(),
+    initialLocatorStatuses,
+    "repeated failed placement passes must not duplicate the same UNAVAILABLE status"
+  );
+
+  await page.evaluate(() => {
+    const target = document.getElementById("hidden-target");
+    Object.assign(target.style, {
+      display: "block",
+      position: "absolute",
+      left: "420px",
+      top: "300px",
+      width: "150px",
+      height: "36px"
+    });
+    window.dispatchEvent(new Event("resize"));
+  });
+  await page.waitForFunction(() => {
+    const statuses = window.__replayOutbound.filter((message) =>
+      message.type === "LOCATOR_STATUS" && message.issueId === 103
+    );
+    return statuses.at(-1)?.status === "CONNECTED";
+  });
+  const reconnectedLocatorStatuses = await readLocatorStatuses();
+  assert.equal(
+    reconnectedLocatorStatuses.length,
+    initialLocatorStatuses.length + 1,
+    "recovery must add exactly one LOCATOR_STATUS transition"
+  );
+  assert.deepEqual(
+    reconnectedLocatorStatuses.slice(-1),
+    [{ issueId: 103, status: "CONNECTED", reason: null }],
+    "a target that gains a visible marker position must transition back to CONNECTED"
+  );
+
+  await page.evaluate(() => {
+    for (let pass = 0; pass < 4; pass += 1) {
+      window.dispatchEvent(new Event("resize"));
+      document.dispatchEvent(new Event("scroll"));
+    }
+  });
+  await page.waitForTimeout(100);
+  assert.deepEqual(
+    await readLocatorStatuses(),
+    reconnectedLocatorStatuses,
+    "repeated successful placement passes must not duplicate the same CONNECTED status"
+  );
+
+  await page.evaluate(() => {
+    document.getElementById("hidden-target").style.display = "none";
+    window.dispatchEvent(new Event("resize"));
+  });
+  await page.waitForFunction(() => {
+    const statuses = window.__replayOutbound.filter((message) =>
+      message.type === "LOCATOR_STATUS" && message.issueId === 103
+    );
+    return statuses.at(-1)?.status === "UNAVAILABLE"
+      && statuses.at(-1)?.reason === "NO_VISIBLE_MARKER_POSITION";
+  });
+  const locatorStatusesAfterVisibilityTransitions = await readLocatorStatuses();
+  assert.equal(
+    locatorStatusesAfterVisibilityTransitions.length,
+    reconnectedLocatorStatuses.length + 1,
+    "losing the recovered position must add exactly one LOCATOR_STATUS transition"
+  );
+  assert.deepEqual(
+    locatorStatusesAfterVisibilityTransitions.slice(-2),
+    [
+      { issueId: 103, status: "CONNECTED", reason: null },
+      { issueId: 103, status: "UNAVAILABLE", reason: "NO_VISIBLE_MARKER_POSITION" }
+    ],
+    "losing the recovered marker position must emit one new UNAVAILABLE transition"
+  );
+
+  await page.evaluate(() => {
+    for (let pass = 0; pass < 4; pass += 1) {
+      window.dispatchEvent(new Event("resize"));
+      document.dispatchEvent(new Event("scroll"));
+    }
+  });
+  await page.waitForTimeout(100);
+  assert.deepEqual(
+    await readLocatorStatuses(),
+    locatorStatusesAfterVisibilityTransitions,
+    "repeated placement failure after recovery must not duplicate UNAVAILABLE"
+  );
+  const locatorStatusCountAfterVisibilityTransitions = locatorStatusesAfterVisibilityTransitions.length;
+
+  const narrowViewScale = 390 / 900;
+  await sendCommand(page, {
+    type: "SET_VIEW_SCALE",
+    documentToken: replayDocumentToken,
+    scale: narrowViewScale,
+    visualWidth: 390
+  });
+  await page.waitForFunction((scale) => {
+    const marker = document.getElementById("__uni_accessibility_replay_host")
+      ?.shadowRoot?.querySelector(".marker:not([hidden])");
+    return marker && Math.abs(marker.getBoundingClientRect().width * scale - 24) <= 0.1;
+  }, narrowViewScale);
+  const inverseScaledState = await readReplayState(page);
+  assert.ok(
+    inverseScaledState.markers.filter((marker) => !marker.hidden).every((marker) =>
+      Math.abs(marker.rect.width * narrowViewScale - markerSize) <= 0.1
+      && Math.abs(marker.rect.height * narrowViewScale - markerSize) <= 0.1
+    ),
+    "a 390px replay must keep every marker at 24 visual pixels"
+  );
+  await markerB.dispatchEvent("pointerenter", { pointerType: "mouse", isPrimary: true });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return Boolean(root?.querySelector(".issue-popover:not([hidden])"));
+  });
+  const scaledPopover = await page.evaluate((scale) => {
+    const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+    const popover = root.querySelector(".issue-popover:not([hidden])");
+    const message = popover.querySelector(".issue-popover__message");
+    const range = document.createRange();
+    range.selectNodeContents(message);
+    const rect = popover.getBoundingClientRect();
+    const textRect = range.getBoundingClientRect();
+    return {
+      visualRect: {
+        left: rect.left * scale,
+        top: rect.top * scale,
+        right: rect.right * scale,
+        bottom: rect.bottom * scale,
+        width: rect.width * scale,
+        height: rect.height * scale
+      },
+      visualTextHeight: textRect.height * scale,
+      declaredFontSize: parseFloat(getComputedStyle(message).fontSize)
+    };
+  }, narrowViewScale);
+  assert.ok(
+    scaledPopover.visualRect.width >= 220 && scaledPopover.visualRect.width <= 390,
+    `the production replay popover must retain its visual width at scale: ${JSON.stringify(scaledPopover)}`
+  );
+  assert.ok(
+    scaledPopover.visualRect.left >= -0.5 && scaledPopover.visualRect.right <= 390.5,
+    `the production replay popover must stay inside visualWidth=390: ${JSON.stringify(scaledPopover.visualRect)}`
+  );
+  assert.ok(
+    scaledPopover.declaredFontSize >= 12 && scaledPopover.declaredFontSize <= 13,
+    `the production replay tooltip body must stay near its 13px type contract: ${scaledPopover.declaredFontSize}`
+  );
+  assert.ok(
+    scaledPopover.visualTextHeight >= 12 && scaledPopover.visualTextHeight <= 18,
+    `inverse scaling must preserve a readable visual text glyph height: ${scaledPopover.visualTextHeight}`
+  );
+  await markerB.dispatchEvent("pointerleave", { pointerType: "mouse", isPrimary: true });
+  await page.waitForFunction(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    return root?.querySelector(".issue-popover")?.hidden;
+  });
+  await page.evaluate(() => {
+    window.__replayOutbound = window.__replayOutbound.filter((message) => message.type !== "ISSUE_SELECTED");
+  });
+  await sendCommand(page, {
+    type: "SET_VIEW_SCALE",
+    documentToken: "retired_document_token",
+    scale: 1,
+    visualWidth: 900
+  });
+  await page.waitForTimeout(50);
+  const staleScaleState = await readReplayState(page);
+  assert.ok(
+    staleScaleState.markers.filter((marker) => !marker.hidden).every((marker) =>
+      Math.abs(marker.rect.width * narrowViewScale - markerSize) <= 0.1
+    ),
+    "a retired document token must not replace the active inverse scale"
+  );
+  await sendCommand(page, {
+    type: "SET_VIEW_SCALE",
+    documentToken: replayDocumentToken,
+    scale: 1,
+    visualWidth: 900
+  });
+  await page.waitForFunction(() => {
+    const marker = document.getElementById("__uni_accessibility_replay_host")
+      ?.shadowRoot?.querySelector(".marker:not([hidden])");
+    return marker && Math.abs(marker.getBoundingClientRect().width - 24) <= 0.1;
+  });
 
   await page.waitForTimeout(100);
   const beforeHoverB = await readReplayState(page);
@@ -468,7 +727,11 @@ try {
     true,
     "hover must preserve marker DOM identity"
   );
-  assert.equal(afterHoverB.locatorStatusCount, initialState.locatorStatusCount, "hover must not reconnect locators");
+  assert.equal(
+    afterHoverB.locatorStatusCount,
+    locatorStatusCountAfterVisibilityTransitions,
+    "hover must not reconnect locators"
+  );
 
   await markerB.dispatchEvent("pointerenter", { pointerType: "mouse", isPrimary: true });
   await page.waitForTimeout(60);
@@ -702,7 +965,11 @@ try {
     "touch pointer boundaries must add only the click selection"
   );
 
-  assert.equal(fallbackState.locatorStatusCount, initialState.locatorStatusCount, "interactions must not reconnect locators");
+  assert.equal(
+    fallbackState.locatorStatusCount,
+    locatorStatusCountAfterVisibilityTransitions,
+    "interactions must not reconnect locators"
+  );
   assert.equal(
     await markerA.evaluate((marker) => marker === window.__stableMarkerA),
     true,

@@ -17,8 +17,8 @@ const FALLBACK_DETAIL_SELECTOR = ".site-page-evidence-fallback-detail";
 const removedReplayControlPattern = /SET_DISMISS_MODE|UNDO_HIDDEN_ELEMENT|RESET_HIDDEN_ELEMENTS|dismissMode|hiddenCount|REPLAY_UI_STATE|SLIDER_PREVIOUS|SLIDER_NEXT|sliderAvailable|sliderIndex|sliderCount/;
 
 assert.ok(
-  verificationScope === "core" || verificationScope === "full",
-  `PAGE_EVIDENCE_SCOPE must be "core" or "full": ${verificationScope}`
+  verificationScope === "core" || verificationScope === "full" || verificationScope === "scale",
+  `PAGE_EVIDENCE_SCOPE must be "core", "full", or "scale": ${verificationScope}`
 );
 
 const [protocolSource, evidenceCardSource] = await Promise.all([
@@ -57,6 +57,9 @@ assert.match(
   "the replay parser must accept only null or a valid positive issue id"
 );
 assert.match(protocolSource, /severityLabel: string/, "replay issues must carry a localized severity label");
+assert.match(protocolSource, /category: ReplayIssueCategory/, "replay issues must carry a validated marker category");
+assert.match(protocolSource, /row\.analyzerType === "AI_TEXT"[\s\S]*?return "text"/);
+assert.match(protocolSource, /row\.analyzerType === "CV_VISION"[\s\S]*?return "visual"/);
 assert.match(protocolSource, /code: string/, "replay issues must carry the KWCAG code");
 assert.match(protocolSource, /message: string/, "replay issues must carry the issue description");
 assert.match(protocolSource, /path: string \| null/, "replay issues must carry the bounded DOM path");
@@ -79,6 +82,16 @@ assert.match(
   protocolSource,
   /type: "REQUEST_DOCUMENT_STATE"/,
   "the parent must be able to recover a document-state message missed before its listener attached"
+);
+assert.match(
+  protocolSource,
+  /type: "SET_VIEW_SCALE";[\s\S]*?documentToken: string;[\s\S]*?scale: number;[\s\S]*?visualWidth: number;/,
+  "the replay protocol must carry bounded visual viewport metrics"
+);
+assert.match(
+  evidenceCardSource,
+  /sendReplayViewScale\(\);[\s\S]*?type: "INIT_ISSUES"/,
+  "the replay must receive its view scale before initial marker creation"
 );
 assert.match(
   protocolSource,
@@ -219,9 +232,14 @@ const issues = [
     requestId: 501,
     module: "text_difficulty",
     severity: "MINOR",
-    title: "요소 경로가 없는 텍스트 문제",
-    description: "이 문제에는 저장된 DOM 경로가 없습니다.",
-    recommendation: "원문을 검토하세요.",
+    title: "읽기 수준",
+    description: [
+      "text=건축학부 제70회 졸업 전시회 개최",
+      'flags=["어려운 어휘 과다: 쉬운 단어 비율 40.0%"]',
+      "suggestions=어려운 표현을 쉬운 단어로 바꾸세요.",
+      'llm_revision={"revised_text":"건축학부 졸업 전시회가 열립니다.","reason":"짧고 쉬운 문장으로 바꿨습니다.","model":"internal-model"}'
+    ].join("\n"),
+    recommendation: null,
     selector: null,
     locator: null,
     wcagCode: "3.1.5",
@@ -257,6 +275,17 @@ const replayHtml = `<!doctype html>
     <title>예제 쇼핑몰 재현</title>
     <style>
       * { box-sizing: border-box; }
+      html { scrollbar-gutter: auto; }
+      @supports not selector(::-webkit-scrollbar) {
+        html { scrollbar-width: thin; scrollbar-color: rgba(99,99,102,.78) transparent; }
+        @media (forced-colors: active) { html { scrollbar-width: auto; scrollbar-color: auto; } }
+      }
+      @supports selector(::-webkit-scrollbar) {
+        html::-webkit-scrollbar { width: 10px; height: 10px; }
+        html::-webkit-scrollbar-track, html::-webkit-scrollbar-corner { background: transparent; }
+        html::-webkit-scrollbar-thumb { min-height: 48px; border: 1px solid transparent; border-radius: 999px; background: rgba(99,99,102,.78); background-clip: padding-box; }
+        html::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+      }
       body { margin: 0; min-height: 900px; background: #f4f6f9; color: #18202b; font-family: Arial, sans-serif; }
       header { padding: 22px 28px; background: #fff; border-bottom: 1px solid #dfe4ea; font-weight: 800; }
       main { display: grid; gap: 22px; padding: 28px; }
@@ -264,11 +293,13 @@ const replayHtml = `<!doctype html>
       #search-copy { color: #a7acb2; }
       #search-button { min-height: 44px; padding: 0 20px; border: 0; border-radius: 8px; background: #f1644a; color: #fff; }
       a { color: #174ea6; }
+      :root { --replay-overlay-inverse-scale: 1; --replay-visual-width: 100vw; }
       #replay-markers { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
-      .replay-marker { position: fixed; z-index: 10001; width: 34px; height: 34px; border: 3px solid #fff; border-radius: 999px; background: #d73535; color: #fff; font-weight: 800; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+      .replay-marker { position: fixed; z-index: 10001; width: 24px; height: 24px; border: 2px solid #fff; border-radius: 999px; background: #d73535; color: #fff; font-weight: 800; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,.3); transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
       .replay-marker[data-issue-id="9001"] { left: 34px; top: 120px; }
       .replay-marker[data-issue-id="9002"] { left: 78px; top: 120px; background: #e77922; }
-      .replay-marker-description { position: fixed; left: 32px; top: 164px; z-index: 10002; max-width: 320px; padding: 10px; border: 1px solid #cbd3dc; border-radius: 8px; background: #fff; color: #18202b; }
+      .replay-marker-description { position: fixed; left: 32px; top: 164px; z-index: 10002; width: min(320px, calc(var(--replay-visual-width) - 24px)); padding: 10px; border: 1px solid #cbd3dc; border-radius: 8px; background: #fff; color: #18202b; font: 400 13px/13px Arial, sans-serif; transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
+      .replay-marker-description__text { display: block; height: 13px; overflow: hidden; white-space: nowrap; }
       [data-replay-selected="true"] { outline: 4px solid #1378d1 !important; outline-offset: 4px; }
     </style>
   </head>
@@ -299,7 +330,9 @@ const replayHtml = `<!doctype html>
         const state = {
           issues: [],
           selectedIssueId: null,
-          markersVisible: true
+          markersVisible: true,
+          viewScale: 1,
+          visualWidth: window.innerWidth
         };
         let activeMarkerPreview = null;
         let markerPreviewClearFrame = 0;
@@ -410,9 +443,29 @@ const replayHtml = `<!doctype html>
           description.id = "replay-marker-description-" + issue.id;
           description.className = "replay-marker-description";
           description.dataset.replayMarkerDescription = "true";
-          description.textContent = issue.message;
+          const text = document.createElement("span");
+          text.className = "replay-marker-description__text";
+          text.textContent = issue.message;
+          description.append(text);
           document.body.append(description);
           marker.setAttribute("aria-describedby", description.id);
+        }
+
+        function applyViewScale(message) {
+          const scale = message.scale;
+          const visualWidth = message.visualWidth;
+          if (
+            !Number.isFinite(scale)
+            || scale < 0.01
+            || scale > 1
+            || !Number.isFinite(visualWidth)
+            || visualWidth <= 0
+            || visualWidth > 16384
+          ) return;
+          state.viewScale = scale;
+          state.visualWidth = visualWidth;
+          document.documentElement.style.setProperty("--replay-overlay-inverse-scale", String(1 / scale));
+          document.documentElement.style.setProperty("--replay-visual-width", visualWidth + "px");
         }
 
         function renderMarkers() {
@@ -435,9 +488,11 @@ const replayHtml = `<!doctype html>
             marker.textContent = String(issue.id).slice(-1);
             marker.addEventListener("pointerenter", (event) => {
               previewIssue(marker, issue.id, event.pointerType);
+              if (event.pointerType !== "touch") showMarkerDescription(marker, issue);
             });
             marker.addEventListener("pointerleave", (event) => {
               endPreview(issue.id, event.pointerType);
+              clearMarkerDescription(marker);
             });
             marker.addEventListener("pointercancel", (event) => {
               endPreview(issue.id, event.pointerType);
@@ -476,6 +531,8 @@ const replayHtml = `<!doctype html>
           } else if (message.type === "SET_MARKERS_VISIBLE" && typeof message.markersVisible === "boolean") {
             state.markersVisible = message.markersVisible;
             renderMarkers();
+          } else if (message.type === "SET_VIEW_SCALE" && message.documentToken === DOCUMENT_TOKEN) {
+            applyViewScale(message);
           }
         });
 
@@ -495,6 +552,7 @@ const replayHtml = `<!doctype html>
 let artifactResponseMode = "replay";
 let holdNextReplayReady = false;
 let dropNextReplayInitialLoading = false;
+let nextIssueResponseGate = null;
 let dashboardRequestFetchCount = 0;
 let issueResponseFetchCount = 0;
 const overview = createDashboardOverview({
@@ -572,6 +630,13 @@ async function installFixture(page) {
       return;
     }
 
+    if (pathname === "/api/results/requests/501/issues" && nextIssueResponseGate) {
+      const gate = nextIssueResponseGate;
+      nextIssueResponseGate = null;
+      gate.markStarted();
+      await gate.releasePromise;
+    }
+
     await fulfillJson(route, payloadFor(pathname));
   });
 }
@@ -615,6 +680,16 @@ async function waitForReplayConnectionState(evidence, expectedState, timeoutMs =
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for replay connection state ${expectedState}`);
+}
+
+async function waitForUnavailableLocatorCount(evidence, expectedCount, timeoutMs = 5_000) {
+  const preview = evidence.locator(".site-page-evidence-preview");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await preview.getAttribute("data-unavailable-locator-count") === String(expectedCount)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for unavailable locator count ${expectedCount}`);
 }
 
 async function waitForNewReplayDocumentToken(frame, previousToken, timeoutMs = 5_000) {
@@ -705,6 +780,7 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   });
 
   await waitForReplayConnectionState(evidence, "loading");
+  await waitForUnavailableLocatorCount(evidence, 0);
   assert.equal(await preview.getAttribute("aria-busy"), "true");
   const freshDocumentToken = await waitForNewReplayDocumentToken(frame, initialDocumentToken);
   assert.match(freshDocumentToken, /^[A-Za-z0-9_-]{1,128}$/);
@@ -773,6 +849,7 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   assert.equal(await frame.locator(".replay-marker").count(), 2, "all connected markers must recover after reload");
   assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "true");
   assert.equal(await frame.locator('[data-issue-id="9002"]').getAttribute("aria-pressed"), "false");
+  await waitForUnavailableLocatorCount(evidence, 2);
   assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
   assert.equal(
     dashboardRequestFetchCount,
@@ -795,7 +872,7 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   for (const staleMessage of [
     { type: "ISSUE_SELECTED", issueId: 9002, documentToken: initialDocumentToken },
     { type: "ISSUE_DETAIL_FALLBACK", issueId: 9002, documentToken: initialDocumentToken },
-    { type: "LOCATOR_STATUS", issueId: 9002, status: "CONNECTED", documentToken: initialDocumentToken },
+    { type: "LOCATOR_STATUS", issueId: 9003, status: "CONNECTED", documentToken: initialDocumentToken },
     { type: "LINK_BLOCKED", href: "https://stale.example/", documentToken: initialDocumentToken }
   ]) {
     await sendRawReplayTestMessage(frame, staleMessage);
@@ -803,6 +880,11 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   await page.waitForTimeout(80);
   assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "true");
   assert.equal(await frame.locator('[data-issue-id="9002"]').getAttribute("aria-pressed"), "false");
+  assert.equal(
+    await preview.getAttribute("data-unavailable-locator-count"),
+    "2",
+    "stale locator status must not mutate the active document"
+  );
   assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
   assert.equal(
     (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
@@ -1034,6 +1116,80 @@ async function verifyNoExternalReplayControls(evidence, frame) {
   );
 }
 
+async function verifyArtifactBeforeResultDetails(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  let markIssueResponseStarted;
+  let releaseIssueResponse;
+  const issueResponseStarted = new Promise((resolve) => {
+    markIssueResponseStarted = resolve;
+  });
+  const releasePromise = new Promise((resolve) => {
+    releaseIssueResponse = resolve;
+  });
+  nextIssueResponseGate = {
+    markStarted: markIssueResponseStarted,
+    releasePromise
+  };
+  const artifactResponse = page.waitForResponse((response) =>
+    response.url().endsWith("/api/results/requests/501/artifact")
+  );
+
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+  await artifactResponse;
+  await issueResponseStarted;
+
+  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
+  await evidence.waitFor({ state: "visible" });
+  try {
+    assert.equal(
+      await evidence.locator("iframe.site-page-evidence-replay-frame").count(),
+      0,
+      "the artifact may resolve before result details while the replay preview is not mounted"
+    );
+    await page.evaluate(() => new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+  } finally {
+    releaseIssueResponse();
+  }
+
+  await waitForReplayReady(evidence);
+  const iframe = evidence.locator("iframe.site-page-evidence-replay-frame");
+  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
+  const messages = await getReplayMessages(frame);
+  const scaleIndex = messages.findIndex((message) => message.type === "SET_VIEW_SCALE");
+  const initMessages = messages.filter((message) => message.type === "INIT_ISSUES");
+  const initIndex = messages.findIndex((message) => message.type === "INIT_ISSUES");
+
+  assert.ok(scaleIndex >= 0, "the late-mounted replay must receive viewport metrics");
+  assert.ok(initIndex > scaleIndex, "the late-mounted replay must receive scale before issues");
+  assert.equal(initMessages.length, 1, "the late-mounted replay must initialize its issues exactly once");
+  assert.ok(messages[scaleIndex].visualWidth > 0, "the late-mounted replay visual width must be measurable");
+  assert.equal(messages[initIndex].issues.length, issues.length);
+  assert.ok(
+    Number.parseFloat(await iframe.getAttribute("data-replay-visual-width")) > 0,
+    "the iframe must not retain the pre-mount visualWidth=0 state"
+  );
+  const expectedSourceWidth = Math.max(artifact.viewportWidthCssPx, artifact.pageWidthCssPx) + 10;
+  const frameFit = await evidence.evaluate((element) => {
+    const preview = element.querySelector(".site-page-evidence-preview");
+    const replayFrame = element.querySelector("iframe.site-page-evidence-replay-frame");
+    return {
+      logicalWidth: replayFrame?.clientWidth ?? 0,
+      previewWidth: preview?.clientWidth ?? 0,
+      visualWidth: replayFrame?.getBoundingClientRect().width ?? 0,
+      scale: Number.parseFloat(replayFrame?.dataset.replayScale ?? "0")
+    };
+  });
+  assert.equal(frameFit.logicalWidth, expectedSourceWidth);
+  assert.ok(frameFit.scale > 0 && frameFit.scale < 1, "the late-mounted replay must be scaled to fit");
+  assert.ok(
+    Math.abs(frameFit.previewWidth - frameFit.visualWidth) <= 2,
+    "the late-mounted replay must fit the preview without horizontal clipping"
+  );
+  assert.equal(await frame.locator(".replay-marker:not([hidden])").count(), 2);
+}
+
 async function verifyDesktop(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
@@ -1056,7 +1212,24 @@ async function verifyDesktop(page) {
   assert.equal(initialMessage.issues.length, 4);
   assert.deepEqual(initialMessage.issues[0].pathSteps, [{ context: "DOCUMENT", selector: "#search-button" }]);
   assert.equal(initialMessage.issues[0].severityLabel, "심각");
+  assert.equal(initialMessage.issues[0].category, "media");
   assert.equal(initialMessage.issues[0].code, "5.1.1");
+  assert.equal(initialMessage.issues[1].category, "visual");
+  assert.equal(initialMessage.issues[3].category, "text");
+  assert.deepEqual(initialMessage.issues[3].textAnalysis, {
+    kind: "text-analysis",
+    sourceText: "건축학부 제70회 졸업 전시회 개최",
+    flags: ["어려운 어휘 과다: 쉬운 단어 비율 40.0%"],
+    suggestions: ["어려운 표현을 쉬운 단어로 바꾸세요."],
+    revision: {
+      text: "건축학부 졸업 전시회가 열립니다.",
+      reason: "짧고 쉬운 문장으로 바꿨습니다."
+    }
+  });
+  assert.match(initialMessage.issues[3].message, /분석 문장\n건축학부/);
+  assert.match(initialMessage.issues[3].message, /개선 필요\n• 어려운 어휘 과다/);
+  assert.doesNotMatch(initialMessage.issues[3].message, /(?:text|flags|suggestions|llm_revision)=/);
+  assert.doesNotMatch(initialMessage.issues[3].message, /internal-model/);
   assert.equal(initialMessage.issues[0].title, issues[0].title);
   assert.ok(initialMessage.issues[0].message.includes(issues[0].description.slice(0, 300)));
   assert.ok(initialMessage.issues[0].message.includes(issues[0].recommendation));
@@ -1064,6 +1237,30 @@ async function verifyDesktop(page) {
   assert.equal(initialMessage.selectedIssueId, 9001);
   assert.equal(initialMessage.markersVisible, true);
   assert.equal(await frame.locator(".replay-marker").count(), 2);
+  await waitForUnavailableLocatorCount(evidence, 2);
+  const locatorStatus = evidence.locator(".site-page-evidence-locator-status");
+  assert.match(await locatorStatus.textContent(), /문제 2개의 위치를 재현 화면에 표시하지 못했습니다/);
+  await sendReplayTestMessage(frame, {
+    type: "LOCATOR_STATUS",
+    issueId: 999999,
+    status: "UNAVAILABLE",
+    reason: "UNTRUSTED_REASON"
+  });
+  await page.waitForTimeout(50);
+  assert.equal(
+    await evidence.locator(".site-page-evidence-preview").getAttribute("data-unavailable-locator-count"),
+    "2",
+    "unknown locator statuses must not affect the dashboard"
+  );
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9003, status: "CONNECTED" });
+  await waitForUnavailableLocatorCount(evidence, 1);
+  await sendReplayTestMessage(frame, {
+    type: "LOCATOR_STATUS",
+    issueId: 9003,
+    status: "UNAVAILABLE",
+    reason: "SELECTOR_NOT_FOUND"
+  });
+  await waitForUnavailableLocatorCount(evidence, 2);
   await verifyNoExternalReplayControls(evidence, frame);
   await page.waitForTimeout(100);
   assert.equal(
@@ -1541,8 +1738,8 @@ async function verifyDesktop(page) {
       contentInnerWidth,
       unusedBottom: Math.max(0, contentInnerBottom - cardRect.bottom),
       viewportHeight: window.innerHeight,
-      previewWidth: preview?.getBoundingClientRect().width ?? 0,
-      previewHeight: preview?.getBoundingClientRect().height ?? 0,
+      previewWidth: preview?.clientWidth ?? 0,
+      previewHeight: preview?.clientHeight ?? 0,
       frameWidth: frameElement?.getBoundingClientRect().width ?? 0,
       frameHeight: frameElement?.getBoundingClientRect().height ?? 0,
       inspectorCount: element.querySelectorAll(".site-page-evidence-inspector").length,
@@ -1561,8 +1758,14 @@ async function verifyDesktop(page) {
   assert.ok(dimensions.previewWidth >= dimensions.cardWidth * 0.95, "replay must reclaim the inspector width");
   assert.equal(dimensions.inspectorCount, 0);
   assert.equal(dimensions.gridColumnCount, 1);
-  assert.ok(Math.abs(dimensions.previewWidth - dimensions.frameWidth) <= 2);
-  assert.ok(Math.abs(dimensions.previewHeight - dimensions.frameHeight) <= 2);
+  assert.ok(
+    Math.abs(dimensions.previewWidth - dimensions.frameWidth) <= 2,
+    `replay width must fit the preview: ${JSON.stringify(dimensions)}`
+  );
+  assert.ok(
+    Math.abs(dimensions.previewHeight - dimensions.frameHeight) <= 2,
+    `replay height must fit the preview: ${JSON.stringify(dimensions)}`
+  );
 
   mkdirSync(outDir, { recursive: true });
   await evidence.screenshot({ path: `${outDir}/desktop.png` });
@@ -1586,7 +1789,51 @@ async function verifyLegacyArtifactRejected(page) {
   artifactResponseMode = "replay";
 }
 
+async function verifyScaledReplayOverlays(page, evidence, frame) {
+  const messages = await getReplayMessages(frame);
+  const initIndex = messages.findIndex((message) => message.type === "INIT_ISSUES");
+  const scaleIndex = messages.findIndex((message) => message.type === "SET_VIEW_SCALE");
+  assert.ok(scaleIndex >= 0, "the parent must send replay viewport metrics");
+  assert.ok(initIndex >= 0, "the replay must receive its initial issues");
+  assert.ok(scaleIndex < initIndex, "SET_VIEW_SCALE must arrive before INIT_ISSUES");
+
+  const scaleMessage = messages[scaleIndex];
+  assert.equal(scaleMessage.documentToken, await frame.locator("html").evaluate(() => window.__replayDocumentToken));
+  assert.ok(scaleMessage.scale >= 0.01 && scaleMessage.scale <= 1);
+  assert.ok(scaleMessage.visualWidth > 0 && scaleMessage.visualWidth <= 16_384);
+
+  const frameElement = evidence.locator("iframe.site-page-evidence-replay-frame");
+  const frameMetrics = await frameElement.evaluate((element) => ({
+    scale: Number.parseFloat(element.dataset.replayScale ?? ""),
+    visualWidth: Number.parseFloat(element.dataset.replayVisualWidth ?? "")
+  }));
+  assert.ok(Math.abs(scaleMessage.scale - frameMetrics.scale) <= 0.001);
+  assert.ok(Math.abs(scaleMessage.visualWidth - frameMetrics.visualWidth) <= 0.5);
+
+  const marker = frame.locator('.replay-marker[data-issue-id="9001"]');
+  const markerBox = await marker.boundingBox();
+  assert.ok(markerBox, "the scaled replay marker must remain visible");
+  assert.ok(Math.abs(markerBox.width - 24) <= 0.75, `scaled marker width: ${markerBox.width}`);
+  assert.ok(Math.abs(markerBox.height - 24) <= 0.75, `scaled marker height: ${markerBox.height}`);
+
+  await marker.hover();
+  const tooltip = frame.locator(".replay-marker-description");
+  await tooltip.waitFor({ state: "visible" });
+  const tooltipTextBox = await tooltip.locator(".replay-marker-description__text").boundingBox();
+  const tooltipBox = await tooltip.boundingBox();
+  const previewBox = await evidence.locator(".site-page-evidence-preview").boundingBox();
+  assert.ok(tooltipTextBox, "the scaled tooltip text must be measurable");
+  assert.ok(tooltipBox && previewBox, "the scaled tooltip must remain in the replay preview");
+  assert.ok(
+    Math.abs(tooltipTextBox.height - 13) <= 0.75,
+    `scaled tooltip 13px text probe: ${tooltipTextBox.height}`
+  );
+  assert.ok(tooltipBox.width <= previewBox.width - 20, "the scaled tooltip must fit the visual viewport");
+  await page.mouse.move(0, 0);
+}
+
 async function verifyResponsiveWidths(page) {
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
   const viewports = [
     { width: 1920, height: 1080 },
     { width: 1024, height: 900 },
@@ -1638,6 +1885,9 @@ async function verifyResponsiveWidths(page) {
     assert.equal(facts.inspectorCount, 0, `${viewport.width}px must not render the removed inspector`);
     assert.equal(facts.gridColumnCount, 1, `${viewport.width}px replay layout must remain single-column`);
     assert.ok(facts.previewFrameDelta <= 2);
+    if (viewport.width === 390) {
+      await verifyScaledReplayOverlays(page, evidence, frame);
+    }
     let fallback = null;
     if (viewport.width <= 768) {
       const initMessages = (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES");
@@ -1800,19 +2050,31 @@ async function verifyMobile(page) {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 const pageErrors = [];
+const chartDimensionWarnings = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
+page.on("console", (message) => {
+  if (message.type() === "warning" && /width\(-1\).*height\(-1\).*chart/.test(message.text())) {
+    chartDimensionWarnings.push(message.text());
+  }
+});
 
 try {
   await installFixture(page);
-  const desktop = await verifyDesktop(page);
+  if (verificationScope !== "scale") {
+    await verifyArtifactBeforeResultDetails(page);
+  }
+  const desktop = verificationScope === "scale" ? null : await verifyDesktop(page);
   let responsive = null;
   let mobile = null;
   if (verificationScope === "full") {
     await verifyLegacyArtifactRejected(page);
     responsive = await verifyResponsiveWidths(page);
     mobile = await verifyMobile(page);
+  } else if (verificationScope === "scale") {
+    responsive = await verifyResponsiveWidths(page);
   }
   assert.deepEqual(pageErrors, []);
+  assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
   console.log(JSON.stringify({ result: "PASS", scope: verificationScope, desktop, responsive, mobile }, null, 2));
 } finally {
   await page.close();

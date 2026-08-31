@@ -67,12 +67,25 @@ function extractBridgeScript(source) {
     .join("\n");
 }
 
-function issue(id, selector, title = `Performance issue ${id}`) {
+const performanceIssueProfiles = [
+  { category: "media", code: "5.1.1" },
+  { category: "visual", code: "5.4.3" },
+  { category: "navigation", code: "6.4.3" },
+  { category: "form", code: "7.3.2" },
+  { category: "structure", code: "8.1.1" },
+  { category: "text", code: "WCAG 3.1.5" },
+  { category: "keyboard", code: "6.1.1" },
+  { category: "interaction", code: "6.1.3" }
+];
+
+function issue(id, selector, title = `Performance issue ${id}`, profile) {
+  const resolvedProfile = profile ?? performanceIssueProfiles[id % performanceIssueProfiles.length];
   return {
     id,
     severity: id % 3 === 0 ? "HIGH" : id % 3 === 1 ? "MEDIUM" : "LOW",
     severityLabel: id % 3 === 0 ? "High" : id % 3 === 1 ? "Medium" : "Low",
-    code: `perf-${id}`,
+    category: resolvedProfile.category,
+    code: resolvedProfile.code,
     title,
     message: `Marker performance fixture ${id}`,
     path: selector,
@@ -242,6 +255,11 @@ async function markerFacts(frame, limit = Number.POSITIVE_INFINITY) {
       return {
         hidden: marker.hidden,
         markerIndex: marker.dataset.markerIndex,
+        groupSize: marker.dataset.groupSize,
+        grouped: marker.dataset.grouped,
+        category: marker.dataset.markerCategory,
+        icon: marker.querySelector(".marker__icon")?.dataset.icon,
+        iconCount: marker.querySelectorAll(".marker__icon").length,
         text: marker.textContent,
         ariaLabel: marker.getAttribute("aria-label"),
         ariaPressed: marker.getAttribute("aria-pressed"),
@@ -255,6 +273,44 @@ async function markerFacts(frame, limit = Number.POSITIVE_INFINITY) {
       };
     });
   }, Number.isFinite(limit) ? limit : 2 ** 31 - 1);
+}
+
+async function groupedPopoverFacts(frame) {
+  return frame.evaluate(() => {
+    const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+    const marker = root?.querySelector(".marker");
+    const dock = root?.querySelector(".issue-dock");
+    const popover = root?.querySelector(".issue-popover");
+    return {
+      markerExpanded: marker?.getAttribute("aria-expanded") ?? null,
+      markerDescribedBy: marker?.getAttribute("aria-describedby") ?? null,
+      dockHidden: dock?.hidden ?? true,
+      popoverHidden: popover?.hidden ?? true,
+      popoverIssueId: popover?.dataset.issueId ?? null,
+      grouped: popover?.dataset.grouped ?? null,
+      group: popover?.querySelector(".issue-popover__group")?.textContent ?? null,
+      primary: {
+        severity: popover?.querySelector(".issue-popover__severity")?.textContent ?? null,
+        code: popover?.querySelector(".issue-popover__code")?.textContent ?? null,
+        title: popover?.querySelector(".issue-popover__title")?.textContent ?? null,
+        message: popover?.querySelector(".issue-popover__message")?.textContent ?? null,
+        path: popover?.querySelector(".issue-popover__path")?.textContent ?? null
+      },
+      summaries: [...(popover?.querySelectorAll(".issue-popover__issue") ?? [])].map((issue) => ({
+        issueId: issue.dataset.issueId,
+        pressed: issue.getAttribute("aria-pressed"),
+        severity: issue.querySelector(".issue-popover__issue-severity")?.textContent ?? null,
+        code: issue.querySelector(".issue-popover__issue-code")?.textContent ?? null,
+        title: issue.querySelector(".issue-popover__issue-title")?.textContent ?? null
+      })),
+      pager: {
+        hidden: popover?.querySelector(".issue-popover__pager")?.hidden ?? true,
+        status: popover?.querySelector(".issue-popover__page-status")?.textContent ?? null,
+        previousDisabled: popover?.querySelector('.issue-popover__page-button[data-direction="previous"]')?.disabled ?? null,
+        nextDisabled: popover?.querySelector('.issue-popover__page-button[data-direction="next"]')?.disabled ?? null
+      }
+    };
+  });
 }
 
 function expandedRect(rect, halo = MARKER_HALO) {
@@ -411,6 +467,15 @@ async function verifyDistributedPerformance(browser, bridgeScript) {
 
       if (count === 100) {
         baselinePositions = await markerFacts(frame, 32);
+        assert.ok(
+          baselinePositions.every((marker) => marker.icon === marker.category && marker.iconCount === 1),
+          "every distributed issue type must render exactly one matching semantic icon"
+        );
+        assert.deepEqual(
+          [...new Set(baselinePositions.map((marker) => marker.category))].sort(),
+          performanceIssueProfiles.map((profile) => profile.category).sort(),
+          "the browser fixture must exercise every supported single-issue marker category"
+        );
         await clearMarkers(page);
         await runMeasuredInit(page, issues.slice(0, count), count);
         repeatedBaselinePositions = await markerFacts(frame, 32);
@@ -462,8 +527,12 @@ async function verifyDistributedPerformance(browser, bridgeScript) {
 }
 
 async function verifyClusteredPerformance(browser, bridgeScript) {
+  const textProfile = { category: "text", code: "WCAG 3.1.5" };
   const issues = Array.from({ length: 5000 }, (_, index) =>
-    issue(10_001 + index, "#cluster-target", `Clustered performance issue ${index + 1}`)
+    issue(10_001 + index, "#cluster-target", `Clustered performance issue ${index + 1}`, textProfile)
+  );
+  const mixedIssues = Array.from({ length: 5000 }, (_, index) =>
+    issue(20_001 + index, "#cluster-target", `Mixed clustered issue ${index + 1}`)
   );
   const { page, frame } = await createHarnessPage(browser, bridgeScript, {
     styles: `
@@ -475,54 +544,179 @@ async function verifyClusteredPerformance(browser, bridgeScript) {
   });
 
   try {
-    await runMeasuredInit(page, issues.slice(0, 20), 20);
+    await runMeasuredInit(page, issues.slice(0, 5), 1);
+    await frame.evaluate(() => {
+      document.getElementById("cluster-target").scrollIntoView({ block: "center", inline: "center" });
+    });
+    await frame.waitForTimeout(100);
+    await page.evaluate(() => {
+      window.__groupIssueSelections = [];
+      window.addEventListener("message", (event) => {
+        if (event.data?.source === "accessibility-page-replay" && event.data.type === "ISSUE_SELECTED") {
+          window.__groupIssueSelections.push(event.data.issueId ?? null);
+        }
+      });
+    });
+    await frame.evaluate(() => {
+      document.getElementById("__uni_accessibility_replay_host").shadowRoot.querySelector(".marker").click();
+    });
+    await frame.waitForFunction(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+      return root?.querySelector(".issue-popover:not([hidden])")?.dataset.issueId === "10002";
+    });
+    await frame.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      root.querySelector('.issue-popover__page-button[data-direction="next"]').click();
+    });
+    await frame.waitForFunction(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+      return root?.querySelector(".issue-popover__page-status")?.textContent === "2 / 2";
+    });
+    const fiveIssueLastPage = await groupedPopoverFacts(frame);
+    assert.deepEqual(fiveIssueLastPage.summaries, [
+      {
+        issueId: "10005",
+        pressed: "false",
+        severity: "High",
+        code: "WCAG 3.1.5",
+        title: "Clustered performance issue 5"
+      }
+    ], "a five-issue group must expose its final issue on the last selector page");
+    assert.deepEqual(fiveIssueLastPage.pager, {
+      hidden: false,
+      status: "2 / 2",
+      previousDisabled: false,
+      nextDisabled: true
+    });
+    await frame.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      root.querySelector('.issue-popover__issue[data-issue-id="10005"]').click();
+    });
+    await frame.waitForFunction(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+      return root?.querySelector(".issue-popover:not([hidden])")?.dataset.issueId === "10005";
+    });
+    const selectedFifthIssue = await groupedPopoverFacts(frame);
+    assert.deepEqual(selectedFifthIssue.primary, {
+      severity: "High",
+      code: "WCAG 3.1.5",
+      title: "Clustered performance issue 5",
+      message: "Marker performance fixture 10005",
+      path: "#cluster-target"
+    }, "selecting the last-page issue must replace the complete grouped detail");
+    assert.deepEqual(
+      await page.evaluate(() => window.__groupIssueSelections),
+      [10002, 10005],
+      "the grouped selector must notify both the severity-aligned default and the chosen issue"
+    );
+    await clearMarkers(page);
+
+    await runMeasuredInit(page, issues.slice(0, 20), 1);
     await clearMarkers(page);
 
     const samples = [];
     let baselinePositions = null;
-    let repeatedBaselinePositions = null;
     let finalMarkers = null;
     for (const count of CLUSTERED_COUNTS) {
-      const metrics = await runStableMeasuredInit(page, issues.slice(0, count), count);
-      assert.equal(metrics.markerCount, count, `clustered ${count} INIT must complete`);
-      assert.equal(metrics.visibleMarkerCount, count, `clustered ${count} markers must all be visible`);
+      const metrics = await runStableMeasuredInit(page, issues.slice(0, count), 1);
+      assert.equal(metrics.markerCount, 1, `clustered ${count} issues must share one target marker`);
+      assert.equal(metrics.visibleMarkerCount, 1, `clustered ${count} grouped marker must remain visible`);
+      const currentMarkers = await markerFacts(frame);
+      assert.equal(currentMarkers[0]?.groupSize, String(count));
+      assert.equal(currentMarkers[0]?.grouped, "true");
+      assert.equal(currentMarkers[0]?.category, "text");
+      assert.equal(currentMarkers[0]?.icon, "text");
+      assert.equal(currentMarkers[0]?.iconCount, 1);
       samples.push({ count, ...metrics });
 
       if (count === 250) {
-        baselinePositions = await markerFacts(frame, 64);
+        baselinePositions = currentMarkers;
         await clearMarkers(page);
-        await runMeasuredInit(page, issues.slice(0, count), count);
-        repeatedBaselinePositions = await markerFacts(frame, 64);
+        await runMeasuredInit(page, issues.slice(0, count), 1);
+        const repeatedBaselinePositions = await markerFacts(frame);
         assertPositionsClose(
           repeatedBaselinePositions,
           baselinePositions,
-          "clustered 250-marker repeated initialization"
+          "clustered 250-issue grouped initialization"
         );
       }
-      if (count === 1000) finalMarkers = await markerFacts(frame);
+      if (count === 1000) finalMarkers = currentMarkers;
     }
 
-    const maximumMetrics = await runStableMeasuredInit(page, issues, 5000);
-    assert.equal(maximumMetrics.markerCount, 5000, "clustered MAX_ISSUES INIT must complete");
-    assert.equal(maximumMetrics.visibleMarkerCount, 5000, "clustered MAX_ISSUES markers must all be visible");
+    const maximumMetrics = await runStableMeasuredInit(page, issues, 1);
+    assert.equal(maximumMetrics.markerCount, 1, "clustered MAX_ISSUES must share one marker");
+    assert.equal(maximumMetrics.visibleMarkerCount, 1, "clustered MAX_ISSUES marker must remain visible");
     const maximumMarkers = await markerFacts(frame);
+    assert.equal(maximumMarkers[0]?.groupSize, "5000");
+    assert.equal(maximumMarkers[0]?.grouped, "true");
+    assert.equal(maximumMarkers[0]?.category, "text");
+    assert.equal(maximumMarkers[0]?.icon, "text");
+    assert.equal(maximumMarkers[0]?.iconCount, 1);
+
+    const closedMaximumPopover = await groupedPopoverFacts(frame);
+    assert.equal(closedMaximumPopover.markerExpanded, "false");
+    assert.equal(closedMaximumPopover.markerDescribedBy, null);
+    assert.equal(closedMaximumPopover.dockHidden, true);
+    assert.equal(closedMaximumPopover.popoverHidden, true);
+    await frame.evaluate(() => {
+      document.getElementById("cluster-target").scrollIntoView({ block: "center", inline: "center" });
+    });
+    await frame.waitForTimeout(100);
+    await frame.evaluate(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host").shadowRoot;
+      root.querySelector(".marker").click();
+    });
+    await frame.waitForFunction(() => {
+      const root = document.getElementById("__uni_accessibility_replay_host")?.shadowRoot;
+      return root?.querySelector(".issue-popover:not([hidden])")?.dataset.issueId === "10002";
+    });
+    const maximumGroupedPopover = await groupedPopoverFacts(frame);
+    assert.equal(maximumGroupedPopover.markerExpanded, "true");
+    assert.equal(maximumGroupedPopover.markerDescribedBy, null);
+    assert.equal(maximumGroupedPopover.dockHidden, true, "the legacy issue dock must remain hidden");
+    assert.equal(maximumGroupedPopover.popoverHidden, false);
+    assert.equal(maximumGroupedPopover.popoverIssueId, "10002");
+    assert.equal(maximumGroupedPopover.grouped, "true");
+    assert.equal(maximumGroupedPopover.group, "같은 요소에서 발견된 문제 5000개");
+    assert.deepEqual(maximumGroupedPopover.primary, {
+      severity: "High",
+      code: "WCAG 3.1.5",
+      title: "Clustered performance issue 2",
+      message: "Marker performance fixture 10002",
+      path: "#cluster-target"
+    });
+    assert.deepEqual(maximumGroupedPopover.summaries, [
+      { issueId: "10001", pressed: "false", severity: "Low", code: "WCAG 3.1.5", title: "Clustered performance issue 1" },
+      { issueId: "10002", pressed: "true", severity: "High", code: "WCAG 3.1.5", title: "Clustered performance issue 2" },
+      { issueId: "10003", pressed: "false", severity: "Medium", code: "WCAG 3.1.5", title: "Clustered performance issue 3" },
+      { issueId: "10004", pressed: "false", severity: "Low", code: "WCAG 3.1.5", title: "Clustered performance issue 4" }
+    ], "a maximum group must render only its four-item selector page");
+    assert.deepEqual(maximumGroupedPopover.pager, {
+      hidden: false,
+      status: "1 / 1250",
+      previousDisabled: true,
+      nextDisabled: false
+    }, "the maximum group must stay bounded to a paged selector instead of thousands of DOM nodes");
+
+    const mixedMaximumMetrics = await runStableMeasuredInit(page, mixedIssues, 1);
+    assert.equal(mixedMaximumMetrics.markerCount, 1, "mixed MAX_ISSUES must share one marker");
+    const mixedMaximumMarkers = await markerFacts(frame);
+    assert.equal(mixedMaximumMarkers[0]?.groupSize, "5000");
+    assert.equal(mixedMaximumMarkers[0]?.category, "multiple");
+    assert.equal(mixedMaximumMarkers[0]?.icon, "multiple");
+    assert.equal(mixedMaximumMarkers[0]?.iconCount, 1, "a mixed group must render one stable icon");
     assert.ok(baselinePositions && finalMarkers);
     assertPositionsClose(
+      finalMarkers,
       baselinePositions,
-      exactClusterLegacyPositions(baselinePositions.length),
-      "clustered positions must preserve the legacy alternating-slot layout"
+      "clustered group position must not depend on later issues"
     );
     assertPositionsClose(
-      finalMarkers.slice(0, baselinePositions.length),
+      maximumMarkers,
       baselinePositions,
-      "clustered first positions must not depend on later issues"
+      "clustered MAX_ISSUES group position must remain deterministic"
     );
-    assertPositionsClose(
-      maximumMarkers.slice(0, baselinePositions.length),
-      baselinePositions,
-      "clustered MAX_ISSUES first positions must remain deterministic"
-    );
-    assertNoHaloCollisions(maximumMarkers, "clustered MAX_ISSUES layout");
+    assertNoHaloCollisions(maximumMarkers, "clustered MAX_ISSUES grouped layout");
 
     const byCount = new Map(samples.map((sample) => [sample.count, sample]));
     const twoHundredFifty = byCount.get(250);
@@ -549,10 +743,11 @@ async function verifyClusteredPerformance(browser, bridgeScript) {
     return {
       samples: samples.map((sample) => summarizedMetrics(sample.count, sample)),
       maximumIssuesSample: summarizedMetrics(5000, maximumMetrics),
+      mixedMaximumIssuesSample: summarizedMetrics(5000, mixedMaximumMetrics),
       scaling250To1000: Number(scalingRatio.toFixed(2)),
       scaling1000To5000: Number(maximumScalingRatio.toFixed(2)),
       deterministicMarkersChecked: baselinePositions.length,
-      legacyCoordinatesChecked: baselinePositions.length,
+      legacyCoordinatesChecked: 0,
       haloCollisionMarkersChecked: maximumMarkers.length
     };
   } finally {

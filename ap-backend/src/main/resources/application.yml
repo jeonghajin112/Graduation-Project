@@ -40,3 +40,5 @@ accessibility:
 
 server:
   port: 9090
+  compression:
+    enabled: true

@@ -7,38 +7,13 @@ type PageInformationPanelProps = {
   analyzedAt: string | null;
   faviconUrl?: string | null;
   name: string;
-  targetType: string;
-  viewportHeight: number | null;
-  viewportWidth: number | null;
 };
-
-function formatTargetType(targetType: string): string {
-  const normalized = targetType.trim().toUpperCase();
-  if (normalized.includes("MOBILE") || targetType.includes("모바일")) {
-    return "모바일 웹";
-  }
-  if (normalized.includes("DOCUMENT") || targetType.includes("문서")) {
-    return "문서";
-  }
-  return "PC 웹";
-}
-
-function formatViewport(width: number | null, height: number | null): string {
-  if (!width || !height) {
-    return "-";
-  }
-
-  return `${width.toLocaleString("ko-KR")} × ${height.toLocaleString("ko-KR")} px`;
-}
 
 export function PageInformationPanel({
   accessUrl,
   analyzedAt,
   faviconUrl,
-  name,
-  targetType,
-  viewportHeight,
-  viewportWidth
+  name
 }: PageInformationPanelProps) {
   return (
     <section className="site-rail-card site-page-information" aria-labelledby="site-page-information-heading">
@@ -71,16 +46,8 @@ export function PageInformationPanel({
 
       <dl className="site-page-information__metadata">
         <div>
-          <dt>대상</dt>
-          <dd>{formatTargetType(targetType)}</dd>
-        </div>
-        <div>
           <dt>최근 분석</dt>
           <dd>{formatDateTime(analyzedAt)}</dd>
-        </div>
-        <div>
-          <dt>재현 화면</dt>
-          <dd>{formatViewport(viewportWidth, viewportHeight)}</dd>
         </div>
       </dl>
     </section>

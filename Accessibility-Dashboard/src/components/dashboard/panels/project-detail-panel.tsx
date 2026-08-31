@@ -30,6 +30,61 @@ function getFallbackFaviconUrl(accessUrl: string): string | null {
   }
 }
 
+function ProjectFavicon({
+  faviconUrl,
+  isDarkMode,
+  targetType
+}: {
+  faviconUrl: string | null;
+  isDarkMode: boolean;
+  targetType: EvaluationTargetModel["targetType"];
+}) {
+  const [loadedFaviconUrl, setLoadedFaviconUrl] = useState<string | null>(null);
+  const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
+  const hasLoadedFavicon = faviconUrl !== null && loadedFaviconUrl === faviconUrl;
+
+  return (
+    <span
+      className={cn(
+        "dashboard-project-favicon relative inline-flex shrink-0 items-center justify-center overflow-hidden",
+        hasLoadedFavicon
+          ? "bg-transparent"
+          : isDarkMode
+            ? "border border-white/10 bg-white text-[#6e6e73]"
+            : "border border-[#e5e5ea] bg-white text-[#86868b]"
+      )}
+      data-favicon-loaded={hasLoadedFavicon ? "true" : "false"}
+      aria-hidden="true"
+    >
+      {!hasLoadedFavicon ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          {renderTargetTypeIcon(targetType)}
+        </span>
+      ) : null}
+      {faviconUrl !== null && failedFaviconUrl !== faviconUrl ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          className={cn(
+            "absolute inset-0 h-full w-full object-cover",
+            hasLoadedFavicon ? "opacity-100" : "opacity-0"
+          )}
+          onLoad={() => {
+            setLoadedFaviconUrl(faviconUrl);
+            setFailedFaviconUrl(null);
+          }}
+          onError={() => {
+            setLoadedFaviconUrl(null);
+            setFailedFaviconUrl(faviconUrl);
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
 
 export function OrganizationModelDetailPanel({
   organization,
@@ -343,29 +398,12 @@ export function OrganizationModelDetailPanel({
               </div> : null}
 
               <div className="dashboard-project-card-header pointer-events-none relative z-[1] flex min-w-0 items-start">
-                <span
-                  className={`dashboard-project-favicon relative inline-flex shrink-0 items-center justify-center overflow-hidden border bg-white ${
-                    isDarkMode ? "border-white/10 text-[#6e6e73]" : "border-[#e5e5ea] text-[#86868b]"
-                  }`}
-                  aria-hidden="true"
-                >
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    {renderTargetTypeIcon(row.targetType)}
-                  </span>
-                  {row.faviconUrl ? (
-                    <img
-                      src={row.faviconUrl}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      referrerPolicy="no-referrer"
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : null}
-                </span>
+                <ProjectFavicon
+                  key={row.faviconUrl ?? "fallback"}
+                  faviconUrl={row.faviconUrl}
+                  isDarkMode={isDarkMode}
+                  targetType={row.targetType}
+                />
 
                 <div className="min-w-0">
                   <h3
