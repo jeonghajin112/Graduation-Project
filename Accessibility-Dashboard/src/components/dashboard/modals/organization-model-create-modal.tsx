@@ -122,7 +122,7 @@ export function OrganizationModelCreateModal({
               disabled={isSubmitting}
               onClick={() => {
                 const shouldDiscard = window.confirm(
-                  "이 복구 정보를 삭제하면 서버에 이미 생성된 프로젝트가 있을 경우 다음 생성 시 중복될 수 있습니다. 그래도 삭제할까요?"
+                  "프로젝트가 이미 생성되지 않았는지 목록에서 확인하셨나요? 이전 작업 정보를 삭제하면 같은 프로젝트가 다시 생성될 수 있습니다. 그래도 삭제할까요?"
                 );
                 if (shouldDiscard) {
                   onDiscardRecovery();
@@ -134,7 +134,7 @@ export function OrganizationModelCreateModal({
                   : "h-7 bg-[#fff0f0] px-4 text-xs text-[#b42318] hover:bg-[#ffe2e0]"
               }
             >
-              복구 정보 삭제
+              이전 작업 정보 삭제
             </Button>
           )}
           <Button

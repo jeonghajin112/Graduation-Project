@@ -13,6 +13,7 @@ import {
   writeSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
 import type { StoredSiteCreateAttempt } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
   EvaluationRequestModel
@@ -38,6 +39,7 @@ type TargetAnalysisRequestCheckpoint = {
   targetId: number;
   knownRequestIds: number[];
   requestId: number | null;
+  releaseAbortListener: (() => void) | null;
   recoveryToken: DirectoryRecoveryToken | null;
   stored: StoredSiteCreateAttempt;
 };
@@ -56,6 +58,51 @@ export function useEvaluationTargetAnalysisRequest({
   const targetAnalysisRequestCheckpointRef =
     useRef<TargetAnalysisRequestCheckpoint | null>(null);
 
+  const releaseCheckpointLease = useCallback(
+    (checkpoint: TargetAnalysisRequestCheckpoint | null) => {
+      checkpoint?.releaseAbortListener?.();
+      if (checkpoint) {
+        checkpoint.releaseAbortListener = null;
+      }
+      if (checkpoint?.recoveryToken !== null && checkpoint?.recoveryToken !== undefined) {
+        endDirectoryRecovery(checkpoint.recoveryToken);
+        checkpoint.recoveryToken = null;
+      }
+    },
+    [endDirectoryRecovery]
+  );
+
+  const releaseRequestCheckpoint = useCallback(
+    (checkpoint: TargetAnalysisRequestCheckpoint | null) => {
+      releaseCheckpointLease(checkpoint);
+      if (targetAnalysisRequestCheckpointRef.current === checkpoint) {
+        targetAnalysisRequestCheckpointRef.current = null;
+      }
+    },
+    [releaseCheckpointLease]
+  );
+
+  const bindCheckpointToSignal = useCallback(
+    (checkpoint: TargetAnalysisRequestCheckpoint, signal?: AbortSignal) => {
+      checkpoint.releaseAbortListener?.();
+      checkpoint.releaseAbortListener = null;
+      if (!signal) {
+        return;
+      }
+
+      const handleAbort = () => releaseRequestCheckpoint(checkpoint);
+      if (signal.aborted) {
+        handleAbort();
+        return;
+      }
+      signal.addEventListener("abort", handleAbort, { once: true });
+      checkpoint.releaseAbortListener = () => {
+        signal.removeEventListener("abort", handleAbort);
+      };
+    },
+    [releaseRequestCheckpoint]
+  );
+
   useEffect(() => {
     const checkpoint = targetAnalysisRequestCheckpointRef.current;
     if (
@@ -66,14 +113,20 @@ export function useEvaluationTargetAnalysisRequest({
         (request) => request.id === checkpoint.requestId
       )
     ) {
-      endDirectoryRecovery(checkpoint.recoveryToken);
-      checkpoint.recoveryToken = null;
+      releaseCheckpointLease(checkpoint);
     }
   }, [
     dashboardData?.evaluationRequests,
     dashboardData?.organizations,
-    endDirectoryRecovery
+    releaseCheckpointLease
   ]);
+
+  useEffect(
+    () => () => {
+      releaseRequestCheckpoint(targetAnalysisRequestCheckpointRef.current);
+    },
+    [releaseRequestCheckpoint]
+  );
 
   return useCallback(
     async (
@@ -81,17 +134,6 @@ export function useEvaluationTargetAnalysisRequest({
       signal?: AbortSignal,
       previousFailedRequestId?: number
     ): Promise<number> => {
-      const releaseRequestCheckpoint = (
-        checkpoint: TargetAnalysisRequestCheckpoint | null
-      ) => {
-        if (checkpoint?.recoveryToken !== null && checkpoint?.recoveryToken !== undefined) {
-          endDirectoryRecovery(checkpoint.recoveryToken);
-        }
-        if (targetAnalysisRequestCheckpointRef.current === checkpoint) {
-          targetAnalysisRequestCheckpointRef.current = null;
-        }
-      };
-
       const reconcileCheckpoint = async (
         checkpoint: TargetAnalysisRequestCheckpoint
       ): Promise<number | null> =>
@@ -126,7 +168,7 @@ export function useEvaluationTargetAnalysisRequest({
           : null;
       const persistedRecovery = readSiteCreateRecovery();
       if (persistedRecovery.kind === "blocked") {
-        throw new Error(SITE_RECOVERY_BLOCKED_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
       }
 
       let stored: StoredSiteCreateAttempt | null = null;
@@ -138,27 +180,29 @@ export function useEvaluationTargetAnalysisRequest({
             rawValue: persistedRecovery.rawValue
           };
         } else {
-          throw new Error(SITE_RECOVERY_CONFLICT_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_CONFLICT_MESSAGE);
         }
       }
 
       if (stored?.attempt.phase === "target-reconciling") {
-        throw new Error(TARGET_CREATE_RECOVERY_MESSAGE);
+        throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
       }
 
       if (stored?.attempt.phase === "poll") {
         if (replaceRequestId === null) {
+          releaseRequestCheckpoint(targetAnalysisRequestCheckpointRef.current);
           targetAnalysisRequestCheckpointRef.current = {
             targetId,
             knownRequestIds: stored.attempt.knownRequestIds,
             requestId: stored.attempt.requestId,
+            releaseAbortListener: null,
             recoveryToken: null,
             stored
           };
           return stored.attempt.requestId;
         }
         if (replaceRequestId !== stored.attempt.requestId) {
-          throw new Error(TARGET_REQUEST_RECOVERY_MESSAGE);
+          throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
         }
         const requestReady = writeSiteCreateRecovery(
           {
@@ -170,7 +214,7 @@ export function useEvaluationTargetAnalysisRequest({
           stored.rawValue
         );
         if (requestReady === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         stored = requestReady;
       }
@@ -183,7 +227,7 @@ export function useEvaluationTargetAnalysisRequest({
           (candidate) => candidate.id === targetId
         );
         if (!project || !target) {
-          throw new Error(
+          throw new UserFacingError(
             "등록된 페이지 정보를 확인하지 못했습니다. 목록을 새로 고친 뒤 다시 시도해 주세요."
           );
         }
@@ -204,7 +248,7 @@ export function useEvaluationTargetAnalysisRequest({
           null
         );
         if (stored === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
       }
 
@@ -219,6 +263,7 @@ export function useEvaluationTargetAnalysisRequest({
             targetId,
             knownRequestIds: stored.attempt.knownRequestIds,
             requestId: null,
+            releaseAbortListener: null,
             recoveryToken: beginDirectoryRecovery(),
             stored
           };
@@ -228,10 +273,11 @@ export function useEvaluationTargetAnalysisRequest({
           existingCheckpoint.knownRequestIds = stored.attempt.knownRequestIds;
           existingCheckpoint.requestId = null;
         }
+        bindCheckpointToSignal(existingCheckpoint, signal);
 
         const recoveredRequestId = await reconcileCheckpoint(existingCheckpoint);
         if (recoveredRequestId === null) {
-          throw new Error(TARGET_REQUEST_RECOVERY_MESSAGE);
+          throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
         }
         const pollStored = writeSiteCreateRecovery(
           {
@@ -244,19 +290,15 @@ export function useEvaluationTargetAnalysisRequest({
           stored.rawValue
         );
         if (pollStored === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         existingCheckpoint.stored = pollStored;
         existingCheckpoint.requestId = recoveredRequestId;
-        if (existingCheckpoint.recoveryToken !== null) {
-          endDirectoryRecovery(existingCheckpoint.recoveryToken);
-          existingCheckpoint.recoveryToken = null;
-        }
         return recoveredRequestId;
       }
 
       if (stored.attempt.phase !== "request-ready") {
-        throw new Error(SITE_RECOVERY_BLOCKED_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
       }
 
       const currentTarget = await runWithNetworkDeadline(
@@ -270,7 +312,7 @@ export function useEvaluationTargetAnalysisRequest({
         normalizeSiteCreateAccessUrl(currentTarget.accessUrl) !==
           normalizeSiteCreateAccessUrl(stored.attempt.accessUrl)
       ) {
-        throw new Error(TARGET_ANALYSIS_PREFLIGHT_MESSAGE);
+        throw new UserFacingError(TARGET_ANALYSIS_PREFLIGHT_MESSAGE);
       }
 
       const effectiveFailedRequestId =
@@ -289,7 +331,7 @@ export function useEvaluationTargetAnalysisRequest({
           stored.rawValue
         );
         if (updatedReady === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         stored = updatedReady;
       }
@@ -345,12 +387,13 @@ export function useEvaluationTargetAnalysisRequest({
         );
         endDirectoryRecovery(recoveryToken);
         if (pollStored === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         targetAnalysisRequestCheckpointRef.current = {
           targetId,
           knownRequestIds: [...knownRequestIds],
           requestId: inFlightRequest.id,
+          releaseAbortListener: null,
           recoveryToken: null,
           stored: pollStored
         };
@@ -369,16 +412,18 @@ export function useEvaluationTargetAnalysisRequest({
       );
       if (requestReconciling === null) {
         endDirectoryRecovery(recoveryToken);
-        throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
       const checkpoint: TargetAnalysisRequestCheckpoint = {
         targetId,
         knownRequestIds: [...knownRequestIds],
         requestId: null,
+        releaseAbortListener: null,
         recoveryToken,
         stored: requestReconciling
       };
       targetAnalysisRequestCheckpointRef.current = checkpoint;
+      bindCheckpointToSignal(checkpoint, signal);
 
       try {
         const requestId = await runWithNetworkDeadline(
@@ -397,7 +442,7 @@ export function useEvaluationTargetAnalysisRequest({
             checkpoint.stored.rawValue
           );
           if (pollStored === null) {
-            throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+            throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
           }
           checkpoint.stored = pollStored;
           checkpoint.requestId = requestId;
@@ -414,12 +459,9 @@ export function useEvaluationTargetAnalysisRequest({
             },
             checkpoint.stored.rawValue
           );
-          if (checkpoint.recoveryToken !== null) {
-            endDirectoryRecovery(checkpoint.recoveryToken);
-          }
-          targetAnalysisRequestCheckpointRef.current = null;
+          releaseRequestCheckpoint(checkpoint);
           if (requestReady === null) {
-            throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+            throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
           }
           throw error;
         }
@@ -444,19 +486,21 @@ export function useEvaluationTargetAnalysisRequest({
           checkpoint.stored.rawValue
         );
         if (pollStored === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         checkpoint.stored = pollStored;
         checkpoint.requestId = recoveredRequestId;
-        if (checkpoint.recoveryToken !== null) {
-          endDirectoryRecovery(checkpoint.recoveryToken);
-          checkpoint.recoveryToken = null;
-        }
         return recoveredRequestId;
       }
 
-      throw new Error(TARGET_REQUEST_RECOVERY_MESSAGE);
+      throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
     },
-    [beginDirectoryRecovery, dashboardData, endDirectoryRecovery]
+    [
+      beginDirectoryRecovery,
+      bindCheckpointToSignal,
+      dashboardData,
+      endDirectoryRecovery,
+      releaseRequestCheckpoint
+    ]
   );
 }

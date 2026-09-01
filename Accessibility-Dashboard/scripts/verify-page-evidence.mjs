@@ -1781,9 +1781,12 @@ async function verifyLegacyArtifactRejected(page) {
   await evidence.waitFor({ state: "visible" });
   const artifactAlert = evidence.getByRole("alert");
   await artifactAlert.waitFor({ state: "visible" });
-  assert.match(
-    await artifactAlert.textContent(),
-    /서버 응답 계약이 올바르지 않습니다.*captureMode/
+  const artifactAlertText = await artifactAlert.textContent();
+  assert.match(artifactAlertText, /페이지 재현 화면을 불러오지 못했어요/);
+  assert.doesNotMatch(
+    artifactAlertText,
+    /서버 응답 계약|captureMode|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\bHTTP\s+\d{3}\b/i,
+    "artifact errors must not expose response-contract or request diagnostics"
   );
   assert.equal(await evidence.locator("iframe").count(), 0);
   artifactResponseMode = "replay";

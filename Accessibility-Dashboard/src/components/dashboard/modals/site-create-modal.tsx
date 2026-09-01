@@ -14,6 +14,7 @@ import {
   writeSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
 import type { PersistedSiteCreateAttempt } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   CreateEvaluationTargetInput as CreateEvaluationTargetModelInput,
   EvaluationStatus,
@@ -27,6 +28,7 @@ import {
   waitForDocumentVisible
 } from "../shared/mutation-recovery";
 import {
+  EVALUATION_REQUEST_FAILED_MESSAGE,
   evaluationRequestPhaseFromStatus,
   isFinalEvaluationRequestStatus
 } from "../shared/evaluation-request-status";
@@ -34,19 +36,24 @@ import { useCancellationScope } from "../shared/use-cancellation-scope";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 import { useExclusiveOperation } from "../shared/use-exclusive-operation";
 
-const ANALYSIS_NETWORK_TIMEOUT_MESSAGE = "서버 응답 대기 시간이 초과되었습니다.";
+const ANALYSIS_NETWORK_TIMEOUT_MESSAGE =
+  "처리 결과를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
 const SITE_RECOVERY_PERSISTENCE_MESSAGE =
-  "브라우저에 안전한 복구 정보를 저장하지 못했습니다. 저장 공간 또는 브라우저 설정을 확인해 주세요.";
+  "브라우저에 이전 작업 상태를 저장하지 못해 요청을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
 const SITE_RECOVERY_BLOCKED_MESSAGE =
-  "이전 버전, 다른 서버 또는 손상된 페이지 생성 복구 정보가 남아 있어 새 요청을 잠갔습니다. 서버 상태를 확인한 뒤 복구 정보를 삭제해 주세요.";
+  "확인할 수 없는 이전 페이지 작업이 남아 있어 중복 요청을 막았습니다. 이미 페이지가 추가되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
 const SITE_RECOVERY_STALE_MESSAGE =
-  "24시간이 지난 복구 정보입니다. 서버 상태를 먼저 확인한 뒤 목록만 다시 확인하거나 복구 정보를 삭제할 수 있습니다.";
+  "오래된 페이지 작업 정보가 남아 있습니다. 목록에서 완료 여부를 확인한 뒤 이전 작업 정보를 삭제할 수 있습니다.";
 const SITE_RECOVERY_CONFLICT_MESSAGE =
-  "다른 프로젝트의 완료 여부를 확인하지 못한 페이지 작업이 남아 있어 새 요청을 잠갔습니다. 기존 프로젝트에서 복구를 이어가거나, 24시간이 지난 뒤 복구 정보를 삭제하거나, 로그아웃해 주세요.";
+  "다른 프로젝트에서 완료 여부를 확인하지 못한 페이지 작업이 남아 있어 새 요청을 시작하지 않았습니다. 해당 프로젝트에서 작업을 이어가거나 로그아웃한 뒤 다시 시도해 주세요.";
 const TARGET_RECOVERY_MESSAGE =
-  "이전 페이지 생성 결과를 목록에서 다시 확인합니다. 중복 방지를 위해 생성 요청은 다시 보내지 않습니다.";
-const REQUEST_RECOVERY_MESSAGE =
-  "이전 분석 요청 결과를 목록에서 다시 확인합니다. 중복 방지를 위해 분석 요청은 다시 보내지 않습니다.";
+  "이전 페이지 등록 결과를 확인하고 있습니다. 중복 등록을 막기 위해 새 요청은 보내지 않습니다.";
+const REQUEST_READY_MESSAGE =
+  "페이지 등록이 완료되었습니다. 준비가 되면 분석을 시작해 주세요.";
+const REQUEST_RECONCILING_MESSAGE =
+  "이전 분석 요청이 시작되었는지 확인이 필요합니다. 중복 분석을 막기 위해 새 요청은 보내지 않습니다.";
+const REQUEST_STATUS_RECOVERY_MESSAGE =
+  "기존 분석 요청의 상태를 다시 확인할 수 있습니다. 새 분석 요청은 보내지 않습니다.";
 
 async function runWithAnalysisNetworkDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -59,7 +66,17 @@ async function runWithAnalysisNetworkDeadline<T>(
   });
 }
 
-type AnalysisProgressPhase = "idle" | "creating" | "requesting" | "queued" | "running" | "saving" | "completed" | "failed";
+type AnalysisProgressPhase =
+  | "idle"
+  | "creating"
+  | "requesting"
+  | "queued"
+  | "running"
+  | "saving"
+  | "completed"
+  | "ready"
+  | "paused"
+  | "failed";
 
 type AnalysisProgress = {
   phase: AnalysisProgressPhase;
@@ -119,26 +136,60 @@ function progressFromPersistedAttempt(
   if (attempt.phase === "target-reconciling") {
     return emptyProgress;
   }
-  if (attempt.phase === "poll") {
+  if (attempt.phase === "request-ready") {
+    if (attempt.previousFailedRequestId !== null) {
+      return {
+        phase: "failed",
+        requestId: attempt.previousFailedRequestId,
+        status: "FAILED",
+        message: EVALUATION_REQUEST_FAILED_MESSAGE
+      };
+    }
     return {
-      phase: "failed",
-      requestId: attempt.requestId,
+      phase: "ready",
+      requestId: null,
       status: null,
-      message: "기존 분석 요청의 상태 확인을 이어서 진행할 수 있습니다."
+      message: REQUEST_READY_MESSAGE
     };
   }
-  return {
-    phase: "failed",
-    requestId: null,
-    status: null,
-    message: REQUEST_RECOVERY_MESSAGE
-  };
+  if (attempt.phase === "request-reconciling") {
+    return {
+      phase: "paused",
+      requestId: null,
+      status: null,
+      message: REQUEST_RECONCILING_MESSAGE
+    };
+  }
+  if (attempt.phase === "poll") {
+    return {
+      phase: "paused",
+      requestId: attempt.requestId,
+      status: null,
+      message: REQUEST_STATUS_RECOVERY_MESSAGE
+    };
+  }
+  return emptyProgress;
+}
+
+function messageFromPersistedAttempt(attempt: PersistedSiteCreateAttempt): string {
+  if (attempt.phase === "target-reconciling") {
+    return TARGET_RECOVERY_MESSAGE;
+  }
+  if (attempt.phase === "request-ready") {
+    return attempt.previousFailedRequestId === null
+      ? REQUEST_READY_MESSAGE
+      : EVALUATION_REQUEST_FAILED_MESSAGE;
+  }
+  if (attempt.phase === "request-reconciling") {
+    return REQUEST_RECONCILING_MESSAGE;
+  }
+  return REQUEST_STATUS_RECOVERY_MESSAGE;
 }
 
 const progressSteps = [
   { key: "creating", label: "페이지 등록", description: "프로젝트에 분석 대상을 추가합니다." },
-  { key: "requesting", label: "분석 요청", description: "백엔드에 분석 작업을 생성합니다." },
-  { key: "running", label: "분석 엔진 실행", description: "규칙, 텍스트 난이도, CV 분석을 실행합니다." },
+  { key: "requesting", label: "분석 요청", description: "페이지 분석을 요청합니다." },
+  { key: "running", label: "페이지 검사", description: "규칙, 텍스트 난이도, 시각 요소를 검사합니다." },
   { key: "saving", label: "결과 저장", description: "분석 결과와 점수를 반영합니다." },
   { key: "completed", label: "완료", description: "대시보드에 최신 결과를 표시합니다." }
 ] as const;
@@ -161,10 +212,10 @@ function messageFromRequestStatus(status: EvaluationStatus | string): string {
   }
 
   if (status === "FAILED") {
-    return "분석 엔진이 실패했습니다. 대상 사이트 접속 차단 또는 리다이렉트가 원인일 수 있습니다.";
+    return EVALUATION_REQUEST_FAILED_MESSAGE;
   }
 
-  return "분석 엔진이 접근성 검사를 수행하고 있습니다.";
+  return "페이지 접근성 검사를 진행하고 있습니다.";
 }
 
 function getActiveStepIndex(progress: AnalysisProgress, resumePoint: AnalysisResumePoint) {
@@ -174,6 +225,9 @@ function getActiveStepIndex(progress: AnalysisProgress, resumePoint: AnalysisRes
   }
 
   if (phase === "failed") {
+    if (progress.status === "FAILED") {
+      return 2;
+    }
     if (resumePoint.kind === "create") {
       return 0;
     }
@@ -181,6 +235,17 @@ function getActiveStepIndex(progress: AnalysisProgress, resumePoint: AnalysisRes
       return 1;
     }
     return progress.status === "COMPLETED" ? 3 : 2;
+  }
+
+  if (phase === "paused") {
+    if (progress.status === "COMPLETED") {
+      return 3;
+    }
+    return resumePoint.kind === "request" ? 1 : 2;
+  }
+
+  if (phase === "ready") {
+    return 1;
   }
 
   if (phase === "creating") {
@@ -251,6 +316,12 @@ export function SiteCreateModal({
     closeDisabled: isSubmittingSite
   });
   const hasAnalysisProgress = analysisProgress.phase !== "idle";
+  const isRetryableProgress =
+    analysisProgress.phase === "ready" ||
+    analysisProgress.phase === "paused" ||
+    analysisProgress.phase === "failed";
+  const isAnalysisNotice =
+    analysisProgress.phase === "ready" || analysisProgress.phase === "paused";
 
   useEffect(() => {
     if (!isOpen) {
@@ -282,9 +353,7 @@ export function SiteCreateModal({
       setSiteCreateError(
         recovery.isStale
           ? SITE_RECOVERY_STALE_MESSAGE
-          : recovery.attempt.phase === "target-reconciling"
-            ? TARGET_RECOVERY_MESSAGE
-            : REQUEST_RECOVERY_MESSAGE
+          : messageFromPersistedAttempt(recovery.attempt)
       );
       return;
     }
@@ -361,7 +430,7 @@ export function SiteCreateModal({
     }
     if (
       !window.confirm(
-        "서버에 페이지 또는 분석 요청이 생성되었는지 확인하셨나요? 복구 정보를 삭제하면 같은 요청을 다시 보낼 수 있습니다."
+        "페이지나 분석이 이미 시작되지 않았는지 목록에서 확인하셨나요? 이전 작업 정보를 삭제하면 같은 요청이 다시 전송될 수 있습니다."
       )
     ) {
       return;
@@ -433,6 +502,7 @@ export function SiteCreateModal({
     });
 
     let nextResumePoint = resumePoint;
+    let terminalRequestFailed = false;
 
     try {
       let targetId: number;
@@ -522,6 +592,7 @@ export function SiteCreateModal({
       }
 
       if (finalStatus === "FAILED") {
+        terminalRequestFailed = true;
         nextResumePoint = {
           kind: "request",
           targetId,
@@ -544,13 +615,15 @@ export function SiteCreateModal({
             recovery.rawValue
           ) === null
         ) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
-        throw new Error("분석 엔진 실행에 실패했습니다. 대상 사이트가 자동 브라우저 접속을 차단했거나 다른 페이지로 이동했을 수 있습니다.");
+        throw new UserFacingError(EVALUATION_REQUEST_FAILED_MESSAGE);
       }
 
       if (!isFinalEvaluationRequestStatus(finalStatus)) {
-        throw new Error("분석 상태 확인 시간이 초과되었습니다.");
+        throw new UserFacingError(
+          "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요."
+        );
       }
 
       setAnalysisProgress({
@@ -580,7 +653,7 @@ export function SiteCreateModal({
             completedRecovery.attempt.requestId !== requestId ||
             !clearSiteCreateRecovery(completedRecovery.rawValue)))
       ) {
-        throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
 
       setAnalysisProgress({
@@ -625,13 +698,33 @@ export function SiteCreateModal({
         }
         setAnalysisProgress(emptyProgress);
       } else {
+        const persistedRecovery = readSiteCreateRecovery();
+        const persistedAttempt =
+          persistedRecovery.kind === "valid" &&
+          persistedRecovery.attempt.projectId === project.id
+            ? persistedRecovery.attempt
+            : null;
+        const recoveryPhase: AnalysisProgressPhase = terminalRequestFailed
+          ? "failed"
+          : persistedAttempt?.phase === "request-reconciling" ||
+              persistedAttempt?.phase === "poll" ||
+              nextResumePoint.kind === "poll"
+            ? "paused"
+            : persistedAttempt?.phase === "request-ready" &&
+                persistedAttempt.previousFailedRequestId === null
+              ? "ready"
+              : "failed";
         setAnalysisProgress((current) => ({
           ...current,
-          phase: "failed",
+          phase: recoveryPhase,
           message
         }));
       }
     } finally {
+      // The request-recovery hook binds its in-memory directory lease to this
+      // operation scope. Ending the scope releases that lease while the
+      // persisted checkpoint remains available for a deliberate retry.
+      cancelScope();
       if (!keepLockedUntilAutoClose && finishOperation(operationId)) {
         setIsSubmittingSite(false);
       }
@@ -679,17 +772,32 @@ export function SiteCreateModal({
           <div
             role="alert"
             className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
-              isDarkMode
-                ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
-                : "border-rose-200 bg-rose-50 text-rose-700"
+              isAnalysisNotice
+                ? isDarkMode
+                  ? "border-[#5b4a1f] bg-[#2a2519] text-[#ffd60a]"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
+                : isDarkMode
+                  ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
             }`}
           >
-            {resumePoint.kind === "create" ? "페이지 추가 실패" : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
+            {resumePoint.kind === "create"
+              ? "페이지 추가 실패"
+              : analysisProgress.phase === "ready"
+                ? "페이지 등록 완료 · 분석 시작 전"
+                : analysisProgress.phase === "paused"
+                ? "페이지 등록 완료 · 상태 확인 필요"
+                : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
           </div>
         )}
 
         {hasAnalysisProgress ? (
-          <AnalysisProgressPanel progress={analysisProgress} resumePoint={resumePoint} isDarkMode={isDarkMode} />
+          <AnalysisProgressPanel
+            progress={analysisProgress}
+            resumePoint={resumePoint}
+            isDarkMode={isDarkMode}
+            showMessage={siteCreateError.length === 0}
+          />
         ) : (
           <div className="grid gap-3.5">
             <label className="block">
@@ -764,7 +872,7 @@ export function SiteCreateModal({
                     : "h-7 bg-rose-50 px-3 text-xs text-rose-700 hover:bg-rose-100"
                 }
               >
-                복구 정보 삭제
+                이전 작업 정보 삭제
               </Button>
             )}
             <Button
@@ -779,9 +887,9 @@ export function SiteCreateModal({
                   : "h-7 bg-[#e5e5ea] px-5 text-xs text-[#1d1d1f] hover:bg-[#d2d2d7]"
               }
             >
-              {hasAnalysisProgress && analysisProgress.phase !== "failed"
+              {hasAnalysisProgress && !isRetryableProgress
                 ? "자동 닫힘"
-                : analysisProgress.phase === "failed" && resumePoint.kind !== "create"
+                : isRetryableProgress && resumePoint.kind !== "create"
                   ? "닫기"
                   : "취소"}
             </Button>
@@ -800,7 +908,7 @@ export function SiteCreateModal({
               </Button>
             )}
 
-            {analysisProgress.phase === "failed" && (
+            {isRetryableProgress && (
               <Button
                 type="button"
                 size="sm"
@@ -810,7 +918,11 @@ export function SiteCreateModal({
                 }}
                 className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
               >
-                {resumePoint.kind === "create"
+                {analysisProgress.phase === "ready"
+                  ? "분석 시작"
+                  : analysisProgress.phase === "paused" && resumePoint.kind === "request"
+                    ? "분석 시작 여부 확인"
+                    : resumePoint.kind === "create"
                   ? "다시 시도"
                   : resumePoint.kind === "request"
                     ? "분석 요청 다시 시도"
@@ -827,11 +939,13 @@ export function SiteCreateModal({
 function AnalysisProgressPanel({
   progress,
   resumePoint,
-  isDarkMode
+  isDarkMode,
+  showMessage
 }: {
   progress: AnalysisProgress;
   resumePoint: AnalysisResumePoint;
   isDarkMode: boolean;
+  showMessage: boolean;
 }) {
   const activeStepIndex = getActiveStepIndex(progress, resumePoint);
 
@@ -845,9 +959,19 @@ function AnalysisProgressPanel({
       <div className="flex min-w-0 items-start justify-between gap-4">
         <div className="min-w-0">
           <p className={`text-sm font-semibold ${isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"}`}>
-            {progress.phase === "failed" ? "분석을 완료하지 못했습니다" : "분석 진행 중"}
+            {progress.phase === "failed"
+              ? "분석을 완료하지 못했습니다"
+              : progress.phase === "ready"
+                ? "분석을 시작할 수 있습니다"
+              : progress.phase === "paused"
+                ? "분석 상태를 다시 확인해 주세요"
+                : "분석 진행 중"}
           </p>
-          <p className={`mt-1 text-xs ${isDarkMode ? "text-[#a1a1a6]" : "text-[#68686d]"}`}>{progress.message}</p>
+          {showMessage && (
+            <p className={`mt-1 text-xs ${isDarkMode ? "text-[#a1a1a6]" : "text-[#68686d]"}`}>
+              {progress.message}
+            </p>
+          )}
         </div>
         {progress.requestId !== null && (
           <span
@@ -863,7 +987,12 @@ function AnalysisProgressPanel({
       <ol className="mt-5 grid gap-3">
         {progressSteps.map((step, index) => {
           const isCompleted = progress.phase === "completed" || index < activeStepIndex;
-          const isActive = index === activeStepIndex && progress.phase !== "completed" && progress.phase !== "failed";
+          const isActive =
+            index === activeStepIndex &&
+            progress.phase !== "completed" &&
+            progress.phase !== "ready" &&
+            progress.phase !== "paused" &&
+            progress.phase !== "failed";
           const isFailed = progress.phase === "failed" && index === activeStepIndex;
 
           return (

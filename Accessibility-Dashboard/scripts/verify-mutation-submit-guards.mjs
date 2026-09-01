@@ -157,10 +157,15 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.pageDeletePatches, 1, "page delete must issue one PATCH");
   releasePageDelete.resolve();
-  await pageDeleteDialog
+  const pageDeleteAlert = pageDeleteDialog
     .getByRole("alert")
-    .filter({ hasText: "data: null 형식" })
-    .waitFor();
+    .filter({ hasText: "페이지를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+  await pageDeleteAlert.waitFor();
+  assert.doesNotMatch(
+    await pageDeleteAlert.innerText(),
+    /data|success|null|HTTP|PATCH|\/(?:api|targets)\//i,
+    "void response contract details must not be exposed to the user"
+  );
   assert.equal(await pageDeleteDialog.isVisible(), true);
   await pageDeleteButton.click();
   await pageDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
@@ -196,10 +201,15 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.projectDeletePatches, 1, "project delete must issue one PATCH");
   releaseProjectDelete.resolve();
-  await projectDeleteDialog
+  const projectDeleteAlert = projectDeleteDialog
     .getByRole("alert")
-    .filter({ hasText: "프로젝트 제거가 거부되었습니다" })
-    .waitFor();
+    .filter({ hasText: "프로젝트를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+  await projectDeleteAlert.waitFor();
+  assert.doesNotMatch(
+    await projectDeleteAlert.innerText(),
+    /거부되었습니다|success|data|null|HTTP|PATCH|\/(?:api|organizations)\//i,
+    "server payload and request details must not be exposed to the user"
+  );
   assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
   await projectDeleteButton.click();
   await projectDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });

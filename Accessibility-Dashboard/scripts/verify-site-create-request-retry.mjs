@@ -11,6 +11,7 @@ import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-f
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
+const storageKey = "accessibility-dashboard.site-create-attempt.v1";
 const timestamp = "2026-08-10T10:00:00.000Z";
 
 const organization = {
@@ -60,6 +61,18 @@ const pendingRequest = {
   updatedAt: timestamp
 };
 
+const terminalPendingRequest = {
+  ...pendingRequest,
+  id: 500,
+  requestNote: "terminal failure regression"
+};
+
+const terminalFailedRequest = {
+  ...terminalPendingRequest,
+  status: "FAILED",
+  updatedAt: "2026-08-10T10:00:01.000Z"
+};
+
 const completedRequest = {
   ...pendingRequest,
   status: "COMPLETED",
@@ -93,6 +106,7 @@ const observed = {
   targetStatusGets: 0,
   targetPosts: 0,
   requestPosts: 0,
+  terminalFailedStatusGets: 0,
   requestStatusGets: 0,
   targetPostBody: null,
   requestPostBodies: [],
@@ -136,7 +150,7 @@ try {
       await fulfillJson(
         route,
         (observed.targetPosts === 1 && observed.requestPosts === 0) ||
-          (observed.requestPosts === 2 && observed.requestStatusGets === 0)
+          (observed.requestPosts === 3 && observed.requestStatusGets === 0)
           ? { ...overview, organizations: "unrelated malformed overview" }
           : overview
       );
@@ -201,7 +215,13 @@ try {
         return;
       }
 
-      requests = [pendingRequest];
+      if (observed.requestPosts === 2) {
+        requests = [terminalFailedRequest];
+        await fulfillJson(route, terminalPendingRequest);
+        return;
+      }
+
+      requests = [terminalFailedRequest, pendingRequest];
       await route.fulfill({
         // The request committed but its response was lost. Recovery must use
         // the targeted request list even while overview is malformed.
@@ -209,6 +229,12 @@ try {
         contentType: "application/json",
         body: JSON.stringify({ message: "request response lost after commit" })
       });
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/requests/${terminalPendingRequest.id}`) {
+      observed.terminalFailedStatusGets += 1;
+      await fulfillJson(route, terminalFailedRequest);
       return;
     }
 
@@ -224,7 +250,7 @@ try {
         return;
       }
 
-      requests = [completedRequest];
+      requests = [terminalFailedRequest, completedRequest];
       await fulfillJson(route, completedRequest);
       return;
     }
@@ -286,9 +312,10 @@ try {
   await dialog.getByLabel("페이지 주소", { exact: true }).fill(target.accessUrl);
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
 
-  await dialog.getByText(/페이지 등록 완료 · 분석 실패/).waitFor();
+  await dialog.getByText(/페이지 등록 완료 · 분석 시작 전/).waitFor();
+  await dialog.getByText("분석을 시작할 수 있습니다", { exact: true }).waitFor();
   const requestRetryButton = dialog.getByRole("button", {
-    name: "분석 요청 다시 시도",
+    name: "분석 시작",
     exact: true
   });
   await requestRetryButton.waitFor();
@@ -322,7 +349,7 @@ try {
   await requestRetryButton.click();
   await dialog
     .getByRole("alert")
-    .filter({ hasText: "등록된 페이지가 비활성화되었거나 복구 정보와 일치하지 않아" })
+    .filter({ hasText: "등록된 페이지가 현재 목록과 일치하지 않아" })
     .waitFor();
   assert.equal(
     observed.requestPosts,
@@ -332,23 +359,117 @@ try {
 
   targetLookupStatus = "ACTIVE";
   await requestRetryButton.click();
+  const terminalFailureAlert = dialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지 검사를 완료하지 못했습니다" });
+  await terminalFailureAlert.waitFor();
+  await dialog.getByText("분석을 완료하지 못했습니다", { exact: true }).waitFor();
+  assert.match(await terminalFailureAlert.innerText(), /페이지 등록 완료 · 분석 실패/);
+  assert.equal(
+    await dialog
+      .getByText(
+        "페이지 검사를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요. 같은 문제가 계속되면 관리자에게 문의해 주세요.",
+        { exact: false }
+      )
+      .count(),
+    1,
+    "terminal failure details must be rendered in only one announcement region"
+  );
+
+  const terminalFailureText = await terminalFailureAlert.innerText();
+  assert.match(
+    terminalFailureText,
+    /잠시 후 다시 시도해 주세요\. 같은 문제가 계속되면 관리자에게 문의해 주세요\./
+  );
+  assert.doesNotMatch(
+    terminalFailureText,
+    /자동 접속|차단|리다이렉트|FAILED|HTTP|\/(?:api|requests|targets)\//,
+    "terminal analysis failures must not expose speculative causes or implementation details"
+  );
+
+  const failedRecovery = await page.evaluate((key) => {
+    const rawValue = window.sessionStorage.getItem(key);
+    return rawValue === null ? null : JSON.parse(rawValue);
+  }, storageKey);
+  assert.ok(failedRecovery, "a terminal failure must leave a retry checkpoint");
+  assert.equal(failedRecovery.phase, "request-ready");
+  assert.equal(failedRecovery.targetId, target.id);
+  assert.equal(failedRecovery.previousFailedRequestId, terminalPendingRequest.id);
+  assert.equal(observed.targetPosts, 1);
+  assert.equal(observed.requestPosts, 2);
+  assert.equal(observed.targetStatusGets, 3);
+  assert.equal(observed.terminalFailedStatusGets, 1);
+  assert.equal(observed.requestStatusGets, 0);
+
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
+  await dialog.waitFor();
+  const terminalRetryButton = dialog.getByRole("button", {
+    name: "분석 요청 다시 시도",
+    exact: true
+  });
+  await terminalRetryButton.waitFor();
+  await page.waitForTimeout(250);
+  assert.equal(
+    observed.requestPosts,
+    2,
+    "restoring a terminal-failure checkpoint must not automatically create another request"
+  );
+
+  await terminalRetryButton.click();
   const pollRetryButton = dialog.getByRole("button", {
     name: "상태 확인 다시 시도",
     exact: true
   });
   await pollRetryButton.waitFor();
 
+  const statusCheckAlert = dialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" });
+  await statusCheckAlert.waitFor();
+  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
+  assert.doesNotMatch(
+    await statusCheckAlert.innerText(),
+    /분석 실패|분석을 완료하지 못했습니다/,
+    "a temporary status lookup failure must not be presented as a terminal analysis failure"
+  );
+  assert.equal(
+    await dialog
+      .getByText("서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.", {
+        exact: false
+      })
+      .count(),
+    1,
+    "status lookup error details must be rendered in only one announcement region"
+  );
+
   assert.equal(observed.targetPosts, 1);
-  assert.equal(observed.requestPosts, 2);
-  assert.equal(observed.targetStatusGets, 3);
+  assert.equal(observed.requestPosts, 3);
+  assert.equal(observed.targetStatusGets, 4);
+  assert.equal(observed.terminalFailedStatusGets, 1);
   assert.equal(observed.requestStatusGets, 1);
+
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
+  await dialog.waitFor();
+  await statusCheckAlert.waitFor();
+  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
+  assert.equal(observed.requestPosts, 3);
+  assert.equal(
+    observed.requestStatusGets,
+    1,
+    "restoring an in-progress request must wait for an explicit status-check retry"
+  );
 
   await pollRetryButton.click();
   await dialog.waitFor({ state: "hidden", timeout: 10_000 });
 
   assert.equal(observed.targetPosts, 1);
-  assert.equal(observed.requestPosts, 2);
+  assert.equal(observed.requestPosts, 3);
   assert.equal(observed.requestStatusGets, 2);
+  assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), storageKey), null);
   assert.deepEqual(observed.targetPostBody, {
     name: target.name,
     accessUrl: target.accessUrl
@@ -364,6 +485,72 @@ try {
   await createdTargetDetailButton.waitFor({ state: "visible", timeout: 10_000 });
   assert.equal(await createdTargetDetailButton.count(), 1);
   assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
+
+  const recoveryBase = {
+    version: 1,
+    apiScope: "/api",
+    projectId: organization.id,
+    name: target.name,
+    accessUrl: target.accessUrl,
+    previousTargetIds: [inactiveTarget.id, lateInactiveTarget.id],
+    startedAt: Date.now(),
+    targetId: target.id
+  };
+  await page.evaluate(
+    ({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        ...recoveryBase,
+        attemptId: "request-ready-not-started",
+        phase: "request-ready",
+        previousFailedRequestId: null
+      }
+    }
+  );
+  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
+  await dialog.waitFor();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지 등록 완료 · 분석 시작 전" })
+    .waitFor();
+  await dialog.getByText("분석을 시작할 수 있습니다", { exact: true }).waitFor();
+  await dialog.getByRole("button", { name: "분석 시작", exact: true }).waitFor();
+  assert.equal(await dialog.getByText("분석 실패", { exact: false }).count(), 0);
+  assert.equal(observed.requestPosts, 3, "request-ready recovery must not auto-submit analysis");
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+
+  await page.evaluate(
+    ({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        ...recoveryBase,
+        attemptId: "request-post-outcome-unknown",
+        phase: "request-reconciling",
+        knownRequestIds: [terminalPendingRequest.id, pendingRequest.id],
+        previousFailedRequestId: null
+      }
+    }
+  );
+  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
+  await dialog.waitFor();
+  await dialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" })
+    .waitFor();
+  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
+  await dialog.getByRole("button", { name: "분석 시작 여부 확인", exact: true }).waitFor();
+  assert.equal(await dialog.getByText("분석 실패", { exact: false }).count(), 0);
+  assert.equal(
+    observed.requestPosts,
+    3,
+    "request-reconciling recovery must remain GET-only until explicit confirmation"
+  );
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.evaluate((key) => sessionStorage.removeItem(key), storageKey);
   assert.deepEqual([...observed.unknownRequests], []);
 
   console.log(
@@ -374,6 +561,7 @@ try {
         targetStatusGets: observed.targetStatusGets,
         targetPosts: observed.targetPosts,
         requestPosts: observed.requestPosts,
+        terminalFailedStatusGets: observed.terminalFailedStatusGets,
         requestStatusGets: observed.requestStatusGets,
         finalPath: new URL(page.url()).pathname
       },

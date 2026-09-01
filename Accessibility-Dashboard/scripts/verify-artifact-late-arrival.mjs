@@ -575,7 +575,15 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   const reloadedEvidence = page.locator("article.site-page-evidence-card");
   await reloadedEvidence.waitFor({ state: "visible" });
-  await reloadedEvidence.getByRole("alert").waitFor({ state: "visible" });
+  const artifactErrorAlert = reloadedEvidence.getByRole("alert");
+  await artifactErrorAlert.waitFor({ state: "visible" });
+  const artifactErrorText = await artifactErrorAlert.innerText();
+  assert.match(artifactErrorText, /서비스에 일시적인 문제가 발생했습니다/);
+  assert.doesNotMatch(
+    artifactErrorText,
+    /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\bHTTP\s+\d{3}\b|\/results\/requests\//i,
+    "artifact errors must not expose request diagnostics"
+  );
   await page.waitForTimeout(1_100);
   const errorCalls = artifactCalls.filter((call) => call.requestId === 502).slice(callsBeforeErrorReload);
   assert.deepEqual(errorCalls.map((call) => call.status), [500], "HTTP 500 must fail immediately without retry");
@@ -590,7 +598,7 @@ try {
     .waitFor({ state: "visible" });
   await reloadedEvidence
     .getByRole("alert")
-    .filter({ hasText: "페이지 재현 화면 응답 대기 시간이 초과되었습니다" })
+    .filter({ hasText: "검사 화면을 불러오는 데 시간이 오래 걸리고 있습니다" })
     .waitFor({ state: "visible" });
   await restoreAcceleratedArtifactDeadlineTimers(page);
   await page.waitForTimeout(300);

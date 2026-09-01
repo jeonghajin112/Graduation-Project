@@ -36,8 +36,8 @@ assert.match(
 );
 assert.match(
   resultDetailsSource,
-  /timeoutPromise[\s\S]*?window\.setTimeout\([\s\S]*?controller\.abort\(\);[\s\S]*?reject\(new Error\(DETAILS_REQUEST_TIMEOUT_MESSAGE\)\)/,
-  "the shared request owner must abort and surface its timeout as an error"
+  /timeoutPromise[\s\S]*?window\.setTimeout\([\s\S]*?controller\.abort\(\);[\s\S]*?reject\(new UserFacingError\(DETAILS_REQUEST_TIMEOUT_MESSAGE\)\)/,
+  "the shared request owner must abort and surface a safe timeout message"
 );
 assert.match(
   resultDetailsSource,
@@ -123,6 +123,24 @@ function collectPageErrors(page) {
   return errors;
 }
 
+function assertNoInternalErrorDetails(text) {
+  assert.doesNotMatch(
+    text,
+    /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\bHTTP\s+\d{3}\b/i,
+    "user-facing errors must not expose request methods or HTTP statuses"
+  );
+  assert.doesNotMatch(
+    text,
+    /\/(?:api\/)?(?:dashboard|organizations|requests|results|targets)(?:\/|\b)/i,
+    "user-facing errors must not expose API endpoints"
+  );
+  assert.doesNotMatch(
+    text,
+    /\bdata(?:\.|\[)|\bsuccess\b|서버 응답 계약|API 응답|captureMode|ApiRequestError/i,
+    "user-facing errors must not expose response-contract details"
+  );
+}
+
 async function runMalformedOverviewScenario(browser) {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -155,13 +173,16 @@ async function runMalformedOverviewScenario(browser) {
     const alert = page.getByRole("alert");
     await alert.waitFor();
     const alertText = await alert.innerText();
-    assert.match(alertText, /data\.organizations/);
-    assert.match(alertText, /GET \/dashboard\/overview, HTTP 200/);
+    assert.match(alertText, /대시보드를 불러오지 못했습니다/);
+    assert.match(alertText, /대시보드 데이터를 가져오지 못했습니다/);
+    assertNoInternalErrorDetails(alertText);
     assert.doesNotMatch(alertText, /map is not a function|Cannot read properties/);
     assert.equal(await page.getByText("배열이 아닌 오염된 조직 목록").count(), 0);
 
     serveValidOverview = true;
-    await alert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await alert
+      .getByRole("button", { name: "대시보드 다시 불러오기", exact: true })
+      .click();
     await page
       .getByRole("complementary")
       .getByRole("button", { name: project.name, exact: true })
@@ -248,6 +269,10 @@ async function runMalformedOverviewRelationsScenario(browser) {
                     scoreResults: [{ ...scoreResult, totalScore: 101 }]
                   }
               : validOverview;
+        // Keep the loading label observable so each retry can prove that it
+        // processed a new malformed response rather than reusing the alert
+        // left behind by the previous response.
+        await new Promise((resolve) => setTimeout(resolve, 100));
         await fulfillJson(route, responseOverview, {
           envelope: responseMode !== "missing-envelope"
         });
@@ -258,38 +283,69 @@ async function runMalformedOverviewRelationsScenario(browser) {
     });
 
     await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
-    const envelopeAlert = page.getByRole("alert").filter({ hasText: "success" });
+    const envelopeAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "대시보드를 불러오지 못했습니다" });
     await envelopeAlert.waitFor();
-    assert.match(await envelopeAlert.innerText(), /GET \/dashboard\/overview, HTTP 200/);
+    assert.match(await envelopeAlert.innerText(), /대시보드 데이터를 가져오지 못했습니다/);
+    assertNoInternalErrorDetails(await envelopeAlert.innerText());
+
+    const retryAndWaitForDashboardError = async (alert) => {
+      const previousOverviewGets = overviewGets;
+      const responsePromise = page.waitForResponse((response) => {
+        const request = response.request();
+        return (
+          request.method() === "GET" &&
+          new URL(response.url()).pathname === "/api/dashboard/overview"
+        );
+      });
+      await alert
+        .getByRole("button", { name: "대시보드 다시 불러오기", exact: true })
+        .click();
+      await page
+        .getByRole("button", { name: "대시보드 불러오는 중", exact: true })
+        .waitFor();
+      await responsePromise;
+      await alert
+        .getByRole("button", { name: "대시보드 다시 불러오기", exact: true })
+        .waitFor();
+      assert.equal(
+        overviewGets,
+        previousOverviewGets + 1,
+        "each malformed response mode must receive its own dashboard request"
+      );
+    };
 
     responseMode = "missing-target-reference";
-    await envelopeAlert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await retryAndWaitForDashboardError(envelopeAlert);
     const relationAlert = page
       .getByRole("alert")
-      .filter({ hasText: "data.evaluationRequests[0].evaluationTargetId" });
+      .filter({ hasText: "대시보드를 불러오지 못했습니다" });
     await relationAlert.waitFor();
-    assert.match(
-      await relationAlert.innerText(),
-      /GET \/dashboard\/overview, HTTP 200/
-    );
+    assertNoInternalErrorDetails(await relationAlert.innerText());
 
     responseMode = "invalid-score-type";
-    await relationAlert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await retryAndWaitForDashboardError(relationAlert);
     const scoreAlert = page
       .getByRole("alert")
-      .filter({ hasText: "data.scoreResults[0].totalScore" });
+      .filter({ hasText: "대시보드를 불러오지 못했습니다" });
     await scoreAlert.waitFor();
-    assert.match(await scoreAlert.innerText(), /GET \/dashboard\/overview, HTTP 200/);
+    assertNoInternalErrorDetails(await scoreAlert.innerText());
 
     responseMode = "invalid-score-range";
-    await scoreAlert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await retryAndWaitForDashboardError(scoreAlert);
     const scoreRangeAlert = page
       .getByRole("alert")
-      .filter({ hasText: "0 이상 100 이하의 점수" });
+      .filter({ hasText: "대시보드를 불러오지 못했습니다" });
     await scoreRangeAlert.waitFor();
+    const scoreRangeAlertText = await scoreRangeAlert.innerText();
+    assertNoInternalErrorDetails(scoreRangeAlertText);
+    assert.doesNotMatch(scoreRangeAlertText, /0 이상 100 이하의 점수/);
 
     responseMode = "valid";
-    await scoreRangeAlert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await scoreRangeAlert
+      .getByRole("button", { name: "대시보드 다시 불러오기", exact: true })
+      .click();
     await page
       .getByRole("complementary")
       .getByRole("button", { name: project.name, exact: true })
@@ -435,11 +491,8 @@ async function runMalformedIssueScenario(browser) {
       .filter({ hasText: "페이지 재현 화면을 불러오지 못했어요" });
     await alert.waitFor();
     const alertText = await alert.innerText();
-    assert.match(alertText, /data\[0\]\.severity/);
-    assert.match(
-      alertText,
-      new RegExp(`GET /results/requests/${evaluationRequest.id}/issues, HTTP 200`)
-    );
+    assert.match(alertText, /페이지 검사 결과를 불러오지 못했어요/);
+    assertNoInternalErrorDetails(alertText);
     assert.equal(await evidenceCard.getByText(issueTitle, { exact: true }).count(), 0);
 
     serveValidIssues = true;
@@ -540,7 +593,7 @@ async function runResultDetailsTimeoutScenario(browser) {
     const evidenceCard = page.getByRole("article", { name: "페이지 검사 화면" });
     const timeoutAlert = evidenceCard
       .getByRole("alert")
-      .filter({ hasText: "페이지 검사 결과 응답 대기 시간이 초과되었습니다" });
+      .filter({ hasText: "검사 결과를 불러오는 데 시간이 오래 걸리고 있습니다" });
     await timeoutAlert.waitFor({ timeout: 8_000 });
     assert.equal(issueGets, 1, "StrictMode consumers must share one timed request");
 

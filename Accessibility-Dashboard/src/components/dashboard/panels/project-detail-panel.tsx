@@ -319,7 +319,9 @@ export function OrganizationModelDetailPanel({
       }
     } catch (error) {
       if (activeDeleteEvaluationTargetOperationIdRef.current === operationId) {
-        setDeleteEvaluationTargetError(getApiErrorMessage(error, "페이지 제거 중 오류가 발생했습니다."));
+        setDeleteEvaluationTargetError(
+          getApiErrorMessage(error, "페이지를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        );
       }
     } finally {
       if (activeDeleteEvaluationTargetOperationIdRef.current === operationId) {

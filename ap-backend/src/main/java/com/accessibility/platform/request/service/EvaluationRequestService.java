@@ -1,5 +1,7 @@
 package com.accessibility.platform.request.service;
 
+import com.accessibility.platform.common.exception.BusinessException;
+import com.accessibility.platform.common.exception.ErrorCode;
 import com.accessibility.platform.common.exception.ResourceNotFoundException;
 import com.accessibility.platform.request.domain.EvaluationRequest;
 import com.accessibility.platform.request.dto.EvaluationRequestCreateRequest;
@@ -117,7 +119,11 @@ public class EvaluationRequestService {
 
     @Transactional
     public EvaluationRequestResponse updateStatus(Long id, EvaluationRequestStatusUpdateRequest request) {
-        EvaluationRequest evaluationRequest = getRequest(id);
+        EvaluationRequest evaluationRequest = evaluationRequestRepository.findByIdForUpdate(id)
+                .orElseThrow(ResourceNotFoundException::new);
+        if (!evaluationRequest.getStatus().canTransitionTo(request.status())) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS_TRANSITION);
+        }
         evaluationRequest.changeStatus(request.status());
         return EvaluationRequestResponse.from(evaluationRequest);
     }

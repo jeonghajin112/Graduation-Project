@@ -49,7 +49,7 @@ export const DASHBOARD_STATUS_POLL_INTERVAL_MS = 5_000;
 export const DASHBOARD_STATUS_POLL_TIMEOUT_MS = 10_000;
 export const DASHBOARD_OVERVIEW_TIMEOUT_MS = 15_000;
 export const DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE =
-  "대시보드 응답 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.";
+  "대시보드를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
 
 function createDashboardSnapshotSignature(data: DashboardViewModel): string {
   // The aggregate response is already the UI's complete source of truth. A

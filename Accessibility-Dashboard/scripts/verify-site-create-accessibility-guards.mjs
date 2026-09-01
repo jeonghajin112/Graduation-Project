@@ -75,7 +75,7 @@ try {
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
   await dialog
     .getByRole("alert")
-    .filter({ hasText: "복구 정보를 저장하지 못해 요청을 시작하지 않았습니다" })
+    .filter({ hasText: "이전 작업 상태를 저장하지 못해 요청을 시작하지 않았습니다" })
     .waitFor();
 
   const metrics = await dialog.evaluate((element) => {

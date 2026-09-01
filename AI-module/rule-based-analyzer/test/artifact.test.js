@@ -415,7 +415,7 @@ test('falls back to nonblank initial HTML after a cross-origin bot challenge wit
              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
         <script>setTimeout(() => {
           location.href = 'http://localhost:${port}/challenge?atn=Selenium';
-        }, 25);</script>
+        }, 0);</script>
       </body></html>`);
   });
   await new Promise((resolve, reject) => {

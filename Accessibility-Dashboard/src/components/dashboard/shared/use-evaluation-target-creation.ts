@@ -16,6 +16,7 @@ import type {
   PersistedSiteCreateAttempt,
   StoredSiteCreateAttempt
 } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   CreateEvaluationTargetInput as CreateEvaluationTargetModelInput,
   DashboardViewModel,
@@ -159,7 +160,7 @@ export function useEvaluationTargetCreation({
           checkpoint.stored.rawValue
         );
         if (nextStored === null) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
         }
         checkpoint.stored = nextStored;
         checkpoint.resolvedTargetId = targetId;
@@ -225,7 +226,7 @@ export function useEvaluationTargetCreation({
 
       const persistedRecovery = readSiteCreateRecovery();
       if (persistedRecovery.kind === "blocked") {
-        throw new Error(SITE_RECOVERY_BLOCKED_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
       }
 
       if (persistedRecovery.kind === "valid") {
@@ -268,10 +269,10 @@ export function useEvaluationTargetCreation({
           if (recoveredTargetId !== null) {
             return finishTargetRecovery(existingCheckpoint, recoveredTargetId);
           }
-          throw new Error(TARGET_CREATE_RECOVERY_MESSAGE);
+          throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
         }
 
-        throw new Error(SITE_RECOVERY_CONFLICT_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_CONFLICT_MESSAGE);
       }
 
       const existingCheckpoint = targetCreateCheckpointRef.current;
@@ -311,7 +312,7 @@ export function useEvaluationTargetCreation({
       );
       if (stored === null) {
         endDirectoryRecovery(recoveryToken);
-        throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
       const checkpoint: TargetCreateCheckpoint = {
         key,
@@ -339,7 +340,7 @@ export function useEvaluationTargetCreation({
           createdTarget.name.trim() !== normalizedInput.name ||
           normalizeSiteCreateAccessUrl(createdTarget.accessUrl) !== normalizedInput.accessUrl
         ) {
-          throw new Error(TARGET_CREATE_RECOVERY_MESSAGE);
+          throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
         }
         return finishTargetRecovery(checkpoint, createdTarget.id);
       } catch (error) {
@@ -347,7 +348,7 @@ export function useEvaluationTargetCreation({
           const didClear = clearSiteCreateRecovery(checkpoint.stored.rawValue);
           releaseTargetCheckpoint(checkpoint);
           if (!didClear) {
-            throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+            throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
           }
           throw error;
         }
@@ -365,7 +366,7 @@ export function useEvaluationTargetCreation({
       if (recoveredTargetId !== null) {
         return finishTargetRecovery(checkpoint, recoveredTargetId);
       }
-      throw new Error(TARGET_CREATE_RECOVERY_MESSAGE);
+      throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
     },
     [beginDirectoryRecovery, endDirectoryRecovery, loadDashboard]
   );

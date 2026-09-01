@@ -1,7 +1,9 @@
 import { ApiRequestError } from "@/services/backend-api";
+import { UserFacingError } from "@/services/user-facing-error";
 
 export const DEFAULT_MUTATION_REQUEST_TIMEOUT_MS = 15_000;
-export const DEFAULT_MUTATION_TIMEOUT_MESSAGE = "서버 응답 대기 시간이 초과되었습니다.";
+export const DEFAULT_MUTATION_TIMEOUT_MESSAGE =
+  "요청 처리에 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
 export const ANALYSIS_POLL_ATTEMPTS = 52;
 
 const DEFINITIVE_MUTATION_REJECTION_STATUSES = new Set([
@@ -83,7 +85,7 @@ export async function runMutationRequestWithDeadline<T>({
       throw abortError();
     }
     if (didTimeout) {
-      throw new Error(timeoutMessage);
+      throw new UserFacingError(timeoutMessage);
     }
     return result;
   } catch (error) {
@@ -91,7 +93,7 @@ export async function runMutationRequestWithDeadline<T>({
       throw abortError();
     }
     if (didTimeout) {
-      throw new Error(timeoutMessage);
+      throw new UserFacingError(timeoutMessage);
     }
     throw error;
   } finally {

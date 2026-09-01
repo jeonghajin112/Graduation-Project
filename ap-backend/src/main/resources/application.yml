@@ -37,6 +37,10 @@ accessibility:
   artifacts:
     directory: ./data/artifacts
     max-file-size-bytes: 20971520
+  ai:
+    python-executable: ${AI_PYTHON_EXECUTABLE:}
+    # run_all.py: analyzers max 720s + ingestion/artifact I/O max 70s + overhead.
+    process-timeout-seconds: ${AI_PROCESS_TIMEOUT_SECONDS:900}
 
 server:
   port: 9090

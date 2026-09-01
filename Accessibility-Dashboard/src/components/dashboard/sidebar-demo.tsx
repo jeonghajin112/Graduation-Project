@@ -445,7 +445,7 @@ export function DashboardSurface({
               >
                 <p className="flex items-center gap-2 font-semibold text-rose-700">
                   <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
-                  대시보드 연결 실패
+                  대시보드를 불러오지 못했습니다
                 </p>
                 <p className="text-rose-600">{dashboard.dashboardError}</p>
                 <button
@@ -455,7 +455,9 @@ export function DashboardSurface({
                   className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-wait disabled:opacity-60"
                 >
                   <RotateCcw size={13} strokeWidth={2.4} aria-hidden="true" />
-                  {dashboard.isDashboardLoading ? "다시 불러오는 중" : "다시 시도"}
+                  {dashboard.isDashboardLoading
+                    ? "대시보드 불러오는 중"
+                    : "대시보드 다시 불러오기"}
                 </button>
               </article>
             ) : null}

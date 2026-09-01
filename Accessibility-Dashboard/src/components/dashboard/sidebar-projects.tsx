@@ -213,7 +213,7 @@ export function SidebarProjectsSection({
       }
     } catch (error) {
       if (activeSaveOperationIdRef.current === operationId) {
-        setEditError(getApiErrorMessage(error, "프로젝트 수정 중 오류가 발생했습니다."));
+        setEditError(getApiErrorMessage(error, "프로젝트를 수정하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       if (activeSaveOperationIdRef.current === operationId) {
@@ -242,7 +242,7 @@ export function SidebarProjectsSection({
       }
     } catch (error) {
       if (activeDeleteOperationIdRef.current === operationId) {
-        setDeleteError(getApiErrorMessage(error, "프로젝트 제거 중 오류가 발생했습니다."));
+        setDeleteError(getApiErrorMessage(error, "프로젝트를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요."));
       }
     } finally {
       if (activeDeleteOperationIdRef.current === operationId) {

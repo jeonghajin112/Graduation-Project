@@ -15,6 +15,7 @@ import {
   writePersistedOrganizationCreateAttempt
 } from "@/services/organization-create-recovery-storage";
 import type { PersistedOrganizationCreateAttempt } from "@/services/organization-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type { DashboardViewModel } from "@/types/accessibility-domain";
 
 import {
@@ -33,11 +34,11 @@ const INDETERMINATE_REFRESH_FAILURE_MESSAGE =
   "프로젝트 생성 결과를 확인하지 못했습니다. 중복 생성을 막기 위해 생성 요청은 다시 보내지 않습니다. 프로젝트 목록만 다시 불러와 주세요.";
 const PROJECT_REFRESH_TIMEOUT_MS = 15_000;
 const PERSISTENCE_FAILURE_MESSAGE =
-  "브라우저에 안전한 복구 정보를 저장하지 못해 프로젝트 생성을 시작하지 않았습니다. 저장 공간 또는 브라우저 설정을 확인해 주세요.";
+  "브라우저에 이전 작업 상태를 저장하지 못해 프로젝트 생성을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
 const RECOVERY_DISCARD_FAILURE_MESSAGE =
-  "오래된 복구 정보를 지우지 못했습니다. 브라우저 저장 공간을 확인하거나 로그아웃 후 다시 시도해 주세요.";
+  "이전 작업 정보를 지우지 못했습니다. 브라우저 저장 공간을 확인하거나 로그아웃한 뒤 다시 시도해 주세요.";
 const BLOCKED_RECOVERY_MESSAGE =
-  "이전 버전, 다른 서버 또는 손상된 프로젝트 생성 복구 정보가 남아 있어 새 생성을 잠갔습니다. 서버에 이미 생성된 프로젝트가 없는지 확인한 뒤 복구 정보를 삭제해 주세요.";
+  "확인할 수 없는 이전 프로젝트 작업이 남아 있어 중복 생성을 막았습니다. 이미 프로젝트가 생성되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
 
 function checkpointFromPersistedAttempt(
   attempt: PersistedOrganizationCreateAttempt
@@ -391,7 +392,7 @@ export function useOrganizationModelCreateForm({
           startedAt: Date.now()
         };
         if (!writePersistedOrganizationCreateAttempt(postingAttempt, null)) {
-          throw new Error(PERSISTENCE_FAILURE_MESSAGE);
+          throw new UserFacingError(PERSISTENCE_FAILURE_MESSAGE);
         }
         persistedAttemptRef.current = postingAttempt;
         setCanDiscardOrganizationCreateRecovery(false);
@@ -526,7 +527,9 @@ export function useOrganizationModelCreateForm({
           clearPersistedOrganizationCreateAttempt(persistedAttemptId);
         }
         releaseDirectoryRecovery();
-        setProjectCreateError(getApiErrorMessage(error, "프로젝트 생성 중 오류가 발생했습니다."));
+        setProjectCreateError(
+          getApiErrorMessage(error, "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        );
       }
     } finally {
       if (activeOperationIdRef.current === operationId) {

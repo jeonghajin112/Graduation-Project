@@ -31,6 +31,7 @@ import {
   SITE_URL_MAX_LENGTH,
   isValidEvaluationTargetAccessUrl
 } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
   EvaluationRequestModel,
@@ -44,14 +45,24 @@ import {
   runMutationRequestWithDeadline,
   waitForDocumentVisible
 } from "../shared/mutation-recovery";
-import { evaluationRequestPhaseFromStatus } from "../shared/evaluation-request-status";
+import {
+  EVALUATION_REQUEST_FAILED_MESSAGE,
+  evaluationRequestPhaseFromStatus
+} from "../shared/evaluation-request-status";
 import { useCancellationScope } from "../shared/use-cancellation-scope";
 import { useExclusiveOperation } from "../shared/use-exclusive-operation";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
 
-type AnalysisPhase = "idle" | "requesting" | "queued" | "running" | "completed" | "failed";
+type AnalysisPhase =
+  | "idle"
+  | "requesting"
+  | "queued"
+  | "running"
+  | "completed"
+  | "paused"
+  | "failed";
 
 type ProgressState = {
   phase: AnalysisPhase;
@@ -94,11 +105,11 @@ const emptyProgress: ProgressState = {
 };
 
 const QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE =
-  "브라우저에 분석 복구 정보를 안전하게 저장하지 못해 새 분석 요청을 보내지 않았습니다.";
+  "이전 분석 정보를 브라우저에 저장하지 못해 새 분석을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
 const QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE =
-  "확인할 수 없는 분석 복구 정보가 남아 있어 중복 분석을 막기 위해 새 요청을 차단했습니다. 로그아웃 후 다시 시도해 주세요.";
+  "확인할 수 없는 이전 분석 작업이 남아 있어 중복 요청을 막았습니다. 로그아웃한 뒤 다시 시도해 주세요.";
 const QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE =
-  "이전 URL의 분석 요청 결과를 먼저 확인해야 합니다. 복구 중인 URL로 되돌렸습니다.";
+  "이전 페이지의 분석 결과를 먼저 확인해야 합니다. 진행 중이던 주소로 되돌렸습니다.";
 
 const analysisJourneySteps = ["페이지 연결", "접근성 검사", "결과 준비"] as const;
 
@@ -114,7 +125,7 @@ function messageFromRequestStatus(status: EvaluationStatus | string): string {
     return "분석이 완료되었습니다. 결과 화면으로 이동합니다.";
   }
   if (status === "FAILED") {
-    return "분석에 실패했습니다. 대상 사이트 접속이 막혀 있거나 리다이렉트되었을 수 있습니다.";
+    return EVALUATION_REQUEST_FAILED_MESSAGE;
   }
   return "페이지 접근성 분석을 진행하고 있습니다.";
 }
@@ -132,6 +143,9 @@ function labelFromPhase(phase: AnalysisPhase): string {
   if (phase === "completed") {
     return "결과 준비 완료";
   }
+  if (phase === "paused") {
+    return "상태 확인 필요";
+  }
   if (phase === "failed") {
     return "분석 실패";
   }
@@ -142,7 +156,7 @@ function journeyStepIndexFromPhase(phase: AnalysisPhase): number {
   if (phase === "requesting" || phase === "queued") {
     return 0;
   }
-  if (phase === "running" || phase === "failed") {
+  if (phase === "running" || phase === "paused" || phase === "failed") {
     return 1;
   }
   if (phase === "completed") {
@@ -351,7 +365,12 @@ export function QuickAnalyzePanel({
   const recoveryBlockedRef = useRef(initialRecovery.kind === "blocked");
 
   const showProgressView = progress.phase !== "idle";
-  const isBusy = isSubmitting || (progress.phase !== "idle" && progress.phase !== "failed" && progress.phase !== "completed");
+  const isBusy =
+    isSubmitting ||
+    (progress.phase !== "idle" &&
+      progress.phase !== "paused" &&
+      progress.phase !== "failed" &&
+      progress.phase !== "completed");
   const hasUrlInput = urlInput.trim().length > 0;
   const canSubmit = hasUrlInput && !isBusy && !readOnly;
   const hasError = errorMessage.length > 0;
@@ -398,12 +417,15 @@ export function QuickAnalyzePanel({
       status: null,
       message: "분석 요청을 생성하고 있습니다."
     });
+    let terminalRequestFailed = false;
+    let requiresInputReset = false;
 
     try {
       let checkpoint = checkpointRef.current;
       if (checkpoint !== null && checkpoint.url !== normalized) {
+        requiresInputReset = true;
         setUrlInput(checkpoint.url);
-        throw new Error(QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE);
+        throw new UserFacingError(QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE);
       }
 
       if (checkpoint === null) {
@@ -412,7 +434,7 @@ export function QuickAnalyzePanel({
         // without sending the mutation again.
         const baseline = await runQuickAnalysisRequestWithTimeout({
           signal,
-          timeoutMessage: "분석 요청 전 기존 작업 목록을 확인하는 시간이 초과되었습니다.",
+          timeoutMessage: "분석을 준비하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
           operation: (requestSignal) =>
             fetchDashboardViewModel(requestSignal)
         });
@@ -433,7 +455,7 @@ export function QuickAnalyzePanel({
           knownRequestIds
         };
         if (!writeQuickAnalysisAttempt(postingAttempt, null)) {
-          throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
         }
 
         const reconcilingCheckpoint: Extract<
@@ -452,7 +474,7 @@ export function QuickAnalyzePanel({
         try {
           const created = await runQuickAnalysisRequestWithTimeout({
             signal,
-            timeoutMessage: "분석 요청 응답을 기다리는 시간이 초과되었습니다.",
+            timeoutMessage: "분석을 시작하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
               startUrlEvaluation(normalized, requestSignal)
           });
@@ -474,7 +496,7 @@ export function QuickAnalyzePanel({
                 attemptId
               )
             ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             checkpointRef.current = requestCheckpoint;
             checkpoint = requestCheckpoint;
@@ -482,7 +504,7 @@ export function QuickAnalyzePanel({
         } catch (error) {
           if (isDefinitiveMutationRejection(error)) {
             if (!clearQuickAnalysisAttempt(attemptId)) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             checkpointRef.current = null;
             throw error;
@@ -501,7 +523,7 @@ export function QuickAnalyzePanel({
               checkpoint.attemptId
             )
           ) {
-            throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+            throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
           }
         }
       }
@@ -514,7 +536,7 @@ export function QuickAnalyzePanel({
 
           const reconciledData = await runQuickAnalysisRequestWithTimeout({
             signal,
-            timeoutMessage: "분석 요청 결과를 확인하는 시간이 초과되었습니다.",
+            timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
               fetchDashboardViewModel(requestSignal)
           });
@@ -545,7 +567,7 @@ export function QuickAnalyzePanel({
                 checkpoint.attemptId
               )
             ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             checkpointRef.current = requestCheckpoint;
             checkpoint = requestCheckpoint;
@@ -554,7 +576,7 @@ export function QuickAnalyzePanel({
         }
 
         if (checkpoint.kind === "reconciling") {
-          throw new Error(
+          throw new UserFacingError(
             "분석 요청의 처리 결과를 아직 확인하지 못했습니다. 잠시 후 다시 시도해 주세요. 새 분석 요청은 보내지 않습니다."
           );
         }
@@ -572,11 +594,12 @@ export function QuickAnalyzePanel({
         }
 
         if (requestCheckpoint.status === "FAILED") {
+          terminalRequestFailed = true;
           if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
-            throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+            throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
           }
           checkpointRef.current = null;
-          throw new Error("분석 엔진 실행에 실패했습니다. URL을 확인한 뒤 다시 시도해 주세요.");
+          throw new UserFacingError(EVALUATION_REQUEST_FAILED_MESSAGE);
         }
 
         if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
@@ -590,7 +613,7 @@ export function QuickAnalyzePanel({
 
             const request = await runQuickAnalysisRequestWithTimeout({
               signal,
-              timeoutMessage: "분석 상태 응답을 기다리는 시간이 초과되었습니다.",
+              timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
               operation: (requestSignal) =>
                 fetchEvaluationRequest(requestCheckpoint.requestId, requestSignal)
             });
@@ -603,7 +626,7 @@ export function QuickAnalyzePanel({
               startedAt: requestCheckpoint.startedAt
             });
             if (nextCheckpoint === null) {
-              throw new Error("분석 상태 응답에서 요청 ID를 확인하지 못했습니다.");
+              throw new UserFacingError("분석 진행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
             }
             if (
               !writeQuickAnalysisAttempt(
@@ -611,7 +634,7 @@ export function QuickAnalyzePanel({
                 requestCheckpoint.attemptId
               )
             ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             requestCheckpoint = nextCheckpoint;
             checkpointRef.current = requestCheckpoint;
@@ -623,11 +646,12 @@ export function QuickAnalyzePanel({
             });
 
             if (request.status === "FAILED") {
+              terminalRequestFailed = true;
               if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
-                throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+                throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
               }
               checkpointRef.current = null;
-              throw new Error("분석 엔진 실행에 실패했습니다. URL을 확인한 뒤 다시 시도해 주세요.");
+              throw new UserFacingError(EVALUATION_REQUEST_FAILED_MESSAGE);
             }
             if (request.status === "COMPLETED" && requestCheckpoint.targetId !== null) {
               reachedUsableFinalRequest = true;
@@ -636,12 +660,12 @@ export function QuickAnalyzePanel({
           }
 
           if (!reachedUsableFinalRequest) {
-            throw new Error("분석이 시간 내에 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
+            throw new UserFacingError("페이지 검사에 예상보다 오래 걸리고 있습니다. 잠시 후 결과를 다시 확인해 주세요.");
           }
         }
 
         if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
-          throw new Error("완료된 분석의 페이지 정보를 확인하지 못했습니다.");
+          throw new UserFacingError("완료된 분석 결과를 찾지 못했습니다. 결과 목록을 다시 불러와 주세요.");
         }
 
         const targetCheckpoint: Extract<QuickAnalysisCheckpoint, { kind: "target" }> = {
@@ -659,19 +683,19 @@ export function QuickAnalyzePanel({
             requestCheckpoint.attemptId
           )
         ) {
-          throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
         }
         checkpointRef.current = targetCheckpoint;
         checkpoint = targetCheckpoint;
       }
 
       if (checkpoint.kind !== "target") {
-        throw new Error("분석 결과 페이지 정보를 확인하지 못했습니다.");
+        throw new UserFacingError("분석 결과를 찾지 못했습니다. 결과 목록을 다시 불러와 주세요.");
       }
 
       const target = await runQuickAnalysisRequestWithTimeout({
         signal,
-        timeoutMessage: "분석 대상 정보를 기다리는 시간이 초과되었습니다.",
+        timeoutMessage: "분석 결과를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
         operation: (requestSignal) =>
           fetchEvaluationTarget(checkpoint.targetId, requestSignal)
       });
@@ -682,8 +706,8 @@ export function QuickAnalyzePanel({
         target.status !== "ACTIVE" ||
         toComparableUrl(target.accessUrl) !== toComparableUrl(normalized)
       ) {
-        throw new Error(
-          "분석 완료 응답의 페이지 정보를 확인하지 못했습니다. 결과 목록을 다시 확인해 주세요."
+        throw new UserFacingError(
+          "완료된 분석 결과가 현재 페이지와 일치하지 않습니다. 결과 목록에서 다시 확인해 주세요."
         );
       }
       const completedTimestamp = Date.parse(checkpoint.updatedAt ?? "");
@@ -722,7 +746,7 @@ export function QuickAnalyzePanel({
         return;
       }
       if (!clearQuickAnalysisAttempt(checkpoint.attemptId)) {
-        throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+        throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
       checkpointRef.current = null;
     } catch (error) {
@@ -730,11 +754,14 @@ export function QuickAnalyzePanel({
         return;
       }
 
-      const message = getApiErrorMessage(error, "페이지 분석 중 오류가 발생했습니다.");
+      const message = getApiErrorMessage(error, "페이지 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       setErrorMessage(message);
       setProgress((current) => ({
         ...current,
-        phase: "failed",
+        phase:
+          terminalRequestFailed || requiresInputReset || checkpointRef.current === null
+            ? "failed"
+            : "paused",
         message
       }));
     } finally {
@@ -760,6 +787,8 @@ export function QuickAnalyzePanel({
             >
               {progress.phase === "failed"
                 ? "분석을 완료하지 못했습니다"
+                : progress.phase === "paused"
+                  ? "분석 상태를 다시 확인해 주세요"
                 : progress.phase === "completed"
                   ? "분석이 완료되었습니다"
                   : "페이지를 분석하고 있습니다"}
@@ -875,7 +904,11 @@ export function QuickAnalyzePanel({
                   const isCompletedStep = progress.phase === "completed" || index < journeyStepIndex;
                   const isFailedStep = progress.phase === "failed" && index === journeyStepIndex;
                   const isActiveStep =
-                    !isCompletedStep && !isFailedStep && index === journeyStepIndex && progress.phase !== "idle";
+                    !isCompletedStep &&
+                    !isFailedStep &&
+                    index === journeyStepIndex &&
+                    progress.phase !== "idle" &&
+                    progress.phase !== "paused";
 
                   return (
                     <StepperItem
@@ -948,6 +981,22 @@ export function QuickAnalyzePanel({
                   className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc]"
                 >
                   다시 시도
+                </button>
+              </div>
+            )}
+
+            {progress.phase === "paused" && (
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <p className="text-center text-xs text-amber-600">{errorMessage || progress.message}</p>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    void handleSubmit();
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
                 </button>
               </div>
             )}

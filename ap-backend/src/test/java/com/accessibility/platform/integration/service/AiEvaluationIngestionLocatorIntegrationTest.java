@@ -8,9 +8,11 @@ import com.accessibility.platform.organization.domain.Organization;
 import com.accessibility.platform.organization.domain.OrganizationType;
 import com.accessibility.platform.organization.repository.OrganizationRepository;
 import com.accessibility.platform.request.domain.EvaluationRequest;
+import com.accessibility.platform.request.domain.EvaluationRequestStatus;
 import com.accessibility.platform.request.repository.EvaluationRequestRepository;
 import com.accessibility.platform.result.dto.EvaluationIssueResponse;
 import com.accessibility.platform.result.service.EvaluationResultQueryService;
+import com.accessibility.platform.score.repository.ScoreResultRepository;
 import com.accessibility.platform.target.domain.EvaluationTarget;
 import com.accessibility.platform.target.domain.TargetType;
 import com.accessibility.platform.target.repository.EvaluationTargetRepository;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Transactional
@@ -54,6 +57,32 @@ class AiEvaluationIngestionLocatorIntegrationTest {
 
     @Autowired
     EvaluationRequestRepository requestRepository;
+
+    @Autowired
+    ScoreResultRepository scoreResultRepository;
+
+    @Test
+    void failedRequestCannotBeResurrectedByLateIngestion() {
+        EvaluationRequest request = createRequest();
+        request.changeStatus(EvaluationRequestStatus.FAILED);
+        requestRepository.saveAndFlush(request);
+
+        String resultJson = """
+                {
+                  "url":"https://example.com/late-result",
+                  "request_id":%d
+                }
+                """.formatted(request.getId());
+
+        assertThatThrownBy(() -> ingestionService.save(resultJson))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("terminal request")
+                .hasMessageContaining("FAILED");
+
+        assertThat(requestRepository.findById(request.getId()).orElseThrow().getStatus())
+                .isEqualTo(EvaluationRequestStatus.FAILED);
+        assertThat(scoreResultRepository.findByEvaluationRequestId(request.getId())).isEmpty();
+    }
 
     @Test
     void persistsAndExposesRuleAndCvTypedLocatorsWithoutRemovingLegacySelector() {

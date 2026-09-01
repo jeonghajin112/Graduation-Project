@@ -29,8 +29,8 @@
   A+(95↑), A(90↑), B+(85↑), B(80↑), C(70↑), D(60↑), F(60 미만)
 
 [모듈 부분 실패 처리]
-  특정 모듈이 실패해도 나머지 모듈 결과는 정상적으로 반영
-  실패한 모듈은 가중치 재분배 후 나머지 모듈만으로 총점을 계산
+  현재 실행의 유효한 규칙 기반 결과는 완료 저장의 필수 조건
+  난이도 또는 CV가 실패하면 해당 모듈을 제외하고 가중치를 재분배
   예: CV 모듈만 실패 → 규칙 기반(50/80=62.5%)과 난이도(30/80=37.5%)로 재계산
 
 [실행 방법]
@@ -51,9 +51,11 @@
 """
 
 import json
+import math
 import sys
 import os
 import atexit
+import signal
 import subprocess
 import tempfile
 import time
@@ -96,8 +98,9 @@ RUN_OUTPUT_FILES = [
 LEGACY_OUTPUT_FILES = ["result.png"]
 
 
-def clear_previous_outputs():
-    """Remove stale per-run outputs so failed steps cannot reuse old results."""
+def clear_previous_outputs() -> bool:
+    """Remove stale per-run outputs and report whether the workspace is clean."""
+    cleanup_ok = True
     for filename in RUN_OUTPUT_FILES + LEGACY_OUTPUT_FILES:
         path = OUTPUT_DIR / filename
         try:
@@ -105,6 +108,26 @@ def clear_previous_outputs():
                 path.unlink()
         except OSError as e:
             print(f"  [warning] could not remove stale output {filename}: {e}")
+            cleanup_ok = False
+    return cleanup_ok
+
+
+def is_fresh_nonempty_file(path: Path, not_before_ns: int) -> bool:
+    """Accept only a non-empty output written after the current step started."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return path.is_file() and stat.st_size > 0 and stat.st_mtime_ns >= not_before_ns
+
+
+def output_fingerprint(path: Path) -> Optional[Tuple[int, int]]:
+    """Return the immutable fields used to detect mid-pipeline replacement."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
 
 
 def create_ephemeral_cv_capture_path() -> Path:
@@ -123,8 +146,9 @@ def cleanup_ephemeral_cv_capture(path: Path) -> None:
     except OSError as error:
         print(f"  [CV] 임시 이미지 정리 실패: {error}")
 
-# Google Vision API 서비스 계정 키 경로
-# .gitignore에 포함되어 있으므로 각 개발자가 로컬에 설정해야 함
+# Google Vision API 서비스 계정 키의 기존 로컬 fallback 경로.
+# GOOGLE_APPLICATION_CREDENTIALS가 있으면 환경 변수를 우선하고, 둘 다
+# 없으면 자격증명 인자 없이 실행해 CV 모듈만 부분 실패로 처리한다.
 VISION_CREDENTIALS = CV_ANALYZER_DIR / "uniaccess-495010-08a5c6701cd7.json"
 
 # 백엔드 서버 주소 (Spring Boot 서버)
@@ -138,6 +162,20 @@ WEIGHT_RULE_BASED = 0.50
 WEIGHT_DIFFICULTY = 0.30
 WEIGHT_CV = 0.20
 
+# The backend treats any non-zero process status as a failed evaluation request.
+# Keep this distinct from the navigation-blocked status (2) so runtime logs show
+# that the pipeline ran but produced no score-bearing module result.
+NO_SCORABLE_RESULT_EXIT_CODE = 3
+
+# Most local analyzers finish quickly, while the browser-based rule scan may
+# need extra time for a slow public page, static fallback, and axe traversal.
+DEFAULT_STEP_TIMEOUT_SECONDS = 120
+RULE_BASED_STEP_TIMEOUT_SECONDS = 240
+PROCESS_TERMINATION_WAIT_SECONDS = 5
+WINDOWS_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+POSIX_SIGTERM = getattr(signal, "SIGTERM", 15)
+POSIX_SIGKILL = getattr(signal, "SIGKILL", 9)
+
 
 # ── Step 실행 함수들 ─────────────────────────────────────────────────────────
 
@@ -148,7 +186,84 @@ def run_step(step_num: int, total: int, description: str):
     print("-" * 50)
 
 
-def run_command(cmd: list, cwd: str = None, description: str = "") -> bool:
+def process_group_options(platform_name: Optional[str] = None) -> Dict[str, Any]:
+    """Start each analyzer in a group that can be terminated as one unit."""
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt":
+        return {"creationflags": WINDOWS_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def terminate_process_tree(
+    process: subprocess.Popen,
+    platform_name: Optional[str] = None,
+) -> None:
+    """Best-effort termination limited to the analyzer process group/tree."""
+    platform_name = os.name if platform_name is None else platform_name
+    if platform_name == "nt":
+        tree_killed = False
+        try:
+            taskkill_result = subprocess.run(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=PROCESS_TERMINATION_WAIT_SECONDS,
+            )
+            tree_killed = taskkill_result.returncode == 0
+            if not tree_killed:
+                process.kill()
+        except (FileNotFoundError, subprocess.SubprocessError, OSError):
+            try:
+                process.kill()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=PROCESS_TERMINATION_WAIT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        return
+
+    process_group_id = process.pid  # start_new_session=True makes pid == pgid.
+    try:
+        os.killpg(process_group_id, POSIX_SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        return
+
+    try:
+        process.wait(timeout=PROCESS_TERMINATION_WAIT_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+
+    # The parent may have exited while a browser child remains in the group.
+    # A final group kill is harmless when the group has already disappeared.
+    try:
+        os.killpg(process_group_id, POSIX_SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def decode_process_output(output: Any) -> str:
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace").strip()
+    return str(output or "").strip()
+
+
+def run_command(
+    cmd: list,
+    cwd: str = None,
+    description: str = "",
+    timeout_seconds: int = DEFAULT_STEP_TIMEOUT_SECONDS,
+) -> bool:
     """
     외부 명령어(Node.js, Python 스크립트 등)를 subprocess로 실행
     
@@ -157,28 +272,49 @@ def run_command(cmd: list, cwd: str = None, description: str = "") -> bool:
     False: 실패 (비정상 종료, 타임아웃, 파일 없음 등)
     
     [타임아웃]
-    각 Step은 최대 2분(120초)까지 대기함.
-    공공 웹사이트 중 로딩이 느린 경우가 있어 여유 있게 설정
+    기본 제한 시간은 2분(120초)이며, 브라우저 기반 규칙 검사는 호출부에서
+    4분(240초)을 지정한다. 공공 웹사이트 로딩과 정적 fallback까지 고려한 값이다.
     
     [인코딩 처리]
     한국어 출력이 깨지지 않도록 PYTHONIOENCODING=utf-8 환경변수를 설정하고,
     stdout/stderr를 UTF-8로 디코딩
     """
+    process = None
     try:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
 
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             cwd=cwd,
-            capture_output=True,
-            text=False,
-            timeout=120,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
+            **process_group_options(),
         )
+        try:
+            stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as error:
+            terminate_process_tree(process)
+            try:
+                stdout_bytes, stderr_bytes = process.communicate(
+                    timeout=PROCESS_TERMINATION_WAIT_SECONDS,
+                )
+            except (subprocess.TimeoutExpired, ValueError):
+                stdout_bytes = error.output or b""
+                stderr_bytes = error.stderr or b""
 
-        stdout = result.stdout.decode('utf-8', errors='replace').strip()
-        stderr = result.stderr.decode('utf-8', errors='replace').strip()
+            stdout = decode_process_output(stdout_bytes)
+            stderr = decode_process_output(stderr_bytes)
+            if stdout:
+                print(stdout)
+            if stderr:
+                print(stderr)
+            print(f"  [시간초과] {description} - {timeout_seconds}초 초과")
+            return False
+
+        stdout = decode_process_output(stdout_bytes)
+        stderr = decode_process_output(stderr_bytes)
 
         if stdout:
             print(stdout)
@@ -186,15 +322,12 @@ def run_command(cmd: list, cwd: str = None, description: str = "") -> bool:
         if stderr:
             print(stderr)
 
-        if result.returncode != 0:
-            print(f"  [실패] {description} (종료 코드: {result.returncode})")
+        if process.returncode != 0:
+            print(f"  [실패] {description} (종료 코드: {process.returncode})")
             return False
 
         return True
 
-    except subprocess.TimeoutExpired:
-        print(f"  [시간초과] {description} - 2분 초과")
-        return False
     except FileNotFoundError as e:
         print(f"  [실행불가] {e}")
         return False
@@ -209,8 +342,12 @@ def load_json(filepath: Path) -> Optional[Dict]:
         print(f"  [경고] 파일 없음: {filepath.name}")
         return None
 
-    with open(filepath, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"  [경고] JSON 읽기 실패 ({filepath.name}): {error}")
+        return None
 
 
 def normalized_host(value: str) -> str:
@@ -230,7 +367,8 @@ def get_rule_result_url(rule_result: Optional[Dict]) -> str:
 def validate_target_navigation(requested_url: str, rule_result: Optional[Dict]) -> bool:
     analyzed_url = get_rule_result_url(rule_result)
     if not analyzed_url:
-        return True
+        print("  [blocked] 규칙 기반 결과에 분석 URL이 없습니다.")
+        return False
 
     requested_host = normalized_host(requested_url)
     analyzed_host = normalized_host(analyzed_url)
@@ -245,7 +383,37 @@ def validate_target_navigation(requested_url: str, rule_result: Optional[Dict]) 
     return True
 
 
+def validate_rule_artifact(requested_url: str, artifact_metadata: Any) -> bool:
+    """Validate the minimum request-scoped DOM replay metadata contract."""
+    if not isinstance(artifact_metadata, dict):
+        return False
+    artifact_requested_url = str(artifact_metadata.get("requestedUrl") or "")
+    return bool(
+        artifact_metadata.get("captureMode") == "DOM_REPLAY"
+        and normalized_host(artifact_requested_url)
+        and normalized_host(artifact_requested_url) == normalized_host(requested_url)
+    )
+
+
 # ── 총점 계산 ────────────────────────────────────────────────────────────────
+
+
+def finite_numeric_score(value: Any) -> Optional[float]:
+    """Return a JSON numeric score only when it is real and finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric_value = float(value)
+    return numeric_value if math.isfinite(numeric_value) else None
+
+
+def valid_rule_result(rule_result: Any) -> bool:
+    """A rule result is scorable only when its documented score is valid."""
+    if not isinstance(rule_result, dict):
+        return False
+    score_value = rule_result.get("score")
+    if isinstance(score_value, dict):
+        score_value = score_value.get("score")
+    return finite_numeric_score(score_value) is not None
 
 
 def calculate_total_score(rule_score: Optional[Dict],
@@ -267,32 +435,40 @@ def calculate_total_score(rule_score: Optional[Dict],
     특정 모듈이 실패하면 해당 모듈의 가중치를 제외하고,
     나머지 모듈의 가중치를 합이 100%가 되도록 재분배함.
     예: CV 실패 → 규칙 기반 50/(50+30)=62.5%, 난이도 30/(50+30)=37.5%
-    이렇게 하면 한 모듈이 실패해도 나머지만으로 의미 있는 총점을 계산할 수 있음.
+    단, 완료 결과 전송에는 현재 실행의 유효한 규칙 기반 결과가 반드시 필요함.
     """
     scores = {}
     weights = {}
 
     # 규칙 기반 점수 추출
-    if rule_score:
+    if isinstance(rule_score, dict):
         score_val = rule_score.get("score", {})
         if isinstance(score_val, dict):
-            scores["rule_based"] = score_val.get("score", 0)
-        else:
-            scores["rule_based"] = score_val
-        weights["rule_based"] = WEIGHT_RULE_BASED
+            score_val = score_val.get("score")
+        numeric_score = finite_numeric_score(score_val)
+        if numeric_score is not None:
+            scores["rule_based"] = numeric_score
+            weights["rule_based"] = WEIGHT_RULE_BASED
 
     # 난이도 점수 추출
     # page_score는 difficulty_engine.py에서 이미 "100 - 감점"으로 계산됨
     # (높을수록 좋음) → 반전 없이 그대로 사용
-    if difficulty_score:
-        scores["difficulty"] = difficulty_score.get("meta", {}).get("page_score", 0)
-        weights["difficulty"] = WEIGHT_DIFFICULTY
+    if isinstance(difficulty_score, dict):
+        meta = difficulty_score.get("meta", {})
+        page_score = meta.get("page_score") if isinstance(meta, dict) else None
+        numeric_score = finite_numeric_score(page_score)
+        if numeric_score is not None:
+            scores["difficulty"] = numeric_score
+            weights["difficulty"] = WEIGHT_DIFFICULTY
 
     # CV 점수 추출 — 명암비 통과율(%)을 그대로 사용
-    if cv_score:
+    if isinstance(cv_score, dict):
         summary = cv_score.get("summary", {})
-        scores["cv"] = summary.get("pass_rate", 0)
-        weights["cv"] = WEIGHT_CV
+        pass_rate = summary.get("pass_rate") if isinstance(summary, dict) else None
+        numeric_score = finite_numeric_score(pass_rate)
+        if numeric_score is not None:
+            scores["cv"] = numeric_score
+            weights["cv"] = WEIGHT_CV
 
     # 모든 모듈이 실패한 경우
     total_weight = sum(weights.values())
@@ -563,11 +739,21 @@ def run_cv_from_ephemeral_capture(capture_path: Path) -> bool:
         if not capture_path.exists() or capture_path.stat().st_size == 0:
             print("  [건너뜀] CV 전용 임시 이미지가 생성되지 않았습니다.")
             return False
+
+        command = [
+            sys.executable,
+            str(CV_ANALYZER_DIR / "cv_runner.py"),
+            str(capture_path),
+        ]
+        configured_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        if configured_credentials:
+            command.extend(["--credentials", configured_credentials])
+        elif VISION_CREDENTIALS.is_file():
+            command.extend(["--credentials", str(VISION_CREDENTIALS)])
+        command.extend(["--output", str(OUTPUT_DIR / "result_cv.json")])
+
         return run_command(
-            ["python", str(CV_ANALYZER_DIR / "cv_runner.py"),
-             str(capture_path),
-             "--credentials", str(VISION_CREDENTIALS),
-             "--output", str(OUTPUT_DIR / "result_cv.json")],
+            command,
             cwd=str(OUTPUT_DIR),
             description="CV 분석",
         )
@@ -591,8 +777,8 @@ def main():
     Step 6 (통합)      → 위 모든 결과 파일을 읽어서 총점 계산
     Step 7 (전송)      → Step 6의 result_final.json을 백엔드로 POST
     
-    각 Step은 이전 Step의 출력 파일이 존재하는지 확인하고,
-    없으면 해당 Step을 건너뜀 (부분 실패 허용).
+    각 Step은 이전 Step이 성공하고 현재 실행의 출력 파일이 생성됐는지 확인한다.
+    규칙 기반 Step이 실패하면 모든 후속 분석과 백엔드 전송을 중단한다.
     
     [결과 파일 로딩 시 step 성공 여부 반영]
     각 모듈의 JSON 결과를 로딩할 때 해당 step의 성공 여부를 확인함.
@@ -623,7 +809,9 @@ def main():
           f"CV {int(WEIGHT_CV*100)}%")
     print("=" * 60)
 
-    clear_previous_outputs()
+    if not clear_previous_outputs():
+        print("  [분석 실패] 이전 실행 결과를 안전하게 정리하지 못했습니다.")
+        sys.exit(NO_SCORABLE_RESULT_EXIT_CODE)
 
     # The screenshot is private input for the existing CV analyzer. It is
     # deliberately outside output/ and is never part of the replay/upload
@@ -640,29 +828,75 @@ def main():
     #       result_artifact.json(DOM replay 메타데이터)
     run_step(1, total_steps, "규칙 기반 접근성 평가 (axe-core + KWCAG)")
 
-    result_json_path = str(OUTPUT_DIR / "result.json")
-    step1_ok = run_command(
-        ["node", "run.js", url, result_json_path,
+    result_json = OUTPUT_DIR / "result.json"
+    result_api = OUTPUT_DIR / "result_api.json"
+    result_html = OUTPUT_DIR / "result.html"
+    result_artifact = OUTPUT_DIR / "result_artifact.json"
+    rule_output_paths = (result_json, result_api, result_html, result_artifact)
+    step1_started_ns = time.time_ns()
+    step1_process_ok = run_command(
+        ["node", "run.js", url, str(result_json),
          "--cv-screenshot", str(cv_capture_path)],
         cwd=str(RULE_BASED_DIR),
         description="규칙 기반 평가",
+        timeout_seconds=RULE_BASED_STEP_TIMEOUT_SECONDS,
     )
+
+    step1_outputs_fresh = step1_process_ok and all(
+        is_fresh_nonempty_file(path, step1_started_ns)
+        for path in rule_output_paths
+    )
+    rule_result = load_json(result_api) if step1_outputs_fresh else None
+    artifact_metadata = load_json(result_artifact) if step1_outputs_fresh else None
+    rule_result_valid = valid_rule_result(rule_result)
+    artifact_valid = validate_rule_artifact(url, artifact_metadata)
+    navigation_valid = (
+        validate_target_navigation(url, rule_result)
+        if rule_result_valid
+        else False
+    )
+    step1_ok = bool(
+        step1_process_ok
+        and step1_outputs_fresh
+        and rule_result_valid
+        and artifact_valid
+        and navigation_valid
+    )
+    rule_output_fingerprints = {
+        path: output_fingerprint(path)
+        for path in rule_output_paths
+    } if step1_ok else {}
+
+    if not step1_process_ok:
+        print("  [분석 실패] 규칙 기반 평가 프로세스가 완료되지 않았습니다.")
+    elif not step1_outputs_fresh:
+        print("  [분석 실패] 현재 실행의 규칙 결과 또는 DOM replay가 완전하지 않습니다.")
+    elif not rule_result_valid:
+        print("  [분석 실패] 규칙 기반 결과에 유효한 점수가 없습니다.")
+    elif not artifact_valid:
+        print("  [분석 실패] 현재 요청의 DOM replay 메타데이터가 유효하지 않습니다.")
+    elif not navigation_valid:
+        sys.exit(2)
 
     # ── Step 2: 텍스트 추출 ──
     # Step 1에서 저장한 result.html을 입력으로 받아서
     # 분석 대상 텍스트를 추출하고 10개 카테고리로 분류함.
     run_step(2, total_steps, "텍스트 추출 전처리")
 
-    result_html = OUTPUT_DIR / "result.html"
-    if result_html.exists():
-        step2_ok = run_command(
-            ["python", str(TEXT_LEVEL_DIR / "text_extractor.py"),
+    if step1_ok:
+        step2_started_ns = time.time_ns()
+        step2_process_ok = run_command(
+            [sys.executable, str(TEXT_LEVEL_DIR / "text_extractor.py"),
              str(result_html)],
             cwd=str(OUTPUT_DIR),
             description="텍스트 추출",
         )
+        step2_ok = step2_process_ok and is_fresh_nonempty_file(
+            OUTPUT_DIR / "result_text.json",
+            step2_started_ns,
+        )
     else:
-        print("  [건너뜀] result.html 파일이 없습니다.")
+        print("  [건너뜀] 유효한 현재 규칙 결과가 없어 텍스트 추출을 실행하지 않습니다.")
         step2_ok = False
 
     # ── Step 3: 난이도 분석 ──
@@ -671,15 +905,20 @@ def main():
     run_step(3, total_steps, "한국어 인지 난이도 분석")
 
     result_text = OUTPUT_DIR / "result_text.json"
-    if result_text.exists():
-        step3_ok = run_command(
-            ["python", str(TEXT_LEVEL_DIR / "difficulty_engine.py"),
+    if step2_ok:
+        step3_started_ns = time.time_ns()
+        step3_process_ok = run_command(
+            [sys.executable, str(TEXT_LEVEL_DIR / "difficulty_engine.py"),
              str(result_text)],
             cwd=str(OUTPUT_DIR),
             description="난이도 분석",
         )
+        step3_ok = step3_process_ok and is_fresh_nonempty_file(
+            OUTPUT_DIR / "result_text_difficulty.json",
+            step3_started_ns,
+        )
     else:
-        print("  [건너뜀] result_text.json 파일이 없습니다.")
+        print("  [건너뜀] 현재 실행의 텍스트 추출 결과가 없습니다.")
         step3_ok = False
 
     # ── Step 4: LLM 수정 제안 ──
@@ -689,15 +928,20 @@ def main():
     run_step(4, total_steps, "LLM 수정 제안 생성")
 
     result_difficulty = OUTPUT_DIR / "result_text_difficulty.json"
-    if result_difficulty.exists():
-        step4_ok = run_command(
-            ["python", str(TEXT_LEVEL_DIR / "suggestion_generator.py"),
+    if step3_ok:
+        step4_started_ns = time.time_ns()
+        step4_process_ok = run_command(
+            [sys.executable, str(TEXT_LEVEL_DIR / "suggestion_generator.py"),
              str(result_difficulty)],
             cwd=str(OUTPUT_DIR),
             description="수정 제안 생성",
         )
+        step4_ok = step4_process_ok and is_fresh_nonempty_file(
+            OUTPUT_DIR / "result_text_suggestions.json",
+            step4_started_ns,
+        )
     else:
-        print("  [건너뜀] result_text_difficulty.json 파일이 없습니다.")
+        print("  [건너뜀] 현재 실행의 난이도 분석 결과가 없습니다.")
         step4_ok = False
 
     # ── Step 5: CV 시각 분석 ──
@@ -705,7 +949,17 @@ def main():
     # 디렉터리에만 만든 PNG를 기존 CV 분석기에 전달하고, 성공/실패와 무관하게
     # run_cv_from_ephemeral_capture()의 finally에서 즉시 삭제한다.
     run_step(5, total_steps, "CV 시각 접근성 분석")
-    step5_ok = run_cv_from_ephemeral_capture(cv_capture_path)
+    if step1_ok:
+        step5_started_ns = time.time_ns()
+        step5_process_ok = run_cv_from_ephemeral_capture(cv_capture_path)
+        step5_ok = step5_process_ok and is_fresh_nonempty_file(
+            OUTPUT_DIR / "result_cv.json",
+            step5_started_ns,
+        )
+    else:
+        print("  [건너뜀] 유효한 현재 규칙 결과가 없어 CV 분석을 실행하지 않습니다.")
+        cleanup_ephemeral_cv_capture(cv_capture_path)
+        step5_ok = False
 
     # ── Step 6: 결과 통합 + 총점 계산 ──
     # 각 모듈이 생성한 JSON 파일을 읽어서 총점을 계산하고,
@@ -714,13 +968,9 @@ def main():
     # 남아있더라도 읽지 않음 (이전 실행 결과가 현재 결과에 혼입되는 것을 방지)
     run_step(6, total_steps, "결과 통합 및 총점 계산")
 
-    rule_result = load_json(OUTPUT_DIR / "result_api.json") if step1_ok else None
     difficulty_result = load_json(OUTPUT_DIR / "result_text_difficulty.json") if step3_ok else None
     suggestion_result = load_json(OUTPUT_DIR / "result_text_suggestions.json") if step4_ok else None
     cv_result = load_json(OUTPUT_DIR / "result_cv.json") if step5_ok else None
-
-    if step1_ok and not validate_target_navigation(url, rule_result):
-        sys.exit(2)
 
     total_score = calculate_total_score(rule_result, difficulty_result, cv_result)
 
@@ -743,6 +993,23 @@ def main():
         json.dump(final_result, f, ensure_ascii=False, indent=2)
 
     print(f"  통합 결과 저장: {final_path}")
+
+    # A zero score can be a valid finding, so do not decide from total_score.
+    # module_scores is empty only when none of rule/difficulty/CV produced a
+    # score-bearing result. Preserve result_final.json for local diagnosis, but
+    # never ingest it as a completed evaluation or upload its artifact.
+    rule_outputs_unchanged = step1_ok and all(
+        output_fingerprint(path) == fingerprint
+        for path, fingerprint in rule_output_fingerprints.items()
+    )
+    if (
+        not step1_ok
+        or not rule_outputs_unchanged
+        or "rule_based" not in total_score["module_scores"]
+    ):
+        print("  [분석 실패] 현재 실행의 유효한 규칙 기반 결과가 없습니다.")
+        print("  진단용 결과만 저장하고 백엔드 전송은 건너뜁니다.")
+        sys.exit(NO_SCORABLE_RESULT_EXIT_CODE)
 
     # ── Step 7: 백엔드 전송 ──
     # 백엔드 서버가 실행 중이면 result_final.json을 POST로 전송함.

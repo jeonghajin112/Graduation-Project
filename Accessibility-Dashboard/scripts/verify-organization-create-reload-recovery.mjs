@@ -257,7 +257,7 @@ async function runStorageFailureScenario(browser) {
     await dialog.getByRole("button", { name: "생성", exact: true }).click();
     await dialog
       .getByRole("alert")
-      .filter({ hasText: "브라우저에 안전한 복구 정보를 저장하지 못해" })
+      .filter({ hasText: "브라우저에 이전 작업 상태를 저장하지 못해" })
       .waitFor();
 
     assert.equal(organizationPosts, 0);
@@ -400,7 +400,7 @@ async function runStaleRecoveryDiscardScenario(browser) {
       .click();
     const dialog = page.getByRole("dialog", { name: "프로젝트 추가", exact: true });
     const discardButton = dialog.getByRole("button", {
-      name: "복구 정보 삭제",
+      name: "이전 작업 정보 삭제",
       exact: true
     });
     await discardButton.waitFor();
@@ -463,9 +463,12 @@ async function runIncompatibleRecoveryDiscardScenario(browser) {
     const dialog = page.getByRole("dialog", { name: "프로젝트 추가", exact: true });
     const input = dialog.getByLabel("프로젝트 이름", { exact: true });
     assert.equal(await input.isDisabled(), true);
-    await dialog.getByRole("alert").filter({ hasText: "이전 버전" }).waitFor();
+    await dialog
+      .getByRole("alert")
+      .filter({ hasText: "확인할 수 없는 이전 프로젝트 작업" })
+      .waitFor();
     assert.equal(await dialog.getByRole("button", { name: "생성", exact: true }).count(), 0);
-    const discardButton = dialog.getByRole("button", { name: "복구 정보 삭제", exact: true });
+    const discardButton = dialog.getByRole("button", { name: "이전 작업 정보 삭제", exact: true });
     const acceptDiscard = async (confirmation) => {
       await confirmation.accept();
     };

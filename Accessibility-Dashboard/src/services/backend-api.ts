@@ -14,6 +14,7 @@ import {
   parseVoidResponse,
   type ApiResponseParser
 } from "@/services/api-contracts";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   AnalysisResult,
   CreateEvaluationTargetInput,
@@ -63,6 +64,9 @@ export class ApiRequestError extends Error {
 
   constructor({ method, path, payload, status, url, message }: ApiRequestErrorInput) {
     const statusLabel = status === null ? "" : `, HTTP ${status}`;
+    // Keep request context in the diagnostic error only. Rendering code must
+    // use getApiErrorMessage so internal paths and server payloads stay out of
+    // the user interface.
     super(`${message} [${method} ${path}${statusLabel}]`);
     this.name = "ApiRequestError";
     this.method = method;
@@ -78,8 +82,44 @@ export function isAbortError(error: unknown): boolean {
 }
 
 export function getApiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
+  if (error instanceof ApiRequestError) {
+    if (error.status === null) {
+      return "서비스에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 잠시 후 다시 시도해 주세요.";
+    }
+
+    if (error.status === 400 || error.status === 422) {
+      return "입력한 내용을 확인한 뒤 다시 시도해 주세요.";
+    }
+    if (error.status === 401) {
+      return "로그인 정보가 만료되었거나 확인되지 않았습니다. 다시 로그인해 주세요.";
+    }
+    if (error.status === 403) {
+      return "이 작업을 수행할 권한이 없습니다. 권한이 필요하면 관리자에게 문의해 주세요.";
+    }
+    if (error.status === 404) {
+      return "요청한 정보를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.";
+    }
+    if (error.status === 408 || error.status === 504) {
+      return "요청 처리에 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
+    }
+    if (error.status === 409) {
+      return "다른 변경과 겹쳐 요청을 완료하지 못했습니다. 최신 상태를 불러온 뒤 다시 시도해 주세요.";
+    }
+    if (error.status === 413) {
+      return "전송할 내용이 너무 큽니다. 크기를 줄인 뒤 다시 시도해 주세요.";
+    }
+    if (error.status === 429) {
+      return "요청이 많아 잠시 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    }
+    if (error.status >= 500) {
+      return "서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+    }
+
+    return fallback;
+  }
+
+  if (error instanceof UserFacingError && error.message.trim().length > 0) {
+    return error.message.trim();
   }
 
   return fallback;

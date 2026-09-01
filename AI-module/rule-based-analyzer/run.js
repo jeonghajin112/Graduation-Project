@@ -63,7 +63,7 @@ const fs = require('fs');
 const path = require('path');
 
 const MAX_INITIAL_RESPONSE_HTML_BYTES = 10 * 1024 * 1024;
-const INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS = 10000;
+const INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS = 60000;
 
 function siblingOutputPath(outputPath, suffix) {
   const parsed = path.parse(outputPath);
@@ -78,7 +78,13 @@ function urlOrigin(value) {
   }
 }
 
-function challengeSignals({ url = '', title = '', text = '', html = '' }) {
+function challengeSignals({
+  url = '',
+  title = '',
+  text = '',
+  html = '',
+  botManagerWait = {},
+}) {
   let decodedUrl = url;
   try {
     decodedUrl = decodeURIComponent(url);
@@ -105,6 +111,20 @@ function challengeSignals({ url = '', title = '', text = '', html = '' }) {
   for (const [name, pattern] of documentPatterns) {
     if (pattern.test(documentText)) signals.push(name);
   }
+
+  // STCLab BotManager can replace the page body in-place without changing the
+  // URL. Require its exact marker pair, a visible loading overlay, and no
+  // visible page content outside that shell. Generic or dormant loading UI is
+  // therefore not treated as a challenge.
+  const hasBotManagerWaitBackground = /\bid\s*=\s*["']bm-wait-background["']/i.test(html);
+  const hasLoadingOverlay = /\bid\s*=\s*["']loading-overlay["']/i.test(html);
+  const hasMarkerPair = botManagerWait.markerPair
+    || (hasBotManagerWaitBackground && hasLoadingOverlay);
+  if (hasMarkerPair
+      && botManagerWait.loadingOverlayVisible
+      && botManagerWait.shellOnly) {
+    signals.push('BOT_MANAGER_WAIT_OVERLAY');
+  }
   return [...new Set(signals)];
 }
 
@@ -115,19 +135,70 @@ async function detectCrossOriginBotChallenge(page, initialUrl) {
   const crossOrigin = Boolean(
     initialOrigin && currentOrigin && initialOrigin !== currentOrigin,
   );
-  if (!crossOrigin) {
-    return { detected: false, currentUrl, signals: [] };
-  }
-
   const state = await page.evaluate(() => ({
     title: document.title || '',
     text: (document.body?.innerText || '').slice(0, 20000),
     html: (document.documentElement?.outerHTML || '').slice(0, 30000),
+    botManagerWait: (() => {
+      const waitBackground = document.getElementById('bm-wait-background');
+      const loadingOverlay = document.getElementById('loading-overlay');
+      if (!waitBackground || !loadingOverlay || !document.body) {
+        return {
+          markerPair: false,
+          loadingOverlayVisible: false,
+          shellOnly: false,
+        };
+      }
+
+      const isVisible = element => {
+        if (!element.isConnected
+            || element.hidden
+            || element.getAttribute('aria-hidden') === 'true') {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none'
+            || style.visibility === 'hidden'
+            || style.visibility === 'collapse'
+            || Number(style.opacity) === 0) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+
+      const challengeRoots = [waitBackground, loadingOverlay];
+      const belongsToChallenge = element => challengeRoots.some(
+        root => root === element || root.contains(element) || element.contains(root),
+      );
+      const hasVisibleTextOutside = [...document.body.querySelectorAll('*')].some(element => {
+        if (belongsToChallenge(element) || !isVisible(element)) return false;
+        return [...element.childNodes].some(node => (
+          node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim())
+        ));
+      });
+      const meaningfulSelector = [
+        'a[href]', 'button', 'input', 'select', 'textarea',
+        'img[src]', 'svg', 'canvas', 'video', 'audio',
+        'main', 'nav', 'article', 'header', 'footer', 'form',
+      ].join(',');
+      const hasVisibleElementOutside = [...document.body.querySelectorAll(meaningfulSelector)]
+        .some(element => !belongsToChallenge(element) && isVisible(element));
+
+      return {
+        markerPair: true,
+        loadingOverlayVisible: isVisible(loadingOverlay),
+        shellOnly: !hasVisibleTextOutside && !hasVisibleElementOutside,
+      };
+    })(),
   })).catch(() => ({ title: '', text: '', html: '' }));
   const signals = challengeSignals({ url: currentUrl, ...state });
   const strongSignals = new Set(['AUTOMATION_REASON', 'STCLAB', 'CAPTCHA', 'WEBDRIVER']);
+  const sameDocumentChallenge = signals.includes('BOT_MANAGER_WAIT_OVERLAY');
   return {
-    detected: signals.some(signal => strongSignals.has(signal)) || signals.length >= 2,
+    detected: sameDocumentChallenge || (crossOrigin && (
+      signals.some(signal => strongSignals.has(signal)) || signals.length >= 2
+    )),
     currentUrl,
     signals,
   };
@@ -144,65 +215,68 @@ function usableInitialHtml(snapshot) {
   );
 }
 
-function captureInitialMainResponse(page) {
-  let snapshotPromise = null;
-  const onResponse = response => {
-    if (snapshotPromise) return;
+async function captureInitialMainResponse(page) {
+  let snapshot = null;
+  let firstHtmlResponseClaimed = false;
+  const onRoute = async route => {
+    const request = route.request();
+    if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) {
+      await route.continue();
+      return;
+    }
+
+    let response;
     try {
-      const request = response.request();
+      // Preserve the response before it reaches the page. A response listener
+      // can lose response.body() when page JavaScript redirects within a few
+      // milliseconds, which would make challenge fallback nondeterministic.
+      response = await route.fetch({
+        maxRedirects: 0,
+        timeout: INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS,
+      });
       const contentType = response.headers()['content-type'] || '';
-      if (!request.isNavigationRequest()
-          || request.frame() !== page.mainFrame()
-          || response.status() < 200
-          || response.status() >= 300
-          || !/(?:text\/html|application\/xhtml\+xml)/i.test(contentType)) {
-        return;
-      }
-      // Begin consuming the body as soon as response headers arrive. Waiting
-      // until page.goto() settles can lose the body when client JS immediately
-      // replaces the main document with a challenge page.
-      snapshotPromise = response.body()
-        .then(body => {
-          if (body.length > MAX_INITIAL_RESPONSE_HTML_BYTES) {
-            return null;
-          }
-          const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] || 'utf-8';
+      const isUsableHtmlResponse = !firstHtmlResponseClaimed
+        && response.status() >= 200
+        && response.status() < 300
+        && /(?:text\/html|application\/xhtml\+xml)/i.test(contentType);
+      let body;
+      if (isUsableHtmlResponse) {
+        firstHtmlResponseClaimed = true;
+        body = await response.body();
+        if (body.length <= MAX_INITIAL_RESPONSE_HTML_BYTES) {
+          const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1]
+            || 'utf-8';
           let html;
           try {
             html = new TextDecoder(charset).decode(body);
           } catch {
             html = body.toString('utf8');
           }
-          return {
+          snapshot = {
             url: response.url(),
             status: response.status(),
             contentType,
             html,
           };
-        })
-        .catch(() => null);
+        }
+      }
+      await route.fulfill(body ? { response, body } : { response });
     } catch {
-      // Ignore non-standard/closing responses and retain the first valid one.
+      // If interception itself fails, let the browser continue normally. The
+      // scan can still use the rendered DOM, but no unsafe fallback is made.
+      await route.continue().catch(() => {});
+    } finally {
+      await response?.dispose().catch(() => {});
     }
   };
-  page.on('response', onResponse);
+  await page.route('**/*', onRoute);
 
   return {
     async value() {
-      if (!snapshotPromise) return null;
-      return new Promise(resolve => {
-        const timer = setTimeout(
-          () => resolve(null),
-          INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS,
-        );
-        snapshotPromise.then(value => {
-          clearTimeout(timer);
-          resolve(value);
-        });
-      });
+      return snapshot;
     },
-    stop() {
-      page.off('response', onResponse);
+    async stop() {
+      await page.unroute('**/*', onRoute);
     },
   };
 }
@@ -462,7 +536,7 @@ async function sendToBackend(requestId, apiData) {
  * ─────────────────────────────────────────────────────────────────────────
  * - 전체 흐름
     1. 브라우저 실행 & 페이지 로드
-    2. 교차 출처 bot challenge 여부 판정 및 제한적 정적 fallback
+    2. bot challenge/동일 문서 BotManager 대기 화면 판정 및 제한적 정적 fallback
     3. axe-core 접근성 검사 + typed locator 해석
     4. 동일 DOM의 정적 replay HTML/메타데이터 저장
     5. 어댑터 변환 및 점수 산출
@@ -525,12 +599,12 @@ async function run(url, outputPath, options = {}) {
     //   → 이후 고정 settle 구간에서 CSR(Vue/React 등) 초기 변경을 추가 관찰
     // timeout: 60000 (60초) — 공공 사이트 일부가 로딩이 느려 넉넉히 잡음
     let initialSnapshot = null;
-    const initialResponseCapture = captureInitialMainResponse(page);
+    const initialResponseCapture = await captureInitialMainResponse(page);
     try {
       await page.goto(url, { waitUntil: 'load', timeout: 60000 });
     } catch { }
     initialSnapshot = await initialResponseCapture.value();
-    initialResponseCapture.stop();
+    await initialResponseCapture.stop();
     await page.waitForTimeout(settleMs);
     
     await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
@@ -540,7 +614,7 @@ async function run(url, outputPath, options = {}) {
     if (initialSnapshot) {
       const challenge = await detectCrossOriginBotChallenge(page, initialSnapshot.url);
       if (challenge.detected && usableInitialHtml(initialSnapshot)) {
-        console.log('   [정적 fallback] 교차 출처 봇/보안 챌린지 이동을 감지했습니다.');
+        console.log('   [정적 fallback] 봇/보안 대기 화면을 감지했습니다.');
         console.log(`   [정적 fallback] ${challenge.signals.join(', ')}: ${challenge.currentUrl}`);
         console.log('   [정적 fallback] 최초 2xx HTML을 스크립트 없이 재현하여 정적 DOM만 분석합니다.');
         console.log('   [정적 fallback] CAPTCHA를 우회하거나 webdriver 값을 위장하지 않습니다.');
@@ -549,7 +623,7 @@ async function run(url, outputPath, options = {}) {
         replaySourceMode = 'INITIAL_RESPONSE_STATIC';
       } else if (challenge.detected) {
         throw new Error(
-          '교차 출처 봇/보안 챌린지를 감지했지만 사용할 수 있는 최초 2xx HTML을 보존하지 못했습니다.',
+          '봇/보안 대기 화면을 감지했지만 사용할 수 있는 최초 2xx HTML을 보존하지 못했습니다.',
         );
       }
     }

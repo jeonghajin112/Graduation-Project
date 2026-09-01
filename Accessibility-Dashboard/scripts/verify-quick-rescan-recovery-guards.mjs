@@ -50,6 +50,7 @@ const pendingRequest = {
 };
 
 const completedRequest = { ...pendingRequest, status: "COMPLETED" };
+const failedRequest = { ...pendingRequest, status: "FAILED" };
 const summary = {
   requestId: completedRequest.id,
   targetName: target.name,
@@ -132,16 +133,25 @@ async function clickQuickSubmit(page, count = 1) {
   }, count);
 }
 
-async function waitForQuickFailure(page) {
+async function waitForQuickStatusCheck(page) {
   // Four bounded GET-only reconciliation attempts intentionally follow an
   // ambiguous POST timeout. Leave CI headroom for those real-time waits when
   // this fixture runs alongside the other Chromium regression suites.
-  await page.locator('section[aria-live="polite"] button').waitFor({ timeout: 15_000 });
+  await page
+    .getByRole("button", { name: "상태 다시 확인", exact: true })
+    .waitFor({ timeout: 15_000 });
 }
 
-async function resetQuickFailure(page) {
-  await page.locator('section[aria-live="polite"] button').click();
-  await page.locator("#quick-analyze-url").waitFor();
+async function assertQuickStatusCheckPresentation(page) {
+  await page
+    .getByRole("heading", { name: "분석 상태를 다시 확인해 주세요", exact: true })
+    .waitFor();
+  await page.getByText("상태 확인 필요", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByText("분석 실패", { exact: true }).count(),
+    0,
+    "a retryable GET failure must not be presented as a terminal analysis failure"
+  );
 }
 
 async function waitForObservedCondition(predicate, message, timeoutMs = 7000) {
@@ -233,12 +243,12 @@ async function verifyQuickCheckpointResume(browser) {
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
   await page.locator("#quick-analyze-url").fill("https://example.com");
   await clickQuickSubmit(page);
-  await waitForQuickFailure(page);
-  await resetQuickFailure(page);
-  await clickQuickSubmit(page);
-  await waitForQuickFailure(page);
-  await resetQuickFailure(page);
-  await clickQuickSubmit(page);
+  await waitForQuickStatusCheck(page);
+  await assertQuickStatusCheckPresentation(page);
+  await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
+  await waitForQuickStatusCheck(page);
+  await assertQuickStatusCheckPresentation(page);
+  await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
   await page.waitForURL("**/recent-pages/101");
 
   assert.equal(posts, 1, "status/target GET retries must not repeat the evaluate POST");
@@ -246,6 +256,160 @@ async function verifyQuickCheckpointResume(browser) {
   assert.equal(targetGets, 2);
   await page.close();
   return { posts, statusGets, targetGets };
+}
+
+async function verifyQuickTerminalFailure(browser) {
+  let posts = 0;
+  let statusGets = 0;
+  let committed = false;
+  const page = await browser.newPage();
+  page.setDefaultTimeout(7000);
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
+      posts += 1;
+      committed = true;
+      await fulfillJson(route, pendingRequest);
+      return;
+    }
+    if (pathname === "/api/requests/501") {
+      statusGets += 1;
+      await fulfillJson(route, failedRequest);
+      return;
+    }
+    await fulfillJson(route, dashboardPayload(pathname, { committed }));
+  });
+
+  await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+  await page.locator("#quick-analyze-url").fill("https://example.com");
+  await clickQuickSubmit(page);
+  await page
+    .getByRole("heading", { name: "분석을 완료하지 못했습니다", exact: true })
+    .waitFor();
+  await page.getByText("분석 실패", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "다시 시도", exact: true }).waitFor();
+  assert.equal(
+    await page.getByText("상태 확인 필요", { exact: true }).count(),
+    0,
+    "a terminal FAILED response must remain a terminal analysis failure"
+  );
+  assert.equal(posts, 1);
+  assert.equal(statusGets, 1);
+  assert.equal(
+    await page.evaluate((key) => sessionStorage.getItem(key), quickRecoveryStorageKey),
+    null,
+    "a terminal FAILED request must clear its in-flight checkpoint"
+  );
+  await page.close();
+  return { posts, statusGets };
+}
+
+async function verifyQuickStatusGetTimeout(browser) {
+  let posts = 0;
+  const page = await browser.newPage();
+  page.setDefaultTimeout(7000);
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch;
+    window.__quickStatusTimeoutProbe = { gets: 0, aborted: 0 };
+    window.fetch = (input, init) => {
+      const inputRequest = input instanceof Request ? input : null;
+      const method = String(init?.method ?? inputRequest?.method ?? "GET").toUpperCase();
+      const rawUrl = inputRequest?.url ?? String(input);
+      const pathname = new URL(rawUrl, window.location.href).pathname;
+      if (method !== "GET" || pathname !== "/api/requests/501") {
+        return nativeFetch(input, init);
+      }
+
+      window.__quickStatusTimeoutProbe.gets += 1;
+      const signal = init?.signal ?? inputRequest?.signal;
+      return new Promise((resolve, reject) => {
+        const rejectAsAborted = () => {
+          window.__quickStatusTimeoutProbe.aborted += 1;
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        };
+        if (signal?.aborted) {
+          rejectAsAborted();
+          return;
+        }
+        signal?.addEventListener("abort", rejectAsAborted, { once: true });
+      });
+    };
+  });
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
+      posts += 1;
+      await fulfillJson(route, pendingRequest);
+      return;
+    }
+    await fulfillJson(route, dashboardPayload(pathname));
+  });
+
+  await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+  await page.clock.install();
+  await page.locator("#quick-analyze-url").fill("https://example.com");
+  await clickQuickSubmit(page);
+  await waitForObservedCondition(
+    async () => (await page.evaluate(() => window.__quickStatusTimeoutProbe.gets)) === 1,
+    "Quick Analyze status GET was not observed"
+  );
+  await page.clock.runFor(15_000);
+  await waitForObservedCondition(
+    async () => (await page.evaluate(() => window.__quickStatusTimeoutProbe.aborted)) === 1,
+    "Quick Analyze did not abort its status GET at the finite deadline"
+  );
+  await waitForQuickStatusCheck(page);
+  await assertQuickStatusCheckPresentation(page);
+  assert.equal(posts, 1, "a status GET timeout must not repeat the evaluate POST");
+  await page.close();
+  return { posts, statusGets: 1 };
+}
+
+async function verifyQuickNonFinalPollingTimeout(browser) {
+  let posts = 0;
+  let statusGets = 0;
+  const page = await browser.newPage();
+  page.setDefaultTimeout(7000);
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
+      posts += 1;
+      await fulfillJson(route, pendingRequest);
+      return;
+    }
+    if (pathname === "/api/requests/501") {
+      statusGets += 1;
+      await fulfillJson(route, pendingRequest);
+      return;
+    }
+    await fulfillJson(route, dashboardPayload(pathname));
+  });
+
+  await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+  await page.clock.install();
+  await page.locator("#quick-analyze-url").fill("https://example.com");
+  await clickQuickSubmit(page);
+  await waitForObservedCondition(
+    async () => statusGets === 1,
+    "Quick Analyze did not begin status polling"
+  );
+  for (let attempt = 1; attempt < 52; attempt += 1) {
+    const delayMs = attempt <= 10 ? 1_500 : attempt <= 30 ? 3_000 : 5_000;
+    await page.clock.runFor(delayMs);
+    await waitForObservedCondition(
+      async () => statusGets === attempt + 1,
+      `Quick Analyze did not perform polling attempt ${attempt + 1}`
+    );
+  }
+  await waitForQuickStatusCheck(page);
+  await assertQuickStatusCheckPresentation(page);
+  assert.equal(posts, 1, "poll exhaustion must not repeat the evaluate POST");
+  assert.equal(statusGets, 52);
+  await page.close();
+  return { posts, statusGets };
 }
 
 async function verifyQuickPostTimeout(browser) {
@@ -317,7 +481,8 @@ async function verifyQuickPostTimeout(browser) {
   // Let the bounded GET-only reconciliation use real time. This avoids coupling
   // the assertion to Playwright route delivery/microtask ordering under a fake clock.
   await page.clock.resume();
-  await waitForQuickFailure(page);
+  await waitForQuickStatusCheck(page);
+  await assertQuickStatusCheckPresentation(page);
   await page.close();
   return { posts: probe.posts, abortedAfterVirtualMs: observedAbortDelay };
 }
@@ -524,6 +689,9 @@ try {
   const result = {
     quickAmbiguousMutex: await verifyQuickAmbiguousCommitAndMutex(browser),
     quickCheckpointResume: await verifyQuickCheckpointResume(browser),
+    quickTerminalFailure: await verifyQuickTerminalFailure(browser),
+    quickStatusTimeout: await verifyQuickStatusGetTimeout(browser),
+    quickNonFinalTimeout: await verifyQuickNonFinalPollingTimeout(browser),
     quickTimeout: await verifyQuickPostTimeout(browser),
     quickReloadRecovery: await verifyQuickRecoveryAfterReload(browser),
     quickSpaRecovery: await verifyQuickRecoveryAfterSpaUnmount(browser),

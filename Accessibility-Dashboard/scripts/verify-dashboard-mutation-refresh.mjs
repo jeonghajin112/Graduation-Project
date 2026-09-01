@@ -18,7 +18,7 @@ const baseUrl = resolveTestBaseUrl();
 const DASHBOARD_OVERVIEW_TIMEOUT_MS = 15_000;
 const ACCELERATED_DASHBOARD_OVERVIEW_TIMEOUT_MS = 250;
 const DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE =
-  "대시보드 응답 대기 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.";
+  "대시보드를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
 const timestamp = "2026-08-10T10:00:00.000Z";
 const baselineProject = {
   id: 1,
@@ -397,12 +397,23 @@ async function runRetrySupersededByMutationScenario(browser) {
       .getByRole("button", { name: baselineProject.name, exact: true })
       .waitFor();
     failNextOverview = true;
-    const retryAlert = page.getByRole("alert").filter({ hasText: "Temporary overview failure" });
+    const retryAlert = page
+      .getByRole("alert")
+      .filter({ hasText: "서비스에 일시적인 문제가 발생했습니다" });
     await retryAlert.waitFor({ timeout: 8_000 });
+    const retryAlertText = await retryAlert.innerText();
+    assert.match(retryAlertText, /대시보드를 불러오지 못했습니다/);
+    assert.doesNotMatch(
+      retryAlertText,
+      /Temporary overview failure|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\bHTTP\s+\d{3}\b|\/dashboard\/overview/i,
+      "dashboard errors must hide server payloads and request diagnostics"
+    );
     await page.evaluate(() => {
       window.__dashboardOverviewLoadProbe.stallNext = true;
     });
-    await retryAlert.getByRole("button", { name: "다시 시도", exact: true }).click();
+    await retryAlert
+      .getByRole("button", { name: "대시보드 다시 불러오기", exact: true })
+      .click();
     await stalledRequestStarted;
 
     const addProjectButton = page
@@ -500,7 +511,10 @@ async function runTimeoutRetryScenario(browser) {
       0,
       "the boot overlay must end when the overview deadline expires"
     );
-    const retryButton = timeoutAlert.getByRole("button", { name: "다시 시도", exact: true });
+    const retryButton = timeoutAlert.getByRole("button", {
+      name: "대시보드 다시 불러오기",
+      exact: true
+    });
     await retryButton.focus();
     await page.keyboard.press("Enter");
     await page

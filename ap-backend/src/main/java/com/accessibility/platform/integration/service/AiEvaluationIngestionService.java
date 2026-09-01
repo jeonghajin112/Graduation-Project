@@ -66,8 +66,10 @@ public class AiEvaluationIngestionService {
         EvaluationRequest request;
         if (result.has("request_id") && !result.get("request_id").isNull() && !result.get("request_id").asText().isBlank()) {
             Long reqId = result.get("request_id").asLong();
-            request = requestRepository.findById(reqId)
+            request = requestRepository.findByIdForUpdate(reqId)
                     .orElseGet(() -> requestRepository.save(new EvaluationRequest(findOrCreateTarget(url), "AI-module result_final.json import")));
+
+            ensureRequestCanComplete(request);
 
             // Fail closed: results and their visual evidence must always come
             // from the same run. The scanner uploads the replacement artifact
@@ -107,6 +109,18 @@ public class AiEvaluationIngestionService {
                 text(result, "grade", null),
                 request.getStatus()
         );
+    }
+
+    private void ensureRequestCanComplete(EvaluationRequest request) {
+        // Ingestion is not an idempotent status-only operation: it deletes and
+        // replaces scores, analyses, issues, and visual evidence. Once either
+        // terminal state is committed, a late/duplicate payload must be inert.
+        if (request.getStatus().isTerminal()) {
+            throw new IllegalStateException(
+                    "Cannot ingest results for terminal request " + request.getId()
+                            + " with status " + request.getStatus()
+            );
+        }
     }
 
     private JsonNode parse(String resultJson) {

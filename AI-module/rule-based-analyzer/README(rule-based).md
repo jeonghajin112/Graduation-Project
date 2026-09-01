@@ -80,7 +80,9 @@ node run.js https://www.mohw.go.kr result.json
 **Playwright는 run.js 한 곳에서만 실행**  
 규칙 기반 모듈과 AI 모듈이 각자 브라우저를 띄우면 리소스가 낭비되고, 렌더링 시점이 달라 데이터 일관성이 깨진다. run.js에서 axe와 locator가 본 동일한 일시정지 DOM을 정적 HTML로 저장하고, 다른 모듈은 그 파일을 소비한다. 영구 PNG 산출물은 생성하지 않으며 locator 좌표도 스크린샷 경계로 자르지 않는다. `run_all.py`가 `--cv-screenshot`을 지정한 경우에만 같은 렌더를 OS 임시 PNG로 만들어 CV 입력에 사용하며, 오케스트레이터가 성공·실패와 무관하게 즉시 삭제한다.
 
-초기 2xx 문서가 대기 중 교차 출처 STCLab/CAPTCHA/자동화 챌린지로 이동하면,
+초기 2xx 문서가 대기 중 교차 출처 STCLab/CAPTCHA/자동화 챌린지로 이동하거나,
+같은 URL에서 BotManager의 `#bm-wait-background`와 `#loading-overlay`가 실제 표시되고
+그 밖의 본문이 보이지 않는 대기 화면으로 바뀌면,
 최초 main-response HTML이 유효할 때에만 script·inline handler·meta refresh를 제거한
 정적 복제본을 분석한다. 콘솔과 HTML의
 `data-accessibility-replay-source="INITIAL_RESPONSE_STATIC"`로 이 사실을 표시하며,

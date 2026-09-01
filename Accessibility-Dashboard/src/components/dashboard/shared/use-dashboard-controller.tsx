@@ -9,6 +9,7 @@ import {
   updateOrganizationModel
 } from "@/services/backend-api";
 import { parseDashboardRoute } from "@/services/dashboard-route";
+import { UserFacingError } from "@/services/user-facing-error";
 
 import { useDashboardData } from "./use-dashboard-data";
 import { useDashboardTheme } from "./use-dashboard-theme";
@@ -320,7 +321,7 @@ export function useDashboardController({
           organization.evaluationTargets.some((target) => target.id === siteId)
       );
       if (!resultIsVisible) {
-        throw new Error(QUICK_ANALYSIS_RESULT_REFRESH_MESSAGE);
+        throw new UserFacingError(QUICK_ANALYSIS_RESULT_REFRESH_MESSAGE);
       }
       navigate(`/recent-pages/${siteId}`);
     },

@@ -6,6 +6,7 @@ import {
   isAbortError
 } from "@/services/backend-api";
 import { registerDashboardSessionCache } from "@/services/dashboard-session-cache";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   AnalysisResult,
   EvaluationRequestModel,
@@ -52,7 +53,7 @@ const IDLE_STATE: EvaluationResultDetailsState = {
 
 const DETAILS_REQUEST_TIMEOUT_MS = 15_000;
 const DETAILS_REQUEST_TIMEOUT_MESSAGE =
-  "페이지 검사 결과 응답 대기 시간이 초과되었습니다. 다시 시도해 주세요.";
+  "검사 결과를 불러오는 데 시간이 오래 걸리고 있습니다. 다시 시도해 주세요.";
 const DETAILS_CACHE_TTL_MS = 60_000;
 const DETAILS_CACHE_MAX_ENTRIES = 8;
 const detailsCache = new Map<number, DetailsCacheEntry>();
@@ -121,7 +122,7 @@ function acquireDetailsRequest(request: EvaluationRequestModel): {
         didTimeout = true;
         timeoutTimer = null;
         controller.abort();
-        reject(new Error(DETAILS_REQUEST_TIMEOUT_MESSAGE));
+        reject(new UserFacingError(DETAILS_REQUEST_TIMEOUT_MESSAGE));
       }, DETAILS_REQUEST_TIMEOUT_MS);
     });
     const promise = Promise.race([
@@ -134,7 +135,7 @@ function acquireDetailsRequest(request: EvaluationRequestModel): {
       })
       .catch((error: unknown) => {
         if (didTimeout) {
-          throw new Error(DETAILS_REQUEST_TIMEOUT_MESSAGE);
+          throw new UserFacingError(DETAILS_REQUEST_TIMEOUT_MESSAGE);
         }
         throw error;
       });

@@ -19,6 +19,7 @@ const artifactLateArrival = viteTest("verify-artifact-late-arrival.mjs");
 const apiResponseValidation = viteTest("verify-api-response-validation.mjs");
 const dashboardRequestBudget = viteTest("verify-dashboard-request-budget.mjs");
 const directoryRecoveryLeases = viteTest("verify-directory-recovery-leases.mjs");
+const analysisRequestLeaseRelease = viteTest("verify-analysis-request-lease-release.mjs");
 const mutationRefresh = viteTest("verify-dashboard-mutation-refresh.mjs");
 const mutationSubmitGuards = viteTest("verify-mutation-submit-guards.mjs");
 const organizationPostTimeout = viteTest("verify-organization-create-post-timeout.mjs");
@@ -58,6 +59,7 @@ const ci = [
   apiResponseValidation,
   dashboardRequestBudget,
   directoryRecoveryLeases,
+  analysisRequestLeaseRelease,
   mutationRefresh,
   mutationSubmitGuards,
   quickRecovery,

@@ -7,6 +7,7 @@ import {
 } from "@/services/backend-api";
 import { wait } from "@/services/async-cancellation";
 import { registerDashboardSessionCache } from "@/services/dashboard-session-cache";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   EvaluationArtifact,
   EvaluationRequestModel
@@ -73,7 +74,7 @@ const ARTIFACT_REQUEST_TIMEOUT_MS = 10_000;
 const ARTIFACT_RECONCILIATION_DEADLINE_MS = 105_000;
 const ARTIFACT_RECONCILING_UI_DELAY_MS = 3_000;
 const ARTIFACT_REQUEST_TIMEOUT_MESSAGE =
-  "페이지 재현 화면 응답 대기 시간이 초과되었습니다. 다시 시도해 주세요.";
+  "검사 화면을 불러오는 데 시간이 오래 걸리고 있습니다. 다시 시도해 주세요.";
 const ARTIFACT_READY_CACHE_TTL_MS = 60_000;
 const ARTIFACT_EMPTY_CACHE_TTL_MS = 5_000;
 const ARTIFACT_CACHE_MAX_ENTRIES = 50;
@@ -163,7 +164,7 @@ async function fetchArtifactWithDeadline(
   throwIfArtifactRequestAborted(signal);
   const remainingMs = reconciliationDeadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
+    throw new UserFacingError(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
   }
 
   const controller = new AbortController();
@@ -179,13 +180,13 @@ async function fetchArtifactWithDeadline(
     const artifact = await fetchEvaluationArtifact(requestId, controller.signal);
     throwIfArtifactRequestAborted(signal);
     if (didTimeout) {
-      throw new Error(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
+      throw new UserFacingError(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
     }
     return artifact;
   } catch (error) {
     throwIfArtifactRequestAborted(signal);
     if (didTimeout) {
-      throw new Error(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
+      throw new UserFacingError(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
     }
     throw error;
   } finally {
@@ -204,7 +205,7 @@ async function loadArtifactWithRetry(
 
   for (const [attemptIndex, delayMs] of retryDelays.entries()) {
     if (delayMs >= reconciliationDeadline - Date.now()) {
-      throw new Error(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
+      throw new UserFacingError(ARTIFACT_REQUEST_TIMEOUT_MESSAGE);
     }
     await wait(delayMs, signal);
     const artifact = await fetchArtifactWithDeadline(
@@ -237,7 +238,7 @@ async function loadArtifactWithRetry(
     }
   }
 
-  throw new Error("페이지 재현 화면 조회가 예기치 않게 종료되었습니다.");
+  throw new UserFacingError("검사 화면을 불러오지 못했습니다. 다시 시도해 주세요.");
 }
 
 function acquireArtifactRequest(requestId: number, requestUpdatedAt: string): {
