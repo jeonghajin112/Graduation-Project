@@ -44,6 +44,18 @@ function createDeferred() {
   return { promise, resolve };
 }
 
+async function assertDestructiveButton(button, label) {
+  const colors = await button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      color: style.color
+    };
+  });
+  assert.equal(colors.backgroundColor, "rgb(215, 0, 21)", `${label} must use the destructive red`);
+  assert.equal(colors.color, "rgb(255, 255, 255)", `${label} must keep readable white text`);
+}
+
 const pageDeleteStarted = createDeferred();
 const releasePageDelete = createDeferred();
 const projectSaveStarted = createDeferred();
@@ -149,6 +161,7 @@ try {
   await page.getByRole("button", { name: `${target.name} 제거`, exact: true }).click();
   const pageDeleteDialog = page.getByRole("dialog", { name: "페이지 제거", exact: true });
   const pageDeleteButton = pageDeleteDialog.getByRole("button", { name: "제거", exact: true });
+  await assertDestructiveButton(pageDeleteButton, "page delete confirmation");
   await pageDeleteButton.evaluate((button) => {
     button.click();
     button.click();
@@ -190,9 +203,45 @@ try {
   await page.getByRole("heading", { level: 1, name: updatedName, exact: true }).waitFor();
 
   await sidebar.getByRole("button", { name: updatedName, exact: true }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "삭제", exact: true }).click();
+  const projectDeleteMenuItem = page.getByRole("menuitem", { name: "삭제", exact: true });
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(215, 0, 21)",
+    "project delete menu item must use the destructive red"
+  );
+  await projectDeleteMenuItem.evaluate((element) => {
+    const dashboardSurface = element.closest(".bridge-dashboard");
+    if (!(dashboardSurface instanceof HTMLElement)) {
+      throw new Error("project delete menu is outside the dashboard surface");
+    }
+    dashboardSurface.classList.remove("theme-light");
+    dashboardSurface.classList.add("theme-dark");
+  });
+  await page.waitForTimeout(200);
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(255, 69, 58)",
+    "project delete menu item must use the accessible dark-theme destructive red"
+  );
+  await projectDeleteMenuItem.hover();
+  await page.waitForTimeout(200);
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(255, 69, 58)",
+    "project delete menu item must remain red on dark-theme hover"
+  );
+  await projectDeleteMenuItem.evaluate((element) => {
+    const dashboardSurface = element.closest(".bridge-dashboard");
+    if (!(dashboardSurface instanceof HTMLElement)) {
+      throw new Error("project delete menu is outside the dashboard surface");
+    }
+    dashboardSurface.classList.remove("theme-dark");
+    dashboardSurface.classList.add("theme-light");
+  });
+  await projectDeleteMenuItem.click();
   const projectDeleteDialog = page.getByRole("dialog", { name: "프로젝트 제거", exact: true });
   const projectDeleteButton = projectDeleteDialog.getByRole("button", { name: "네", exact: true });
+  await assertDestructiveButton(projectDeleteButton, "project delete confirmation");
   await projectDeleteButton.evaluate((button) => {
     button.click();
     button.click();

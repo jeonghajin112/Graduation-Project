@@ -384,6 +384,16 @@ try {
     },
     "page information must keep only the selected page identity and latest analysis time"
   );
+  assert.equal(
+    (await evidence.textContent())?.includes("2026-08-11 12:30"),
+    false,
+    "the replay card must not repeat the latest analysis time"
+  );
+  assert.equal(
+    (await pageInformationCard.textContent())?.match(/2026-08-11 12:30/g)?.length,
+    1,
+    "the latest analysis time must appear once in page information"
+  );
   const railCardOrder = await page.locator(".site-dashboard-rail > *").evaluateAll((cards) =>
     cards.map((card) => card.textContent?.trim() ?? "")
   );

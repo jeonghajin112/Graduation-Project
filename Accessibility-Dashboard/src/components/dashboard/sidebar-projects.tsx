@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type { DashboardSidebarSelection } from "@/services/dashboard-route";
@@ -426,7 +427,7 @@ export function SidebarProjectsSection({
                       role="menuitem"
                       onClick={() => openDelete(project)}
                       className={cn(
-                        "sidebar-project-context-menu-item mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-[var(--dashboard-text-primary)] transition-colors hover:bg-[var(--dashboard-hover-surface)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px]"
+                        "sidebar-project-context-menu-item sidebar-project-context-menu-item-destructive mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-[var(--dashboard-hover-surface)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px]"
                       )}
                     >
                       <Trash2 size={13} />
@@ -651,16 +652,18 @@ export function SidebarProjectsSection({
                   >
                     아니요
                   </button>
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     disabled={isDeleting}
                     onClick={() => {
                       void handleDelete();
                     }}
-                    className="inline-flex h-9 items-center rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="h-9 px-3 text-sm font-semibold"
                   >
                     {isDeleting ? "제거 중..." : "네"}
-                  </button>
+                  </Button>
                 </div>
               </article>
             </div>,

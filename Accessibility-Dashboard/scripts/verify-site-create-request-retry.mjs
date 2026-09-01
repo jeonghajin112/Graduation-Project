@@ -358,6 +358,7 @@ try {
   );
 
   targetLookupStatus = "ACTIVE";
+  await page.setViewportSize({ width: 580, height: 560 });
   await requestRetryButton.click();
   const terminalFailureAlert = dialog
     .getByRole("alert")
@@ -386,6 +387,93 @@ try {
     /자동 접속|차단|리다이렉트|FAILED|HTTP|\/(?:api|requests|targets)\//,
     "terminal analysis failures must not expose speculative causes or implementation details"
   );
+
+  const failureLayout = await dialog.evaluate((element) => {
+    const scrollRegion = element.querySelector("[data-site-create-scroll-region]");
+    const footer = element.querySelector("[data-site-create-footer]");
+    const title = element.querySelector("#site-create-title");
+    if (
+      !(scrollRegion instanceof HTMLElement) ||
+      !(footer instanceof HTMLElement) ||
+      !(title instanceof HTMLElement)
+    ) {
+      throw new Error("site-create modal regions are missing");
+    }
+    const dialogRect = element.getBoundingClientRect();
+    const footerRectBefore = footer.getBoundingClientRect();
+    const titleRectBefore = title.getBoundingClientRect();
+    scrollRegion.scrollTop = scrollRegion.scrollHeight;
+    const footerRectAfter = footer.getBoundingClientRect();
+    const titleRectAfter = title.getBoundingClientRect();
+    return {
+      dialogBottom: dialogRect.bottom,
+      dialogOverflowY: getComputedStyle(element).overflowY,
+      dialogTop: dialogRect.top,
+      footerBottom: footerRectAfter.bottom,
+      footerTopDelta: footerRectAfter.top - footerRectBefore.top,
+      scrollClientHeight: scrollRegion.clientHeight,
+      scrollHeight: scrollRegion.scrollHeight,
+      scrollOverflowY: getComputedStyle(scrollRegion).overflowY,
+      titleTopDelta: titleRectAfter.top - titleRectBefore.top
+    };
+  });
+  assert.equal(failureLayout.dialogOverflowY, "hidden");
+  assert.equal(failureLayout.scrollOverflowY, "auto");
+  assert.ok(
+    failureLayout.scrollHeight > failureLayout.scrollClientHeight,
+    "the compact failure state must scroll only its content region"
+  );
+  assert.ok(failureLayout.dialogTop >= 0 && failureLayout.dialogBottom <= 560);
+  assert.ok(failureLayout.footerBottom <= failureLayout.dialogBottom + 1);
+  assert.ok(Math.abs(failureLayout.footerTopDelta) < 1, "footer must stay fixed while content scrolls");
+  assert.ok(Math.abs(failureLayout.titleTopDelta) < 1, "title must stay fixed while content scrolls");
+
+  const scrollRegion = dialog.locator("[data-site-create-scroll-region]");
+  await scrollRegion.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await scrollRegion.focus();
+  await page.keyboard.press("PageDown");
+  await page.waitForFunction(
+    () => (document.querySelector("[data-site-create-scroll-region]")?.scrollTop ?? 0) > 0
+  );
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  const narrowFailureLayout = await dialog.evaluate((element) => {
+    const footer = element.querySelector("[data-site-create-footer]");
+    if (!(footer instanceof HTMLElement)) {
+      throw new Error("site-create modal footer is missing");
+    }
+    const dialogRect = element.getBoundingClientRect();
+    const footerRect = footer.getBoundingClientRect();
+    const buttonRects = Array.from(footer.querySelectorAll("button")).map((button) => {
+      const rect = button.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    });
+    return {
+      buttonRects,
+      dialogBottom: dialogRect.bottom,
+      dialogLeft: dialogRect.left,
+      dialogRight: dialogRect.right,
+      dialogTop: dialogRect.top,
+      footerBottom: footerRect.bottom,
+      footerLeft: footerRect.left,
+      footerRight: footerRect.right,
+      footerScrollWidth: footer.scrollWidth,
+      footerWidth: footer.clientWidth
+    };
+  });
+  assert.ok(narrowFailureLayout.dialogTop >= 0 && narrowFailureLayout.dialogBottom <= 568);
+  assert.ok(narrowFailureLayout.footerBottom <= narrowFailureLayout.dialogBottom + 1);
+  assert.ok(
+    narrowFailureLayout.footerScrollWidth <= narrowFailureLayout.footerWidth,
+    "the compact footer must not overflow horizontally"
+  );
+  for (const buttonRect of narrowFailureLayout.buttonRects) {
+    assert.ok(buttonRect.left >= narrowFailureLayout.footerLeft - 1);
+    assert.ok(buttonRect.right <= narrowFailureLayout.footerRight + 1);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   const failedRecovery = await page.evaluate((key) => {
     const rawValue = window.sessionStorage.getItem(key);
@@ -417,6 +505,13 @@ try {
     "restoring a terminal-failure checkpoint must not automatically create another request"
   );
 
+  await page.setViewportSize({ width: 320, height: 568 });
+  const retryScrollRegion = dialog.locator("[data-site-create-scroll-region]");
+  const retryScrollMaximum = await retryScrollRegion.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    return element.scrollHeight - element.clientHeight;
+  });
+  assert.ok(retryScrollMaximum > 0, "the compact retry state must provide scrollable content");
   await terminalRetryButton.click();
   const pollRetryButton = dialog.getByRole("button", {
     name: "상태 확인 다시 시도",
@@ -428,6 +523,25 @@ try {
     .getByRole("alert")
     .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" });
   await statusCheckAlert.waitFor();
+  const statusAlertVisibility = await statusCheckAlert.evaluate((alert) => {
+    const scrollRegion = alert.closest("[data-site-create-scroll-region]");
+    if (!(scrollRegion instanceof HTMLElement)) {
+      throw new Error("status alert is outside the site-create scroll region");
+    }
+    const alertRect = alert.getBoundingClientRect();
+    const scrollRect = scrollRegion.getBoundingClientRect();
+    return {
+      alertBottom: alertRect.bottom,
+      alertTop: alertRect.top,
+      scrollBottom: scrollRect.bottom,
+      scrollTop: scrollRect.top,
+      scrollPosition: scrollRegion.scrollTop
+    };
+  });
+  assert.equal(statusAlertVisibility.scrollPosition, 0, "new errors must reset content to the top");
+  assert.ok(statusAlertVisibility.alertTop >= statusAlertVisibility.scrollTop - 1);
+  assert.ok(statusAlertVisibility.alertBottom <= statusAlertVisibility.scrollBottom + 1);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
   assert.doesNotMatch(
     await statusCheckAlert.innerText(),
@@ -520,6 +634,51 @@ try {
   assert.equal(observed.requestPosts, 3, "request-ready recovery must not auto-submit analysis");
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
+
+  await page.evaluate(
+    ({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)),
+    {
+      key: storageKey,
+      value: {
+        ...recoveryBase,
+        attemptId: "stale-request-ready",
+        phase: "request-ready",
+        previousFailedRequestId: null,
+        startedAt: Date.now() - 24 * 60 * 60 * 1_000 - 1
+      }
+    }
+  );
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
+  await dialog.waitFor();
+  await dialog.getByRole("button", { name: "이전 작업 정보 삭제", exact: true }).waitFor();
+  const staleFooterLayout = await dialog.locator("[data-site-create-footer]").evaluate((footer) => {
+    const footerRect = footer.getBoundingClientRect();
+    const buttons = Array.from(footer.querySelectorAll("button")).map((button) => {
+      const rect = button.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    });
+    return {
+      buttons,
+      buttonCount: buttons.length,
+      footerLeft: footerRect.left,
+      footerRight: footerRect.right,
+      scrollWidth: footer.scrollWidth,
+      width: footer.clientWidth
+    };
+  });
+  assert.equal(staleFooterLayout.buttonCount, 3, "stale recovery must expose all three actions");
+  assert.ok(
+    staleFooterLayout.scrollWidth <= staleFooterLayout.width,
+    "the three-action compact footer must not overflow"
+  );
+  for (const buttonRect of staleFooterLayout.buttons) {
+    assert.ok(buttonRect.left >= staleFooterLayout.footerLeft - 1);
+    assert.ok(buttonRect.right <= staleFooterLayout.footerRight + 1);
+  }
+  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.evaluate(
     ({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)),

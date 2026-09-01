@@ -81,16 +81,34 @@ try {
   const metrics = await dialog.evaluate((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
+    const scrollRegion = element.querySelector("[data-site-create-scroll-region]");
+    const footer = element.querySelector("[data-site-create-footer]");
+    if (!(scrollRegion instanceof HTMLElement) || !(footer instanceof HTMLElement)) {
+      throw new Error("site-create modal regions are missing");
+    }
+    const scrollStyle = getComputedStyle(scrollRegion);
+    const footerRect = footer.getBoundingClientRect();
     return {
+      scrollAriaLabel: scrollRegion.getAttribute("aria-label"),
       bottom: rect.bottom,
       clientHeight: element.clientHeight,
-      overflowY: style.overflowY,
+      dialogOverflowY: style.overflowY,
+      footerBottom: footerRect.bottom,
+      footerTop: footerRect.top,
+      scrollOverflowY: scrollStyle.overflowY,
+      scrollRole: scrollRegion.getAttribute("role"),
+      scrollTabIndex: scrollRegion.tabIndex,
       top: rect.top
     };
   });
   assert.ok(metrics.clientHeight <= 520, `dialog height ${metrics.clientHeight} exceeds mobile max`);
   assert.ok(metrics.top >= 0 && metrics.bottom <= 568, "dialog must stay inside the mobile viewport");
-  assert.equal(metrics.overflowY, "auto");
+  assert.equal(metrics.dialogOverflowY, "hidden");
+  assert.equal(metrics.scrollOverflowY, "auto");
+  assert.equal(metrics.scrollRole, "region");
+  assert.equal(metrics.scrollAriaLabel, "페이지 추가 내용");
+  assert.equal(metrics.scrollTabIndex, 0);
+  assert.ok(metrics.footerTop >= metrics.top && metrics.footerBottom <= metrics.bottom + 1);
   assert.equal(targetPosts, 0, "a storage failure must prevent the mutation POST");
   assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), storageKey), null);
   assert.deepEqual(unknownRequests, []);

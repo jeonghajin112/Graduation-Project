@@ -685,6 +685,16 @@
     color: #ffffff !important;
   }
 
+  .bridge-dashboard.theme-light .sidebar-project-context-menu-item-destructive {
+    color: #d70015 !important;
+  }
+
+  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive,
+  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:hover,
+  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:focus-visible {
+    color: #ff453a !important;
+  }
+
   .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:focus-visible,
   .bridge-dashboard.theme-dark .dashboard-account-menu-item:focus-visible {
     --tw-ring-offset-color: transparent;
@@ -967,6 +977,38 @@
 .dashboard-modal-layer {
   z-index: 10000;
   isolation: isolate;
+}
+
+/* Keep long modal content scrollable without cutting through the rounded shell. */
+.site-create-modal-scroll {
+  scrollbar-color: var(--dashboard-text-muted) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .site-create-modal-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-track,
+  .site-create-modal-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-thumb {
+    min-height: 44px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--dashboard-text-muted);
+    background-clip: padding-box;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
 /* Compact project tree sidebar — adapted from the supplied dark tree-navigation reference. */

@@ -117,7 +117,7 @@ export function OrganizationModelCreateModal({
           {canDiscardRecovery && (
             <Button
               type="button"
-              variant="secondary"
+              variant="destructive"
               size="sm"
               disabled={isSubmitting}
               onClick={() => {
@@ -128,11 +128,7 @@ export function OrganizationModelCreateModal({
                   onDiscardRecovery();
                 }
               }}
-              className={
-                isDarkMode
-                  ? "h-7 bg-[#3a2024] px-4 text-xs text-[#ffb4ab] hover:bg-[#4a282d]"
-                  : "h-7 bg-[#fff0f0] px-4 text-xs text-[#b42318] hover:bg-[#ffe2e0]"
-              }
+              className="h-7 px-4 text-xs font-semibold"
             >
               이전 작업 정보 삭제
             </Button>

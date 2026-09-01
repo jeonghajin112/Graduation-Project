@@ -1,5 +1,5 @@
 import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -310,6 +310,7 @@ export function SiteCreateModal({
   const autoCloseTimeoutRef = useRef<number | null>(null);
   const recoveryRawValueRef = useRef<string | null>(null);
   const discardLockRef = useRef(false);
+  const scrollRegionRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useDialogAccessibility({
     isOpen,
     onClose,
@@ -322,6 +323,12 @@ export function SiteCreateModal({
     analysisProgress.phase === "failed";
   const isAnalysisNotice =
     analysisProgress.phase === "ready" || analysisProgress.phase === "paused";
+
+  useLayoutEffect(() => {
+    if (isOpen && siteCreateError.length > 0) {
+      scrollRegionRef.current?.scrollTo({ top: 0 });
+    }
+  }, [isOpen, siteCreateError]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -736,7 +743,7 @@ export function SiteCreateModal({
   }
 
   return (
-    <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-6">
+    <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
       <div
         className="absolute inset-0"
         aria-hidden="true"
@@ -753,11 +760,11 @@ export function SiteCreateModal({
         aria-modal="true"
         aria-labelledby="site-create-title"
         tabIndex={-1}
-        className={`relative z-10 max-h-[calc(100dvh-3rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-[18px] border p-6 ${
+        className={`relative z-10 flex max-h-[calc(100dvh-3rem)] w-full max-w-md flex-col overflow-hidden rounded-[18px] border ${
           isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
         }`}
       >
-        <div className="mb-4">
+        <header className="shrink-0 px-6 pb-4 pt-6">
           <h2
             id="site-create-title"
             className={`text-lg font-semibold tracking-[-0.015em] ${
@@ -766,89 +773,101 @@ export function SiteCreateModal({
           >
             페이지 추가
           </h2>
+        </header>
+
+        <div
+          ref={scrollRegionRef}
+          data-site-create-scroll-region
+          role="region"
+          aria-label="페이지 추가 내용"
+          tabIndex={0}
+          className="site-create-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-6"
+        >
+          {siteCreateError.length > 0 && (
+            <div
+              role="alert"
+              className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
+                isAnalysisNotice
+                  ? isDarkMode
+                    ? "border-[#5b4a1f] bg-[#2a2519] text-[#ffd60a]"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                  : isDarkMode
+                    ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
+                    : "border-rose-200 bg-rose-50 text-rose-700"
+              }`}
+            >
+              {resumePoint.kind === "create"
+                ? "페이지 추가 실패"
+                : analysisProgress.phase === "ready"
+                  ? "페이지 등록 완료 · 분석 시작 전"
+                  : analysisProgress.phase === "paused"
+                  ? "페이지 등록 완료 · 상태 확인 필요"
+                  : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
+            </div>
+          )}
+
+          {hasAnalysisProgress ? (
+            <AnalysisProgressPanel
+              progress={analysisProgress}
+              resumePoint={resumePoint}
+              isDarkMode={isDarkMode}
+              showMessage={siteCreateError.length === 0}
+            />
+          ) : (
+            <div className="grid gap-3.5">
+              <label className="block">
+                <span
+                  className={`mb-1.5 block text-xs font-semibold ${
+                    isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
+                  }`}
+                >
+                  페이지 이름
+                </span>
+                <Input
+                  value={siteName}
+                  onChange={(event) => setSiteName(event.target.value)}
+                  disabled={isRecoveryBlocked}
+                  maxLength={SITE_NAME_MAX_LENGTH}
+                  placeholder="페이지 이름 입력"
+                  className={
+                    isDarkMode
+                      ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
+                      : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
+                  }
+                />
+              </label>
+
+              <label className="block">
+                <span
+                  className={`mb-1.5 block text-xs font-semibold ${
+                    isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
+                  }`}
+                >
+                  페이지 주소
+                </span>
+                <Input
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                  disabled={isRecoveryBlocked}
+                  maxLength={SITE_URL_MAX_LENGTH}
+                  placeholder="https://example.com"
+                  className={
+                    isDarkMode
+                      ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
+                      : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
+                  }
+                />
+              </label>
+            </div>
+          )}
         </div>
 
-        {siteCreateError.length > 0 && (
-          <div
-            role="alert"
-            className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
-              isAnalysisNotice
-                ? isDarkMode
-                  ? "border-[#5b4a1f] bg-[#2a2519] text-[#ffd60a]"
-                  : "border-amber-200 bg-amber-50 text-amber-800"
-                : isDarkMode
-                  ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
-                  : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
-          >
-            {resumePoint.kind === "create"
-              ? "페이지 추가 실패"
-              : analysisProgress.phase === "ready"
-                ? "페이지 등록 완료 · 분석 시작 전"
-                : analysisProgress.phase === "paused"
-                ? "페이지 등록 완료 · 상태 확인 필요"
-                : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
-          </div>
-        )}
-
-        {hasAnalysisProgress ? (
-          <AnalysisProgressPanel
-            progress={analysisProgress}
-            resumePoint={resumePoint}
-            isDarkMode={isDarkMode}
-            showMessage={siteCreateError.length === 0}
-          />
-        ) : (
-          <div className="grid gap-3.5">
-            <label className="block">
-              <span
-                className={`mb-1.5 block text-xs font-semibold ${
-                  isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
-                }`}
-              >
-                페이지 이름
-              </span>
-              <Input
-                value={siteName}
-                onChange={(event) => setSiteName(event.target.value)}
-                disabled={isRecoveryBlocked}
-                maxLength={SITE_NAME_MAX_LENGTH}
-                placeholder="페이지 이름 입력"
-                className={
-                  isDarkMode
-                    ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
-                    : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
-                }
-              />
-            </label>
-
-            <label className="block">
-              <span
-                className={`mb-1.5 block text-xs font-semibold ${
-                  isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
-                }`}
-              >
-                페이지 주소
-              </span>
-              <Input
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                disabled={isRecoveryBlocked}
-                maxLength={SITE_URL_MAX_LENGTH}
-                placeholder="https://example.com"
-                className={
-                  isDarkMode
-                    ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
-                    : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
-                }
-              />
-            </label>
-          </div>
-        )}
-
-        <div className="mt-5 flex items-center justify-between gap-3">
+        <div
+          data-site-create-footer
+          className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-5 sm:flex-row sm:items-center sm:justify-between"
+        >
           {hasAnalysisProgress ? (
-            <p className={`text-xs font-medium ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
+            <p className={`min-w-0 flex-1 text-xs font-medium ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
               {isSubmittingSite
                 ? "분석 중에는 창을 닫을 수 없습니다."
                 : resumePoint.kind === "create"
@@ -858,19 +877,15 @@ export function SiteCreateModal({
           ) : (
             <span />
           )}
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
             {(isRecoveryBlocked || canDiscardRecovery) && (
               <Button
                 type="button"
-                variant="secondary"
+                variant="destructive"
                 size="sm"
                 disabled={isSubmittingSite || !canDiscardRecovery}
                 onClick={handleDiscardRecovery}
-                className={
-                  isDarkMode
-                    ? "h-7 bg-[#3a2024] px-3 text-xs text-[#ff9aa8] hover:bg-[#4a272d]"
-                    : "h-7 bg-rose-50 px-3 text-xs text-rose-700 hover:bg-rose-100"
-                }
+                className="h-7 px-3 text-xs font-semibold"
               >
                 이전 작업 정보 삭제
               </Button>

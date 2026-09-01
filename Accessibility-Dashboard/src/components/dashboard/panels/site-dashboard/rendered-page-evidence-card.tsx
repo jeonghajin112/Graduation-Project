@@ -4,7 +4,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getEvaluationArtifactContentUrl } from "@/services/backend-api";
 import type { EvaluationArtifact } from "@/types/accessibility-domain";
 
-import { formatDateTime } from "../../shared/utils";
 import { formatIssueCodeLabel } from "./constants";
 import {
   DASHBOARD_REPLAY_SOURCE,
@@ -559,11 +558,7 @@ export function RenderedPageEvidenceCard({
       <header className="site-page-evidence-header">
         <div>
           <h2 id="site-page-evidence-heading">페이지 검사 화면</h2>
-          <p>
-            {artifact
-              ? `${formatDateTime(artifact.capturedAt)} 스캔 페이지 재현`
-              : "문제가 발견된 요소를 재현된 페이지에서 직접 확인합니다"}
-          </p>
+          <p>문제가 발견된 요소를 재현된 페이지에서 직접 확인합니다</p>
         </div>
 
       </header>

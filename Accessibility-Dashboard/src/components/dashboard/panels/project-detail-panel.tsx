@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type {
@@ -391,8 +392,8 @@ export function OrganizationModelDetailPanel({
                   aria-label={`${row.name} 제거`}
                   className={`dashboard-project-card-delete-button inline-flex items-center justify-center rounded-full opacity-0 transition group-hover:opacity-100 focus:opacity-100 ${
                     isDarkMode
-                      ? "text-[#a1a1a6] hover:bg-white/[0.07]"
-                      : "text-[#86868b] hover:bg-black/[0.05]"
+                      ? "text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                      : "text-red-600 hover:bg-red-50 hover:text-red-700"
                   }`}
                 >
                   <Trash2 size={13} aria-hidden="true" />
@@ -723,16 +724,18 @@ export function OrganizationModelDetailPanel({
                   >
                     취소
                   </button>
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     disabled={isDeletingEvaluationTarget}
                     onClick={() => {
                       void handleConfirmDeleteEvaluationTargetModel();
                     }}
-                    className="inline-flex h-7 items-center rounded-md bg-[#0071e3] px-5 text-xs font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="h-7 rounded-md px-5 text-xs font-semibold"
                   >
                     {isDeletingEvaluationTarget ? "제거 중..." : "제거"}
-                  </button>
+                  </Button>
                 </div>
               </article>
             </div>,
