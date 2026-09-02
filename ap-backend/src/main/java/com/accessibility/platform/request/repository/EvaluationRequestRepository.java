@@ -19,6 +19,9 @@ public interface EvaluationRequestRepository extends JpaRepository<EvaluationReq
     @Query("select request from EvaluationRequest request where request.id = :id")
     Optional<EvaluationRequest> findByIdForUpdate(@Param("id") Long id);
 
+    @Query("select request.evaluationTarget.accessUrl from EvaluationRequest request where request.id = :id")
+    Optional<String> findTargetUrlById(@Param("id") Long id);
+
     @Query("""
             select evaluationRequest
             from EvaluationRequest evaluationRequest

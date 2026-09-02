@@ -362,7 +362,6 @@ class ReplayDocumentSanitizerTest {
                 "--replay-overlay-inverse-scale",
                 "--replay-visual-width",
                 "--replay-selection-border-width",
-                "window.addEventListener('beforeunload', postDocumentUnloading, { once: true })",
                 "window.addEventListener('pagehide', postDocumentUnloading, { once: true })",
                 "post({ type: 'DOCUMENT_LOADING', documentToken: replayDocumentToken })",
                 "post({ type: 'READY', documentToken: replayDocumentToken })",
@@ -569,6 +568,7 @@ class ReplayDocumentSanitizerTest {
                 "post({ type: 'DOCUMENT_UNLOADING', documentToken: replayDocumentToken });"
         );
         assertThat(script).doesNotContain(
+                "beforeunload",
                 "POPOVER_MAX_MARKER_DISTANCE",
                 "button.textContent = String(index + 1)",
                 "targetSlots",

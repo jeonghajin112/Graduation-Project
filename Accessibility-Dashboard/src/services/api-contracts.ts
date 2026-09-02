@@ -10,6 +10,7 @@ import type {
   EvaluationTarget,
   IssueLocator,
   IssueLocatorPathStep,
+  LiveReportSession,
   Organization,
   RequestStatus,
   ScoreResult,
@@ -1022,6 +1023,88 @@ export function createEvaluationArtifactParser(
     };
   };
 }
+
+export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession> = (
+  value,
+  path
+) => {
+  const record = parseRecord(value, path);
+  const sessionId = parseNonBlankString(
+    readRequired(record, "sessionId", path),
+    `${path}.sessionId`,
+    128
+  );
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+    return failContract(sessionId, `${path}.sessionId`, "URL-safe session identifier");
+  }
+
+  const runtimeUrl = parseAbsoluteHttpUrl(
+    readRequired(record, "runtimeUrl", path),
+    `${path}.runtimeUrl`
+  );
+  const viewerOrigin = parseNonBlankString(
+    readRequired(record, "viewerOrigin", path),
+    `${path}.viewerOrigin`,
+    512
+  );
+  const parsedRuntimeUrl = new URL(runtimeUrl);
+  if (viewerOrigin !== "null") {
+    const parsedViewerOrigin = new URL(parseAbsoluteHttpUrl(viewerOrigin, `${path}.viewerOrigin`, 512));
+    if (
+      parsedViewerOrigin.origin !== viewerOrigin ||
+      parsedViewerOrigin.pathname !== "/" ||
+      parsedViewerOrigin.search.length > 0 ||
+      parsedViewerOrigin.hash.length > 0
+    ) {
+      return failContract(viewerOrigin, `${path}.viewerOrigin`, "path가 없는 HTTP(S) origin");
+    }
+    if (parsedRuntimeUrl.origin !== parsedViewerOrigin.origin) {
+      return failContract(
+        runtimeUrl,
+        `${path}.runtimeUrl`,
+        `viewerOrigin ${viewerOrigin}과 같은 origin의 URL`
+      );
+    }
+  }
+
+  const nonce = parseNonBlankString(
+    readRequired(record, "nonce", path),
+    `${path}.nonce`,
+    256
+  );
+  if (!/^[A-Za-z0-9_-]{32,256}$/.test(nonce)) {
+    return failContract(nonce, `${path}.nonce`, "32~256자 URL-safe nonce");
+  }
+
+  const bridgeSecret = parseNonBlankString(
+    readRequired(record, "bridgeSecret", path),
+    `${path}.bridgeSecret`,
+    256
+  );
+  if (!/^[A-Za-z0-9_-]{32,256}$/.test(bridgeSecret)) {
+    return failContract(
+      bridgeSecret,
+      `${path}.bridgeSecret`,
+      "32~256자 URL-safe bridge secret"
+    );
+  }
+  if (bridgeSecret === nonce) {
+    return failContract(
+      bridgeSecret,
+      `${path}.bridgeSecret`,
+      "resource nonce와 다른 bridge secret"
+    );
+  }
+
+  return {
+    sessionId,
+    runtimeUrl,
+    viewerOrigin,
+    nonce,
+    bridgeSecret,
+    expiresAt: parseDateTime(readRequired(record, "expiresAt", path), `${path}.expiresAt`)
+  };
+};
 
 export const parseVoidResponse: ApiResponseParser<void> = (value, path) => {
   if (value === null) {

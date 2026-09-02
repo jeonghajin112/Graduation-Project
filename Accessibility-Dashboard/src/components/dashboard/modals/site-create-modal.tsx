@@ -321,6 +321,7 @@ export function SiteCreateModal({
     analysisProgress.phase === "ready" ||
     analysisProgress.phase === "paused" ||
     analysisProgress.phase === "failed";
+  const showFooter = !hasAnalysisProgress || isRetryableProgress;
   const isAnalysisNotice =
     analysisProgress.phase === "ready" || analysisProgress.phase === "paused";
 
@@ -781,7 +782,9 @@ export function SiteCreateModal({
           role="region"
           aria-label="페이지 추가 내용"
           tabIndex={0}
-          className="site-create-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-6"
+          className={`site-create-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 ${
+            showFooter ? "" : "pb-6"
+          }`}
         >
           {siteCreateError.length > 0 && (
             <div
@@ -862,90 +865,90 @@ export function SiteCreateModal({
           )}
         </div>
 
-        <div
-          data-site-create-footer
-          className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-5 sm:flex-row sm:items-center sm:justify-between"
-        >
-          {hasAnalysisProgress ? (
-            <p className={`min-w-0 flex-1 text-xs font-medium ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
-              {isSubmittingSite
-                ? "분석 중에는 창을 닫을 수 없습니다."
-                : resumePoint.kind === "create"
+        {showFooter && (
+          <div
+            data-site-create-footer
+            className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-5 sm:flex-row sm:items-center sm:justify-between"
+          >
+            {hasAnalysisProgress ? (
+              <p
+                className={`min-w-0 flex-1 text-xs font-medium ${
+                  isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"
+                }`}
+              >
+                {resumePoint.kind === "create"
                   ? "입력 내용을 유지한 채 다시 시도할 수 있습니다."
                   : "페이지는 등록되어 있으며 분석 단계만 다시 시도합니다."}
-            </p>
-          ) : (
-            <span />
-          )}
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
-            {(isRecoveryBlocked || canDiscardRecovery) && (
+              </p>
+            ) : (
+              <span />
+            )}
+            <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+              {(isRecoveryBlocked || canDiscardRecovery) && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isSubmittingSite || !canDiscardRecovery}
+                  onClick={handleDiscardRecovery}
+                  className="h-7 px-3 text-xs font-semibold"
+                >
+                  이전 작업 정보 삭제
+                </Button>
+              )}
               <Button
                 type="button"
-                variant="destructive"
+                variant="secondary"
                 size="sm"
-                disabled={isSubmittingSite || !canDiscardRecovery}
-                onClick={handleDiscardRecovery}
-                className="h-7 px-3 text-xs font-semibold"
+                disabled={isSubmittingSite}
+                onClick={onClose}
+                className={
+                  isDarkMode
+                    ? "h-7 bg-[#2c2c2e] px-5 text-xs text-[#f5f5f7] hover:bg-[#3a3a3c]"
+                    : "h-7 bg-[#e5e5ea] px-5 text-xs text-[#1d1d1f] hover:bg-[#d2d2d7]"
+                }
               >
-                이전 작업 정보 삭제
+                {isRetryableProgress && resumePoint.kind !== "create" ? "닫기" : "취소"}
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSubmittingSite}
-              onClick={onClose}
-              className={
-                isDarkMode
-                  ? "h-7 bg-[#2c2c2e] px-5 text-xs text-[#f5f5f7] hover:bg-[#3a3a3c]"
-                  : "h-7 bg-[#e5e5ea] px-5 text-xs text-[#1d1d1f] hover:bg-[#d2d2d7]"
-              }
-            >
-              {hasAnalysisProgress && !isRetryableProgress
-                ? "자동 닫힘"
-                : isRetryableProgress && resumePoint.kind !== "create"
-                  ? "닫기"
-                  : "취소"}
-            </Button>
 
-            {!hasAnalysisProgress && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={isSubmittingSite || isRecoveryBlocked}
-                onClick={() => {
-                  void handleAddSite();
-                }}
-                className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
-              >
-                분석 시작
-              </Button>
-            )}
+              {!hasAnalysisProgress && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isSubmittingSite || isRecoveryBlocked}
+                  onClick={() => {
+                    void handleAddSite();
+                  }}
+                  className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
+                >
+                  분석 시작
+                </Button>
+              )}
 
-            {isRetryableProgress && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={isSubmittingSite || isRecoveryBlocked}
-                onClick={() => {
-                  void handleAddSite();
-                }}
-                className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
-              >
-                {analysisProgress.phase === "ready"
-                  ? "분석 시작"
-                  : analysisProgress.phase === "paused" && resumePoint.kind === "request"
-                    ? "분석 시작 여부 확인"
-                    : resumePoint.kind === "create"
-                  ? "다시 시도"
-                  : resumePoint.kind === "request"
-                    ? "분석 요청 다시 시도"
-                    : "상태 확인 다시 시도"}
-              </Button>
-            )}
+              {isRetryableProgress && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isSubmittingSite || isRecoveryBlocked}
+                  onClick={() => {
+                    void handleAddSite();
+                  }}
+                  className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
+                >
+                  {analysisProgress.phase === "ready"
+                    ? "분석 시작"
+                    : analysisProgress.phase === "paused" && resumePoint.kind === "request"
+                      ? "분석 시작 여부 확인"
+                      : resumePoint.kind === "create"
+                        ? "다시 시도"
+                        : resumePoint.kind === "request"
+                          ? "분석 요청 다시 시도"
+                          : "상태 확인 다시 시도"}
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </article>
     </div>
   );

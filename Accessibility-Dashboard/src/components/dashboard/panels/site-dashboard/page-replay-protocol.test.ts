@@ -8,6 +8,7 @@ import {
   REPLAY_VIEW_SCALE_MIN,
   REPLAY_VISUAL_WIDTH_MAX,
   classifyReplayIssueCategory,
+  isMeaningfulLiveDocumentHealth,
   isValidReplayViewportMetrics,
   parsePageReplayMessage,
   parseLegacyTextAnalysisMessage,
@@ -131,6 +132,135 @@ describe("replay locator status messages", () => {
     };
     Object.assign(payload, overrides);
     expect(parsePageReplayMessage(payload)).toBeNull();
+  });
+});
+
+describe("live document health messages", () => {
+  it.each(["EMPTY", "MEANINGFUL"] as const)(
+    "accepts an exact %s visible-content report",
+    (status) => {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE,
+        type: "DOCUMENT_HEALTH",
+        documentToken: "live_doc_501",
+        status,
+        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
+        visibleControlCount: 0,
+        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
+        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
+        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
+        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
+      })).toEqual({
+        source: PAGE_REPLAY_SOURCE,
+        type: "DOCUMENT_HEALTH",
+        documentToken: "live_doc_501",
+        status,
+        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
+        visibleControlCount: 0,
+        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
+        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
+        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
+        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
+      });
+    }
+  );
+
+  it.each([
+    { status: "UNKNOWN" },
+    { consecutiveMeaningfulSamples: -1 },
+    { visibleControlCount: 1.5 },
+    { visibleElementCount: -1 },
+    { visibleImageCount: 1.5 },
+    { largestVisibleVisualArea: 1.5 },
+    { largestVisibleVisualArea: 1_000_001 },
+    { visibleTextLength: Number.POSITIVE_INFINITY },
+    { visibleTextLength: 1_000_001 },
+    { unexpected: true }
+  ])("rejects malformed document health payload %#", (overrides) => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_501",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 12,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 24_000,
+      visibleTextLength: 48,
+      ...overrides
+    })).toBeNull();
+  });
+
+  it("requires the complete exact health contract", () => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_legacy",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      visibleTextLength: 0
+    })).toBeNull();
+  });
+
+  it("does not accept a transient single loading image as meaningful content", () => {
+    const loadingImage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_loader",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 8,
+      visibleControlCount: 0,
+      visibleElementCount: 3,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 2_304,
+      visibleTextLength: 0
+    });
+    const visualPage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_visual",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 10_000,
+      visibleTextLength: 0
+    });
+    const unstableVisualPage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_visual_loading",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 3,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 40_000,
+      visibleTextLength: 0
+    });
+    const substantivePage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_page",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 6,
+      visibleImageCount: 0,
+      largestVisibleVisualArea: 0,
+      visibleTextLength: 40
+    });
+
+    expect(loadingImage?.type).toBe("DOCUMENT_HEALTH");
+    expect(loadingImage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(loadingImage)).toBe(false);
+    expect(unstableVisualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(unstableVisualPage)).toBe(false);
+    expect(visualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(visualPage)).toBe(true);
+    expect(substantivePage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(substantivePage)).toBe(true);
   });
 });
 

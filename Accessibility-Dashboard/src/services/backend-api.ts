@@ -10,6 +10,7 @@ import {
   parseDashboardOverviewResponse,
   parseEvaluationRequestsResponse,
   parseEvaluationRequestResponse,
+  parseLiveReportSessionResponse,
   parseOrganizationResponse,
   parseVoidResponse,
   type ApiResponseParser
@@ -25,6 +26,7 @@ import type {
   EvaluationTarget,
   EvaluationTargetModel,
   IssueResultModel,
+  LiveReportSession,
   Organization,
   OrganizationModel
 } from "@/types/accessibility-domain";
@@ -508,6 +510,36 @@ export async function fetchEvaluationArtifact(
       cache: "no-store",
       signal,
       optionalStatuses: [404]
+    }
+  );
+}
+
+export async function createLiveReportSession(
+  requestId: number,
+  signal?: AbortSignal
+): Promise<LiveReportSession | null> {
+  return apiRequest(
+    `/results/requests/${requestId}/live-session`,
+    (value, path) => (value === null ? null : parseLiveReportSessionResponse(value, path)),
+    {
+      method: "POST",
+      signal,
+      optionalStatuses: [404, 409, 501]
+    }
+  );
+}
+
+export async function renewLiveReportSession(
+  requestId: number,
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<LiveReportSession> {
+  return apiRequest(
+    `/results/requests/${requestId}/live-session/${encodeURIComponent(sessionId)}/renew`,
+    parseLiveReportSessionResponse,
+    {
+      method: "POST",
+      signal
     }
   );
 }

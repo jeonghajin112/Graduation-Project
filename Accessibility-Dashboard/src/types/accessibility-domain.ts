@@ -104,6 +104,15 @@ export type EvaluationArtifact = {
   updatedAt: string;
 };
 
+export type LiveReportSession = {
+  sessionId: string;
+  runtimeUrl: string;
+  viewerOrigin: string;
+  nonce: string;
+  bridgeSecret: string;
+  expiresAt: string;
+};
+
 export type EvaluationIssue = {
   id: number;
   requestId: number;

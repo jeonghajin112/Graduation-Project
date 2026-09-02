@@ -21,7 +21,11 @@ assert.ok(
   `PAGE_EVIDENCE_SCOPE must be "core", "full", or "scale": ${verificationScope}`
 );
 
-const [protocolSource, evidenceCardSource] = await Promise.all([
+const [liveProtocolSource, protocolSource, evidenceCardSource] = await Promise.all([
+  readFile(path.join(
+    dashboardDirectory,
+    "src/components/dashboard/panels/site-dashboard/live-report-protocol.ts"
+  ), "utf8"),
   readFile(path.join(
     dashboardDirectory,
     "src/components/dashboard/panels/site-dashboard/page-replay-protocol.ts"
@@ -117,6 +121,46 @@ assert.doesNotMatch(
   evidenceCardSource,
   /site-page-evidence-inspector|site-page-evidence-selection-(?:tags|title|message|path|status)/,
   "the fixed right-side issue inspector must be removed from the page view"
+);
+assert.match(
+  liveProtocolSource,
+  /type: "CONNECT";[\s\S]*?protocolVersion:[\s\S]*?bridgeSecret: string;[\s\S]*?challenge: string;/,
+  "live reports must authenticate a versioned MessageChannel connection"
+);
+assert.match(
+  liveProtocolSource,
+  /value\.sequence !== expectedSequence[\s\S]*?payload = parsePageReplayMessage\(value\.payload\)[\s\S]*?payload\.documentToken !== value\.documentToken/,
+  "live port events must be ordered and reuse the strict replay payload parser"
+);
+assert.match(
+  liveProtocolSource,
+  /isLiveReportViewerOriginAllowed\(session\.viewerOrigin, viewerBaseUrl\)[\s\S]*?!isLiveReportViewerOriginAllowed\(candidateOrigin, viewerBaseUrl\)[\s\S]*?throw new Error[\s\S]*?return candidateOrigin;/,
+  "live reports must connect only to an isolated route under the configured viewer origin"
+);
+assert.match(
+  evidenceCardSource,
+  /new MessageChannel\(\)[\s\S]*?createLiveReportConnectMessage[\s\S]*?\[channel\.port2\]/,
+  "each live document must receive a transferred private message port"
+);
+assert.match(
+  evidenceCardSource,
+  /connection\.port\.postMessage\(createLiveReportPortCommand/,
+  "all live viewer commands must use the authenticated private port"
+);
+assert.match(
+  evidenceCardSource,
+  /activeFrameKindRef\.current !== "artifact"[\s\S]*?parsePageReplayMessage\(event\.data\)/,
+  "the global window listener must remain artifact-only"
+);
+assert.match(
+  evidenceCardSource,
+  /function closeLiveReportPort\(\)[\s\S]*?connection\.port\.close\(\)/,
+  "live ports must be explicitly retired on navigation and fallback"
+);
+assert.match(
+  evidenceCardSource,
+  /activeFrameKind === "live"[\s\S]*?"allow-scripts allow-same-origin allow-forms"[\s\S]*?: "allow-scripts"/,
+  "only the isolated live viewer may run same-origin child frames and safe replay forms"
 );
 
 const organization = {
@@ -371,7 +415,6 @@ const replayHtml = `<!doctype html>
 
         window.__sendReplayReady = sendReady;
         if (!DROP_INITIAL_LOADING) sendDocumentLoading();
-        addEventListener("beforeunload", sendDocumentUnloading, { once: true });
         addEventListener("pagehide", sendDocumentUnloading, { once: true });
 
         function resolveIssue(issue) {
@@ -758,6 +801,16 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
     (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
     initialInitCount,
     "malformed lifecycle messages must not reinitialize markers"
+  );
+
+  await frame.locator("html").evaluate(() => {
+    dispatchEvent(new Event("beforeunload", { cancelable: true }));
+  });
+  await page.waitForTimeout(50);
+  assert.equal(
+    await preview.getAttribute("data-connection-state"),
+    "ready",
+    "a cancellable beforeunload signal must not disconnect the active replay document"
   );
 
   await preview.evaluate((element) => {

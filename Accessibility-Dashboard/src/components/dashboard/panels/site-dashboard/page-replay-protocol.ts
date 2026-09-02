@@ -140,11 +140,25 @@ export type DashboardToPageReplayMessage =
 
 export type LocatorConnectionStatus = "CONNECTED" | "UNAVAILABLE";
 
+export type LiveDocumentHealthStatus = "EMPTY" | "MEANINGFUL";
+
 export type PageReplayToDashboardMessage =
   | {
       source: typeof PAGE_REPLAY_SOURCE;
       type: "DOCUMENT_LOADING" | "DOCUMENT_UNLOADING" | "READY";
       documentToken: string;
+    }
+  | {
+      source: typeof PAGE_REPLAY_SOURCE;
+      type: "DOCUMENT_HEALTH";
+      documentToken: string;
+      status: LiveDocumentHealthStatus;
+      consecutiveMeaningfulSamples: number;
+      visibleControlCount: number;
+      visibleElementCount: number;
+      visibleImageCount: number;
+      largestVisibleVisualArea: number;
+      visibleTextLength: number;
     }
   | {
       source: typeof PAGE_REPLAY_SOURCE;
@@ -173,6 +187,32 @@ export type PageReplayToDashboardMessage =
       href?: string;
     };
 
+export type LiveDocumentHealthMessage = Extract<
+  PageReplayToDashboardMessage,
+  { type: "DOCUMENT_HEALTH" }
+>;
+
+const LIVE_DOCUMENT_MIN_TEXT_LENGTH = 12;
+const LIVE_DOCUMENT_MIN_CONTROL_COUNT = 2;
+const LIVE_DOCUMENT_MIN_IMAGE_COUNT = 2;
+const LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA = 10_000;
+const LIVE_DOCUMENT_MIN_STABLE_SAMPLES = 4;
+
+export function isMeaningfulLiveDocumentHealth(
+  message: LiveDocumentHealthMessage
+): boolean {
+  const hasSubstantiveContent =
+    message.visibleTextLength >= LIVE_DOCUMENT_MIN_TEXT_LENGTH ||
+    message.visibleControlCount >= LIVE_DOCUMENT_MIN_CONTROL_COUNT ||
+    message.visibleImageCount >= LIVE_DOCUMENT_MIN_IMAGE_COUNT ||
+    message.largestVisibleVisualArea >= LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA;
+  return (
+    message.status === "MEANINGFUL" &&
+    message.consecutiveMeaningfulSamples >= LIVE_DOCUMENT_MIN_STABLE_SAMPLES &&
+    hasSubstantiveContent
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
@@ -196,6 +236,10 @@ export function isValidReplayViewportMetrics(
 
 function isIssueId(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function isBoundedCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
 }
 
 function hasExactOwnKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
@@ -507,6 +551,43 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
       source: PAGE_REPLAY_SOURCE,
       type: value.type,
       documentToken: value.documentToken
+    };
+  }
+
+  if (
+    value.type === "DOCUMENT_HEALTH" &&
+    hasExactOwnKeys(value, [
+      "source",
+      "type",
+      "documentToken",
+      "status",
+      "consecutiveMeaningfulSamples",
+      "visibleControlCount",
+      "visibleElementCount",
+      "visibleImageCount",
+      "largestVisibleVisualArea",
+      "visibleTextLength"
+    ]) &&
+    isDocumentToken(value.documentToken) &&
+    (value.status === "EMPTY" || value.status === "MEANINGFUL") &&
+    isBoundedCount(value.consecutiveMeaningfulSamples) &&
+    isBoundedCount(value.visibleControlCount) &&
+    isBoundedCount(value.visibleElementCount) &&
+    isBoundedCount(value.visibleImageCount) &&
+    isBoundedCount(value.largestVisibleVisualArea) &&
+    isBoundedCount(value.visibleTextLength)
+  ) {
+    return {
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: value.documentToken,
+      status: value.status,
+      consecutiveMeaningfulSamples: value.consecutiveMeaningfulSamples,
+      visibleControlCount: value.visibleControlCount,
+      visibleElementCount: value.visibleElementCount,
+      visibleImageCount: value.visibleImageCount,
+      largestVisibleVisualArea: value.largestVisibleVisualArea,
+      visibleTextLength: value.visibleTextLength
     };
   }
 

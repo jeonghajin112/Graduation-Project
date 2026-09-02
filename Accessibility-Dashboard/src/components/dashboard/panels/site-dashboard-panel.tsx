@@ -14,13 +14,13 @@ import type {
 import { selectLatestEvaluationRequest } from "../shared/evaluation-request-selection";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
 import { resolveWcagCriterion, severityChartItems } from "./site-dashboard/constants";
-import { hasUsableIssueLocator } from "./site-dashboard/issue-locator";
 import { PageInformationPanel } from "./site-dashboard/page-information-panel";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
 import type { RecentIssueRow } from "./site-dashboard/types";
 import { useEvaluationArtifact } from "./site-dashboard/use-evaluation-artifact";
 import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
+import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
 import { getAnalyzerTypeLabel } from "./site-dashboard/utils";
 
 type SiteDashboardPanelProps = {
@@ -105,6 +105,15 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
     latestMaterializedResultRequest,
     previewEvidence ? { artifact: previewEvidence.artifact } : undefined
   );
+  const {
+    errorMessage: liveSessionErrorMessage,
+    loadState: liveSessionLoadState,
+    retry: retryLiveSession,
+    session: liveSession
+  } = useLiveReportSession(
+    latestMaterializedResultRequest,
+    previewEvidence === undefined
+  );
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const latestIssueSignature = latestIssues.map((issue) => issue.id).join(",");
 
@@ -114,7 +123,9 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
         return current;
       }
 
-      return latestIssues.find(hasUsableIssueLocator)?.id ?? latestIssues[0]?.id ?? null;
+      // Markers should start in their neutral state. A target is highlighted
+      // only after the user hovers, focuses, or explicitly selects its marker.
+      return null;
     });
   }, [latestIssueSignature, latestResultRequestId]);
 
@@ -141,9 +152,18 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
       : resultDetailsLoadState === "error"
         ? "error"
         : artifactLoadState;
-  const evidenceErrorMessage = resultDetailsErrorMessage ?? artifactErrorMessage;
-  const retryEvidence =
-    resultDetailsLoadState === "error" ? retryResultDetails : retryArtifact;
+  const evidenceErrorMessage =
+    resultDetailsErrorMessage ?? artifactErrorMessage ?? liveSessionErrorMessage;
+  const evidenceLiveSessionLoadState =
+    resultDetailsLoadState === "ready" ? liveSessionLoadState : "idle";
+  const retryEvidence = () => {
+    if (resultDetailsLoadState === "error") {
+      retryResultDetails();
+      return;
+    }
+    retryLiveSession();
+    retryArtifact();
+  };
   // Severity comes from the result-details request, not from the replay
   // artifact. Keep it available when only the DOM replay is missing or is
   // still being reconciled.
@@ -161,11 +181,16 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
           artifact={artifact}
           artifactContentUrl={previewEvidence?.artifactContentUrl}
           errorMessage={evidenceErrorMessage}
+          evaluationRequestId={latestResultRequestId}
+          liveSession={liveSession}
+          liveSessionErrorMessage={liveSessionErrorMessage}
+          liveSessionLoadState={evidenceLiveSessionLoadState}
           loadState={evidenceLoadState}
           rows={replayIssueRows}
           selectedIssueId={selectedIssueId}
           targetName={evaluationTarget.name}
           onRetry={retryEvidence}
+          onRetryLiveSession={retryLiveSession}
           onSelectIssue={setSelectedIssueId}
         />
       </div>

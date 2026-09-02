@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   ApiContractValidationError,
   createEvaluationArtifactParser,
-  parseDashboardOverviewResponse
+  parseDashboardOverviewResponse,
+  parseLiveReportSessionResponse
 } from "./api-contracts";
 
 const validDate = "2024-02-29T23:59:59+18:00";
@@ -168,6 +169,44 @@ describe("createEvaluationArtifactParser", () => {
     expectContractError(
       () => parseArtifact(createArtifact("https://attacker.example/artifact"), "$.data"),
       "$.data.contentUrl"
+    );
+  });
+});
+
+describe("parseLiveReportSessionResponse", () => {
+  const validSession = {
+    sessionId: "session_501",
+    runtimeUrl: "https://viewer.example.test/reports/session_501",
+    viewerOrigin: "https://viewer.example.test",
+    nonce: "n".repeat(32),
+    bridgeSecret: "s".repeat(43),
+    expiresAt: validDate
+  };
+
+  it("accepts an isolated runtime URL and matching viewer origin", () => {
+    expect(parseLiveReportSessionResponse(validSession, "$.data")).toEqual(validSession);
+    expect(parseLiveReportSessionResponse(
+      { ...validSession, viewerOrigin: "null" },
+      "$.data"
+    ).viewerOrigin).toBe("null");
+  });
+
+  it.each([
+    [
+      { ...validSession, viewerOrigin: "https://viewer.example.test/path" },
+      "$.data.viewerOrigin"
+    ],
+    [
+      { ...validSession, runtimeUrl: "https://attacker.example.test/report" },
+      "$.data.runtimeUrl"
+    ],
+    [{ ...validSession, nonce: "too-short" }, "$.data.nonce"],
+    [{ ...validSession, bridgeSecret: "too-short" }, "$.data.bridgeSecret"],
+    [{ ...validSession, bridgeSecret: validSession.nonce }, "$.data.bridgeSecret"]
+  ])("rejects an unsafe live viewer contract", (session, fieldPath) => {
+    expectContractError(
+      () => parseLiveReportSessionResponse(session, "$.data"),
+      fieldPath
     );
   });
 });

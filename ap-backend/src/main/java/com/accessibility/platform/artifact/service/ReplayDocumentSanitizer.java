@@ -339,7 +339,6 @@ public class ReplayDocumentSanitizer {
                 documentUnloadingReported = true;
                 post({ type: 'DOCUMENT_UNLOADING', documentToken: replayDocumentToken });
               };
-              window.addEventListener('beforeunload', postDocumentUnloading, { once: true });
               window.addEventListener('pagehide', postDocumentUnloading, { once: true });
               post({ type: 'DOCUMENT_LOADING', documentToken: replayDocumentToken });
 

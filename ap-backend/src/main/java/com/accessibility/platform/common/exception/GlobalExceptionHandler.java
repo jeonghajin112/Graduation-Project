@@ -2,8 +2,14 @@ package com.accessibility.platform.common.exception;
 
 import com.accessibility.platform.artifact.exception.ArtifactValidationException;
 import com.accessibility.platform.common.response.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
@@ -12,8 +18,13 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException e) {
         return ResponseEntity
@@ -56,7 +67,26 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
-        return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
+    public void handleException(Exception exception, HttpServletResponse response) {
+        if (response.isCommitted()) {
+            log.debug("Request failed after its response was committed", exception);
+            return;
+        }
+
+        log.error("Unexpected server request failure", exception);
+        byte[] body = "{\"success\":false,\"data\":null,\"message\":\"Unexpected server error\"}"
+                .getBytes(StandardCharsets.UTF_8);
+        response.reset();
+        response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setContentLength(body.length);
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        try {
+            response.getOutputStream().write(body);
+        } catch (IOException writeFailure) {
+            log.debug("Generic error response could not be written", writeFailure);
+        }
     }
 }

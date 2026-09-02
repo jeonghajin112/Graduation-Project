@@ -116,6 +116,10 @@ const observed = {
 let targets = [inactiveTarget];
 let requests = [];
 let targetLookupStatus = "ACTIVE";
+let releaseSecondRequestResponse = () => {};
+const secondRequestResponseGate = new Promise((resolve) => {
+  releaseSecondRequestResponse = resolve;
+});
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -217,6 +221,7 @@ try {
 
       if (observed.requestPosts === 2) {
         requests = [terminalFailedRequest];
+        await secondRequestResponseGate;
         await fulfillJson(route, terminalPendingRequest);
         return;
       }
@@ -360,6 +365,23 @@ try {
   targetLookupStatus = "ACTIVE";
   await page.setViewportSize({ width: 580, height: 560 });
   await requestRetryButton.click();
+  await dialog.getByText("분석 진행 중", { exact: true }).waitFor();
+  assert.equal(
+    await dialog.locator("[data-site-create-footer]").count(),
+    0,
+    "active analysis must not render the modal footer"
+  );
+  assert.equal(
+    await dialog.getByText("분석 중에는 창을 닫을 수 없습니다.", { exact: true }).count(),
+    0,
+    "active analysis must not render the close restriction copy"
+  );
+  assert.equal(
+    await dialog.getByRole("button", { name: "자동 닫힘", exact: true }).count(),
+    0,
+    "active analysis must not render an auto-close button"
+  );
+  releaseSecondRequestResponse();
   const terminalFailureAlert = dialog
     .getByRole("alert")
     .filter({ hasText: "페이지 검사를 완료하지 못했습니다" });
