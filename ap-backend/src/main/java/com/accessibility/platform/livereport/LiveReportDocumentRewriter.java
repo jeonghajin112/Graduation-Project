@@ -808,7 +808,7 @@ public class LiveReportDocumentRewriter {
                     height: 0 !important;
                   }
                 }
-                #ap-live-marker-layer{position:fixed;inset:0;z-index:2147483647;pointer-events:none}
+                #ap-live-marker-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none}
                 .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;width:24px;height:24px;border:2px solid #fff;
                 border-radius:50%;background:var(--ap-marker-color,#0b6ff4);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
                 pointer-events:auto;cursor:pointer;display:grid;place-items:center;font:700 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -1833,6 +1833,74 @@ public class LiveReportDocumentRewriter {
                     const root = element.getRootNode();
                     return root instanceof ShadowRoot && root.host instanceof Element ? root.host : null;
                   };
+                  const markerPositionAnchorForElement = element => {
+                    for (let current = element; current; current = composedElementParent(current)) {
+                      const position = getComputedStyle(current).position;
+                      if (position === 'fixed' || position === 'sticky') return {element:current, position};
+                      if (current === document.documentElement) break;
+                    }
+                    return null;
+                  };
+                  const finiteCssInset = value => {
+                    const parsed = Number.parseFloat(value);
+                    return numberIsFinite(parsed) ? parsed : null;
+                  };
+                  const hasNonNoneStyleValue = value => typeof value === 'string' && value !== '' && value !== 'none';
+                  const establishesFixedContainingBlock = style => {
+                    const contain = String(style.contain || '').split(' ');
+                    const willChange = String(style.willChange || '').split(',').map(value => value.trim());
+                    return hasNonNoneStyleValue(style.transform)
+                      || hasNonNoneStyleValue(style.translate) || hasNonNoneStyleValue(style.rotate)
+                      || hasNonNoneStyleValue(style.scale) || hasNonNoneStyleValue(style.perspective)
+                      || hasNonNoneStyleValue(style.filter) || hasNonNoneStyleValue(style.backdropFilter)
+                      || contain.some(value => value === 'layout' || value === 'paint'
+                        || value === 'strict' || value === 'content')
+                      || willChange.some(value => value === 'transform' || value === 'perspective'
+                        || value === 'filter' || value === 'backdrop-filter')
+                      || style.contentVisibility === 'auto';
+                  };
+                  const fixedContainingBlockFor = element => {
+                    for (let current = composedElementParent(element); current; current = composedElementParent(current)) {
+                      if (establishesFixedContainingBlock(getComputedStyle(current))) return current;
+                      if (current === document.documentElement) break;
+                    }
+                    return null;
+                  };
+                  const verticalStickyIsStuck = (element, style) => {
+                    const rect = element.getBoundingClientRect();
+                    const epsilon = 1.5;
+                    const top = finiteCssInset(style.top);
+                    const bottom = finiteCssInset(style.bottom);
+                    return (top !== null && Math.abs(rect.top - top) <= epsilon)
+                      || (bottom !== null && Math.abs(innerHeight - rect.bottom - bottom) <= epsilon);
+                  };
+                  const positionAnchorUsesViewportCoordinates = (anchor, visited = new Set()) => {
+                    if (!anchor?.element?.isConnected || visited.has(anchor.element)) return false;
+                    visited.add(anchor.element);
+                    const style = getComputedStyle(anchor.element);
+                    if (style.position === 'sticky') {
+                      if (verticalStickyIsStuck(anchor.element, style)) return true;
+                      const outerAnchor = markerPositionAnchorForElement(composedElementParent(anchor.element));
+                      return positionAnchorUsesViewportCoordinates(outerAnchor, visited);
+                    }
+                    if (style.position !== 'fixed') return false;
+                    const containingBlock = fixedContainingBlockFor(anchor.element);
+                    if (!containingBlock) return true;
+                    const outerAnchor = markerPositionAnchorForElement(containingBlock);
+                    return positionAnchorUsesViewportCoordinates(outerAnchor, visited);
+                  };
+                  const markerUsesViewportCoordinates = entry => {
+                    let anchor = entry.positionAnchor;
+                    if (anchor === undefined || (anchor && !anchor.element?.isConnected)) {
+                      anchor = entry.positionAnchor = markerPositionAnchorForElement(entry.element);
+                    }
+                    if (anchor?.element?.isConnected
+                        && getComputedStyle(anchor.element).position !== anchor.position) {
+                      anchor = entry.positionAnchor = markerPositionAnchorForElement(entry.element);
+                    }
+                    if (!anchor?.element?.isConnected) return false;
+                    return positionAnchorUsesViewportCoordinates(anchor);
+                  };
                   const highlightRectsForElement = element => {
                     if (!(element instanceof Element) || !element.isConnected) return [];
                     const clippingAncestors = [];
@@ -1880,7 +1948,10 @@ public class LiveReportDocumentRewriter {
                       right:Math.max(union.right, rect.right), bottom:Math.max(union.bottom, rect.bottom)
                     }), rects[0])];
                   };
-                  const positionHighlight = () => {
+                  const positionHighlight = (
+                    documentLeft = globalThis.scrollX,
+                    documentTop = globalThis.scrollY
+                  ) => {
                     const element = highlightedEntry?.element;
                     if (layer.hidden || !element?.isConnected) {
                       highlight.replaceChildren();
@@ -1896,18 +1967,42 @@ public class LiveReportDocumentRewriter {
                     const inverseScale = 1 / viewScale;
                     const gap = 4 * inverseScale;
                     const borderWidth = 2 * inverseScale;
-                    const fragments = document.createDocumentFragment();
-                    rects.forEach(rect => {
+                    const viewportAttached = highlightedEntry?.viewportAttached === true;
+                    const documentRight = Math.max(
+                      document.documentElement.clientWidth,
+                      document.documentElement.scrollWidth,
+                      document.body?.scrollWidth || 0
+                    );
+                    const documentBottom = Math.max(
+                      document.documentElement.clientHeight,
+                      document.documentElement.scrollHeight,
+                      document.body?.scrollHeight || 0
+                    );
+                    while (highlight.childElementCount < rects.length) {
                       const fragment = document.createElement('span');
                       fragment.className = 'ap-live-highlight__fragment';
-                      fragment.style.setProperty('left', `${rect.left - gap}px`, 'important');
-                      fragment.style.setProperty('top', `${rect.top - gap}px`, 'important');
-                      fragment.style.setProperty('width', `${rect.right - rect.left + gap * 2}px`, 'important');
-                      fragment.style.setProperty('height', `${rect.bottom - rect.top + gap * 2}px`, 'important');
+                      highlight.append(fragment);
+                    }
+                    while (highlight.childElementCount > rects.length) {
+                      highlight.lastElementChild?.remove();
+                    }
+                    rects.forEach((rect, index) => {
+                      const fragment = highlight.children[index];
+                      const coordinateLeft = rect.left + (viewportAttached ? 0 : documentLeft);
+                      const coordinateTop = rect.top + (viewportAttached ? 0 : documentTop);
+                      const maxRight = viewportAttached ? innerWidth : documentRight;
+                      const maxBottom = viewportAttached ? innerHeight : documentBottom;
+                      const left = Math.max(0, coordinateLeft - gap);
+                      const top = Math.max(0, coordinateTop - gap);
+                      const right = Math.min(maxRight, rect.right + (viewportAttached ? 0 : documentLeft) + gap);
+                      const bottom = Math.min(maxBottom, rect.bottom + (viewportAttached ? 0 : documentTop) + gap);
+                      fragment.style.setProperty('position', viewportAttached ? 'fixed' : 'absolute', 'important');
+                      fragment.style.setProperty('left', `${left}px`, 'important');
+                      fragment.style.setProperty('top', `${top}px`, 'important');
+                      fragment.style.setProperty('width', `${Math.max(0, right - left)}px`, 'important');
+                      fragment.style.setProperty('height', `${Math.max(0, bottom - top)}px`, 'important');
                       fragment.style.setProperty('border-width', `${borderWidth}px`, 'important');
-                      fragments.append(fragment);
                     });
-                    highlight.replaceChildren(fragments);
                     highlight.hidden = false;
                   };
                   const setHighlightedEntry = entry => {
@@ -1968,9 +2063,12 @@ public class LiveReportDocumentRewriter {
                     path.textContent = textValue(issue.path, 2048) || '요소 경로 정보 없음';
                     popoverDetail.replaceChildren(tags, title, message, path);
                     if (notify) post({type:'ISSUE_SELECTED', issueId:issue.id});
-                    requestAnimationFrame(positionPopover);
+                    requestAnimationFrame(() => positionPopover());
                   };
-                  const positionPopover = () => {
+                  const positionPopover = (
+                    documentLeft = globalThis.scrollX,
+                    documentTop = globalThis.scrollY
+                  ) => {
                     if (popover.hidden || !openEntry) return;
                     const rect = openEntry.element.getBoundingClientRect();
                     const scale = 1 / viewScale;
@@ -1985,8 +2083,10 @@ public class LiveReportDocumentRewriter {
                     let top = rect.bottom + 10;
                     if (left + width > viewportRight) left = Math.max(viewportLeft, rect.right - width - 18);
                     if (top + height > viewportBottom) top = Math.max(viewportTop, rect.top - height - 10);
-                    popover.style.left = `${Math.max(viewportLeft, left)}px`;
-                    popover.style.top = `${Math.max(viewportTop, top)}px`;
+                    const viewportAttached = openEntry.markerViewportAttached === true;
+                    popover.style.position = viewportAttached ? 'fixed' : 'absolute';
+                    popover.style.left = `${Math.max(viewportLeft, left) + (viewportAttached ? 0 : documentLeft)}px`;
+                    popover.style.top = `${Math.max(viewportTop, top) + (viewportAttached ? 0 : documentTop)}px`;
                   };
                   const openPopover = (entry, preferredIssueId = null, notify = false) => {
                     if (!entry) return;
@@ -2042,7 +2142,7 @@ public class LiveReportDocumentRewriter {
                     if (!popover.isConnected) layer.append(popover);
                     popover.hidden = false;
                     renderDetail(entry, preferred, notify && entry.issues.length === 1);
-                    requestAnimationFrame(positionPopover);
+                    requestAnimationFrame(() => positionPopover());
                   };
                   const clear = () => {
                     closePopover();
@@ -2123,6 +2223,8 @@ public class LiveReportDocumentRewriter {
                     && rect.left < innerWidth && rect.top < innerHeight
                   );
                   const clampMarkerCenter = (entry, left, top) => {
+                    const requestedLeft = left;
+                    const requestedTop = top;
                     const margin = markerViewportMargin / viewScale;
                     let footprint = markerFootprint(entry, left, top);
                     if (footprint.right - footprint.left > innerWidth - margin * 2
@@ -2132,21 +2234,32 @@ public class LiveReportDocumentRewriter {
                     if (footprint.top < margin) top += margin - footprint.top;
                     if (footprint.bottom > innerHeight - margin) top -= footprint.bottom - (innerHeight - margin);
                     footprint = markerFootprint(entry, left, top, markerCollisionGap / 2);
-                    return {left, top, footprint};
+                    return {
+                      left, top, footprint,
+                      viewportClamped:left !== requestedLeft || top !== requestedTop
+                    };
                   };
                   const markerPlacementFor = (entry, targetRect, spatialIndex) => {
                     const step = markerSlotStep / viewScale;
                     const seenCandidates = new Set();
-                    const tryCandidate = (left, top) => {
+                    const tryCandidate = (left, top, markerOffset) => {
                       const candidate = clampMarkerCenter(entry, left, top);
                       if (!candidate) return null;
                       const key = `${Math.round(candidate.left * 100)}:${Math.round(candidate.top * 100)}`;
                       if (seenCandidates.has(key)) return null;
                       seenCandidates.add(key);
                       if (spatialIndex.overlaps(candidate.footprint)) return null;
-                      return candidate;
+                      return {...candidate, markerOffset};
                     };
-                    let placement = tryCandidate(targetRect.left, targetRect.top);
+                    let placement = entry.markerOffset
+                      ? tryCandidate(
+                          targetRect.left + entry.markerOffset.left,
+                          targetRect.top + entry.markerOffset.top,
+                          entry.markerOffset
+                        )
+                      : null;
+                    if (placement) return placement;
+                    placement = tryCandidate(targetRect.left, targetRect.top, {left:0, top:0});
                     if (placement) return placement;
                     // Keep every layout pass linear in the number of groups: the spatial
                     // index makes each probe local and the ring budget is fixed.
@@ -2160,7 +2273,8 @@ public class LiveReportDocumentRewriter {
                       for (const [offsetX, offsetY] of offsets) {
                         placement = tryCandidate(
                           targetRect.left + offsetX,
-                          targetRect.top + offsetY
+                          targetRect.top + offsetY,
+                          {left:offsetX, top:offsetY}
                         );
                         if (placement) return placement;
                       }
@@ -2168,28 +2282,66 @@ public class LiveReportDocumentRewriter {
                     return null;
                   };
                   const position = () => {
+                    const documentLeft = globalThis.scrollX;
+                    const documentTop = globalThis.scrollY;
                     const spatialIndex = createMarkerSpatialIndex();
-                    marked.forEach(entry => {
-                      const {element, marker} = entry;
-                      const targetRect = element.getBoundingClientRect();
-                      if (!targetVisibleInViewport(element, targetRect)) {
-                        marker.hidden = true;
-                        if (openEntry === entry) closePopover();
-                        return;
-                      }
-                      const placement = markerPlacementFor(entry, targetRect, spatialIndex);
-                      marker.hidden = !placement;
-                      if (!placement) {
-                        if (openEntry === entry) closePopover();
-                        return;
-                      }
-                      marker.style.left = `${placement.left}px`;
-                      marker.style.top = `${placement.top}px`;
-                      marker.style.transform = `translate(-50%%,-50%%) scale(${1 / viewScale})`;
-                      spatialIndex.add(placement.footprint);
+                    const measurements = marked.map(entry => {
+                      const targetRect = entry.element.getBoundingClientRect();
+                      return {
+                        entry,
+                        targetRect,
+                        visible:targetVisibleInViewport(entry.element, targetRect),
+                        viewportAttached:markerUsesViewportCoordinates(entry)
+                      };
                     });
-                    positionHighlight();
-                    positionPopover();
+                    const placements = new Map();
+                    const placeMeasurement = measurement => {
+                      if (!measurement.visible) return;
+                      const placement = markerPlacementFor(
+                        measurement.entry,
+                        measurement.targetRect,
+                        spatialIndex
+                      );
+                      if (!placement) return;
+                      placements.set(measurement.entry, placement);
+                      spatialIndex.add(placement.footprint);
+                    };
+                    measurements.forEach(measurement => {
+                      if (measurement.entry.markerWasVisible) placeMeasurement(measurement);
+                    });
+                    measurements.forEach(measurement => {
+                      if (!measurement.entry.markerWasVisible) placeMeasurement(measurement);
+                    });
+                    let closeOpenPopover = false;
+                    measurements.forEach(measurement => {
+                      const {entry, viewportAttached} = measurement;
+                      const {marker} = entry;
+                      const placement = placements.get(entry) || null;
+                      const hidden = !placement;
+                      if (marker.hidden !== hidden) marker.hidden = hidden;
+                      entry.markerWasVisible = !hidden;
+                      entry.viewportAttached = viewportAttached;
+                      if (!placement) {
+                        if (openEntry === entry) closeOpenPopover = true;
+                        return;
+                      }
+                      entry.markerOffset = placement.markerOffset;
+                      const markerViewportAttached = viewportAttached || placement.viewportClamped;
+                      entry.markerViewportAttached = markerViewportAttached;
+                      const left = `${placement.left + (markerViewportAttached ? 0 : documentLeft)}px`;
+                      const top = `${placement.top + (markerViewportAttached ? 0 : documentTop)}px`;
+                      const position = markerViewportAttached ? 'fixed' : 'absolute';
+                      const transform = `translate(-50%%, -50%%) scale(${1 / viewScale})`;
+                      if (marker.style.position !== position) marker.style.position = position;
+                      if (marker.style.left !== left) marker.style.left = left;
+                      if (marker.style.top !== top) marker.style.top = top;
+                      if (marker.style.transform !== transform) marker.style.transform = transform;
+                    });
+                    if (closeOpenPopover) closePopover();
+                    else {
+                      positionHighlight(documentLeft, documentTop);
+                      positionPopover(documentLeft, documentTop);
+                    }
                   };
                   const schedulePosition = () => {
                     if (markerPositionFrame) return;
@@ -2248,6 +2400,11 @@ public class LiveReportDocumentRewriter {
                       const marker = document.createElement('button');
                       marker.type = 'button'; marker.className = 'ap-live-marker';
                       group.marker = marker;
+                      group.positionAnchor = markerPositionAnchorForElement(group.element);
+                      group.viewportAttached = false;
+                      group.markerViewportAttached = false;
+                      group.markerOffset = null;
+                      group.markerWasVisible = false;
                       marker.dataset.issueId = String(group.selectedIssueId || group.issues[0].id);
                       const markerCategory = groupCategory(group.issues);
                       marker.textContent = markerIcons[markerCategory] || markerIcons.general;
@@ -2320,10 +2477,18 @@ public class LiveReportDocumentRewriter {
                     if (data.type === 'SET_MARKERS_VISIBLE') {
                       layer.hidden = data.markersVisible === false;
                       if (layer.hidden) closePopover();
+                      else schedulePosition();
                     }
                     if (data.type === 'SET_VIEW_SCALE' && data.documentToken === documentToken
                         && numberIsFinite(data.scale) && data.scale > 0 && data.scale <= 1) {
-                      viewScale = data.scale; schedulePosition();
+                      if (viewScale !== data.scale) {
+                        viewScale = data.scale;
+                        marked.forEach(entry => {
+                          entry.markerOffset = null;
+                          entry.markerWasVisible = false;
+                        });
+                      }
+                      schedulePosition();
                     }
                   };
                   addEventListener('scroll', schedulePosition, {passive:true});
@@ -2368,6 +2533,11 @@ public class LiveReportDocumentRewriter {
                     if (globalThis.MutationObserver) {
                       healthObserver = new MutationObserver(records => {
                         if (marked.length > 0 && records.some(record => !layer.contains(record.target))) {
+                          if (records.some(record => record.type === 'attributes' || record.type === 'childList')) {
+                            marked.forEach(entry => {
+                              entry.positionAnchor = undefined;
+                            });
+                          }
                           schedulePosition();
                         }
                         if (!lastDocumentHealth || lastDocumentHealth.status !== 'MEANINGFUL') {
