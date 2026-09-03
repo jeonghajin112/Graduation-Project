@@ -96,6 +96,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).containsPattern("const documentToken = '[0-9a-f]{32}'");
         assertThat(rewritten).contains("data.type === 'INIT_ISSUES'");
         assertThat(rewritten).contains("type:'READY'");
+        assertThat(rewritten).contains("if (data.type === 'REQUEST_DOCUMENT_STATE')");
+        assertThat(rewritten).contains("post({type:'DOCUMENT_LOADING'})");
         assertThat(rewritten).contains("type:'DOCUMENT_HEALTH'");
         assertThat(rewritten).contains("status:meaningful ? 'MEANINGFUL' : 'EMPTY'");
         assertThat(rewritten).contains("const tag = String(element.tagName || '').toUpperCase()");
@@ -103,9 +105,12 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0)");
         assertThat(rewritten).contains("largestVisibleVisualArea >= 10000");
         assertThat(rewritten).contains("largestVisibleVisualArea:0");
-        assertThat(rewritten).contains("meaningfulHealthSamples >= 4");
+        assertThat(rewritten).contains("meaningfulHealthSamples >= 1");
         assertThat(rewritten).contains("consecutiveMeaningfulSamples");
-        assertThat(rewritten).contains("new MutationObserver");
+        assertThat(rewritten).contains("const NativeMutationObserver = globalThis.MutationObserver");
+        assertThat(rewritten).contains("const initializeReadyDocument = () =>");
+        assertThat(rewritten).contains("documentReadyObserver.observe(document.documentElement, {childList:true, subtree:true})");
+        assertThat(rewritten).contains("new NativeMutationObserver");
         assertThat(rewritten).contains("document.addEventListener('click'");
         assertThat(rewritten).contains("location.assign(proxied)");
         assertThat(rewritten).contains("const storedSteps = Array.isArray(item.pathSteps) ? item.pathSteps : []");
@@ -143,30 +148,125 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("const groupCategory = issues =>");
         assertThat(rewritten).doesNotContainIgnoringCase("bokjiro");
         assertThat(rewritten).contains("popover.className = 'ap-live-popover'");
+        assertThat(rewritten).contains(".ap-live-popover__tabs,.ap-live-popover__detail{scrollbar-width:none!important;-ms-overflow-style:none!important}");
+        assertThat(rewritten).contains(".ap-live-popover__tabs::-webkit-scrollbar,.ap-live-popover__detail::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}");
+        assertThat(rewritten).contains(".ap-live-popover__detail{min-height:142px;max-height:270px;overflow:auto");
+        assertThat(rewritten).contains("popoverDetail.tabIndex = 0");
         assertThat(rewritten).contains("같은 요소에서 발견된 문제 ${entry.issues.length}개");
         assertThat(rewritten).contains("post({type:'ISSUE_SELECTED', issueId:issue.id})");
         assertThat(rewritten).contains("event.key === 'Escape'");
         assertThat(rewritten).contains("event.key === 'ArrowRight'");
         assertThat(rewritten).contains("marker.setAttribute('aria-controls', popover.id)");
-        assertThat(rewritten).contains("const schedulePosition = () =>");
-        assertThat(rewritten).contains("document.addEventListener('scroll', schedulePosition, {passive:true,capture:true})");
+        assertThat(rewritten).contains("const position = (mode = 'full') =>");
+        assertThat(rewritten).contains("const schedulePosition = (mode = 'full') =>");
+        assertThat(rewritten).contains("const scheduleRootScrollPosition = () => schedulePosition('preserve-root')");
+        assertThat(rewritten).contains("const scheduleCapturedScrollPosition = event =>");
+        assertThat(rewritten).contains("if (target === document) return");
+        assertThat(rewritten).contains("nativeApply(nativeNodeContains, layer, [target])");
+        assertThat(rewritten).contains("'scroll', scheduleRootScrollPosition, {passive:true}");
+        assertThat(rewritten).contains("'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}");
+        assertThat(rewritten).doesNotContain("document.addEventListener('scroll', schedulePosition");
         assertThat(rewritten).contains("if (markerPositionFrame) return");
+        assertThat(rewritten).contains("if (mode === 'full') pendingMarkerPositionMode = 'full'");
+        assertThat(rewritten).contains("const scheduledMode = pendingMarkerPositionMode");
+        assertThat(rewritten).contains("position(scheduledMode)");
         assertThat(rewritten).contains("new MutationObserver(records =>");
         assertThat(rewritten).contains("records.some(record => !layer.contains(record.target))");
+        int markerObserverIndex = rewritten.indexOf("markerObserver = new NativeMutationObserver(records =>");
+        int markerPreserveIndex = rewritten.indexOf("schedulePosition('preserve-root')", markerObserverIndex);
+        assertThat(markerObserverIndex).isGreaterThanOrEqualTo(0).isLessThan(markerPreserveIndex);
+        assertThat(rewritten).contains("healthObserver = new NativeMutationObserver(() =>");
+        assertThat(rewritten).contains("startMarkerObserver()");
+        assertThat(rewritten).contains("new ResizeObserver(() => schedulePosition('preserve-root'))");
         assertThat(rewritten).contains("const markerPositionTimer = setInterval");
+        assertThat(rewritten).contains("schedulePosition('preserve-root')");
         assertThat(rewritten).contains("}, 1000)");
         assertThat(rewritten).contains("#ap-live-marker-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible");
         assertThat(rewritten).doesNotContain("#ap-live-marker-layer{position:fixed");
         assertThat(rewritten).contains(".ap-live-marker[hidden]{display:none!important}");
-        assertThat(rewritten).contains("left:calc(100% + 4px);top:50%");
-        assertThat(rewritten).doesNotContain("right:-7px;top:-7px");
+        assertThat(rewritten).contains(".ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 3px 10px rgba(0,0,0,.34)}");
+        assertThat(rewritten).contains(".ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}");
+        assertThat(rewritten).doesNotContain("color-mix(in srgb,var(--ap-marker-color");
+        assertThat(rewritten).contains("width:24px;height:24px;border:0");
+        assertThat(rewritten).contains("border:0;border-radius:999px;background:#101828");
+        assertThat(rewritten).doesNotContain("width:24px;height:24px;border:2px solid #fff");
+        assertThat(rewritten).doesNotContain("border:1.5px solid #fff;border-radius:999px");
+        assertThat(rewritten).contains("left:calc(50% + 10px);top:calc(50% - 10px)");
+        assertThat(rewritten).contains("min-width:14px;height:14px;padding:0 3px");
+        assertThat(rewritten).contains("font:700 8px/1 system-ui");
+        assertThat(rewritten).contains("pointer-events:none;transform:translate(-50%,-50%)");
+        assertThat(rewritten).doesNotContain("left:calc(100% + 4px);top:50%");
+        assertThat(rewritten).contains("const markerCountPillMinWidth = 14");
+        assertThat(rewritten).contains("const markerCountPillHorizontalPadding = 6");
+        assertThat(rewritten).contains("const markerCountPillDigitWidth = 5");
+        assertThat(rewritten).contains("const markerCountBadgeCenterX = 10");
+        assertThat(rewritten).contains("const markerCountBadgeCenterY = -10");
+        assertThat(rewritten).contains("const markerCountBadgeHeight = 14");
+        assertThat(rewritten).contains("const badgeRight = markerCountBadgeCenterX + halfWidth");
+        assertThat(rewritten).contains("const badgeTop = markerCountBadgeCenterY - halfHeight");
+        assertThat(rewritten).contains("right: left + (rightExtent + collisionPadding) * inverseScale");
+        assertThat(rewritten).contains("top: top - (topExtent + collisionPadding) * inverseScale");
+        assertThat(rewritten).contains("const markerIcons = Object.freeze");
+        assertThat(rewritten).contains("marker.textContent = markerIcons[markerCategory] || markerIcons.general");
         assertThat(rewritten).contains("const createMarkerSpatialIndex = () =>");
-        assertThat(rewritten).contains("const markerPlacementFor = (entry, targetRect, spatialIndex) =>");
+        assertThat(rewritten).contains("const markerTargetGap = 6");
+        assertThat(rewritten).contains("const markerTargetGeometryForElement = element =>");
+        assertThat(rewritten).containsPattern(
+                "const markerTargetGeometryForElement = element => \\{\\s+"
+                        + "const rects = highlightRectsForElement\\(element\\)"
+        );
+        assertThat(rewritten).contains("const markerClearsTarget =");
+        assertThat(rewritten).contains("const markerProtectedTextRectsForElement =");
+        assertThat(rewritten).contains("range.selectNodeContents(element)");
+        assertThat(rewritten).contains("const markerProtectedTextRectBudget = 512");
+        assertThat(rewritten).contains("const markerProtectedTextPerElementLimit = 32");
+        assertThat(rewritten).contains("let remainingProtectedTextRects = markerProtectedTextRectBudget");
+        assertThat(rewritten).contains("remainingProtectedTextRects -= protectedTextRects.length");
+        assertThat(rewritten).contains("const gap = markerTargetGap / viewScale");
+        assertThat(rewritten).contains("left:rect.left - gap");
+        assertThat(rewritten).contains("top:rect.top - gap");
+        assertThat(rewritten).contains("right:rect.right + gap");
+        assertThat(rewritten).contains("bottom:rect.bottom + gap");
+        assertThat(rewritten).contains("const markerGutterFamilies =");
+        assertThat(rewritten).contains("side:'left', axis:'vertical'");
+        assertThat(rewritten).contains("side:'right', axis:'vertical'");
+        assertThat(rewritten).contains("side:'top', axis:'horizontal'");
+        assertThat(rewritten).contains("side:'bottom', axis:'horizontal'");
+        assertThat(rewritten).contains(
+                "const markerPlacementFor = (entry, targetGeometry, spatialIndex, contentSpatialIndex) =>"
+        );
         assertThat(rewritten).contains("const markerSearchRingLimit = 12");
+        assertThat(rewritten).contains(
+                "!markerClearsTarget(candidate.footprint, targetGeometry.rects)) return null"
+        );
+        assertThat(rewritten).contains("allowTargetOverlap = false");
+        assertThat(rewritten).contains("const pageLevelOverlapAllowed = pageLevelTarget");
+        assertThat(rewritten).contains("&& visibleWidth * visibleHeight >= viewportArea * 0.75");
+        assertThat(rewritten).contains("entry.element === document.documentElement");
+        assertThat(rewritten).contains("entry.element === document.body");
+        assertThat(rewritten).contains("pageFallback:true");
+        assertThat(rewritten).contains("if (contentSpatialIndex.overlaps(candidate.footprint)) return null");
         assertThat(rewritten).contains("if (spatialIndex.overlaps(candidate.footprint)) return null");
+        assertThat(rewritten).doesNotContain(
+                "placement = tryCandidate(targetRect.left, targetRect.top, {left:0, top:0})"
+        );
         assertThat(rewritten).contains("viewportClamped:left !== requestedLeft || top !== requestedTop");
+        int markerClampIndex = rewritten.indexOf("const candidate = clampMarkerCenter(entry, left, top)");
+        int markerTargetClearanceIndex = rewritten.indexOf(
+                "!markerClearsTarget(candidate.footprint, targetGeometry.rects)) return null"
+        );
+        int markerCollisionIndex = rewritten.indexOf("if (spatialIndex.overlaps(candidate.footprint)) return null");
+        int markerOffsetReuseIndex = rewritten.indexOf("if (entry.markerOffset)");
+        assertThat(markerClampIndex).isGreaterThanOrEqualTo(0).isLessThan(markerTargetClearanceIndex);
+        assertThat(markerTargetClearanceIndex).isLessThan(markerCollisionIndex).isLessThan(markerOffsetReuseIndex);
+        assertThat(rewritten).containsPattern(
+                "const previousFamily = families\\.find\\(\\s+"
+                        + "family => family\\.side === entry\\.markerOffset\\.side"
+        );
+        assertThat(rewritten).contains("numberIsFinite(entry.markerOffset.laneOffset)");
         assertThat(rewritten).contains("const targetVisibleInViewport = (element, rect) =>");
         assertThat(rewritten).contains("const markerPositionAnchorForElement = element =>");
+        assertThat(rewritten).contains("element.assignedSlot instanceof HTMLSlotElement");
         assertThat(rewritten).contains("position === 'fixed' || position === 'sticky'");
         assertThat(rewritten).contains("const establishesFixedContainingBlock = style =>");
         assertThat(rewritten).contains("const fixedContainingBlockFor = element =>");
@@ -186,10 +286,26 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("if (openEntry === entry) closeOpenPopover = true");
         assertThat(rewritten).contains("const documentLeft = globalThis.scrollX");
         assertThat(rewritten).contains("const documentTop = globalThis.scrollY");
-        assertThat(rewritten).contains("const markerViewportAttached = viewportAttached || placement.viewportClamped");
+        assertThat(rewritten).contains("const markerViewportAttached = viewportAttached");
+        assertThat(rewritten).doesNotContain(
+                "const markerViewportAttached = viewportAttached || placement.viewportClamped"
+        );
         assertThat(rewritten).contains("entry.markerViewportAttached = markerViewportAttached");
-        assertThat(rewritten).contains("const left = `${placement.left + (markerViewportAttached ? 0 : documentLeft)}px`");
-        assertThat(rewritten).contains("const top = `${placement.top + (markerViewportAttached ? 0 : documentTop)}px`");
+        assertThat(rewritten).contains("const markerLeft = placement.left + (markerViewportAttached ? 0 : documentLeft)");
+        assertThat(rewritten).contains("const markerTop = placement.top + (markerViewportAttached ? 0 : documentTop)");
+        assertThat(rewritten).contains("entry.markerDocumentLeft = markerLeft");
+        assertThat(rewritten).contains("entry.markerDocumentTop = markerTop");
+        assertThat(rewritten).contains("entry.markerAnchorDocumentRect = targetDocumentRect");
+        assertThat(rewritten).contains("const markerDocumentRectsMatch = (previous, current) =>");
+        assertThat(rewritten).contains("const preservePlacement = preserveRootPlacement");
+        assertThat(rewritten).contains("|| entry.positionAnchor?.position === 'sticky'");
+        assertThat(rewritten).contains("&& (!initiallyVisible || targetGeometry !== null)");
+        assertThat(rewritten).contains("if (measurement.preservePlacement || !measurement.visible) return");
+        assertThat(rewritten).contains("if (preservePlacement) {");
+        assertThat(rewritten).contains("const hidden = !measurement.visible");
+        assertThat(rewritten).contains("if (hidden) closeOpenPopover = true");
+        assertThat(rewritten).contains("if (!preserveRootPlacement) entry.positionAnchor = undefined");
+        assertThat(rewritten).contains("marked.forEach(entry => { entry.positionAnchor = undefined; })");
         assertThat(rewritten).contains("const position = markerViewportAttached ? 'fixed' : 'absolute'");
         assertThat(rewritten).contains("positionHighlight(documentLeft, documentTop)");
         assertThat(rewritten).contains("positionPopover(documentLeft, documentTop)");
@@ -199,9 +315,13 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("(viewportAttached ? 0 : documentLeft)");
         assertThat(rewritten).contains("(viewportAttached ? 0 : documentTop)");
         assertThat(rewritten).contains("const measurements = marked.map(entry =>");
+        assertThat(rewritten).contains("const initiallyVisible = targetVisibleInViewport(entry.element, targetRect)");
+        assertThat(rewritten).contains("? markerTargetGeometryForElement(entry.element)");
+        assertThat(rewritten).contains("const contentSpatialIndex = createMarkerSpatialIndex()");
+        assertThat(rewritten).contains("measurement.protectedTextRects.forEach(rect => contentSpatialIndex.add(rect))");
         assertThat(rewritten).contains("const placeMeasurement = measurement =>");
         assertThat(rewritten).contains("if (measurement.entry.markerWasVisible) placeMeasurement(measurement)");
-        assertThat(rewritten).contains("targetRect.left + entry.markerOffset.left");
+        assertThat(rewritten).contains("measurement.targetGeometry");
         assertThat(rewritten).contains("return {...candidate, markerOffset}");
         assertThat(rewritten).contains("entry.markerOffset = placement.markerOffset");
         assertThat(rewritten).doesNotContain("left:placement.left - targetRect.left");
@@ -212,6 +332,12 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("addEventListener('pageshow', event => {");
         assertThat(rewritten).contains("clearInterval(markerPositionTimer)");
         assertThat(rewritten).contains("cancelAnimationFrame(markerPositionFrame)");
+        assertThat(rewritten).contains("const markerScrollRoots = new Set()");
+        assertThat(rewritten).contains("const observeMarkerShadowScrollRoots = element =>");
+        assertThat(rewritten).contains("const parent = composedElementParent(current)");
+        assertThat(rewritten).contains("'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}");
+        assertThat(rewritten).contains("nativeApply(nativeRemoveEventListener, root");
+        assertThat(rewritten).contains("clearMarkerScrollRoots()");
         assertThat(rewritten).doesNotContain("addEventListener('beforeunload'");
         assertThat(rewritten).contains("Element.prototype.setAttribute = function(name, value)");
         assertThat(rewritten).contains("['HTMLImageElement','src']");
@@ -508,6 +634,69 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("const upstream = decodeSessionResource(value) || resolveUpstream(value, currentUpstreamBase())");
         assertThat(rewritten).contains("pageDocumentUrl = target.upstream");
         assertThat(rewritten).contains("patchDocumentUrlProperty('URL')");
+    }
+
+    @Test
+    void guardsActionControlsWhileLeavingReadOnlyNavigationAvailable() {
+        String html = """
+                <html><body>
+                  <a id="article-link" href="/article">Article</a>
+                  <button id="tab" type="button" role="tab" aria-controls="panel">Tab</button>
+                  <section id="carousel" class="swiper carousel">
+                    <button id="previous-slide" type="button" class="swiper-button-prev">Previous</button>
+                    <button id="next-slide" type="button" class="swiper-button-next">Next</button>
+                  </section>
+                  <nav class="pagination" aria-label="Pagination">
+                    <button id="next-page" type="button" aria-label="Next page">2</button>
+                  </nav>
+                  <form id="search" method="get" action="/search">
+                    <input name="q"><button id="search-submit" type="submit">Search</button>
+                  </form>
+                  <button id="apply" type="button">Apply</button>
+                  <button id="save" type="submit">Save</button>
+                  <div id="custom-action" role="button" tabindex="0">Delete</div>
+                </body></html>
+                """;
+        LiveReportFetchService.FetchedResource resource = new LiveReportFetchService.FetchedResource(
+                URI.create("https://www.example.com/app/index.html"),
+                "text/html;charset=UTF-8",
+                html.getBytes(StandardCharsets.UTF_8)
+        );
+
+        String rewritten = new String(rewriter.rewriteHtml(resource, session), StandardCharsets.UTF_8);
+
+        assertThat(rewritten).contains("const actionControlSelector =");
+        assertThat(rewritten).contains("const isReplayUiTarget =");
+        assertThat(rewritten).contains("nativeApply(nativeNodeContains, layer, [target])");
+        assertThat(rewritten).contains("nativeApply(nativeNodeContains, popover, [target])");
+        assertThat(rewritten).contains("const isAllowedNavigationControl =");
+        assertThat(rewritten).contains("const blockedActionControl =");
+        assertThat(rewritten).contains("const guardReadOnlyInteraction =");
+        assertThat(rewritten).contains("a[href]");
+        assertThat(rewritten).contains("role=tab");
+        assertThat(rewritten).contains("tablist");
+        assertThat(rewritten).contains("carousel");
+        assertThat(rewritten).contains("pagination");
+        assertThat(rewritten).contains("slider");
+        assertThat(rewritten).contains("formMethod(form, control) !== 'GET'");
+        assertThat(rewritten).contains("'pointerdown'");
+        assertThat(rewritten).contains("'pointerup'");
+        assertThat(rewritten).contains("'mousedown'");
+        assertThat(rewritten).contains("'mouseup'");
+        assertThat(rewritten).contains("'touchstart'");
+        assertThat(rewritten).contains("'touchend'");
+        assertThat(rewritten).contains("'click'");
+        assertThat(rewritten).contains("'dblclick'");
+        assertThat(rewritten).contains("'auxclick'");
+        assertThat(rewritten).contains("event.key !== 'Enter'");
+        assertThat(rewritten).contains("event.key !== ' '");
+        assertThat(rewritten).contains("if (trusted !== true) return");
+        assertThat(rewritten).contains("nativeApply(nativePreventDefault, event, [])");
+        assertThat(rewritten).contains("nativeApply(nativeStopImmediatePropagation, event, [])");
+
+        int interactionGuardIndex = rewritten.indexOf("const guardReadOnlyInteraction =");
+        int anchorNavigationIndex = rewritten.indexOf("document.addEventListener('click'");
+        assertThat(interactionGuardIndex).isGreaterThanOrEqualTo(0).isLessThan(anchorNavigationIndex);
     }
 
     @Test

@@ -12,7 +12,6 @@ try {
   const fixture = await installDashboardApiFixture(page);
   const consoleErrors = [];
   const externalFontErrors = [];
-  const expectedArtifactMisses = [];
   const pageErrors = [];
   const sidebar = page.getByRole("complementary");
   const main = page.getByRole("main");
@@ -22,13 +21,6 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") {
       const locationUrl = message.location().url;
-      if (
-        locationUrl.endsWith(`/api/results/requests/${fixture.request.id}/artifact`) &&
-        message.text().includes("404 (Not Found)")
-      ) {
-        expectedArtifactMisses.push(message.text());
-        return;
-      }
       if (
         locationUrl.startsWith(
           "https://cdn.jsdelivr.net/gh/orioncactus/pretendard/"
@@ -198,7 +190,6 @@ try {
       escapeFocusRestored,
       consoleErrorCount: consoleErrors.length,
       externalFontErrorCount: externalFontErrors.length,
-      expectedArtifactMissCount: expectedArtifactMisses.length,
       pageErrorCount: pageErrors.length
     })
   );

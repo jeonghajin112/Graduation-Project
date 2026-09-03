@@ -345,6 +345,102 @@ async function runHttpErrorScenario(browser, { status, expectGetOnlyRecovery }) 
   }
 }
 
+async function runRecoveryCasConflictScenario(browser) {
+  const storageKey = "accessibility-dashboard.organization-create-attempt.v1";
+  const createdProject = organization(113, "Conflicting recovery project");
+  const observed = { organizationPosts: 0, unknownRequests: new Set() };
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+  try {
+    await page.addInitScript(({ key }) => {
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const rawUrl =
+          typeof input === "string" || input instanceof URL ? input.toString() : input.url;
+        const pathname = new URL(rawUrl, window.location.origin).pathname;
+        const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+        const response = await nativeFetch(input, init);
+
+        if (pathname === "/api/organizations" && method === "POST") {
+          const rawValue = window.sessionStorage.getItem(key);
+          if (rawValue !== null) {
+            const attempt = JSON.parse(rawValue);
+            window.sessionStorage.setItem(
+              key,
+              JSON.stringify({ ...attempt, phase: "reconciling", organizationId: null })
+            );
+          }
+        }
+        return response;
+      };
+    }, { key: storageKey });
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const method = request.method();
+      const pathname = new URL(request.url()).pathname;
+      if (method === "GET" && pathname === "/api/dashboard/overview") {
+        await fulfillJson(route, createDashboardOverview());
+        return;
+      }
+      if (method === "POST" && pathname === "/api/organizations") {
+        observed.organizationPosts += 1;
+        await fulfillJson(route, createdProject, { status: 201 });
+        return;
+      }
+      observed.unknownRequests.add(`${method} ${pathname}`);
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+    });
+
+    await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+    const addProjectButton = page
+      .locator("aside")
+      .getByRole("button", { name: "프로젝트 추가", exact: true });
+    await addProjectButton.click();
+    let dialog = page.getByRole("dialog", { name: "프로젝트 추가", exact: true });
+    const input = dialog.getByLabel("프로젝트 이름", { exact: true });
+    await input.fill(createdProject.name);
+    await dialog.getByRole("button", { name: "생성", exact: true }).click();
+
+    const conflictAlert = dialog
+      .getByRole("alert")
+      .filter({ hasText: "복구 상태가 다른 화면에서 변경되었습니다" });
+    await conflictAlert.waitFor();
+    assert.equal(observed.organizationPosts, 1);
+    assert.equal(await input.isDisabled(), true);
+    assert.equal(await dialog.getByRole("button", { name: "생성", exact: true }).count(), 0);
+    assert.equal(
+      await dialog.getByRole("button", { name: "이전 작업 정보 삭제", exact: true }).count(),
+      0
+    );
+
+    const storedAttempt = await page.evaluate((key) => {
+      const rawValue = window.sessionStorage.getItem(key);
+      return rawValue === null ? null : JSON.parse(rawValue);
+    }, storageKey);
+    assert.equal(storedAttempt?.phase, "reconciling");
+    assert.equal(storedAttempt?.organizationId, null);
+
+    await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+    await addProjectButton.click();
+    dialog = page.getByRole("dialog", { name: "프로젝트 추가", exact: true });
+    await dialog
+      .getByRole("alert")
+      .filter({ hasText: "복구 상태가 다른 화면에서 변경되었습니다" })
+      .waitFor();
+    assert.equal(observed.organizationPosts, 1);
+    assert.deepEqual([...observed.unknownRequests], []);
+
+    return {
+      blockedWithoutDiscard: true,
+      organizationPosts: observed.organizationPosts,
+      storedPhase: storedAttempt.phase
+    };
+  } finally {
+    await page.close();
+  }
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   const noCommit = await runScenario(browser, {
@@ -368,6 +464,7 @@ try {
     status: 499,
     expectGetOnlyRecovery: true
   });
+  const recoveryCasConflict = await runRecoveryCasConflictScenario(browser);
 
   console.log(
     JSON.stringify(
@@ -378,7 +475,8 @@ try {
         unmount,
         definitive422,
         ambiguous503,
-        ambiguous499
+        ambiguous499,
+        recoveryCasConflict
       },
       null,
       2

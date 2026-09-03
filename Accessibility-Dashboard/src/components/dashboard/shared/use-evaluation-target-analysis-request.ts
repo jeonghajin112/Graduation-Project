@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { API_BASE_URL } from "@/config/api";
-import { wait } from "@/services/async-cancellation";
 import {
   fetchEvaluationTarget,
   fetchEvaluationRequests,
@@ -29,8 +28,10 @@ import {
   TARGET_ANALYSIS_PREFLIGHT_MESSAGE,
   TARGET_CREATE_RECOVERY_MESSAGE,
   TARGET_REQUEST_RECOVERY_MESSAGE,
+  commitMutationOnce,
   getPersistedTargetId,
   isDefinitiveMutationRejection,
+  reconcileWithRetries,
   runWithNetworkDeadline
 } from "./site-create-recovery-workflow";
 import type { DirectoryRecoveryToken } from "./use-dashboard-data";
@@ -139,27 +140,22 @@ export function useEvaluationTargetAnalysisRequest({
       ): Promise<number | null> =>
         runWithNetworkDeadline(async (reconcileSignal) => {
           const knownRequestIds = new Set(checkpoint.knownRequestIds);
-          for (let attempt = 0; attempt < REQUEST_RECONCILE_ATTEMPTS; attempt += 1) {
-            if (attempt > 0) {
-              await wait(REQUEST_RECONCILE_INTERVAL_MS, reconcileSignal);
+          return reconcileWithRetries({
+            attempts: REQUEST_RECONCILE_ATTEMPTS,
+            intervalMs: REQUEST_RECONCILE_INTERVAL_MS,
+            signal: reconcileSignal,
+            probe: async (requestSignal) => {
+              const reconciledRequests = await fetchEvaluationRequests(requestSignal);
+              const candidates = reconciledRequests.filter(
+                (request) =>
+                  request.evaluationTargetId === checkpoint.targetId &&
+                  !knownRequestIds.has(request.id)
+              );
+              // Without a server correlation key, choosing among multiple
+              // candidates could attach this modal to another actor's request.
+              return candidates.length === 1 ? candidates[0]!.id : null;
             }
-
-            const reconciledRequests = await fetchEvaluationRequests(reconcileSignal);
-            const candidates = reconciledRequests.filter(
-              (request) =>
-                request.evaluationTargetId === checkpoint.targetId &&
-                !knownRequestIds.has(request.id)
-            );
-            if (candidates.length === 1) {
-              return candidates[0]!.id;
-            }
-            if (candidates.length > 1) {
-              // Without a server correlation key, choosing either candidate
-              // could attach this modal to another actor's request.
-              return null;
-            }
-          }
-          return null;
+          });
         }, signal);
 
       const replaceRequestId =
@@ -426,18 +422,21 @@ export function useEvaluationTargetAnalysisRequest({
       bindCheckpointToSignal(checkpoint, signal);
 
       try {
-        const requestId = await runWithNetworkDeadline(
-          (requestSignal) => requestEvaluationTargetRescan(targetId, requestSignal),
-          signal
-        );
-        if (requestId !== null && !knownRequestIds.has(requestId)) {
+        const commitOutcome = await commitMutationOnce({
+          signal,
+          operation: (requestSignal) =>
+            requestEvaluationTargetRescan(targetId, requestSignal),
+          accept: (requestId) =>
+            requestId !== null && !knownRequestIds.has(requestId) ? requestId : null
+        });
+        if (commitOutcome.kind === "accepted") {
           const pollStored = writeSiteCreateRecovery(
             {
               ...checkpoint.stored.attempt,
               phase: "poll",
               targetId,
               knownRequestIds: checkpoint.knownRequestIds,
-              requestId
+              requestId: commitOutcome.value
             },
             checkpoint.stored.rawValue
           );
@@ -445,8 +444,8 @@ export function useEvaluationTargetAnalysisRequest({
             throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
           }
           checkpoint.stored = pollStored;
-          checkpoint.requestId = requestId;
-          return requestId;
+          checkpoint.requestId = commitOutcome.value;
+          return commitOutcome.value;
         }
       } catch (error) {
         if (isDefinitiveMutationRejection(error)) {
@@ -465,9 +464,7 @@ export function useEvaluationTargetAnalysisRequest({
           }
           throw error;
         }
-        if (signal?.aborted) {
-          throw error;
-        }
+        throw error;
       }
 
       // A lost POST response does not prove that the server rejected the

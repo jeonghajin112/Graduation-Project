@@ -1,6 +1,6 @@
 package com.accessibility.platform.common.exception;
 
-import com.accessibility.platform.artifact.exception.ArtifactValidationException;
+import com.accessibility.platform.capturemetadata.exception.CaptureMetadataValidationException;
 import com.accessibility.platform.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
@@ -10,13 +10,11 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.web.multipart.MaxUploadSizeExceededException;
-import org.springframework.web.multipart.MultipartException;
-import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -46,24 +44,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
     }
 
-    @ExceptionHandler(ArtifactValidationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleArtifactValidationException(ArtifactValidationException e) {
+    @ExceptionHandler(CaptureMetadataValidationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCaptureMetadataValidationException(
+            CaptureMetadataValidationException e
+    ) {
         return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
     }
 
-    @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
-        return ResponseEntity.badRequest().body(ApiResponse.fail("Replay document exceeds the configured size limit"));
-    }
-
-    @ExceptionHandler({MissingServletRequestPartException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleMalformedRequest(Exception e) {
-        return ResponseEntity.badRequest().body(ApiResponse.fail("Required multipart data is missing or malformed"));
+        return ResponseEntity.badRequest().body(ApiResponse.fail("Request body is missing or malformed"));
     }
 
-    @ExceptionHandler(MultipartException.class)
-    public ResponseEntity<ApiResponse<Void>> handleMultipartException(MultipartException e) {
-        return ResponseEntity.badRequest().body(ApiResponse.fail("Multipart request is malformed"));
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound() {
+        return ResponseEntity
+                .status(ErrorCode.RESOURCE_NOT_FOUND.getStatus())
+                .body(ApiResponse.fail(ErrorCode.RESOURCE_NOT_FOUND.getMessage()));
     }
 
     @ExceptionHandler(Exception.class)

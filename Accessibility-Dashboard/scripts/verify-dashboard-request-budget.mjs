@@ -194,13 +194,28 @@ try {
 
     if (
       entry.method === "GET" &&
-      entry.pathname === `/api/results/requests/${selectedLatestRequestId}/artifact`
+      entry.pathname === `/api/results/requests/${selectedLatestRequestId}/capture-metadata`
     ) {
-      await route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({ success: false, data: null, message: "No artifact in request budget fixture." })
+      await fulfillJson(route, {
+        id: 8801,
+        requestId: selectedLatestRequestId,
+        requestedUrl: selectedTarget.accessUrl,
+        finalUrl: selectedTarget.accessUrl,
+        capturedAt: tiedUpdatedAt,
+        viewportWidthCssPx: 1280,
+        viewportHeightCssPx: 720,
+        deviceScaleFactor: 1,
+        pageWidthCssPx: 1280,
+        pageHeightCssPx: 1440
       });
+      return;
+    }
+
+    if (
+      entry.method === "POST" &&
+      entry.pathname === `/api/results/requests/${selectedLatestRequestId}/live-session`
+    ) {
+      await fulfillJson(route, null);
       return;
     }
 
@@ -258,7 +273,7 @@ try {
       entry.pathname === `/api/results/requests/${selectedLatestRequestId}/issues`
   );
   await main
-    .getByText("이 스캔에는 재현 페이지가 없어요", { exact: true })
+    .getByText("현재 동적 페이지를 열지 못했어요", { exact: true })
     .waitFor({ state: "visible" });
 
   await page.evaluate((projectId) => {
@@ -270,7 +285,7 @@ try {
   await openPageButton.click({ position: { x: 12, y: 12 } });
   await page.waitForURL(`**/projects/${selectedOrganization.id}/pages/${selectedTarget.id}`);
   await main
-    .getByText("이 스캔에는 재현 페이지가 없어요", { exact: true })
+    .getByText("현재 동적 페이지를 열지 못했어요", { exact: true })
     .waitFor({ state: "visible" });
 
   const finalOverviewCount = journal.filter(
@@ -279,8 +294,8 @@ try {
   const issueRequestPaths = journal
     .filter((entry) => entry.method === "GET" && entry.pathname.endsWith("/issues"))
     .map((entry) => entry.pathname);
-  const artifactRequestPaths = journal
-    .filter((entry) => entry.method === "GET" && entry.pathname.endsWith("/artifact"))
+  const captureMetadataRequestPaths = journal
+    .filter((entry) => entry.method === "GET" && entry.pathname.endsWith("/capture-metadata"))
     .map((entry) => entry.pathname);
   assert.equal(
     finalOverviewCount,
@@ -290,9 +305,9 @@ try {
   assert.deepEqual(issueRequestPaths, [
     `/api/results/requests/${selectedLatestRequestId}/issues`
   ], "a recent completed-detail cache entry must avoid refetching issues on re-entry");
-  assert.deepEqual(artifactRequestPaths, [
-    `/api/results/requests/${selectedLatestRequestId}/artifact`
-  ], "an old request must use one immediate artifact lookup and reuse the fresh empty cache");
+  assert.deepEqual(captureMetadataRequestPaths, [
+    `/api/results/requests/${selectedLatestRequestId}/capture-metadata`
+  ], "page re-entry must reuse the fresh capture metadata cache");
   assert.equal(
     issueRequestPaths.includes(`/api/results/requests/${selectedOlderRequestId}/issues`),
     false,
@@ -306,8 +321,7 @@ try {
       (entry.pathname === "/api/organizations" ||
         entry.pathname === "/api/requests" ||
         /^\/api\/organizations\/\d+\/evaluation-targets$/.test(entry.pathname) ||
-        /^\/api\/results\/requests\/\d+\/summary$/.test(entry.pathname) ||
-        /^\/api\/scores\/requests\/\d+$/.test(entry.pathname))
+        /^\/api\/results\/requests\/\d+\/summary$/.test(entry.pathname))
   );
   assert.deepEqual(forbiddenFanOut, []);
 
@@ -320,7 +334,7 @@ try {
         completedRequestCount: evaluationRequests.length,
         bootstrapOverviewCount,
         detailIssueRequestCount: issueRequestPaths.length,
-        artifactRequestCount: artifactRequestPaths.length,
+        captureMetadataRequestCount: captureMetadataRequestPaths.length,
         selectedLatestRequestId,
         additionalOverviewCount: finalOverviewCount - bootstrapOverviewCount,
         forbiddenFanOutCount: forbiddenFanOut.length

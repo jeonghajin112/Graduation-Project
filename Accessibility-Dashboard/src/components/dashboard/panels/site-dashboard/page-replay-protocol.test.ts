@@ -50,11 +50,7 @@ function replayIssue(message: string, analyzerType: AnalyzerType = "AI_TEXT") {
   const row: RecentIssueRow = {
     issue,
     severity: { key: "LOW", label: "낮음", color: "#027a48" },
-    wcagCriterion: { criterion: "3.1.5", title: "읽기 수준" },
-    issueGuides: [],
-    analyzerLabel: "텍스트 분석",
-    analyzerType,
-    showsAiGuide: analyzerType === "AI_TEXT"
+    analyzerType
   };
   return toPageReplayIssue(row);
 }
@@ -206,7 +202,7 @@ describe("live document health messages", () => {
     })).toBeNull();
   });
 
-  it("does not accept a transient single loading image as meaningful content", () => {
+  it("accepts the first substantive sample but rejects a small loading image", () => {
     const loadingImage = parsePageReplayMessage({
       source: PAGE_REPLAY_SOURCE,
       type: "DOCUMENT_HEALTH",
@@ -236,7 +232,7 @@ describe("live document health messages", () => {
       type: "DOCUMENT_HEALTH",
       documentToken: "live_doc_visual_loading",
       status: "MEANINGFUL",
-      consecutiveMeaningfulSamples: 3,
+      consecutiveMeaningfulSamples: 1,
       visibleControlCount: 0,
       visibleElementCount: 2,
       visibleImageCount: 1,
@@ -258,7 +254,7 @@ describe("live document health messages", () => {
 
     expect(loadingImage?.type).toBe("DOCUMENT_HEALTH");
     expect(loadingImage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(loadingImage)).toBe(false);
-    expect(unstableVisualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(unstableVisualPage)).toBe(false);
+    expect(unstableVisualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(unstableVisualPage)).toBe(true);
     expect(visualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(visualPage)).toBe(true);
     expect(substantivePage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(substantivePage)).toBe(true);
   });

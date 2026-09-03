@@ -809,17 +809,17 @@ public class LiveReportDocumentRewriter {
                   }
                 }
                 #ap-live-marker-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none}
-                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;width:24px;height:24px;border:2px solid #fff;
+                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;width:24px;height:24px;border:0;
                 border-radius:50%;background:var(--ap-marker-color,#0b6ff4);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
                 pointer-events:auto;cursor:pointer;display:grid;place-items:center;font:700 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
                 transform:translate(-50%,-50%);isolation:isolate}
                 .ap-live-marker[hidden]{display:none!important}
-                .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 0 0 3px color-mix(in srgb,var(--ap-marker-color,#0b6ff4) 24%,transparent),0 3px 10px rgba(0,0,0,.34)}
+                .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 3px 10px rgba(0,0,0,.34)}
                 .ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}
-                .ap-live-marker__count{all:initial;box-sizing:border-box;position:absolute;left:calc(100% + 4px);top:50%;min-width:16px;height:16px;padding:0 4px;
-                border:1.5px solid #fff;border-radius:999px;background:#101828;color:#fff;display:grid;place-items:center;
-                font:700 9px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.28);
-                pointer-events:none;transform:translateY(-50%)}
+                .ap-live-marker__count{all:initial;box-sizing:border-box;position:absolute;left:calc(50% + 10px);top:calc(50% - 10px);min-width:14px;height:14px;padding:0 3px;
+                border:0;border-radius:999px;background:#101828;color:#fff;display:grid;place-items:center;
+                font:700 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.28);
+                pointer-events:none;transform:translate(-50%,-50%)}
                 .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(360px,calc(100vw - 24px));
                 min-height:218px;max-height:min(440px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
                 border-radius:14px;background:rgba(255,255,255,.96);color:#101828;box-shadow:0 18px 44px rgba(16,24,40,.25),inset 0 1px rgba(255,255,255,.9);
@@ -832,6 +832,8 @@ public class LiveReportDocumentRewriter {
                 font:700 18px/1 system-ui,-apple-system,"Segoe UI",sans-serif}.ap-live-popover__close:hover{background:#f2f4f7}
                 .ap-live-popover__close:focus-visible,.ap-live-popover__tab:focus-visible{outline:2px solid #0b6ff4;outline-offset:1px}
                 .ap-live-popover__tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:108px;overflow:auto;padding:0 12px 9px}
+                .ap-live-popover__tabs,.ap-live-popover__detail{scrollbar-width:none!important;-ms-overflow-style:none!important}
+                .ap-live-popover__tabs::-webkit-scrollbar,.ap-live-popover__detail::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
                 .ap-live-popover__tabs[hidden]{display:none!important}
                 .ap-live-popover__tab{all:initial;min-width:0;padding:7px 8px;border-radius:8px;background:#f8fafc;color:#344054;cursor:pointer;
                 box-shadow:inset 0 0 0 1px rgba(16,24,40,.08);display:grid;grid-template-columns:18px minmax(0,1fr);gap:7px;align-items:start;
@@ -884,9 +886,16 @@ public class LiveReportDocumentRewriter {
                   const expectedParent = parent;
                   const nativeApply = Reflect.apply;
                   const NativeMessagePort = MessagePort;
+                  const NativeMutationObserver = globalThis.MutationObserver;
                   const nativeWindowPostMessage = globalThis.postMessage;
                   const nativeAddEventListener = EventTarget.prototype.addEventListener;
+                  const nativeRemoveEventListener = EventTarget.prototype.removeEventListener;
+                  const nativePreventDefault = Event.prototype.preventDefault;
                   const nativeStopImmediatePropagation = Event.prototype.stopImmediatePropagation;
+                  const nativeComposedPath = Event.prototype.composedPath;
+                  const nativeNodeContains = Node.prototype.contains;
+                  const nativeGetRootNode = Node.prototype.getRootNode;
+                  const nativeClosest = Element.prototype.closest;
                   const nativePortPostMessage = MessagePort.prototype.postMessage;
                   const nativePortStart = MessagePort.prototype.start;
                   const nativePortClose = MessagePort.prototype.close;
@@ -897,6 +906,7 @@ public class LiveReportDocumentRewriter {
                   const messageDataGetter = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'data')?.get;
                   const messagePortsGetter = Object.getOwnPropertyDescriptor(MessageEvent.prototype, 'ports')?.get;
                   const eventIsTrustedGetter = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted')?.get;
+                  const eventTargetGetter = Object.getOwnPropertyDescriptor(Event.prototype, 'target')?.get;
                   const arrayIsArray = Array.isArray;
                   const numberIsSafeInteger = Number.isSafeInteger;
                   const numberIsFinite = Number.isFinite;
@@ -919,6 +929,8 @@ public class LiveReportDocumentRewriter {
                   let viewScale = 1;
                   let healthCheckTimer = 0;
                   let healthObserver = null;
+                  let markerObserver = null;
+                  let documentReadyObserver = null;
                   let lastDocumentHealth = null;
                   let meaningfulHealthSamples = 0;
                   let openEntry = null;
@@ -926,6 +938,8 @@ public class LiveReportDocumentRewriter {
                   let closeTimer = 0;
                   let restoringMarkerFocus = false;
                   let markerPositionFrame = 0;
+                  let pendingMarkerPositionMode = 'preserve-root';
+                  const markerScrollRoots = new Set();
                   const layer = document.createElement('div');
                   layer.id = 'ap-live-marker-layer';
                   const highlight = document.createElement('div');
@@ -941,14 +955,19 @@ public class LiveReportDocumentRewriter {
                     LOW:'#10b981',MEDIUM:'#f3b234',MODERATE:'#f3b234',HIGH:'#fb8a3d',SERIOUS:'#fb8a3d',CRITICAL:'#f35f63'
                   });
                   const markerCircleSize = 24;
-                  const markerCountPillGap = 4;
-                  const markerCountPillMinWidth = 16;
-                  const markerCountPillHorizontalPadding = 8;
-                  const markerCountPillDigitWidth = 6;
+                  const markerCountPillMinWidth = 14;
+                  const markerCountPillHorizontalPadding = 6;
+                  const markerCountPillDigitWidth = 5;
+                  const markerCountBadgeCenterX = 10;
+                  const markerCountBadgeCenterY = -10;
+                  const markerCountBadgeHeight = 14;
                   const markerCollisionGap = 6;
+                  const markerTargetGap = 6;
                   const markerSlotStep = 40;
                   const markerViewportMargin = 2;
                   const markerSearchRingLimit = 12;
+                  const markerProtectedTextRectBudget = 512;
+                  const markerProtectedTextPerElementLimit = 32;
                   const maxHighlightFragments = 128;
                   const popover = document.createElement('section');
                   popover.id = 'ap-live-issue-popover';
@@ -1706,6 +1725,147 @@ public class LiveReportDocumentRewriter {
                         arguments.length > 0 ? [submitter] : []);
                     };
                   }
+
+                  // Live reports are interactive only for read-only navigation. Page scripts
+                  // still need to hydrate and carousels/tabs need to move, but arbitrary action
+                  // buttons must not run login, purchase, save or application handlers. Install
+                  // the guard on window before upstream scripts so delegated and inline handlers
+                  // cannot observe a blocked activation first.
+                  const actionControlSelector = 'button,input[type=button i],input[type=submit i],input[type=reset i],input[type=image i],[role=button i]';
+                  const navigationSurfacePattern = /(?:^|[\\s_:-])(?:carousel|slider|swiper|slick|pagination|paginator|pager|tablist|tabs)(?:$|[\\s_:-])/i;
+                  const navigationActionPattern = /(?:^|[\\s_:-])(?:next|previous|prev|back|forward|first|last|page|slide|dot|bullet|tab)(?:$|[\\s_:-])/i;
+                  const explicitNavigationLabelPattern = /(?:^|[\\s_:-])(?:next|previous|prev|first|last)[\\s_-]+(?:page|slide|item|panel)(?:$|[\\s_:-])|(?:go|jump)[\\s_-]+to[\\s_-]+(?:page|slide|item|panel)|(?:다음|이전|첫|마지막)[\\s_-]*(?:페이지|슬라이드|항목|화면)|(?:페이지|슬라이드)[\\s_-]*(?:다음|이전|이동)/i;
+                  const readAttribute = (element, name) => String(nativeGetAttribute.call(element, name) || '').trim();
+                  const readElementText = element => {
+                    try {
+                      const value = nativeTextContent?.get
+                        ? nativeApply(nativeTextContent.get, element, [])
+                        : element.textContent;
+                      return String(value || '').replace(/\\s+/g, ' ').trim().slice(0, 256);
+                    } catch (_) { return ''; }
+                  };
+                  const navigationSemantics = element => [
+                    readAttribute(element, 'role'), readAttribute(element, 'aria-label'),
+                    readAttribute(element, 'aria-roledescription'), readAttribute(element, 'title'),
+                    readAttribute(element, 'id'), readAttribute(element, 'class'),
+                    readAttribute(element, 'data-role'), readAttribute(element, 'data-action')
+                  ].filter(Boolean).join(' ');
+                  const isReplayUiTarget = target => {
+                    if (!(target instanceof Node)) return false;
+                    return target === layer || target === popover
+                      || nativeApply(nativeNodeContains, layer, [target])
+                      || nativeApply(nativeNodeContains, popover, [target]);
+                  };
+                  const closestElement = (element, selector) => {
+                    try { return nativeApply(nativeClosest, element, [selector]); }
+                    catch (_) { return null; }
+                  };
+                  const navigationSurfaceFor = control => {
+                    let candidate = control;
+                    for (let depth = 0; candidate instanceof Element && depth < 8; depth += 1) {
+                      const role = readAttribute(candidate, 'role').toLowerCase();
+                      const roleDescription = readAttribute(candidate, 'aria-roledescription').toLowerCase();
+                      if (role === 'tablist' || roleDescription === 'carousel'
+                          || navigationSurfacePattern.test(navigationSemantics(candidate))) return candidate;
+                      const parentElement = candidate.parentElement;
+                      if (parentElement) {
+                        candidate = parentElement;
+                        continue;
+                      }
+                      try {
+                        const root = nativeApply(nativeGetRootNode, candidate, []);
+                        candidate = root && root.host instanceof Element ? root.host : null;
+                      } catch (_) { candidate = null; }
+                    }
+                    return null;
+                  };
+                  const formNavigationDecision = control => {
+                    const tag = String(control.tagName || '').toUpperCase();
+                    const rawType = readAttribute(control, 'type').toLowerCase();
+                    if ((tag === 'BUTTON' || tag === 'INPUT') && rawType === 'reset') return false;
+                    const submitControl = tag === 'BUTTON'
+                      ? rawType === '' || rawType === 'submit'
+                      : tag === 'INPUT' && (rawType === 'submit' || rawType === 'image');
+                    if (!submitControl) return null;
+                    const form = control.form instanceof HTMLFormElement
+                      ? control.form
+                      : closestElement(control, 'form');
+                    if (!(form instanceof HTMLFormElement)) return rawType === '' ? null : false;
+                    if (formMethod(form, control) !== 'GET') return false;
+                    const submitterAction = nativeGetAttribute.call(control, 'formaction');
+                    const formAction = nativeGetAttribute.call(form, 'action');
+                    const rawAction = submitterAction !== null
+                      ? submitterAction
+                      : formAction !== null && formAction !== ''
+                        ? formAction
+                        : currentUpstreamDocument();
+                    return Boolean(proxyUrl(rawAction, currentUpstreamBase()));
+                  };
+                  const isAllowedNavigationControl = control => {
+                    if (!(control instanceof Element)) return false;
+                    if (nativeGetAttribute.call(control, 'disabled') !== null
+                        || readAttribute(control, 'aria-disabled').toLowerCase() === 'true') return false;
+                    const formNavigation = formNavigationDecision(control);
+                    if (formNavigation !== null) return formNavigation;
+                    const role = readAttribute(control, 'role').toLowerCase();
+                    const anchor = closestElement(control, 'a[href]');
+                    if (anchor && readAttribute(anchor, 'role').toLowerCase() !== 'button') return true;
+                    if (role === 'tab' || closestElement(control, '[role=tablist],[role=TABLIST]')) return true;
+                    const slide = readAttribute(control, 'data-slide') || readAttribute(control, 'data-bs-slide');
+                    if (/^(?:next|prev)$/i.test(slide)) return true;
+                    if (nativeGetAttribute.call(control, 'data-slide-to') !== null
+                        || nativeGetAttribute.call(control, 'data-bs-slide-to') !== null) return true;
+                    const label = [
+                      readAttribute(control, 'aria-label'), readAttribute(control, 'title'), readElementText(control)
+                    ].filter(Boolean).join(' ');
+                    if (explicitNavigationLabelPattern.test(label)) return true;
+                    const surface = navigationSurfaceFor(control);
+                    if (!surface) return false;
+                    const semantics = `${navigationSemantics(control)} ${label}`;
+                    if (navigationActionPattern.test(semantics)) return true;
+                    return /^[0-9]+$/.test(readElementText(control));
+                  };
+                  const eventPath = event => {
+                    try {
+                      const path = nativeApply(nativeComposedPath, event, []);
+                      if (arrayIsArray(path) && path.length > 0) return path;
+                    } catch (_) { /* Fall back to the native target getter below. */ }
+                    const target = eventTargetGetter
+                      ? nativeApply(eventTargetGetter, event, [])
+                      : event.target;
+                    return target ? [target] : [];
+                  };
+                  const blockedActionControl = event => {
+                    const path = eventPath(event);
+                    for (let index = 0; index < path.length; index += 1) {
+                      const candidate = path[index];
+                      if (!(candidate instanceof Element)) continue;
+                      if (isReplayUiTarget(candidate)) return null;
+                      const control = closestElement(candidate, actionControlSelector);
+                      if (!control) continue;
+                      return isAllowedNavigationControl(control) ? null : control;
+                    }
+                    return null;
+                  };
+                  const guardReadOnlyInteraction = event => {
+                    const trusted = eventIsTrustedGetter
+                      ? nativeApply(eventIsTrustedGetter, event, [])
+                      : event.isTrusted;
+                    if (trusted !== true) return;
+                    if (!blockedActionControl(event)) return;
+                    nativeApply(nativePreventDefault, event, []);
+                    nativeApply(nativeStopImmediatePropagation, event, []);
+                  };
+                  ['pointerdown','pointerup','mousedown','mouseup','touchstart','touchend','click','dblclick','auxclick'].forEach(type => {
+                    nativeApply(nativeAddEventListener, globalThis, [type, guardReadOnlyInteraction, {capture:true, passive:false}]);
+                  });
+                  const guardReadOnlyKeyboard = event => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    guardReadOnlyInteraction(event);
+                  };
+                  ['keydown','keypress','keyup'].forEach(type => {
+                    nativeApply(nativeAddEventListener, globalThis, [type, guardReadOnlyKeyboard, {capture:true}]);
+                  });
                   document.addEventListener('submit', event => {
                     const form = event.target instanceof HTMLFormElement ? event.target : null;
                     if (!form) return;
@@ -1775,7 +1935,7 @@ public class LiveReportDocumentRewriter {
                     const substantive = visibleTextLength >= 12 || visibleImageCount >= 2 || visibleControlCount >= 2
                       || largestVisibleVisualArea >= 10000;
                     meaningfulHealthSamples = substantive ? meaningfulHealthSamples + 1 : 0;
-                    const meaningful = meaningfulHealthSamples >= 4;
+                    const meaningful = meaningfulHealthSamples >= 1;
                     return {
                       type:'DOCUMENT_HEALTH', status:meaningful ? 'MEANINGFUL' : 'EMPTY',
                       consecutiveMeaningfulSamples:Math.min(meaningfulHealthSamples, 1000000),
@@ -1807,6 +1967,33 @@ public class LiveReportDocumentRewriter {
                       });
                     }, 650);
                   };
+                  const startMarkerObserver = () => {
+                    if (markerObserver || !NativeMutationObserver) return;
+                    markerObserver = new NativeMutationObserver(records => {
+                      if (marked.length > 0 && records.some(record => !layer.contains(record.target))) {
+                        if (records.some(record => record.type === 'attributes' || record.type === 'childList')) {
+                          marked.forEach(entry => {
+                            entry.positionAnchor = undefined;
+                          });
+                        }
+                        schedulePosition('preserve-root');
+                      }
+                    });
+                    markerObserver.observe(document.body || document.documentElement, {
+                      childList:true, subtree:true, characterData:true, attributes:true
+                    });
+                  };
+                  const startDocumentHealth = () => {
+                    if (healthObserver || !NativeMutationObserver) return;
+                    healthObserver = new NativeMutationObserver(() => {
+                      if (!lastDocumentHealth || lastDocumentHealth.status !== 'MEANINGFUL') {
+                        scheduleDocumentHealth();
+                      }
+                    });
+                    healthObserver.observe(document.body || document.documentElement, {
+                      childList:true, subtree:true, characterData:true, attributes:true
+                    });
+                  };
                   const textValue = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
                   const severityKey = issue => String(issue?.severity || '').toUpperCase();
                   const highestSeverityIssue = issues => issues.reduce((highest, candidate) => {
@@ -1829,6 +2016,7 @@ public class LiveReportDocumentRewriter {
                   };
                   const composedElementParent = element => {
                     if (!(element instanceof Element)) return null;
+                    if (element.assignedSlot instanceof HTMLSlotElement) return element.assignedSlot;
                     if (element.parentElement) return element.parentElement;
                     const root = element.getRootNode();
                     return root instanceof ShadowRoot && root.host instanceof Element ? root.host : null;
@@ -2144,10 +2332,33 @@ public class LiveReportDocumentRewriter {
                     renderDetail(entry, preferred, notify && entry.issues.length === 1);
                     requestAnimationFrame(() => positionPopover());
                   };
+                  const clearMarkerScrollRoots = () => {
+                    markerScrollRoots.forEach(root => {
+                      nativeApply(nativeRemoveEventListener, root, [
+                        'scroll', scheduleCapturedScrollPosition, {capture:true}
+                      ]);
+                    });
+                    markerScrollRoots.clear();
+                  };
                   const clear = () => {
                     closePopover();
                     marked = [];
+                    clearMarkerScrollRoots();
                     layer.replaceChildren(highlight, popover);
+                  };
+                  const observeMarkerShadowScrollRoots = element => {
+                    for (let current = element; current instanceof Element;) {
+                      const root = nativeApply(nativeGetRootNode, current, []);
+                      if (root instanceof ShadowRoot && !markerScrollRoots.has(root)) {
+                        markerScrollRoots.add(root);
+                        nativeApply(nativeAddEventListener, root, [
+                          'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}
+                        ]);
+                      }
+                      const parent = composedElementParent(current);
+                      if (!(parent instanceof Element) || parent === current) return;
+                      current = parent;
+                    }
                   };
                   const rectanglesOverlap = (left, right) => !(
                     left.right <= right.left || right.right <= left.left
@@ -2164,14 +2375,27 @@ public class LiveReportDocumentRewriter {
                     const inverseScale = 1 / viewScale;
                     const radius = markerCircleSize / 2;
                     const countPillWidth = markerCountPillWidth(entry);
-                    const rightExtent = radius + (countPillWidth > 0
-                      ? markerCountPillGap + countPillWidth
-                      : 0);
+                    let leftExtent = radius;
+                    let topExtent = radius;
+                    let rightExtent = radius;
+                    let bottomExtent = radius;
+                    if (countPillWidth > 0) {
+                      const halfWidth = countPillWidth / 2;
+                      const halfHeight = markerCountBadgeHeight / 2;
+                      const badgeLeft = markerCountBadgeCenterX - halfWidth;
+                      const badgeTop = markerCountBadgeCenterY - halfHeight;
+                      const badgeRight = markerCountBadgeCenterX + halfWidth;
+                      const badgeBottom = markerCountBadgeCenterY + halfHeight;
+                      leftExtent = Math.max(leftExtent, -badgeLeft);
+                      topExtent = Math.max(topExtent, -badgeTop);
+                      rightExtent = Math.max(rightExtent, badgeRight);
+                      bottomExtent = Math.max(bottomExtent, badgeBottom);
+                    }
                     return {
-                      left: left - (radius + collisionPadding) * inverseScale,
-                      top: top - (radius + collisionPadding) * inverseScale,
+                      left: left - (leftExtent + collisionPadding) * inverseScale,
+                      top: top - (topExtent + collisionPadding) * inverseScale,
                       right: left + (rightExtent + collisionPadding) * inverseScale,
-                      bottom: top + (radius + collisionPadding) * inverseScale
+                      bottom: top + (bottomExtent + collisionPadding) * inverseScale
                     };
                   };
                   const createMarkerSpatialIndex = () => {
@@ -2222,85 +2446,277 @@ public class LiveReportDocumentRewriter {
                     && rect.right > 0 && rect.bottom > 0
                     && rect.left < innerWidth && rect.top < innerHeight
                   );
+                """,
+                """
+                  const markerDocumentRectFor = (element, rect, documentLeft, documentTop) => {
+                    if (!element.isConnected || element.getClientRects().length === 0
+                        || !numberIsFinite(rect.left) || !numberIsFinite(rect.top)
+                        || !numberIsFinite(rect.width) || !numberIsFinite(rect.height)
+                        || rect.width <= 0 || rect.height <= 0) return null;
+                    return {
+                      left:rect.left + documentLeft,
+                      top:rect.top + documentTop,
+                      width:rect.width,
+                      height:rect.height
+                    };
+                  };
+                  const markerDocumentRectsMatch = (previous, current) => {
+                    if (!previous || !current) return false;
+                    const epsilon = 1;
+                    return Math.abs(previous.left - current.left) <= epsilon
+                      && Math.abs(previous.top - current.top) <= epsilon
+                      && Math.abs(previous.width - current.width) <= epsilon
+                      && Math.abs(previous.height - current.height) <= epsilon;
+                  };
+                  const markerTargetGeometryForElement = element => {
+                    const rects = highlightRectsForElement(element);
+                    if (rects.length === 0) return null;
+                    const bounds = rects.reduce((union, rect) => ({
+                      left:Math.min(union.left, rect.left),
+                      top:Math.min(union.top, rect.top),
+                      right:Math.max(union.right, rect.right),
+                      bottom:Math.max(union.bottom, rect.bottom)
+                    }), rects[0]);
+                    bounds.width = bounds.right - bounds.left;
+                    bounds.height = bounds.bottom - bounds.top;
+                    return {rects, bounds, firstRect:rects[0], lastRect:rects[rects.length - 1]};
+                  };
+                  const markerProtectedTextRectsForElement = (element, targetGeometry, maxRects) => {
+                    if (maxRects <= 0 || element.childElementCount > 24) return [];
+                    const text = String(element.textContent || '').trim();
+                    if (!text || text.length > 2000) return [];
+                    let rects = [];
+                    try {
+                      const range = document.createRange();
+                      range.selectNodeContents(element);
+                      rects = Array.from(range.getClientRects());
+                    } catch (_) { /* Fall back to compact control geometry below. */ }
+                    const bounds = targetGeometry.bounds;
+                    rects = rects.slice(0, Math.min(markerProtectedTextPerElementLimit, maxRects)).map(rect => ({
+                      left:Math.max(0, bounds.left, rect.left),
+                      top:Math.max(0, bounds.top, rect.top),
+                      right:Math.min(innerWidth, bounds.right, rect.right),
+                      bottom:Math.min(innerHeight, bounds.bottom, rect.bottom)
+                    })).filter(rect => numberIsFinite(rect.left) && numberIsFinite(rect.top)
+                      && numberIsFinite(rect.right) && numberIsFinite(rect.bottom)
+                      && rect.right > rect.left && rect.bottom > rect.top);
+                    if (rects.length > 0) return rects;
+                    return element.matches('input,textarea,select,button,[role="button"],[role="textbox"]')
+                      ? targetGeometry.rects
+                      : [];
+                  };
+                  const markerClearsTarget = (footprint, targetRects) => {
+                    const gap = markerTargetGap / viewScale;
+                    return !targetRects.some(rect => rectanglesOverlap(footprint, {
+                      left:rect.left - gap,
+                      top:rect.top - gap,
+                      right:rect.right + gap,
+                      bottom:rect.bottom + gap
+                    }));
+                  };
                   const clampMarkerCenter = (entry, left, top) => {
                     const requestedLeft = left;
                     const requestedTop = top;
                     const margin = markerViewportMargin / viewScale;
-                    let footprint = markerFootprint(entry, left, top);
+                    const collisionPadding = markerCollisionGap / 2;
+                    let footprint = markerFootprint(entry, left, top, collisionPadding);
                     if (footprint.right - footprint.left > innerWidth - margin * 2
                         || footprint.bottom - footprint.top > innerHeight - margin * 2) return null;
                     if (footprint.left < margin) left += margin - footprint.left;
                     if (footprint.right > innerWidth - margin) left -= footprint.right - (innerWidth - margin);
                     if (footprint.top < margin) top += margin - footprint.top;
                     if (footprint.bottom > innerHeight - margin) top -= footprint.bottom - (innerHeight - margin);
-                    footprint = markerFootprint(entry, left, top, markerCollisionGap / 2);
+                    footprint = markerFootprint(entry, left, top, collisionPadding);
                     return {
                       left, top, footprint,
                       viewportClamped:left !== requestedLeft || top !== requestedTop
                     };
                   };
-                  const markerPlacementFor = (entry, targetRect, spatialIndex) => {
+                  const markerGutterFamilies = (entry, targetGeometry) => {
+                    const footprint = markerFootprint(entry, 0, 0, markerCollisionGap / 2);
+                    const extents = {
+                      left:-footprint.left,
+                      top:-footprint.top,
+                      right:footprint.right,
+                      bottom:footprint.bottom
+                    };
+                    const gap = markerTargetGap / viewScale;
+                    const {firstRect, lastRect} = targetGeometry;
+                    return [
+                      {
+                        side:'left', axis:'vertical',
+                        baseLeft:firstRect.left - gap - extents.right,
+                        baseTop:firstRect.top + extents.top
+                      },
+                      {
+                        side:'right', axis:'vertical',
+                        baseLeft:firstRect.right + gap + extents.left,
+                        baseTop:firstRect.top + extents.top
+                      },
+                      {
+                        side:'top', axis:'horizontal',
+                        baseLeft:firstRect.left + extents.left,
+                        baseTop:firstRect.top - gap - extents.bottom
+                      },
+                      {
+                        side:'bottom', axis:'horizontal',
+                        baseLeft:lastRect.left + extents.left,
+                        baseTop:lastRect.bottom + gap + extents.top
+                      }
+                    ];
+                  };
+                  const markerPlacementFor = (entry, targetGeometry, spatialIndex, contentSpatialIndex) => {
                     const step = markerSlotStep / viewScale;
                     const seenCandidates = new Set();
-                    const tryCandidate = (left, top, markerOffset) => {
+                    const anchorRect = targetGeometry.firstRect;
+                    const families = markerGutterFamilies(entry, targetGeometry);
+                    const visibleWidth = Math.max(0,
+                      Math.min(innerWidth, targetGeometry.bounds.right)
+                        - Math.max(0, targetGeometry.bounds.left));
+                    const visibleHeight = Math.max(0,
+                      Math.min(innerHeight, targetGeometry.bounds.bottom)
+                        - Math.max(0, targetGeometry.bounds.top));
+                    const viewportArea = Math.max(1, innerWidth * innerHeight);
+                    const pageLevelTarget = entry.element === document.documentElement
+                      || entry.element === document.body;
+                    const pageLevelOverlapAllowed = pageLevelTarget
+                      && visibleWidth * visibleHeight >= viewportArea * 0.75;
+                    const tryCandidate = (left, top, markerOffset, allowTargetOverlap = false) => {
                       const candidate = clampMarkerCenter(entry, left, top);
                       if (!candidate) return null;
-                      const key = `${Math.round(candidate.left * 100)}:${Math.round(candidate.top * 100)}`;
+                      const key = `${allowTargetOverlap ? 'fallback' : 'safe'}:`
+                        + `${Math.round(candidate.left * 100)}:${Math.round(candidate.top * 100)}`;
                       if (seenCandidates.has(key)) return null;
                       seenCandidates.add(key);
+                      if (!allowTargetOverlap
+                          && !markerClearsTarget(candidate.footprint, targetGeometry.rects)) return null;
+                      if (contentSpatialIndex.overlaps(candidate.footprint)) return null;
                       if (spatialIndex.overlaps(candidate.footprint)) return null;
                       return {...candidate, markerOffset};
                     };
-                    let placement = entry.markerOffset
-                      ? tryCandidate(
-                          targetRect.left + entry.markerOffset.left,
-                          targetRect.top + entry.markerOffset.top,
-                          entry.markerOffset
-                        )
-                      : null;
+                    let placement = null;
+                    if (entry.markerOffset) {
+                      const previousFamily = families.find(
+                        family => family.side === entry.markerOffset.side
+                      );
+                      if (previousFamily && numberIsFinite(entry.markerOffset.laneOffset)) {
+                        const laneOffset = entry.markerOffset.laneOffset;
+                        const left = previousFamily.baseLeft
+                          + (previousFamily.axis === 'horizontal' ? laneOffset : 0);
+                        const top = previousFamily.baseTop
+                          + (previousFamily.axis === 'vertical' ? laneOffset : 0);
+                        const pageFallback = entry.markerOffset.pageFallback === true
+                          && pageLevelOverlapAllowed;
+                        placement = tryCandidate(left, top, {
+                          left:left - anchorRect.left,
+                          top:top - anchorRect.top,
+                          side:previousFamily.side,
+                          laneOffset,
+                          pageFallback
+                        }, pageFallback);
+                      }
+                    }
                     if (placement) return placement;
-                    placement = tryCandidate(targetRect.left, targetRect.top, {left:0, top:0});
-                    if (placement) return placement;
-                    // Keep every layout pass linear in the number of groups: the spatial
-                    // index makes each probe local and the ring budget is fixed.
-                    for (let ring = 1; ring <= markerSearchRingLimit; ring += 1) {
+                    // Probe every side at the same distance before moving farther away so
+                    // dense groups stay associated with their element without covering it.
+                    for (let ring = 0; ring <= markerSearchRingLimit; ring += 1) {
                       const distance = ring * step;
-                      const offsets = [
-                        [0, distance], [distance, 0], [0, -distance], [-distance, 0],
-                        [distance, distance], [distance, -distance],
-                        [-distance, distance], [-distance, -distance]
-                      ];
-                      for (const [offsetX, offsetY] of offsets) {
-                        placement = tryCandidate(
-                          targetRect.left + offsetX,
-                          targetRect.top + offsetY,
-                          {left:offsetX, top:offsetY}
-                        );
+                      const laneOffsets = ring === 0 ? [0] : [distance, -distance];
+                      for (const family of families) {
+                        for (const laneOffset of laneOffsets) {
+                          const left = family.baseLeft
+                            + (family.axis === 'horizontal' ? laneOffset : 0);
+                          const top = family.baseTop
+                            + (family.axis === 'vertical' ? laneOffset : 0);
+                          placement = tryCandidate(left, top, {
+                            left:left - anchorRect.left,
+                            top:top - anchorRect.top,
+                            side:family.side,
+                            laneOffset,
+                            pageFallback:false
+                          });
+                          if (placement) return placement;
+                        }
+                      }
+                    }
+                    // Page-level issues can legitimately target body-sized containers with
+                    // no outside gutter. Keep those markers available as a last resort only;
+                    // ordinary text and controls never use this overlap fallback.
+                    if (pageLevelOverlapAllowed) {
+                      for (const family of families) {
+                        placement = tryCandidate(family.baseLeft, family.baseTop, {
+                          left:family.baseLeft - anchorRect.left,
+                          top:family.baseTop - anchorRect.top,
+                          side:family.side,
+                          laneOffset:0,
+                          pageFallback:true
+                        }, true);
                         if (placement) return placement;
                       }
                     }
                     return null;
                   };
-                  const position = () => {
+                  const position = (mode = 'full') => {
+                    const preserveRootPlacement = mode === 'preserve-root';
                     const documentLeft = globalThis.scrollX;
                     const documentTop = globalThis.scrollY;
                     const spatialIndex = createMarkerSpatialIndex();
+                    let remainingProtectedTextRects = markerProtectedTextRectBudget;
                     const measurements = marked.map(entry => {
+                      if (!preserveRootPlacement) entry.positionAnchor = undefined;
                       const targetRect = entry.element.getBoundingClientRect();
+                      const targetDocumentRect = markerDocumentRectFor(
+                        entry.element, targetRect, documentLeft, documentTop
+                      );
+                      const viewportAttached = markerUsesViewportCoordinates(entry);
+                      const tracksRootScroll = viewportAttached
+                        || entry.positionAnchor?.position === 'sticky';
+                      const initiallyVisible = targetVisibleInViewport(entry.element, targetRect);
+                      const targetGeometry = initiallyVisible
+                        ? markerTargetGeometryForElement(entry.element)
+                        : null;
+                      const preservePlacement = preserveRootPlacement
+                        && !tracksRootScroll
+                        && entry.markerWasVisible
+                        && numberIsFinite(entry.markerDocumentLeft)
+                        && numberIsFinite(entry.markerDocumentTop)
+                        && markerDocumentRectsMatch(entry.markerAnchorDocumentRect, targetDocumentRect)
+                        && (!initiallyVisible || targetGeometry !== null);
+                      const protectedTextRects = targetGeometry && remainingProtectedTextRects > 0
+                        ? markerProtectedTextRectsForElement(
+                            entry.element, targetGeometry, remainingProtectedTextRects
+                          )
+                        : [];
+                      remainingProtectedTextRects -= protectedTextRects.length;
                       return {
                         entry,
-                        targetRect,
-                        visible:targetVisibleInViewport(entry.element, targetRect),
-                        viewportAttached:markerUsesViewportCoordinates(entry)
+                        targetDocumentRect,
+                        targetGeometry,
+                        protectedTextRects,
+                        visible:targetGeometry !== null,
+                        viewportAttached,
+                        preservePlacement
                       };
+                    });
+                    const contentSpatialIndex = createMarkerSpatialIndex();
+                    measurements.forEach(measurement => {
+                      measurement.protectedTextRects.forEach(rect => contentSpatialIndex.add(rect));
+                      if (!measurement.preservePlacement) return;
+                      spatialIndex.add(markerFootprint(
+                        measurement.entry,
+                        measurement.entry.markerDocumentLeft - documentLeft,
+                        measurement.entry.markerDocumentTop - documentTop,
+                        markerCollisionGap / 2
+                      ));
                     });
                     const placements = new Map();
                     const placeMeasurement = measurement => {
-                      if (!measurement.visible) return;
+                      if (measurement.preservePlacement || !measurement.visible) return;
                       const placement = markerPlacementFor(
                         measurement.entry,
-                        measurement.targetRect,
-                        spatialIndex
+                        measurement.targetGeometry,
+                        spatialIndex,
+                        contentSpatialIndex
                       );
                       if (!placement) return;
                       placements.set(measurement.entry, placement);
@@ -2313,23 +2729,50 @@ public class LiveReportDocumentRewriter {
                       if (!measurement.entry.markerWasVisible) placeMeasurement(measurement);
                     });
                     let closeOpenPopover = false;
+                    let preserveOpenUi = false;
                     measurements.forEach(measurement => {
-                      const {entry, viewportAttached} = measurement;
+                      const {entry, targetDocumentRect, viewportAttached, preservePlacement} = measurement;
                       const {marker} = entry;
+                      if (preservePlacement) {
+                        const hidden = !measurement.visible;
+                        if (marker.hidden !== hidden) marker.hidden = hidden;
+                        entry.markerWasVisible = true;
+                        entry.viewportAttached = false;
+                        entry.markerViewportAttached = false;
+                        if (openEntry === entry) {
+                          if (hidden) closeOpenPopover = true;
+                          else preserveOpenUi = true;
+                        }
+                        return;
+                      }
                       const placement = placements.get(entry) || null;
                       const hidden = !placement;
                       if (marker.hidden !== hidden) marker.hidden = hidden;
                       entry.markerWasVisible = !hidden;
                       entry.viewportAttached = viewportAttached;
                       if (!placement) {
+                        entry.markerDocumentLeft = null;
+                        entry.markerDocumentTop = null;
+                        entry.markerAnchorDocumentRect = null;
                         if (openEntry === entry) closeOpenPopover = true;
                         return;
                       }
                       entry.markerOffset = placement.markerOffset;
-                      const markerViewportAttached = viewportAttached || placement.viewportClamped;
+                      const markerViewportAttached = viewportAttached;
                       entry.markerViewportAttached = markerViewportAttached;
-                      const left = `${placement.left + (markerViewportAttached ? 0 : documentLeft)}px`;
-                      const top = `${placement.top + (markerViewportAttached ? 0 : documentTop)}px`;
+                      const markerLeft = placement.left + (markerViewportAttached ? 0 : documentLeft);
+                      const markerTop = placement.top + (markerViewportAttached ? 0 : documentTop);
+                      if (markerViewportAttached) {
+                        entry.markerDocumentLeft = null;
+                        entry.markerDocumentTop = null;
+                        entry.markerAnchorDocumentRect = null;
+                      } else {
+                        entry.markerDocumentLeft = markerLeft;
+                        entry.markerDocumentTop = markerTop;
+                        entry.markerAnchorDocumentRect = targetDocumentRect;
+                      }
+                      const left = `${markerLeft}px`;
+                      const top = `${markerTop}px`;
                       const position = markerViewportAttached ? 'fixed' : 'absolute';
                       const transform = `translate(-50%%, -50%%) scale(${1 / viewScale})`;
                       if (marker.style.position !== position) marker.style.position = position;
@@ -2338,16 +2781,19 @@ public class LiveReportDocumentRewriter {
                       if (marker.style.transform !== transform) marker.style.transform = transform;
                     });
                     if (closeOpenPopover) closePopover();
-                    else {
+                    else if (!preserveOpenUi) {
                       positionHighlight(documentLeft, documentTop);
                       positionPopover(documentLeft, documentTop);
                     }
                   };
-                  const schedulePosition = () => {
+                  const schedulePosition = (mode = 'full') => {
+                    if (mode === 'full') pendingMarkerPositionMode = 'full';
                     if (markerPositionFrame) return;
                     markerPositionFrame = requestAnimationFrame(() => {
+                      const scheduledMode = pendingMarkerPositionMode;
+                      pendingMarkerPositionMode = 'preserve-root';
                       markerPositionFrame = 0;
-                      position();
+                      position(scheduledMode);
                     });
                   };
                   const resolveIssue = item => {
@@ -2405,6 +2851,10 @@ public class LiveReportDocumentRewriter {
                       group.markerViewportAttached = false;
                       group.markerOffset = null;
                       group.markerWasVisible = false;
+                      group.markerDocumentLeft = null;
+                      group.markerDocumentTop = null;
+                      group.markerAnchorDocumentRect = null;
+                      observeMarkerShadowScrollRoots(group.element);
                       marker.dataset.issueId = String(group.selectedIssueId || group.issues[0].id);
                       const markerCategory = groupCategory(group.issues);
                       marker.textContent = markerIcons[markerCategory] || markerIcons.general;
@@ -2458,8 +2908,11 @@ public class LiveReportDocumentRewriter {
                   }, true);
                   handleLiveCommand = data => {
                     if (data.type === 'REQUEST_DOCUMENT_STATE') {
-                      post({type:ready ? 'READY' : 'DOCUMENT_LOADING'});
-                      if (ready) scheduleDocumentHealth();
+                      post({type:'DOCUMENT_LOADING'});
+                      if (ready) {
+                        post({type:'READY'});
+                        scheduleDocumentHealth();
+                      }
                     }
                     if (data.type === 'INIT_ISSUES') {
                       layer.hidden = data.markersVisible === false;
@@ -2486,17 +2939,41 @@ public class LiveReportDocumentRewriter {
                         marked.forEach(entry => {
                           entry.markerOffset = null;
                           entry.markerWasVisible = false;
+                          entry.markerDocumentLeft = null;
+                          entry.markerDocumentTop = null;
+                          entry.markerAnchorDocumentRect = null;
                         });
                       }
                       schedulePosition();
                     }
                   };
-                  addEventListener('scroll', schedulePosition, {passive:true});
-                  document.addEventListener('scroll', schedulePosition, {passive:true,capture:true});
-                  addEventListener('resize', schedulePosition, {passive:true});
-                  if (globalThis.ResizeObserver) new ResizeObserver(schedulePosition).observe(document.documentElement);
+                  const scheduleRootScrollPosition = () => schedulePosition('preserve-root');
+                  const scheduleCapturedScrollPosition = event => {
+                    const target = eventTargetGetter
+                      ? nativeApply(eventTargetGetter, event, [])
+                      : event.target;
+                    if (target === document) return;
+                    if (target instanceof Node && nativeApply(nativeNodeContains, layer, [target])) return;
+                    schedulePosition();
+                  };
+                  nativeApply(nativeAddEventListener, globalThis, [
+                    'scroll', scheduleRootScrollPosition, {passive:true}
+                  ]);
+                  nativeApply(nativeAddEventListener, document, [
+                    'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}
+                  ]);
+                  nativeApply(nativeAddEventListener, globalThis, [
+                    'resize', () => schedulePosition(), {passive:true}
+                  ]);
+                  if (globalThis.ResizeObserver) {
+                    new ResizeObserver(() => schedulePosition('preserve-root'))
+                      .observe(document.documentElement);
+                  }
                   const markerPositionTimer = setInterval(() => {
-                    if (marked.length > 0 && !layer.hidden && document.visibilityState === 'visible') schedulePosition();
+                    if (marked.length > 0 && !layer.hidden && document.visibilityState === 'visible') {
+                      marked.forEach(entry => { entry.positionAnchor = undefined; });
+                      schedulePosition('preserve-root');
+                    }
                   }, 1000);
                   const resetLiveConnection = () => {
                     connectionAccepted = false;
@@ -2512,9 +2989,19 @@ public class LiveReportDocumentRewriter {
                   addEventListener('pagehide', event => {
                     post({type:'DOCUMENT_UNLOADING'});
                     resetLiveConnection();
+                    if (documentReadyObserver) {
+                      documentReadyObserver.disconnect(); documentReadyObserver = null;
+                    }
                     if (!event.persisted) {
                       clearInterval(markerPositionTimer);
                       if (markerPositionFrame) cancelAnimationFrame(markerPositionFrame);
+                      if (markerObserver) {
+                        markerObserver.disconnect(); markerObserver = null;
+                      }
+                      if (healthObserver) {
+                        healthObserver.disconnect(); healthObserver = null;
+                      }
+                      clearMarkerScrollRoots();
                     }
                   });
                   addEventListener('pageshow', event => {
@@ -2527,30 +3014,26 @@ public class LiveReportDocumentRewriter {
                     announceBridgeAvailability();
                     schedulePosition();
                   });
-                  post({type:'DOCUMENT_LOADING'});
-                  addEventListener('DOMContentLoaded', () => {
-                    mount(); ready = true; post({type:'READY'});
-                    if (globalThis.MutationObserver) {
-                      healthObserver = new MutationObserver(records => {
-                        if (marked.length > 0 && records.some(record => !layer.contains(record.target))) {
-                          if (records.some(record => record.type === 'attributes' || record.type === 'childList')) {
-                            marked.forEach(entry => {
-                              entry.positionAnchor = undefined;
-                            });
-                          }
-                          schedulePosition();
-                        }
-                        if (!lastDocumentHealth || lastDocumentHealth.status !== 'MEANINGFUL') {
-                          scheduleDocumentHealth();
-                        }
-                      });
-                      healthObserver.observe(document.body || document.documentElement, {
-                        childList:true, subtree:true, characterData:true, attributes:true
-                      });
+                  const initializeReadyDocument = () => {
+                    if (ready || !document.body) return false;
+                    if (documentReadyObserver) {
+                      documentReadyObserver.disconnect(); documentReadyObserver = null;
                     }
+                    mount(); ready = true; post({type:'READY'});
+                    startMarkerObserver();
+                    startDocumentHealth();
                     reportDocumentHealth();
                     scheduleDocumentHealth();
-                  }, {once:true});
+                    return true;
+                  };
+                  post({type:'DOCUMENT_LOADING'});
+                  if (!initializeReadyDocument()) {
+                    if (NativeMutationObserver) {
+                      documentReadyObserver = new NativeMutationObserver(initializeReadyDocument);
+                      documentReadyObserver.observe(document.documentElement, {childList:true, subtree:true});
+                    }
+                    addEventListener('DOMContentLoaded', initializeReadyDocument, {once:true});
+                  }
                 })();
                 """).formatted(
                 session.id(),

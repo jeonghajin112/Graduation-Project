@@ -3,7 +3,7 @@ import type { QuickAnalysisResultRecord } from "@/services/quick-analysis-regist
 import type {
   AnalysisResult,
   DashboardViewModel,
-  EvaluationArtifact,
+  EvaluationCaptureMetadata,
   EvaluationRequestModel,
   EvaluationResultSummary,
   IssueResultModel,
@@ -24,11 +24,8 @@ export const PRODUCT_DEMO_ORGANIZATIONS: OrganizationModel[] = [
   {
     id: 101,
     name: "홍익대학교",
-    type: "대학교",
-    homepageUrl: "https://www.hongik.ac.kr",
     description: "홍익대학교 웹 접근성 점검 프로젝트",
     status: "ACTIVE",
-    createdAt: CREATED_AT,
     updatedAt: "2026-08-11T11:26:00.000Z",
     evaluationTargets: [
       {
@@ -90,11 +87,8 @@ export const PRODUCT_DEMO_ORGANIZATIONS: OrganizationModel[] = [
   {
     id: 102,
     name: "네이버",
-    type: "포털",
-    homepageUrl: "https://www.naver.com",
     description: "네이버 웹 접근성 점검 프로젝트",
     status: "ACTIVE",
-    createdAt: "2026-08-03T03:00:00.000Z",
     updatedAt: "2026-08-10T08:20:00.000Z",
     evaluationTargets: [
       {
@@ -111,33 +105,33 @@ export const PRODUCT_DEMO_ORGANIZATIONS: OrganizationModel[] = [
 ];
 
 const REQUESTS: EvaluationRequestModel[] = [
-  createRequest(HONGIK_MAIN_REQUEST_ID, 1_001, "www.hongik.ac.kr", "2026-08-11T11:26:00.000Z"),
-  createRequest(HONGIK_ARCH_REQUEST_ID, 1_002, "건축학부", "2026-08-09T07:42:00.000Z"),
-  createRequest(HONGIK_LIBRARY_REQUEST_ID, 1_003, "중앙도서관", "2026-08-08T06:18:00.000Z"),
-  createRequest(HONGIK_ADMISSION_REQUEST_ID, 1_004, "입학관리본부", "2026-08-07T05:04:00.000Z"),
-  createRequest(HONGIK_GLOBAL_REQUEST_ID, 1_005, "국제협력본부", "2026-08-06T04:31:00.000Z"),
-  createRequest(HONGIK_GRADUATE_REQUEST_ID, 1_006, "대학원", "2026-08-05T03:12:00.000Z"),
-  createRequest(NAVER_REQUEST_ID, 2_001, "네이버", "2026-08-10T08:20:00.000Z")
+  createRequest(HONGIK_MAIN_REQUEST_ID, 1_001, "2026-08-11T11:26:00.000Z"),
+  createRequest(HONGIK_ARCH_REQUEST_ID, 1_002, "2026-08-09T07:42:00.000Z"),
+  createRequest(HONGIK_LIBRARY_REQUEST_ID, 1_003, "2026-08-08T06:18:00.000Z"),
+  createRequest(HONGIK_ADMISSION_REQUEST_ID, 1_004, "2026-08-07T05:04:00.000Z"),
+  createRequest(HONGIK_GLOBAL_REQUEST_ID, 1_005, "2026-08-06T04:31:00.000Z"),
+  createRequest(HONGIK_GRADUATE_REQUEST_ID, 1_006, "2026-08-05T03:12:00.000Z"),
+  createRequest(NAVER_REQUEST_ID, 2_001, "2026-08-10T08:20:00.000Z")
 ];
 
 const SUMMARIES: EvaluationResultSummary[] = [
-  createSummary(HONGIK_MAIN_REQUEST_ID, "www.hongik.ac.kr", 86.2, 117, "2026-08-11T11:26:00.000Z"),
-  createSummary(HONGIK_ARCH_REQUEST_ID, "건축학부", 75, 233, "2026-08-09T07:42:00.000Z"),
-  createSummary(HONGIK_LIBRARY_REQUEST_ID, "중앙도서관", 91.4, 28, "2026-08-08T06:18:00.000Z"),
-  createSummary(HONGIK_ADMISSION_REQUEST_ID, "입학관리본부", 83.7, 74, "2026-08-07T05:04:00.000Z"),
-  createSummary(HONGIK_GLOBAL_REQUEST_ID, "국제협력본부", 88.1, 39, "2026-08-06T04:31:00.000Z"),
-  createSummary(HONGIK_GRADUATE_REQUEST_ID, "대학원", 80.5, 91, "2026-08-05T03:12:00.000Z"),
-  createSummary(NAVER_REQUEST_ID, "네이버", 89.6, 42, "2026-08-10T08:20:00.000Z")
+  createSummary(HONGIK_MAIN_REQUEST_ID, 86.2, 117, "2026-08-11T11:26:00.000Z"),
+  createSummary(HONGIK_ARCH_REQUEST_ID, 75, 233, "2026-08-09T07:42:00.000Z"),
+  createSummary(HONGIK_LIBRARY_REQUEST_ID, 91.4, 28, "2026-08-08T06:18:00.000Z"),
+  createSummary(HONGIK_ADMISSION_REQUEST_ID, 83.7, 74, "2026-08-07T05:04:00.000Z"),
+  createSummary(HONGIK_GLOBAL_REQUEST_ID, 88.1, 39, "2026-08-06T04:31:00.000Z"),
+  createSummary(HONGIK_GRADUATE_REQUEST_ID, 80.5, 91, "2026-08-05T03:12:00.000Z"),
+  createSummary(NAVER_REQUEST_ID, 89.6, 42, "2026-08-10T08:20:00.000Z")
 ];
 
 const SCORES: ScoreResult[] = [
-  createScore(7_001, HONGIK_MAIN_REQUEST_ID, 86.2, 88, 84, 86.5, "2026-08-11T11:26:00.000Z"),
-  createScore(7_002, HONGIK_ARCH_REQUEST_ID, 75, 72, 78, 75, "2026-08-09T07:42:00.000Z"),
-  createScore(7_004, HONGIK_LIBRARY_REQUEST_ID, 91.4, 93, 90, 91.2, "2026-08-08T06:18:00.000Z"),
-  createScore(7_005, HONGIK_ADMISSION_REQUEST_ID, 83.7, 86, 82, 83.1, "2026-08-07T05:04:00.000Z"),
-  createScore(7_006, HONGIK_GLOBAL_REQUEST_ID, 88.1, 89, 87, 88.3, "2026-08-06T04:31:00.000Z"),
-  createScore(7_007, HONGIK_GRADUATE_REQUEST_ID, 80.5, 82, 79, 80.4, "2026-08-05T03:12:00.000Z"),
-  createScore(7_003, NAVER_REQUEST_ID, 89.6, 91, 88, 89.8, "2026-08-10T08:20:00.000Z")
+  createScore(7_001, HONGIK_MAIN_REQUEST_ID, 86.2),
+  createScore(7_002, HONGIK_ARCH_REQUEST_ID, 75),
+  createScore(7_004, HONGIK_LIBRARY_REQUEST_ID, 91.4),
+  createScore(7_005, HONGIK_ADMISSION_REQUEST_ID, 83.7),
+  createScore(7_006, HONGIK_GLOBAL_REQUEST_ID, 88.1),
+  createScore(7_007, HONGIK_GRADUATE_REQUEST_ID, 80.5),
+  createScore(7_003, NAVER_REQUEST_ID, 89.6)
 ];
 
 export const PRODUCT_DEMO_DASHBOARD: DashboardViewModel = {
@@ -172,7 +166,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_MAIN_REQUEST_ID,
       analysisResultId: 8_001,
-      artifactId: 9_001,
+      metadataId: 9_001,
       url: "https://www.hongik.ac.kr",
       capturedAt: "2026-08-11T11:26:00.000Z",
       issues: [
@@ -187,7 +181,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_ARCH_REQUEST_ID,
       analysisResultId: 8_002,
-      artifactId: 9_002,
+      metadataId: 9_002,
       url: "https://arch.hongik.ac.kr",
       capturedAt: "2026-08-09T07:42:00.000Z",
       issues: [
@@ -201,7 +195,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_LIBRARY_REQUEST_ID,
       analysisResultId: 8_004,
-      artifactId: 9_004,
+      metadataId: 9_004,
       url: "https://library.hongik.ac.kr",
       capturedAt: "2026-08-08T06:18:00.000Z",
       issues: [
@@ -214,7 +208,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_ADMISSION_REQUEST_ID,
       analysisResultId: 8_005,
-      artifactId: 9_005,
+      metadataId: 9_005,
       url: "https://admission.hongik.ac.kr",
       capturedAt: "2026-08-07T05:04:00.000Z",
       issues: [
@@ -227,7 +221,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_GLOBAL_REQUEST_ID,
       analysisResultId: 8_006,
-      artifactId: 9_006,
+      metadataId: 9_006,
       url: "https://oia.hongik.ac.kr",
       capturedAt: "2026-08-06T04:31:00.000Z",
       issues: [
@@ -240,7 +234,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: HONGIK_GRADUATE_REQUEST_ID,
       analysisResultId: 8_007,
-      artifactId: 9_007,
+      metadataId: 9_007,
       url: "https://grad.hongik.ac.kr",
       capturedAt: "2026-08-05T03:12:00.000Z",
       issues: [
@@ -253,7 +247,7 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
     createEvidence({
       requestId: NAVER_REQUEST_ID,
       analysisResultId: 8_003,
-      artifactId: 9_003,
+      metadataId: 9_003,
       url: "https://www.naver.com",
       capturedAt: "2026-08-10T08:20:00.000Z",
       issues: [
@@ -266,36 +260,27 @@ export const PRODUCT_DEMO_EVIDENCE = new Map<number, SiteDashboardPreviewEvidenc
 function createRequest(
   id: number,
   evaluationTargetId: number,
-  targetName: string,
   updatedAt: string
 ): EvaluationRequestModel {
   return {
     id,
     evaluationTargetId,
-    targetName,
-    faviconUrl: null,
     status: "COMPLETED",
-    requestNote: "랜딩 미리보기 fixture",
     requestedAt: updatedAt,
-    createdAt: updatedAt,
     updatedAt
   };
 }
 
 function createSummary(
   requestId: number,
-  targetName: string,
   totalScore: number,
   totalIssueCount: number,
   requestedAt: string
 ): EvaluationResultSummary {
   return {
     requestId,
-    targetName,
-    status: "COMPLETED",
     totalScore,
     totalIssueCount,
-    criticalIssueCount: Math.max(1, Math.round(totalIssueCount * 0.04)),
     requestedAt
   };
 }
@@ -303,21 +288,12 @@ function createSummary(
 function createScore(
   id: number,
   evaluationRequestId: number,
-  totalScore: number,
-  ruleScore: number,
-  aiScore: number,
-  cvScore: number,
-  updatedAt: string
+  totalScore: number
 ): ScoreResult {
   return {
     id,
     evaluationRequestId,
-    totalScore,
-    ruleScore,
-    aiScore,
-    cvScore,
-    createdAt: updatedAt,
-    updatedAt
+    totalScore
   };
 }
 
@@ -338,15 +314,7 @@ function createIssue(
     severity,
     locationPath: selector,
     locator: {
-      kind: "CSS_SELECTOR",
-      pathSteps: [{ context: "DOCUMENT", selector }],
-      x: null,
-      y: null,
-      width: null,
-      height: null,
-      coordinateSpace: "CSS_PIXEL",
-      visible: true,
-      htmlSnippet: null
+      pathSteps: [{ context: "DOCUMENT", selector }]
     },
     message,
     recommendation: "해당 요소가 KWCAG 기준을 충족하도록 이름, 대비 또는 초점 표시를 보완하세요.",
@@ -358,14 +326,14 @@ function createIssue(
 
 function createEvidence({
   analysisResultId,
-  artifactId,
+  metadataId,
   capturedAt,
   issues,
   requestId,
   url
 }: {
   analysisResultId: number;
-  artifactId: number;
+  metadataId: number;
   capturedAt: string;
   issues: IssueResultModel[];
   requestId: number;
@@ -382,8 +350,8 @@ function createEvidence({
     createdAt: capturedAt,
     updatedAt: capturedAt
   };
-  const artifact: EvaluationArtifact = {
-    id: artifactId,
+  const captureMetadata: EvaluationCaptureMetadata = {
+    id: metadataId,
     requestId,
     requestedUrl: url,
     finalUrl: url,
@@ -392,20 +360,13 @@ function createEvidence({
     viewportHeightCssPx: 900,
     deviceScaleFactor: 1,
     pageWidthCssPx: 1440,
-    pageHeightCssPx: 1680,
-    captureMode: "DOM_REPLAY",
-    contentUrl: "/preview/product-replay.html",
-    contentType: "text/html",
-    sizeBytes: 18_000,
-    sha256: `preview-${artifactId}`,
-    createdAt: capturedAt,
-    updatedAt: capturedAt
+    pageHeightCssPx: 1680
   };
 
   return {
     analysisResults: [analysisResult],
-    artifact,
-    artifactContentUrl: "/preview/product-replay.html",
-    issueResults: issues
+    captureMetadata,
+    issueResults: issues,
+    previewRuntimeUrl: "/preview/product-replay.html"
   };
 }

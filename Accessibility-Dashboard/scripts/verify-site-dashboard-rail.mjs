@@ -4,11 +4,21 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import {
+  TEST_LIVE_REPORT_VIEWER_ORIGIN,
+  createTestLiveReportSession,
+  createTestLiveReportViewerHtml
+} from "./fixtures/live-report-viewer-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
 const outDir = process.env.OUT_DIR ?? "artifacts/site-dashboard-rail";
 const capturedAt = "2026-08-11T03:30:00.000Z";
+
+function parseAlpha(value) {
+  const matched = value.match(/-?[\d.]+/g);
+  return matched && matched.length >= 4 ? Number(matched[3]) : 1;
+}
 
 const organization = {
   id: 1,
@@ -160,7 +170,7 @@ const issues = [
   createdAt: capturedAt
 }));
 
-const artifact = {
+const captureMetadata = {
   id: 77,
   requestId: 501,
   requestedUrl: "https://example.com/",
@@ -170,56 +180,14 @@ const artifact = {
   viewportHeightCssPx: 720,
   deviceScaleFactor: 1,
   pageWidthCssPx: 1280,
-  pageHeightCssPx: 1600,
-  captureMode: "DOM_REPLAY",
-  contentUrl: "/results/artifacts/77/content",
-  contentType: "text/html",
-  sizeBytes: 12345,
-  sha256: "a".repeat(64),
-  createdAt: capturedAt,
-  updatedAt: capturedAt
+  pageHeightCssPx: 1600
 };
-
-const replayHtml = `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>재현</title>
-<style>html{scrollbar-gutter:auto}
-@supports not selector(::-webkit-scrollbar){html{scrollbar-width:thin;scrollbar-color:rgba(99,99,102,.78) transparent}@media (forced-colors:active){html{scrollbar-width:auto;scrollbar-color:auto}}}
-@supports selector(::-webkit-scrollbar){html::-webkit-scrollbar{width:10px;height:10px}
-html::-webkit-scrollbar-track,html::-webkit-scrollbar-corner{background:transparent}
-html::-webkit-scrollbar-thumb{min-height:48px;border:1px solid transparent;border-radius:999px;background:rgba(99,99,102,.78);background-clip:padding-box}
-html::-webkit-scrollbar-button{display:none;width:0;height:0}}
-body{margin:0;min-height:1200px;background:#f4f6f9;font-family:Arial}
-section{margin:24px;padding:24px;border-radius:14px;background:#fff}</style></head>
-<body>
-<section><h1>재현된 페이지</h1><div id="a1">img1</div><div id="a2">img2</div><div id="a3">img3</div></section>
-<section><div id="c1">대비1</div><div id="c2">대비2</div><div id="k1">포커스</div></section>
-<div id="replay-markers"></div>
-<script>
-(() => {
-  const VIEWER_SOURCE = "accessibility-page-replay";
-  const DOCUMENT_TOKEN = "doc_" + Date.now().toString(36);
-  const state = { issues: [], selectedIssueId: null };
-  window.__replayMessages = [];
-  function post(message) {
-    parent.postMessage({ ...message, source: VIEWER_SOURCE, documentToken: DOCUMENT_TOKEN }, "*");
-  }
-  window.addEventListener("message", (event) => {
-    const message = event.data;
-    if (!message || message.source !== "accessibility-dashboard") return;
-    window.__replayMessages.push(message);
-    if (message.type === "INIT_ISSUES" && Array.isArray(message.issues)) {
-      state.issues = message.issues;
-      post({ type: "REPLAY_READY", documentHeight: document.documentElement.scrollHeight });
-    }
-    if (message.type === "SELECT_ISSUE") {
-      state.selectedIssueId = message.issueId;
-      document.title = "selected:" + message.issueId;
-    }
-  });
-  post({ type: "REPLAY_READY", documentHeight: document.documentElement.scrollHeight });
-})();
-</script>
-</body></html>`;
+const liveSession = createTestLiveReportSession(request.id, "rail_501");
+const liveViewerHtml = createTestLiveReportViewerHtml({
+  body: "<main><h1>동적 페이지</h1><section>페이지 검사 화면 fixture</section></main>",
+  documentToken: "rail_live_document",
+  session: liveSession
+});
 
 const overview = createDashboardOverview({
   organizations: [organization],
@@ -251,47 +219,151 @@ const overview = createDashboardOverview({
 
 const requestLog = [];
 
-function payloadFor(pathname, artifactAvailable = true) {
+function payloadFor(pathname, fixtureTarget = target) {
   if (pathname === "/api/requests") return [request];
   if (pathname === "/api/organizations") return [organization];
-  if (pathname === "/api/organizations/1/evaluation-targets") return [target];
+  if (pathname === "/api/organizations/1/evaluation-targets") return [fixtureTarget];
   if (pathname === "/api/results/requests/501/summary") return summary;
   if (pathname === "/api/results/requests/501/issues") return issues;
-  if (pathname === "/api/results/requests/501/artifact") {
-    return artifactAvailable ? artifact : null;
-  }
-  if (pathname === "/api/scores/requests/501") return scoreResult;
-  if (pathname === "/api/targets/101") return target;
+  if (pathname === "/api/results/requests/501/capture-metadata") return captureMetadata;
+  if (pathname === "/api/targets/101") return fixtureTarget;
   return [];
 }
 
-async function installFixture(page, { artifactAvailable = true } = {}) {
+async function installFixture(
+  page,
+  { faviconUrl = target.faviconUrl, liveAvailable = true } = {}
+) {
+  const hasFaviconOverride = faviconUrl !== target.faviconUrl;
+  const fixtureTarget = hasFaviconOverride ? { ...target, faviconUrl } : target;
+  const fixtureOverview = hasFaviconOverride
+    ? {
+        ...overview,
+        organizations: overview.organizations.map((fixtureOrganization) => ({
+          ...fixtureOrganization,
+          evaluationTargets: fixtureOrganization.evaluationTargets.map((evaluationTarget) =>
+            evaluationTarget.id === fixtureTarget.id ? fixtureTarget : evaluationTarget
+          )
+        }))
+      }
+    : overview;
+
   await page.route("**/api/**", async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
+    const requestUrl = new URL(route.request().url());
+    const pathname = requestUrl.pathname;
     requestLog.push(route.request().method() + " " + pathname);
+    if (requestUrl.origin === TEST_LIVE_REPORT_VIEWER_ORIGIN) {
+      await route.fulfill({ status: 200, contentType: "text/html", body: liveViewerHtml });
+      return;
+    }
     if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
-      await fulfillJson(route, overview);
+      await fulfillJson(route, fixtureOverview);
       return;
     }
-    if (pathname === "/api/results/artifacts/77/content") {
-      await route.fulfill({ status: 200, contentType: "text/html", body: replayHtml });
+    if (route.request().method() === "POST" && pathname === "/api/results/requests/501/live-session") {
+      await fulfillJson(route, liveAvailable ? liveSession : null);
       return;
     }
-    await fulfillJson(route, payloadFor(pathname, artifactAvailable));
+    await fulfillJson(route, payloadFor(pathname, fixtureTarget));
   });
 }
 
-async function verifyRailWithoutArtifact(browser) {
+async function readPageInformationFaviconPresentation(page) {
+  return page.locator(".site-page-information__icon").evaluate((element) => {
+    const style = getComputedStyle(element);
+    const image = element.querySelector("img");
+    const bounds = element.getBoundingClientRect();
+    const imageBounds = image?.getBoundingClientRect();
+    return {
+      loaded: element.dataset.faviconLoaded,
+      borderTopWidth: style.borderTopWidth,
+      borderRadius: style.borderRadius,
+      backgroundColor: style.backgroundColor,
+      fallbackIconCount: element.querySelectorAll("svg").length,
+      imageCount: element.querySelectorAll("img").length,
+      imageOpacity: image ? getComputedStyle(image).opacity : null,
+      imageObjectFit: image ? getComputedStyle(image).objectFit : null,
+      imageFillsContainer: imageBounds
+        ? Math.abs(imageBounds.width - bounds.width) < 0.5
+          && Math.abs(imageBounds.height - bounds.height) < 0.5
+        : null
+    };
+  });
+}
+
+async function verifyPageInformationFaviconPresentation(browser) {
+  const faviconUrl = `${baseUrl}/__test-assets__/page-information-favicon.svg`;
+  const missingFaviconUrl = `${baseUrl}/__test-assets__/missing-page-information-favicon.svg`;
+  const loadedPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  await loadedPage.route("**/__test-assets__/page-information-favicon.svg", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#0071e3"/></svg>'
+    })
+  );
+  await installFixture(loadedPage, { liveAvailable: false, faviconUrl });
+  await loadedPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
+  await loadedPage
+    .locator('.site-page-information__icon[data-favicon-loaded="true"]')
+    .waitFor({ timeout: 20_000 });
+  const loaded = await readPageInformationFaviconPresentation(loadedPage);
+  await loadedPage.close();
+
+  const fallbackPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  await fallbackPage.route("**/__test-assets__/missing-page-information-favicon.svg", (route) =>
+    route.fulfill({ status: 404, contentType: "text/plain", body: "missing" })
+  );
+  await installFixture(fallbackPage, {
+    liveAvailable: false,
+    faviconUrl: missingFaviconUrl
+  });
+  await fallbackPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
+  await fallbackPage.waitForFunction(() => {
+    const favicon = document.querySelector(
+      '.site-page-information__icon[data-favicon-loaded="false"]'
+    );
+    return favicon && !favicon.querySelector("img");
+  });
+  const fallback = await readPageInformationFaviconPresentation(fallbackPage);
+  await fallbackPage.close();
+
+  assert.equal(loaded.loaded, "true", "a loaded page favicon must enter the loaded state");
+  assert.equal(loaded.borderTopWidth, "0px", "a loaded page favicon must not keep its tile border");
+  assert.equal(loaded.borderRadius, "0px", "a loaded page favicon must keep its native silhouette");
+  assert.equal(parseAlpha(loaded.backgroundColor), 0, "a loaded page favicon must use a transparent surface");
+  assert.equal(loaded.fallbackIconCount, 0, "a loaded page favicon must hide the fallback icon");
+  assert.equal(loaded.imageCount, 1, "a loaded page favicon image must remain rendered");
+  assert.equal(loaded.imageOpacity, "1", "a loaded page favicon image must be visible");
+  assert.equal(loaded.imageObjectFit, "contain", "a loaded page favicon must preserve its aspect ratio");
+  assert.equal(loaded.imageFillsContainer, true, "a loaded page favicon must use the full icon area");
+
+  assert.equal(fallback.loaded, "false", "a failed page favicon must remain in the fallback state");
+  assert.ok(
+    Number.parseFloat(fallback.borderTopWidth) > 0,
+    "a failed page favicon must retain the fallback tile border"
+  );
+  assert.ok(
+    parseAlpha(fallback.backgroundColor) > 0,
+    "a failed page favicon must retain the fallback tile surface"
+  );
+  assert.equal(fallback.fallbackIconCount, 1, "a failed page favicon must retain the globe fallback");
+  assert.equal(fallback.imageCount, 0, "a failed page favicon image must be removed");
+
+  return { loaded, fallback };
+}
+
+async function verifyRailWithoutLiveSession(browser) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   try {
-    await installFixture(page, { artifactAvailable: false });
+    await installFixture(page, { liveAvailable: false });
     await page.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
 
     await page
-      .getByText("이 스캔에는 재현 페이지가 없어요", { exact: true })
+      .getByText("현재 동적 페이지를 열지 못했어요", { exact: true })
       .waitFor({ state: "visible", timeout: 20_000 });
 
     const pageInformationCard = page.locator(".site-page-information");
@@ -302,24 +374,24 @@ async function verifyRailWithoutArtifact(browser) {
     assert.equal(
       await page.locator(".site-rail-severity__row").count(),
       4,
-      "severity results must remain visible without a replay artifact"
+      "severity results must remain visible when the live page is unavailable"
     );
     assert.equal(
       await page.locator(".site-rail-issue").count(),
       0,
-      "the removed top-issue shortcut card must not return without a replay artifact"
+      "the removed top-issue shortcut card must not return when the live page is unavailable"
     );
     assert.equal(
       await pageInformationCard.getByText("Rail Fixture Page", { exact: true }).count(),
       1,
-      "page identity must remain available without a replay artifact"
+      "page identity must remain available when the live page is unavailable"
     );
     assert.deepEqual(
       await pageInformationCard.locator(".site-page-information__metadata dt").allTextContents(),
       ["최근 분석"],
-      "page information must omit target type and replay dimensions even without an artifact"
+      "page information must omit target type and capture dimensions"
     );
-    assert.deepEqual(pageErrors, [], "the artifact-empty page must render without runtime errors");
+    assert.deepEqual(pageErrors, [], "the live-only error state must render without runtime errors");
 
     return {
       pageInformationCards: await page.locator(".site-page-information").count(),
@@ -654,10 +726,12 @@ try {
   await page.screenshot({ path: path.join(outDir, "rail-narrow.png"), fullPage: false });
 
   assert.deepEqual(pageErrors, [], "the page must render without runtime errors");
-  const artifactEmpty = await verifyRailWithoutArtifact(browser);
+  const faviconPresentation = await verifyPageInformationFaviconPresentation(browser);
+  const liveUnavailable = await verifyRailWithoutLiveSession(browser);
   console.log(JSON.stringify({
     result: "PASS",
-    artifactEmpty,
+    liveUnavailable,
+    faviconPresentation,
     pageInformation,
     severityCounts,
     geometry,

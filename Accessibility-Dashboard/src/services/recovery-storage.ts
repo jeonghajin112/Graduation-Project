@@ -6,6 +6,11 @@ export type RecoveryRead<T> =
   | { kind: "valid"; rawValue: string; value: T }
   | { kind: "blocked"; rawValue: string | null };
 
+export type StoredRecovery<T> = {
+  rawValue: string;
+  value: T;
+};
+
 export function isRecoveryTimestampStale(
   startedAt: number,
   now = Date.now()
@@ -61,5 +66,38 @@ export function clearSessionRecoveryIfUnchanged(
     return window.sessionStorage.getItem(storageKey) === null;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Atomically creates or advances one recovery record.
+ *
+ * Comparing the complete serialized value, instead of only an attempt id,
+ * prevents an older async continuation from overwriting a newer phase of the
+ * same attempt after a route remount or StrictMode restart.
+ */
+export function writeSessionRecoveryIfUnchanged<T>(
+  storageKey: string,
+  value: T,
+  normalize: (value: unknown) => T | null,
+  expectedRawValue: string | null
+): StoredRecovery<T> | null {
+  try {
+    const normalizedValue = normalize(value);
+    if (normalizedValue === null) {
+      return null;
+    }
+    if (window.sessionStorage.getItem(storageKey) !== expectedRawValue) {
+      return null;
+    }
+
+    const rawValue = JSON.stringify(normalizedValue);
+    window.sessionStorage.setItem(storageKey, rawValue);
+    if (window.sessionStorage.getItem(storageKey) !== rawValue) {
+      return null;
+    }
+    return { rawValue, value: normalizedValue };
+  } catch {
+    return null;
   }
 }

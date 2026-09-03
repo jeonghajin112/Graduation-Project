@@ -11,18 +11,23 @@ import {
   clearPersistedOrganizationCreateAttempt,
   isPersistedOrganizationCreateAttemptStale as isPersistedAttemptStale,
   readOrganizationCreateRecovery as readPersistedOrganizationCreateRecovery,
-  readPersistedOrganizationCreateAttempt,
   writePersistedOrganizationCreateAttempt
 } from "@/services/organization-create-recovery-storage";
-import type { PersistedOrganizationCreateAttempt } from "@/services/organization-create-recovery-storage";
+import type {
+  PersistedOrganizationCreateAttempt,
+  StoredOrganizationCreateAttempt
+} from "@/services/organization-create-recovery-storage";
 import { UserFacingError } from "@/services/user-facing-error";
 import type { DashboardViewModel } from "@/types/accessibility-domain";
 
 import {
+  commitMutationOnce,
   isDefinitiveMutationRejection,
+  reconcileWithRetries,
   runMutationRequestWithDeadline
 } from "./mutation-recovery";
 import type { DirectoryRecoveryToken, LoadDashboard } from "./use-dashboard-data";
+import { useMutationOperation } from "./use-mutation-operation";
 
 type OrganizationCreateCheckpoint =
   | { kind: "known"; organizationId: number }
@@ -39,6 +44,8 @@ const RECOVERY_DISCARD_FAILURE_MESSAGE =
   "이전 작업 정보를 지우지 못했습니다. 브라우저 저장 공간을 확인하거나 로그아웃한 뒤 다시 시도해 주세요.";
 const BLOCKED_RECOVERY_MESSAGE =
   "확인할 수 없는 이전 프로젝트 작업이 남아 있어 중복 생성을 막았습니다. 이미 프로젝트가 생성되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
+const RECOVERY_CONFLICT_MESSAGE =
+  "프로젝트 생성 복구 상태가 다른 화면에서 변경되었습니다. 중복 생성을 막기 위해 이 화면에서는 계속할 수 없습니다. 새로고침하여 최신 상태를 확인해 주세요.";
 
 function checkpointFromPersistedAttempt(
   attempt: PersistedOrganizationCreateAttempt
@@ -101,6 +108,10 @@ export function useOrganizationModelCreateForm({
   const [restoredRecovery] = useState(readPersistedOrganizationCreateRecovery);
   const restoredAttempt =
     restoredRecovery.kind === "valid" ? restoredRecovery.value : null;
+  const restoredStoredAttempt: StoredOrganizationCreateAttempt | null =
+    restoredRecovery.kind === "valid"
+      ? { attempt: restoredRecovery.value, rawValue: restoredRecovery.rawValue }
+      : null;
   const isRestoredRecoveryBlocked = restoredRecovery.kind === "blocked";
   const restoredBlockedRawValue =
     restoredRecovery.kind === "blocked" ? restoredRecovery.rawValue : null;
@@ -130,47 +141,69 @@ export function useOrganizationModelCreateForm({
   const [isOrganizationCreateRecoveryBlocked, setIsOrganizationCreateRecoveryBlocked] =
     useState(isRestoredRecoveryBlocked);
   const createCheckpointRef = useRef<OrganizationCreateCheckpoint | null>(restoredCheckpoint);
-  const persistedAttemptRef = useRef<PersistedOrganizationCreateAttempt | null>(restoredAttempt);
+  const persistedRecoveryRef = useRef<StoredOrganizationCreateAttempt | null>(
+    restoredStoredAttempt
+  );
   const blockedRecoveryRawValueRef = useRef<string | null>(restoredBlockedRawValue);
+  const recoveryConflictRef = useRef(false);
   const directoryRecoveryTokenRef = useRef<DirectoryRecoveryToken | null>(null);
-  const submissionLockRef = useRef(false);
-  const isMountedRef = useRef(false);
-  const activeOperationIdRef = useRef<symbol | null>(null);
-  const createAbortControllerRef = useRef<AbortController | null>(null);
-  const refreshAbortControllerRef = useRef<AbortController | null>(null);
-  const restoreRefreshAbortControllerRef = useRef<AbortController | null>(null);
+  const {
+    beginMutationOperation,
+    finishMutationOperation,
+    isMutationOperationCurrent,
+    isMutationOperationLocked
+  } = useMutationOperation();
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      activeOperationIdRef.current = null;
-      createAbortControllerRef.current?.abort();
-      createAbortControllerRef.current = null;
-      refreshAbortControllerRef.current?.abort();
-      refreshAbortControllerRef.current = null;
-      restoreRefreshAbortControllerRef.current?.abort();
-      restoreRefreshAbortControllerRef.current = null;
-    };
-  }, []);
+  const releaseDirectoryRecovery = useCallback(() => {
+    const token = directoryRecoveryTokenRef.current;
+    if (token === null) {
+      return;
+    }
+
+    directoryRecoveryTokenRef.current = null;
+    endDirectoryRecovery(token);
+  }, [endDirectoryRecovery]);
+
+  const blockForRecoveryConflict = useCallback(() => {
+    const currentRecovery = readPersistedOrganizationCreateRecovery();
+    persistedRecoveryRef.current =
+      currentRecovery.kind === "valid"
+        ? { attempt: currentRecovery.value, rawValue: currentRecovery.rawValue }
+        : null;
+    blockedRecoveryRawValueRef.current =
+      currentRecovery.kind === "blocked" ? currentRecovery.rawValue : null;
+    recoveryConflictRef.current = true;
+    createCheckpointRef.current = null;
+    releaseDirectoryRecovery();
+    setCreateCheckpoint(null);
+    setCanDiscardOrganizationCreateRecovery(false);
+    setIsOrganizationCreateRecoveryBlocked(true);
+    setProjectCreateError(RECOVERY_CONFLICT_MESSAGE);
+  }, [releaseDirectoryRecovery]);
 
   useEffect(() => {
     const checkpoint = createCheckpointRef.current;
-    const restored = persistedAttemptRef.current;
+    let restored = persistedRecoveryRef.current;
     if (checkpoint === null || restored === null) {
       return;
     }
 
-    if (restored.phase === "posting") {
+    if (restored.attempt.phase === "posting") {
       const reconcilingAttempt: PersistedOrganizationCreateAttempt = {
-        ...restored,
+        ...restored.attempt,
         phase: "reconciling",
         organizationId: null
       };
-      if (
-        writePersistedOrganizationCreateAttempt(reconcilingAttempt, restored.attemptId)
-      ) {
-        persistedAttemptRef.current = reconcilingAttempt;
+      const nextStored = writePersistedOrganizationCreateAttempt(
+        reconcilingAttempt,
+        restored.rawValue
+      );
+      if (nextStored !== null) {
+        persistedRecoveryRef.current = nextStored;
+        restored = nextStored;
+      } else {
+        blockForRecoveryConflict();
+        return;
       }
     }
     if (directoryRecoveryTokenRef.current === null) {
@@ -182,41 +215,24 @@ export function useOrganizationModelCreateForm({
     // effect owns its controller so StrictMode cleanup can abort and restart
     // the request without marking the attempt as completed.
     const restoreController = new AbortController();
-    restoreRefreshAbortControllerRef.current = restoreController;
-    const restoreTimeoutId = window.setTimeout(() => {
-      restoreController.abort();
-    }, PROJECT_REFRESH_TIMEOUT_MS);
-    void loadDashboard({
-      refreshAfterInFlight: true,
-      clearOnError: false,
-      signal: restoreController.signal
+    void runMutationRequestWithDeadline({
+      signal: restoreController.signal,
+      timeoutMs: PROJECT_REFRESH_TIMEOUT_MS,
+      operation: (requestSignal) =>
+        loadDashboard({
+          refreshAfterInFlight: true,
+          clearOnError: false,
+          signal: requestSignal
+        })
     })
-      .catch(() => null)
-      .finally(() => {
-        window.clearTimeout(restoreTimeoutId);
-        if (restoreRefreshAbortControllerRef.current === restoreController) {
-          restoreRefreshAbortControllerRef.current = null;
-        }
-      });
+      .catch(() => null);
 
     return () => {
-      window.clearTimeout(restoreTimeoutId);
       restoreController.abort();
-      if (restoreRefreshAbortControllerRef.current === restoreController) {
-        restoreRefreshAbortControllerRef.current = null;
-      }
     };
-  }, [beginDirectoryRecovery, loadDashboard]);
+  }, [beginDirectoryRecovery, blockForRecoveryConflict, loadDashboard]);
 
-  const releaseDirectoryRecovery = useCallback(() => {
-    const token = directoryRecoveryTokenRef.current;
-    if (token === null) {
-      return;
-    }
-
-    directoryRecoveryTokenRef.current = null;
-    endDirectoryRecovery(token);
-  }, [endDirectoryRecovery]);
+  useEffect(() => () => releaseDirectoryRecovery(), [releaseDirectoryRecovery]);
 
   const finishCreatedOrganization = useCallback(
     (
@@ -230,15 +246,23 @@ export function useOrganizationModelCreateForm({
         return;
       }
 
-      createCheckpointRef.current = null;
-      const persistedAttemptId = persistedAttemptRef.current?.attemptId;
-      persistedAttemptRef.current = null;
-      if (persistedAttemptId !== undefined) {
-        clearPersistedOrganizationCreateAttempt(persistedAttemptId);
+      const persistedRecovery = persistedRecoveryRef.current;
+      if (
+        persistedRecovery !== null &&
+        !clearPersistedOrganizationCreateAttempt(persistedRecovery.rawValue)
+      ) {
+        blockForRecoveryConflict();
+        return;
       }
+
+      createCheckpointRef.current = null;
+      persistedRecoveryRef.current = null;
+      blockedRecoveryRawValueRef.current = null;
+      recoveryConflictRef.current = false;
       releaseDirectoryRecovery();
       setCreateCheckpoint(null);
       setCanDiscardOrganizationCreateRecovery(false);
+      setIsOrganizationCreateRecoveryBlocked(false);
       setNewOrganizationModelName("");
       setProjectCreateError("");
 
@@ -247,7 +271,7 @@ export function useOrganizationModelCreateForm({
         onCreated(organizationId);
       }
     },
-    [onCreated, releaseDirectoryRecovery]
+    [blockForRecoveryConflict, onCreated, releaseDirectoryRecovery]
   );
 
   useEffect(() => {
@@ -264,22 +288,28 @@ export function useOrganizationModelCreateForm({
   }, [createCheckpoint, dashboardData, finishCreatedOrganization, isOrganizationCreateOpen]);
 
   const openOrganizationCreateModal = useCallback(() => {
-    if (blockedRecoveryRawValueRef.current !== null) {
+    if (recoveryConflictRef.current) {
+      setProjectCreateError(RECOVERY_CONFLICT_MESSAGE);
+      setCanDiscardOrganizationCreateRecovery(false);
+    } else if (
+      isOrganizationCreateRecoveryBlocked ||
+      blockedRecoveryRawValueRef.current !== null
+    ) {
       setProjectCreateError(BLOCKED_RECOVERY_MESSAGE);
-      setCanDiscardOrganizationCreateRecovery(true);
+      setCanDiscardOrganizationCreateRecovery(blockedRecoveryRawValueRef.current !== null);
     } else if (createCheckpoint === null) {
       setProjectCreateError("");
     } else {
-      const persistedAttempt = persistedAttemptRef.current;
+      const persistedAttempt = persistedRecoveryRef.current?.attempt;
       if (persistedAttempt && isPersistedAttemptStale(persistedAttempt)) {
         setCanDiscardOrganizationCreateRecovery(true);
       }
     }
     setIsOrganizationCreateOpen(true);
-  }, [createCheckpoint]);
+  }, [createCheckpoint, isOrganizationCreateRecoveryBlocked]);
 
   const discardOrganizationCreateRecovery = useCallback(() => {
-    if (submissionLockRef.current || !canDiscardOrganizationCreateRecovery) {
+    if (isMutationOperationLocked() || !canDiscardOrganizationCreateRecovery) {
       return;
     }
 
@@ -290,6 +320,7 @@ export function useOrganizationModelCreateForm({
         return;
       }
       blockedRecoveryRawValueRef.current = null;
+      recoveryConflictRef.current = false;
       setIsOrganizationCreateRecoveryBlocked(false);
       setCanDiscardOrganizationCreateRecovery(false);
       setNewOrganizationModelName("");
@@ -297,23 +328,22 @@ export function useOrganizationModelCreateForm({
       return;
     }
 
-    const persistedAttempt = persistedAttemptRef.current;
+    const persistedRecovery = persistedRecoveryRef.current;
     // A successful discard clears both refs synchronously before React commits
     // the new button state. Treat a same-task second click as an already handled
     // no-op instead of surfacing a false storage failure.
-    if (persistedAttempt === null) {
+    if (persistedRecovery === null) {
       return;
     }
-    const currentPersistedAttempt = readPersistedOrganizationCreateAttempt();
+    const currentRecovery = readPersistedOrganizationCreateRecovery();
     if (
-      currentPersistedAttempt === null ||
-      currentPersistedAttempt.attemptId !== persistedAttempt.attemptId ||
-      currentPersistedAttempt.startedAt !== persistedAttempt.startedAt
+      currentRecovery.kind !== "valid" ||
+      currentRecovery.rawValue !== persistedRecovery.rawValue
     ) {
       setProjectCreateError(RECOVERY_DISCARD_FAILURE_MESSAGE);
       return;
     }
-    if (!isPersistedAttemptStale(currentPersistedAttempt)) {
+    if (!isPersistedAttemptStale(currentRecovery.value)) {
       const activeCheckpoint = createCheckpointRef.current;
       setCanDiscardOrganizationCreateRecovery(false);
       if (activeCheckpoint !== null) {
@@ -321,30 +351,32 @@ export function useOrganizationModelCreateForm({
       }
       return;
     }
-    if (
-      !clearPersistedOrganizationCreateAttempt(persistedAttempt.attemptId)
-    ) {
+    if (!clearPersistedOrganizationCreateAttempt(persistedRecovery.rawValue)) {
       setProjectCreateError(RECOVERY_DISCARD_FAILURE_MESSAGE);
       return;
     }
 
-    restoreRefreshAbortControllerRef.current?.abort();
-    restoreRefreshAbortControllerRef.current = null;
-    persistedAttemptRef.current = null;
+    persistedRecoveryRef.current = null;
     createCheckpointRef.current = null;
     releaseDirectoryRecovery();
     setCreateCheckpoint(null);
     setCanDiscardOrganizationCreateRecovery(false);
     setNewOrganizationModelName("");
     setProjectCreateError("");
-  }, [canDiscardOrganizationCreateRecovery, releaseDirectoryRecovery]);
+  }, [
+    canDiscardOrganizationCreateRecovery,
+    isMutationOperationLocked,
+    releaseDirectoryRecovery
+  ]);
 
   const handleCreateOrganizationModel = useCallback(async () => {
-    if (submissionLockRef.current) {
+    if (isMutationOperationLocked()) {
       return;
     }
-    if (blockedRecoveryRawValueRef.current !== null) {
-      setProjectCreateError(BLOCKED_RECOVERY_MESSAGE);
+    if (recoveryConflictRef.current || isOrganizationCreateRecoveryBlocked) {
+      setProjectCreateError(
+        recoveryConflictRef.current ? RECOVERY_CONFLICT_MESSAGE : BLOCKED_RECOVERY_MESSAGE
+      );
       return;
     }
 
@@ -364,13 +396,13 @@ export function useOrganizationModelCreateForm({
       return;
     }
 
-    submissionLockRef.current = true;
+    const operation = beginMutationOperation("organization-create-operation");
+    if (operation === null) {
+      return;
+    }
+    const isActiveOperation = () => isMutationOperationCurrent(operation);
     setIsCreatingOrganizationModel(true);
     setProjectCreateError("");
-    const operationId = Symbol("organization-create-operation");
-    activeOperationIdRef.current = operationId;
-    const isActiveOperation = () =>
-      isMountedRef.current && activeOperationIdRef.current === operationId;
     let operationCheckpoint = createCheckpoint;
 
     try {
@@ -391,16 +423,18 @@ export function useOrganizationModelCreateForm({
           previousOrganizationIds,
           startedAt: Date.now()
         };
-        if (!writePersistedOrganizationCreateAttempt(postingAttempt, null)) {
+        const postingRecovery = writePersistedOrganizationCreateAttempt(
+          postingAttempt,
+          null
+        );
+        if (postingRecovery === null) {
           throw new UserFacingError(PERSISTENCE_FAILURE_MESSAGE);
         }
-        persistedAttemptRef.current = postingAttempt;
+        persistedRecoveryRef.current = postingRecovery;
         setCanDiscardOrganizationCreateRecovery(false);
-        const createController = new AbortController();
-        createAbortControllerRef.current = createController;
         try {
-          const created = await runMutationRequestWithDeadline({
-            signal: createController.signal,
+          const commitOutcome = await commitMutationOnce({
+            signal: operation.signal,
             timeoutMessage: "프로젝트 생성 응답을 기다리는 시간이 초과되었습니다.",
             operation: (requestSignal) =>
               createOrganizationModel(
@@ -409,63 +443,72 @@ export function useOrganizationModelCreateForm({
                   description: ""
                 },
                 requestSignal
-              )
+              ),
+            accept: (created) =>
+              Number.isSafeInteger(created?.id) &&
+              created.id > 0 &&
+              !previousOrganizationIds.includes(created.id) &&
+              created.name.trim() === name &&
+              created.status === "ACTIVE"
+                ? created.id
+                : null
           });
           if (!isActiveOperation()) {
             return;
           }
 
           operationCheckpoint =
-            Number.isSafeInteger(created?.id) &&
-            created.id > 0 &&
-            !previousOrganizationIds.includes(created.id) &&
-            created.name.trim() === name &&
-            created.status === "ACTIVE"
-              ? { kind: "known", organizationId: created.id }
+            commitOutcome.kind === "accepted"
+              ? { kind: "known", organizationId: commitOutcome.value }
               : { kind: "indeterminate", name, previousOrganizationIds };
         } catch (error) {
           if (!isActiveOperation()) {
             return;
           }
           if (isDefinitiveMutationRejection(error)) {
+            const activeRecovery = persistedRecoveryRef.current;
+            if (
+              activeRecovery !== null &&
+              !clearPersistedOrganizationCreateAttempt(activeRecovery.rawValue)
+            ) {
+              blockForRecoveryConflict();
+              return;
+            }
+            persistedRecoveryRef.current = null;
             throw error;
           }
-
-          // A timeout, network failure, 5xx, or unusable success response can
-          // happen after the server committed the project. From here on every
-          // retry must reconcile the directory instead of repeating the POST.
-          operationCheckpoint = { kind: "indeterminate", name, previousOrganizationIds };
-        } finally {
-          if (createAbortControllerRef.current === createController) {
-            createAbortControllerRef.current = null;
-          }
+          throw error;
         }
 
         if (!isActiveOperation()) {
           return;
         }
 
-        const persistedAttempt = persistedAttemptRef.current;
+        const persistedRecovery = persistedRecoveryRef.current;
         const reconcilingAttempt: PersistedOrganizationCreateAttempt = {
           version: 1,
-          attemptId: persistedAttempt?.attemptId ?? window.crypto.randomUUID(),
+          attemptId:
+            persistedRecovery?.attempt.attemptId ?? window.crypto.randomUUID(),
           apiScope: API_BASE_URL,
           phase: "reconciling",
           name,
           previousOrganizationIds,
-          startedAt: persistedAttempt?.startedAt ?? Date.now(),
+          startedAt: persistedRecovery?.attempt.startedAt ?? Date.now(),
           organizationId:
               operationCheckpoint.kind === "known" ? operationCheckpoint.organizationId : null
         };
-        if (
-          persistedAttempt !== null &&
-          writePersistedOrganizationCreateAttempt(
-            reconcilingAttempt,
-            persistedAttempt.attemptId
-          )
-        ) {
-          persistedAttemptRef.current = reconcilingAttempt;
+        if (persistedRecovery === null) {
+          throw new UserFacingError(PERSISTENCE_FAILURE_MESSAGE);
         }
+        const reconcilingRecovery = writePersistedOrganizationCreateAttempt(
+          reconcilingAttempt,
+          persistedRecovery.rawValue
+        );
+        if (reconcilingRecovery === null) {
+          blockForRecoveryConflict();
+          return;
+        }
+        persistedRecoveryRef.current = reconcilingRecovery;
 
         // Store the outcome checkpoint before starting the fallible dashboard
         // refresh. From this point every retry is GET-only, even if the server
@@ -477,41 +520,44 @@ export function useOrganizationModelCreateForm({
       if (directoryRecoveryTokenRef.current === null) {
         directoryRecoveryTokenRef.current = beginDirectoryRecovery();
       }
-
-      const refreshController = new AbortController();
-      refreshAbortControllerRef.current = refreshController;
-      const refreshTimeoutId = window.setTimeout(() => {
-        refreshController.abort();
-      }, PROJECT_REFRESH_TIMEOUT_MS);
-      let refreshedDashboard: DashboardViewModel | null;
-      try {
-        refreshedDashboard = await loadDashboard({
-          refreshAfterInFlight: true,
-          clearOnError: false,
-          signal: refreshController.signal
-        });
-      } finally {
-        window.clearTimeout(refreshTimeoutId);
-        if (refreshAbortControllerRef.current === refreshController) {
-          refreshAbortControllerRef.current = null;
-        }
+      if (operationCheckpoint === null) {
+        throw new UserFacingError(INDETERMINATE_REFRESH_FAILURE_MESSAGE);
       }
+      const checkpointToReconcile = operationCheckpoint;
+
+      const organizationId = await reconcileWithRetries({
+        attempts: 1,
+        intervalMs: 0,
+        signal: operation.signal,
+        probe: async (requestSignal) => {
+          const refreshedDashboard = await runMutationRequestWithDeadline({
+            signal: requestSignal,
+            timeoutMs: PROJECT_REFRESH_TIMEOUT_MS,
+            operation: (refreshSignal) =>
+              loadDashboard({
+                refreshAfterInFlight: true,
+                clearOnError: false,
+                signal: refreshSignal
+              })
+          });
+          return findCheckpointOrganizationId(
+            checkpointToReconcile,
+            refreshedDashboard
+          );
+        }
+      });
       if (!isActiveOperation()) {
         return;
       }
-      const organizationId = findCheckpointOrganizationId(
-        operationCheckpoint,
-        refreshedDashboard
-      );
 
       if (organizationId === null) {
-        if (createCheckpointRef.current === operationCheckpoint) {
-          setProjectCreateError(getRefreshFailureMessage(operationCheckpoint));
+        if (createCheckpointRef.current === checkpointToReconcile) {
+          setProjectCreateError(getRefreshFailureMessage(checkpointToReconcile));
         }
         return;
       }
 
-      finishCreatedOrganization(operationCheckpoint, organizationId, true);
+      finishCreatedOrganization(checkpointToReconcile, organizationId, true);
     } catch (error) {
       if (!isActiveOperation()) {
         return;
@@ -520,11 +566,11 @@ export function useOrganizationModelCreateForm({
       if (activeCheckpoint !== null) {
         setProjectCreateError(getRefreshFailureMessage(activeCheckpoint));
       } else if (operationCheckpoint === null) {
-        const persistedAttemptId = persistedAttemptRef.current?.attemptId;
-        persistedAttemptRef.current = null;
+        const persistedRecovery = persistedRecoveryRef.current;
+        persistedRecoveryRef.current = null;
         setCanDiscardOrganizationCreateRecovery(false);
-        if (persistedAttemptId !== undefined) {
-          clearPersistedOrganizationCreateAttempt(persistedAttemptId);
+        if (persistedRecovery !== null) {
+          clearPersistedOrganizationCreateAttempt(persistedRecovery.rawValue);
         }
         releaseDirectoryRecovery();
         setProjectCreateError(
@@ -532,19 +578,21 @@ export function useOrganizationModelCreateForm({
         );
       }
     } finally {
-      if (activeOperationIdRef.current === operationId) {
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
-          setIsCreatingOrganizationModel(false);
-        }
+      if (finishMutationOperation(operation)) {
+        setIsCreatingOrganizationModel(false);
       }
     }
   }, [
     beginDirectoryRecovery,
+    beginMutationOperation,
+    blockForRecoveryConflict,
     createCheckpoint,
     dashboardData,
+    finishMutationOperation,
     finishCreatedOrganization,
+    isMutationOperationCurrent,
+    isMutationOperationLocked,
+    isOrganizationCreateRecoveryBlocked,
     loadDashboard,
     newOrganizationModelName,
     releaseDirectoryRecovery

@@ -1,4 +1,5 @@
 import { ApiRequestError } from "@/services/backend-api";
+import { wait } from "@/services/async-cancellation";
 import { UserFacingError } from "@/services/user-facing-error";
 
 export const DEFAULT_MUTATION_REQUEST_TIMEOUT_MS = 15_000;
@@ -108,4 +109,67 @@ export function isDefinitiveMutationRejection(error: unknown): boolean {
     error.status !== null &&
     DEFINITIVE_MUTATION_REJECTION_STATUSES.has(error.status)
   );
+}
+
+export type MutationCommitOutcome<T> =
+  | { kind: "accepted"; value: T }
+  | { kind: "ambiguous" };
+
+/**
+ * Sends a mutation once and classifies every non-definitive outcome as
+ * ambiguous. Callers must reconcile ambiguous outcomes with GET requests; the
+ * helper intentionally never retries the mutation.
+ */
+export async function commitMutationOnce<TResponse, TValue>({
+  accept,
+  operation,
+  signal,
+  timeoutMessage,
+  timeoutMs
+}: {
+  accept: (response: TResponse) => TValue | null;
+  operation: (signal: AbortSignal) => Promise<TResponse>;
+  signal?: AbortSignal;
+  timeoutMessage?: string;
+  timeoutMs?: number;
+}): Promise<MutationCommitOutcome<TValue>> {
+  try {
+    const response = await runMutationRequestWithDeadline({
+      operation,
+      signal,
+      timeoutMessage,
+      timeoutMs
+    });
+    const value = accept(response);
+    return value === null ? { kind: "ambiguous" } : { kind: "accepted", value };
+  } catch (error) {
+    if (signal?.aborted || isDefinitiveMutationRejection(error)) {
+      throw error;
+    }
+    return { kind: "ambiguous" };
+  }
+}
+
+/** Runs a bounded GET-only reconciliation loop. */
+export async function reconcileWithRetries<T>({
+  attempts,
+  intervalMs,
+  probe,
+  signal
+}: {
+  attempts: number;
+  intervalMs: number;
+  probe: (signal: AbortSignal, attempt: number) => Promise<T | null>;
+  signal: AbortSignal;
+}): Promise<T | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) {
+      await wait(intervalMs, signal);
+    }
+    const value = await probe(signal, attempt);
+    if (value !== null) {
+      return value;
+    }
+  }
+  return null;
 }

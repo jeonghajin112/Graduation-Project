@@ -14,8 +14,8 @@
  *   [이 파일] ─ 규칙 기반 모듈 (axe-core + KWCAG 매핑 + 점수화)
  *             ├─ 출력 1: result.json          (디버깅용, 내부 형식)
  *             ├─ 출력 2: result_api.json      (백엔드 전송용, API 스펙 형식)
- *             ├─ 출력 3: result.html          (정적 DOM replay)
- *             └─ 출력 4: result_artifact.json (DOM replay 메타데이터)
+ *             ├─ 출력 3: result.html          (내부 텍스트 분석용 DOM snapshot)
+ *             └─ 출력 4: result_artifact.json (캡처 메타데이터)
  *                          │
  *                          ▼
  *                   text_extractor.py → difficulty_engine.py → suggestion_generator.py
@@ -29,7 +29,7 @@
  *   URL 입력
  *     → Playwright로 헤드리스 브라우저 실행 및 페이지 로딩
  *     → axe-core 실행 (WCAG 2.0/2.1/2.2 규칙 기반 검사)
- *     → 동일한 일시정지 DOM의 script-free replay HTML/메타데이터 저장
+ *     → 동일한 일시정지 DOM의 내부 분석 snapshot/캡처 메타데이터 생성
  *     → adapter.convert() : axe 결과를 KWCAG 33개 항목 기준으로 재분류
  *     → scorer.score()    : 100점 감점 방식으로 점수 산출
  *     → toApiFormat()     : 백엔드 API 스펙(snake_case)으로 변환
@@ -76,6 +76,12 @@ function urlOrigin(value) {
   } catch {
     return null;
   }
+}
+
+function withoutUrlFragment(value) {
+  const parsed = new URL(value);
+  parsed.hash = '';
+  return parsed.href;
 }
 
 function challengeSignals({
@@ -538,7 +544,7 @@ async function sendToBackend(requestId, apiData) {
     1. 브라우저 실행 & 페이지 로드
     2. bot challenge/동일 문서 BotManager 대기 화면 판정 및 제한적 정적 fallback
     3. axe-core 접근성 검사 + typed locator 해석
-    4. 동일 DOM의 정적 replay HTML/메타데이터 저장
+    4. 동일 DOM의 내부 분석 snapshot/캡처 메타데이터 생성
     5. 어댑터 변환 및 점수 산출
     6. API 형태/로컬 JSON 저장
     7. 콘솔 요약 출력
@@ -609,7 +615,7 @@ async function run(url, outputPath, options = {}) {
     
     await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
 
-    let analysisFinalUrl = page.url();
+    let analysisFinalUrl = withoutUrlFragment(page.url());
     let replaySourceMode = 'RENDERED_DOM';
     if (initialSnapshot) {
       const challenge = await detectCrossOriginBotChallenge(page, initialSnapshot.url);
@@ -619,7 +625,7 @@ async function run(url, outputPath, options = {}) {
         console.log('   [정적 fallback] 최초 2xx HTML을 스크립트 없이 재현하여 정적 DOM만 분석합니다.');
         console.log('   [정적 fallback] CAPTCHA를 우회하거나 webdriver 값을 위장하지 않습니다.');
         await loadStaticInitialResponseFallback(page, initialSnapshot);
-        analysisFinalUrl = initialSnapshot.url;
+        analysisFinalUrl = withoutUrlFragment(initialSnapshot.url);
         replaySourceMode = 'INITIAL_RESPONSE_STATIC';
       } else if (challenge.detected) {
         throw new Error(
@@ -629,8 +635,8 @@ async function run(url, outputPath, options = {}) {
     }
     await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 
-    // Freeze CSS/Web Animations before both axe and replay serialization so the
-    // reported element rectangles describe the stored DOM state.
+    // Freeze CSS/Web Animations before both axe and snapshot serialization so
+    // the reported element rectangles describe the analyzed DOM state.
     await pauseDocumentAnimations(page);
 
     // ── 3) axe-core 실행 ──
@@ -654,15 +660,15 @@ async function run(url, outputPath, options = {}) {
     let htmlOutput;
     let artifactOutput;
     try {
-      // Save a UTF-8 static replay from the same paused DOM consumed by axe and
-      // the locator resolver. Scripts are removed from the stored copy so a
-      // later replay cannot rerun the target application's automation checks.
+      // Create a UTF-8 internal snapshot from the same paused DOM consumed by
+      // axe and the locator resolver. Scripts are removed because this local
+      // intermediate file is used only by the text analyzer and diagnostics.
       const renderedHtml = await serializeDomReplayHtml(page, {
         sourceMode: replaySourceMode,
       });
       htmlOutput = siblingOutputPath(output, '.html');
       fs.writeFileSync(htmlOutput, renderedHtml, 'utf-8');
-      console.log(`4. DOM replay HTML 저장: ${htmlOutput}`);
+      console.log(`4. 내부 분석 DOM snapshot 생성: ${htmlOutput}`);
 
       const artifactMetadata = await buildDomReplayArtifactMetadata(page, {
         requestedUrl: url,
@@ -674,12 +680,12 @@ async function run(url, outputPath, options = {}) {
       // Re-resolve after serialization. Coordinates describe the analyzed DOM
       // and are no longer clipped to a screenshot/tile boundary.
       await revalidateAxeLocators(page, axeResults);
-      console.log(`5. DOM replay 메타데이터 저장: ${artifactOutput}`);
+      console.log(`5. 캡처 메타데이터 생성: ${artifactOutput}`);
 
       if (cvScreenshotPath) {
         try {
           // This raster exists only as an inter-module CV input in the OS temp
-          // directory. It is never metadata, replay evidence, or an upload part.
+          // directory. It is never persisted evidence or part of ingestion.
           const cvImage = await page.screenshot({
             type: 'png',
             fullPage: true,
@@ -704,7 +710,6 @@ async function run(url, outputPath, options = {}) {
     //   에서 의미가 전달된다. adapter.js의 mapping.js가 이 매핑을 담당.
     console.log('6. KWCAG 매핑 변환 중...');
     const kwcagResult = convert(axeResults);
-    kwcagResult.meta.captureMode = 'DOM_REPLAY';
     kwcagResult.meta.replaySource = replaySourceMode;
     kwcagResult.meta.carouselAudit = axeResults.carouselAudit;
 
@@ -812,8 +817,8 @@ async function run(url, outputPath, options = {}) {
     console.log('');
     console.log(`결과 저장: ${path.resolve(output)}`);
     console.log(`API 형태: ${path.resolve(apiOutput)}`);
-    console.log(`DOM replay HTML: ${path.resolve(htmlOutput)}`);
-    console.log(`DOM replay 메타데이터: ${path.resolve(artifactOutput)}`);
+    console.log(`내부 분석 DOM snapshot: ${path.resolve(htmlOutput)}`);
+    console.log(`캡처 메타데이터: ${path.resolve(artifactOutput)}`);
     console.log('─'.repeat(50));
 
     return kwcagResult;
@@ -861,4 +866,5 @@ module.exports = {
   siblingOutputPath,
   toApiFormat,
   usableInitialHtml,
+  withoutUrlFragment,
 };

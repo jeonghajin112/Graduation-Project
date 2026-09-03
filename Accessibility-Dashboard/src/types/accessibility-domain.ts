@@ -6,23 +6,19 @@ export type ApiResponse<T> = {
   message: string | null;
 };
 
-export type EvaluationStatus = "PENDING" | "IN_PROGRESS" | "RUNNING" | "COMPLETED" | "FAILED";
+export type RequestStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
+export type EvaluationStatus = RequestStatus | "RUNNING";
 export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR";
 export type EvaluationModule = "rule_based" | "text_difficulty" | "cv_visual";
-export type RequestStatus = EvaluationStatus;
 export type AnalysisStatus = "SUCCESS" | "FAILED";
 export type AnalyzerType = "RULE_BASED" | "AI_TEXT" | "CV_VISION";
 export type SeverityLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-export type ScoreCategory = "rule_based" | "difficulty" | "cv";
 
 export type Organization = {
   id: number;
   name: string;
-  type: string;
-  homepageUrl: string;
   description: string;
   status: string;
-  createdAt: string;
   updatedAt: string;
 };
 
@@ -33,31 +29,22 @@ export type EvaluationTarget = {
   targetType: string;
   accessUrl: string;
   faviconUrl?: string | null;
-  description: string;
   status: string;
   createdAt: string;
-  updatedAt: string;
 };
 
 export type EvaluationRequest = {
   id: number;
   evaluationTargetId: number;
-  targetName?: string;
-  faviconUrl?: string | null;
   status: RequestStatus;
-  requestNote: string;
   requestedAt: string;
-  createdAt: string;
   updatedAt: string;
 };
 
 export type EvaluationResultSummary = {
   requestId: number;
-  targetName: string;
-  status: EvaluationStatus;
   totalScore: number;
   totalIssueCount: number;
-  criticalIssueCount: number;
   requestedAt: string;
 };
 
@@ -73,18 +60,10 @@ export type IssueLocatorPathStep = {
 };
 
 export type IssueLocator = {
-  kind: string;
   pathSteps: IssueLocatorPathStep[];
-  x: number | null;
-  y: number | null;
-  width: number | null;
-  height: number | null;
-  coordinateSpace: string | null;
-  visible: boolean | null;
-  htmlSnippet: string | null;
 };
 
-export type EvaluationArtifact = {
+export type EvaluationCaptureMetadata = {
   id: number;
   requestId: number;
   requestedUrl: string;
@@ -95,13 +74,6 @@ export type EvaluationArtifact = {
   deviceScaleFactor: number;
   pageWidthCssPx: number;
   pageHeightCssPx: number;
-  captureMode: "DOM_REPLAY";
-  contentUrl: string;
-  contentType: "text/html";
-  sizeBytes: number;
-  sha256: string;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type LiveReportSession = {
@@ -158,33 +130,6 @@ export type ScoreResult = {
   id: number;
   evaluationRequestId: number;
   totalScore: number;
-  ruleScore: number;
-  aiScore: number;
-  cvScore: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ScoreDetail = {
-  id: number;
-  scoreResultId?: number;
-  category: ScoreCategory;
-  score: number;
-  maxScore: number;
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ImprovementGuide = {
-  id: number;
-  issueResultId: number;
-  title: string;
-  guideContent: string;
-  exampleCode: string;
-  recommendation: string;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type EvaluationTargetModel = {
@@ -200,11 +145,8 @@ export type EvaluationTargetModel = {
 export type OrganizationModel = {
   id: number;
   name: string;
-  type: string;
-  homepageUrl: string;
   description: string;
   status: RequestStatus | string;
-  createdAt: string;
   updatedAt: string;
   evaluationTargets: EvaluationTargetModel[];
 };
@@ -212,22 +154,9 @@ export type OrganizationModel = {
 export type EvaluationRequestModel = EvaluationRequest;
 export type IssueResultModel = IssueResult;
 
-export type DashboardIssueGroup = {
-  issueCode: string;
-  issueTitle: string;
-  severity: SeverityLevel;
-  count: number;
-};
-
 export type DashboardLatestIssueCount = {
   evaluationTargetId: number;
   requestId: number;
-  totalIssueCount: number;
-  criticalIssueCount: number;
-  highIssueCount: number;
-  mediumIssueCount: number;
-  lowIssueCount: number;
-  groups: DashboardIssueGroup[];
 };
 
 export type DashboardViewModel = {

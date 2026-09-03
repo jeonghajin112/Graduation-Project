@@ -397,7 +397,8 @@ export function useLiveReportSession(
       sessionCache.delete(requestId);
       // Expose the fresh-session transition in the same user/event turn. Waiting
       // for the retry effect would leave the exhausted iframe selected for one
-      // more paint and can briefly reveal its error document or artifact fallback.
+      // more paint and can briefly reveal its exhausted error document before
+      // the live-only loading state replaces the iframe.
       commitState({
         errorMessage: null,
         loadState: "loading",

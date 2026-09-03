@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatIssueCodeLabel, normalizeIssueCode, resolveWcagCriterion } from "./constants";
+import { formatIssueCodeLabel, normalizeIssueCode } from "./constants";
 
 describe("issue standard code normalization", () => {
   it.each([
@@ -11,7 +11,6 @@ describe("issue standard code normalization", () => {
     ["label-missing", "7.3.2"]
   ])("maps %s to its canonical KWCAG criterion", (issueCode, criterion) => {
     expect(normalizeIssueCode(issueCode)).toBe(criterion);
-    expect(resolveWcagCriterion(issueCode, "fallback").criterion).toBe(criterion);
     expect(formatIssueCodeLabel(issueCode)).toBe(`KWCAG ${criterion}`);
   });
 

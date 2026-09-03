@@ -1,8 +1,10 @@
 import { API_BASE_URL } from "@/config/api";
 import {
+  clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
   isRecoveryTimestampStale,
-  readSessionRecovery
+  readSessionRecovery,
+  writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 import type { RecoveryRead } from "@/services/recovery-storage";
 
@@ -50,6 +52,11 @@ export type PersistedQuickAnalysisAttempt = PersistedAttemptBase & {
         updatedAt: string | null;
       }
   );
+
+export type StoredQuickAnalysisAttempt = {
+  attempt: PersistedQuickAnalysisAttempt;
+  rawValue: string;
+};
 
 export type PersistedTargetRescanAttempt = PersistedAttemptBase & {
   targetId: number;
@@ -204,55 +211,25 @@ export function readQuickAnalysisRecovery(
 
 export function writeQuickAnalysisAttempt(
   attempt: PersistedQuickAnalysisAttempt,
-  expectedAttemptId: string | null
-): boolean {
-  try {
-    const normalizedAttempt = normalizeQuickAnalysisAttempt(attempt);
-    if (normalizedAttempt === null) {
-      return false;
-    }
-    const currentRawValue = window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY);
-    if (expectedAttemptId === null) {
-      if (currentRawValue !== null) {
-        return false;
-      }
-    } else {
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizeQuickAnalysisAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    const serializedAttempt = JSON.stringify(normalizedAttempt);
-    window.sessionStorage.setItem(QUICK_ANALYSIS_STORAGE_KEY, serializedAttempt);
-    return window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY) === serializedAttempt;
-  } catch {
-    return false;
+  expectedRawValue: string | null
+): StoredQuickAnalysisAttempt | null {
+  const stored = writeSessionRecoveryIfUnchanged(
+    QUICK_ANALYSIS_STORAGE_KEY,
+    attempt,
+    normalizeQuickAnalysisAttempt,
+    expectedRawValue
+  );
+  if (stored === null) {
+    return null;
   }
+  return { attempt: stored.value, rawValue: stored.rawValue };
 }
 
-export function clearQuickAnalysisAttempt(expectedAttemptId: string): boolean {
-  try {
-    const currentRawValue = window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY);
-    if (currentRawValue === null) {
-      return false;
-    }
-    const currentAttempt = normalizeQuickAnalysisAttempt(
-      JSON.parse(currentRawValue) as unknown
-    );
-    if (currentAttempt?.attemptId !== expectedAttemptId) {
-      return false;
-    }
-    window.sessionStorage.removeItem(QUICK_ANALYSIS_STORAGE_KEY);
-    return window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
+export function clearQuickAnalysisAttempt(expectedRawValue: string): boolean {
+  return clearSessionRecoveryIfUnchanged(
+    QUICK_ANALYSIS_STORAGE_KEY,
+    expectedRawValue
+  );
 }
 
 function normalizeTargetRescanAttempt(

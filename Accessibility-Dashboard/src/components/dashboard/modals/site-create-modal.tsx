@@ -32,9 +32,8 @@ import {
   evaluationRequestPhaseFromStatus,
   isFinalEvaluationRequestStatus
 } from "../shared/evaluation-request-status";
-import { useCancellationScope } from "../shared/use-cancellation-scope";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
-import { useExclusiveOperation } from "../shared/use-exclusive-operation";
+import { useMutationOperation } from "../shared/use-mutation-operation";
 
 const ANALYSIS_NETWORK_TIMEOUT_MESSAGE =
   "처리 결과를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
@@ -299,14 +298,13 @@ export function SiteCreateModal({
   const [resumePoint, setResumePoint] = useState<AnalysisResumePoint>(initialResumePoint);
   const [isRecoveryBlocked, setIsRecoveryBlocked] = useState(false);
   const [canDiscardRecovery, setCanDiscardRecovery] = useState(false);
-  const { beginScope, cancelScope } = useCancellationScope();
   const {
-    beginOperation,
-    cancelOperation,
-    finishOperation,
-    isOperationCurrent,
-    isOperationLocked
-  } = useExclusiveOperation();
+    beginMutationOperation,
+    cancelMutationOperation,
+    finishMutationOperation,
+    isMutationOperationCurrent,
+    isMutationOperationLocked
+  } = useMutationOperation();
   const autoCloseTimeoutRef = useRef<number | null>(null);
   const recoveryRawValueRef = useRef<string | null>(null);
   const discardLockRef = useRef(false);
@@ -394,8 +392,7 @@ export function SiteCreateModal({
     if (!isOpen) {
       // Closing the modal must stop the analysis polling loop as well, otherwise
       // it keeps hitting the backend until the 120 attempts run out.
-      cancelScope();
-      cancelOperation();
+      cancelMutationOperation();
       discardLockRef.current = false;
       if (autoCloseTimeoutRef.current !== null) {
         window.clearTimeout(autoCloseTimeoutRef.current);
@@ -409,7 +406,7 @@ export function SiteCreateModal({
         setAnalysisProgress(emptyProgress);
       }
     }
-  }, [cancelOperation, cancelScope, isOpen, resumePoint.kind]);
+  }, [cancelMutationOperation, isOpen, resumePoint.kind]);
 
   useEffect(
     () => {
@@ -426,7 +423,7 @@ export function SiteCreateModal({
   const handleDiscardRecovery = () => {
     if (
       discardLockRef.current ||
-      isOperationLocked() ||
+      isMutationOperationLocked() ||
       (!isRecoveryBlocked && !canDiscardRecovery)
     ) {
       return;
@@ -463,7 +460,7 @@ export function SiteCreateModal({
   };
 
   const handleAddSite = async () => {
-    if (isOperationLocked()) {
+    if (isMutationOperationLocked()) {
       return;
     }
     if (isRecoveryBlocked) {
@@ -487,15 +484,15 @@ export function SiteCreateModal({
       return;
     }
 
-    const operationId = beginOperation("site-create-operation");
-    if (operationId === null) {
+    const operation = beginMutationOperation("site-create-operation");
+    if (operation === null) {
       return;
     }
-    const isActiveOperation = () => isOperationCurrent(operationId);
+    const isActiveOperation = () => isMutationOperationCurrent(operation);
     let keepLockedUntilAutoClose = false;
 
     // Aborts when the modal closes or unmounts.
-    const signal = beginScope();
+    const { signal } = operation;
 
     setIsSubmittingSite(true);
     setSiteCreateError("");
@@ -677,7 +674,7 @@ export function SiteCreateModal({
       keepLockedUntilAutoClose = true;
       autoCloseTimeoutRef.current = window.setTimeout(() => {
         autoCloseTimeoutRef.current = null;
-        if (finishOperation(operationId)) {
+        if (finishMutationOperation(operation)) {
           setIsSubmittingSite(false);
           onClose();
         }
@@ -732,8 +729,7 @@ export function SiteCreateModal({
       // The request-recovery hook binds its in-memory directory lease to this
       // operation scope. Ending the scope releases that lease while the
       // persisted checkpoint remains available for a deliberate retry.
-      cancelScope();
-      if (!keepLockedUntilAutoClose && finishOperation(operationId)) {
+      if (!keepLockedUntilAutoClose && finishMutationOperation(operation)) {
         setIsSubmittingSite(false);
       }
     }

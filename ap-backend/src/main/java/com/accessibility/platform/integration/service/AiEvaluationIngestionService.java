@@ -7,7 +7,9 @@ import com.accessibility.platform.analysis.domain.IssueResult;
 import com.accessibility.platform.analysis.domain.Severity;
 import com.accessibility.platform.analysis.repository.AnalysisResultRepository;
 import com.accessibility.platform.analysis.repository.IssueResultRepository;
-import com.accessibility.platform.artifact.service.EvaluationArtifactService;
+import com.accessibility.platform.capturemetadata.dto.EvaluationCaptureMetadataInput;
+import com.accessibility.platform.capturemetadata.exception.CaptureMetadataValidationException;
+import com.accessibility.platform.capturemetadata.service.EvaluationCaptureMetadataService;
 import com.accessibility.platform.integration.dto.AiEvaluationSaveResponse;
 import com.accessibility.platform.organization.domain.Organization;
 import com.accessibility.platform.organization.domain.OrganizationType;
@@ -34,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,7 +60,7 @@ public class AiEvaluationIngestionService {
     private final IssueResultRepository issueResultRepository;
     private final FaviconService faviconService;
     private final AiIssueLocatorParser issueLocatorParser;
-    private final EvaluationArtifactService artifactService;
+    private final EvaluationCaptureMetadataService captureMetadataService;
 
     public AiEvaluationSaveResponse save(String resultJson) {
         JsonNode result = parse(resultJson);
@@ -70,11 +73,6 @@ public class AiEvaluationIngestionService {
                     .orElseGet(() -> requestRepository.save(new EvaluationRequest(findOrCreateTarget(url), "AI-module result_final.json import")));
 
             ensureRequestCanComplete(request);
-
-            // Fail closed: results and their visual evidence must always come
-            // from the same run. The scanner uploads the replacement artifact
-            // after this ingestion transaction commits.
-            artifactService.deleteByRequestId(reqId);
 
             // Clean up existing results for this request ID to allow re-runs
             List<AnalysisResult> existingAnalyses = analysisResultRepository.findByEvaluationRequestId(reqId);
@@ -97,6 +95,7 @@ public class AiEvaluationIngestionService {
 
         ScoreResult scoreResult = saveScore(result, request);
         saveAnalysisResults(result, request);
+        replaceCaptureMetadata(result, request);
 
         request.changeStatus(EvaluationRequestStatus.COMPLETED);
 
@@ -129,6 +128,94 @@ public class AiEvaluationIngestionService {
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Invalid AI evaluation result JSON", e);
         }
+    }
+
+    private void replaceCaptureMetadata(JsonNode result, EvaluationRequest request) {
+        JsonNode metadata = result.get("capture_metadata");
+        if (metadata == null || metadata.isNull()) {
+            // Backward-compatible imports may not contain browser geometry. Do
+            // not leave metadata from an earlier attempt attached to the new
+            // result set; live report launch will fall back to the target URL.
+            captureMetadataService.deleteByRequestId(request.getId());
+            return;
+        }
+        if (!metadata.isObject()) {
+            throw new CaptureMetadataValidationException("capture_metadata must be a JSON object");
+        }
+
+        captureMetadataService.replace(
+                request,
+                new EvaluationCaptureMetadataInput(
+                        requiredText(metadata, "requestedUrl"),
+                        requiredText(metadata, "finalUrl"),
+                        localDateTime(metadata, "capturedAt"),
+                        positiveInt(metadata, "viewportWidthCssPx"),
+                        positiveInt(metadata, "viewportHeightCssPx"),
+                        finiteNumber(metadata, "deviceScaleFactor"),
+                        positiveInt(metadata, "pageWidthCssPx"),
+                        positiveInt(metadata, "pageHeightCssPx")
+                ),
+                text(result, "url", ""),
+                optionalRuleAnalyzedUrl(result)
+        );
+    }
+
+    private String optionalRuleAnalyzedUrl(JsonNode result) {
+        JsonNode value = result.path("modules")
+                .path("rule_based")
+                .path("metadata")
+                .get("url");
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual() || value.asText().isBlank()) {
+            throw new CaptureMetadataValidationException(
+                    "modules.rule_based.metadata.url must be a non-empty string when present"
+            );
+        }
+        return value.asText();
+    }
+
+    private String requiredText(JsonNode node, String fieldName) {
+        JsonNode value = node.get(fieldName);
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            throw new CaptureMetadataValidationException(
+                    "capture_metadata." + fieldName + " must be a non-empty string"
+            );
+        }
+        return value.asText();
+    }
+
+    private LocalDateTime localDateTime(JsonNode node, String fieldName) {
+        String value = requiredText(node, fieldName);
+        try {
+            return LocalDateTime.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new CaptureMetadataValidationException(
+                    "capture_metadata." + fieldName + " must be an ISO local date-time",
+                    exception
+            );
+        }
+    }
+
+    private int positiveInt(JsonNode node, String fieldName) {
+        JsonNode value = node.get(fieldName);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() <= 0) {
+            throw new CaptureMetadataValidationException(
+                    "capture_metadata." + fieldName + " must be a positive integer"
+            );
+        }
+        return value.asInt();
+    }
+
+    private double finiteNumber(JsonNode node, String fieldName) {
+        JsonNode value = node.get(fieldName);
+        if (value == null || !value.isNumber() || !Double.isFinite(value.asDouble())) {
+            throw new CaptureMetadataValidationException(
+                    "capture_metadata." + fieldName + " must be a finite number"
+            );
+        }
+        return value.asDouble();
     }
 
     private EvaluationTarget findOrCreateTarget(String url) {

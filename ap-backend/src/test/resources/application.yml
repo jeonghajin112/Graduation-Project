@@ -9,8 +9,3 @@ spring:
       ddl-auto: create-drop
     open-in-view: false
     show-sql: false
-
-accessibility:
-  artifacts:
-    directory: ./build/test-artifacts
-    max-file-size-bytes: 1048576

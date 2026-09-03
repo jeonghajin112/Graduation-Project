@@ -1,71 +1,85 @@
-import type { EvaluationArtifact } from "@/types/accessibility-domain";
+import type { EvaluationCaptureMetadata } from "@/types/accessibility-domain";
 
-import type { EvaluationArtifactLoadState } from "./use-evaluation-artifact";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
-export type EvidenceFrameKind = "artifact" | "live" | null;
+export type EvidenceFrameKind = "live" | "preview" | null;
+export type PageEvidenceLoadState = "idle" | "loading" | "ready" | "error";
 
-// Keep this in sync with the replay document's root scrollbar width. It is
+export function getEvidenceFrameIdentity({
+  frameKind,
+  liveSessionId,
+  previewRuntimeUrl
+}: {
+  frameKind: EvidenceFrameKind;
+  liveSessionId: string | null;
+  previewRuntimeUrl: string | null;
+}): string | null {
+  if (frameKind === "live") {
+    return liveSessionId === null ? null : `live:${liveSessionId}`;
+  }
+  if (frameKind === "preview") {
+    return previewRuntimeUrl === null ? null : `preview:${previewRuntimeUrl}`;
+  }
+  return null;
+}
+
+export function shouldAwaitLiveDocumentHealthAfterFrameLoad({
+  confirmedDocumentToken,
+  documentToken
+}: {
+  confirmedDocumentToken: string | null;
+  documentToken: string | null;
+}): boolean {
+  return documentToken !== null && documentToken !== confirmedDocumentToken;
+}
+
+// Keep this in sync with the viewer document's root scrollbar width. It is
 // part of the logical iframe width before the dashboard applies its fit scale.
 export const REPLAY_SCROLLBAR_GUTTER_PX = 10;
 
 export function getReplaySourceWidth(
-  artifact: Pick<EvaluationArtifact, "pageWidthCssPx" | "viewportWidthCssPx"> | null,
+  captureMetadata: Pick<
+    EvaluationCaptureMetadata,
+    "pageWidthCssPx" | "viewportWidthCssPx"
+  > | null,
   frameKind: EvidenceFrameKind
 ): number {
-  if (artifact === null || frameKind === null) {
+  if (captureMetadata === null || frameKind === null) {
     return 0;
   }
 
-  // Preserve the complete analyzed canvas for both sources. Some pages render
-  // content wider than the nominal viewport; fitting only the viewport hides
-  // that right-hand content once the replay's horizontal scrollbar is removed.
   const pageWidth = Math.max(
-    artifact.viewportWidthCssPx,
-    artifact.pageWidthCssPx
+    captureMetadata.viewportWidthCssPx,
+    captureMetadata.pageWidthCssPx
   );
   return pageWidth + REPLAY_SCROLLBAR_GUTTER_PX;
 }
 
 export function resolveEvidenceSource({
-  artifactLoadState,
-  hasArtifact,
   hasLiveSession,
+  hasPreviewRuntime,
   liveSessionFailed,
   liveSessionLoadState
 }: {
-  artifactLoadState: EvaluationArtifactLoadState;
-  hasArtifact: boolean;
   hasLiveSession: boolean;
+  hasPreviewRuntime: boolean;
   liveSessionFailed: boolean;
   liveSessionLoadState: LiveReportSessionLoadState;
 }): {
   frameKind: EvidenceFrameKind;
-  loadState: EvaluationArtifactLoadState;
-  usesLiveSession: boolean;
-  waitsForLiveSession: boolean;
+  loadState: PageEvidenceLoadState;
 } {
-  const usesLiveSession =
-    liveSessionLoadState === "ready" && hasLiveSession && !liveSessionFailed;
-  const waitsForLiveSession = liveSessionLoadState === "loading";
-  const liveFailureHasNoFallback =
-    (liveSessionLoadState === "error" || liveSessionFailed) &&
-    !hasArtifact &&
-    (artifactLoadState === "idle" || artifactLoadState === "empty");
-  const loadState: EvaluationArtifactLoadState = usesLiveSession
-    ? "ready"
-    : waitsForLiveSession
-      ? "loading"
-      : liveFailureHasNoFallback
-        ? "error"
-        : artifactLoadState;
-  const frameKind = loadState === "ready"
-    ? usesLiveSession
-      ? "live"
-      : hasArtifact
-        ? "artifact"
-        : null
-    : null;
-
-  return { frameKind, loadState, usesLiveSession, waitsForLiveSession };
+  if (hasPreviewRuntime) {
+    return { frameKind: "preview", loadState: "ready" };
+  }
+  if (liveSessionLoadState === "ready" && hasLiveSession && !liveSessionFailed) {
+    return { frameKind: "live", loadState: "ready" };
+  }
+  if (liveSessionLoadState === "idle") {
+    return { frameKind: null, loadState: "idle" };
+  }
+  if (liveSessionLoadState === "loading") {
+    return { frameKind: null, loadState: "loading" };
+  }
+  return { frameKind: null, loadState: "error" };
 }

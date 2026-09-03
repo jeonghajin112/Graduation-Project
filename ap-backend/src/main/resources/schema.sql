@@ -1,5 +1,18 @@
--- Hibernate's H2 enum update does not widen an enum that was created before
--- DOM_REPLAY existed. Run this idempotent, data-preserving widening before JPA
--- initializes so existing file databases accept the new capture mode.
+-- Live-only reports keep the historical evaluation_artifact table so existing
+-- capture geometry remains available. Replay-file columns from older schemas
+-- are intentionally left in place, but must be nullable because new rows store
+-- metadata only. Every statement is safe for both legacy and fresh databases.
 ALTER TABLE IF EXISTS evaluation_artifact
-    ALTER COLUMN capture_mode ENUM('DOM_REPLAY', 'FULL_PAGE', 'TILE', 'VIEWPORT');
+    ALTER COLUMN IF EXISTS storage_key DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS content_type DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS size_bytes DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS sha256 DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS image_width_px DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS image_height_px DROP NOT NULL;
+ALTER TABLE IF EXISTS evaluation_artifact
+    ALTER COLUMN IF EXISTS capture_mode DROP NOT NULL;

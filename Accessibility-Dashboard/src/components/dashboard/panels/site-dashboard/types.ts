@@ -1,4 +1,4 @@
-import type { AnalyzerType, ImprovementGuide, IssueResultModel, SeverityLevel } from "@/types/accessibility-domain";
+import type { AnalyzerType, IssueResultModel, SeverityLevel } from "@/types/accessibility-domain";
 
 export type ScoreChartItem = {
   slot: number;
@@ -15,17 +15,8 @@ export type SeverityChartItem = {
   color: string;
 };
 
-export type WcagCriterion = {
-  criterion: string;
-  title: string;
-};
-
 export type RecentIssueRow = {
   issue: IssueResultModel;
   severity: SeverityChartItem;
-  wcagCriterion: WcagCriterion;
-  issueGuides: ImprovementGuide[];
-  analyzerLabel: string;
   analyzerType?: AnalyzerType;
-  showsAiGuide: boolean;
 };

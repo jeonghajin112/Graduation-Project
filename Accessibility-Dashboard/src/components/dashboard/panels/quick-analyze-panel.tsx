@@ -40,8 +40,10 @@ import type {
 
 import {
   ANALYSIS_POLL_ATTEMPTS,
+  commitMutationOnce,
   getAnalysisPollDelayMs,
   isDefinitiveMutationRejection,
+  reconcileWithRetries,
   runMutationRequestWithDeadline,
   waitForDocumentVisible
 } from "../shared/mutation-recovery";
@@ -49,8 +51,7 @@ import {
   EVALUATION_REQUEST_FAILED_MESSAGE,
   evaluationRequestPhaseFromStatus
 } from "../shared/evaluation-request-status";
-import { useCancellationScope } from "../shared/use-cancellation-scope";
-import { useExclusiveOperation } from "../shared/use-exclusive-operation";
+import { useMutationOperation } from "../shared/use-mutation-operation";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
@@ -349,20 +350,46 @@ export function QuickAnalyzePanel({
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ProgressState>(emptyProgress);
-  const { beginScope, cancelScope } = useCancellationScope();
   const {
-    beginOperation,
-    cancelOperation,
-    finishOperation,
-    isOperationCurrent,
-    isOperationLocked
-  } = useExclusiveOperation();
+    beginMutationOperation,
+    cancelMutationOperation,
+    finishMutationOperation,
+    isMutationOperationCurrent,
+    isMutationOperationLocked
+  } = useMutationOperation();
   const checkpointRef = useRef<QuickAnalysisCheckpoint | null>(
     restoredAttempt === null
       ? null
       : checkpointFromPersistedQuickAnalysisAttempt(restoredAttempt)
   );
+  const checkpointRawValueRef = useRef<string | null>(
+    initialRecovery.kind === "valid" ? initialRecovery.rawValue : null
+  );
   const recoveryBlockedRef = useRef(initialRecovery.kind === "blocked");
+
+  const persistCheckpoint = (
+    checkpoint: QuickAnalysisCheckpoint | PersistedQuickAnalysisAttempt,
+    expectedRawValue = checkpointRawValueRef.current
+  ): boolean => {
+    const attempt = "kind" in checkpoint
+      ? persistedAttemptFromQuickAnalysisCheckpoint(checkpoint)
+      : checkpoint;
+    const stored = writeQuickAnalysisAttempt(attempt, expectedRawValue);
+    if (stored === null) {
+      return false;
+    }
+    checkpointRawValueRef.current = stored.rawValue;
+    return true;
+  };
+
+  const clearPersistedCheckpoint = (): boolean => {
+    const rawValue = checkpointRawValueRef.current;
+    if (rawValue === null || !clearQuickAnalysisAttempt(rawValue)) {
+      return false;
+    }
+    checkpointRawValueRef.current = null;
+    return true;
+  };
 
   const showProgressView = progress.phase !== "idle";
   const isBusy =
@@ -376,8 +403,7 @@ export function QuickAnalyzePanel({
   const hasError = errorMessage.length > 0;
 
   const handleReset = () => {
-    cancelScope();
-    cancelOperation();
+    cancelMutationOperation();
     setProgress(emptyProgress);
     setErrorMessage("");
     setIsSubmitting(false);
@@ -387,7 +413,7 @@ export function QuickAnalyzePanel({
     if (readOnly) {
       return;
     }
-    if (isOperationLocked() || !hasUrlInput) {
+    if (isMutationOperationLocked() || !hasUrlInput) {
       return;
     }
 
@@ -402,12 +428,12 @@ export function QuickAnalyzePanel({
       return;
     }
 
-    const operationId = beginOperation("quick-analysis-operation");
-    if (operationId === null) {
+    const operation = beginMutationOperation("quick-analysis-operation");
+    if (operation === null) {
       return;
     }
-    const signal = beginScope();
-    const isActiveOperation = () => isOperationCurrent(operationId);
+    const { signal } = operation;
+    const isActiveOperation = () => isMutationOperationCurrent(operation);
 
     setIsSubmitting(true);
     setErrorMessage("");
@@ -454,7 +480,7 @@ export function QuickAnalyzePanel({
           phase: "posting",
           knownRequestIds
         };
-        if (!writeQuickAnalysisAttempt(postingAttempt, null)) {
+        if (!persistCheckpoint(postingAttempt, null)) {
           throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
         }
 
@@ -472,56 +498,47 @@ export function QuickAnalyzePanel({
         checkpoint = reconcilingCheckpoint;
 
         try {
-          const created = await runQuickAnalysisRequestWithTimeout({
+          const commitOutcome = await commitMutationOnce({
             signal,
             timeoutMessage: "분석을 시작하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
-              startUrlEvaluation(normalized, requestSignal)
+              startUrlEvaluation(normalized, requestSignal),
+            accept: (created) => {
+              const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
+                attemptId,
+                startedAt
+              });
+              return requestCheckpoint !== null &&
+                !knownRequestIds.includes(requestCheckpoint.requestId)
+                ? requestCheckpoint
+                : null;
+            }
           });
           if (!isActiveOperation()) {
             return;
           }
 
-          const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
-            attemptId,
-            startedAt
-          });
-          if (
-            requestCheckpoint !== null &&
-            !knownRequestIds.includes(requestCheckpoint.requestId)
-          ) {
-            if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(requestCheckpoint),
-                attemptId
-              )
-            ) {
+          if (commitOutcome.kind === "accepted") {
+            if (!persistCheckpoint(commitOutcome.value)) {
               throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
-            checkpointRef.current = requestCheckpoint;
-            checkpoint = requestCheckpoint;
+            checkpointRef.current = commitOutcome.value;
+            checkpoint = commitOutcome.value;
           }
         } catch (error) {
           if (isDefinitiveMutationRejection(error)) {
-            if (!clearQuickAnalysisAttempt(attemptId)) {
+            if (!clearPersistedCheckpoint()) {
               throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             checkpointRef.current = null;
             throw error;
           }
-          if (!isActiveOperation()) {
-            return;
-          }
-          // A timeout, network error, 5xx, or unusable success body may happen
-          // after commit. Keep the pre-POST checkpoint and reconcile by GET.
+          throw error;
         }
 
         if (checkpoint.kind === "reconciling") {
           if (
-            !writeQuickAnalysisAttempt(
-              persistedAttemptFromQuickAnalysisCheckpoint(checkpoint),
-              checkpoint.attemptId
-            )
+            !persistCheckpoint(checkpoint)
           ) {
             throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
           }
@@ -529,57 +546,43 @@ export function QuickAnalyzePanel({
       }
 
       if (checkpoint.kind === "reconciling") {
-        for (let attempt = 0; attempt < QUICK_ANALYSIS_RECONCILE_ATTEMPTS; attempt += 1) {
-          if (attempt > 0) {
-            await wait(QUICK_ANALYSIS_RECONCILE_INTERVAL_MS, signal);
-          }
-
-          const reconciledData = await runQuickAnalysisRequestWithTimeout({
-            signal,
-            timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
-            operation: (requestSignal) =>
-              fetchDashboardViewModel(requestSignal)
-          });
-          if (!isActiveOperation()) {
-            return;
-          }
-
-          const reconciledRequest = findReconciledQuickAnalysisRequest(
-            reconciledData,
-            checkpoint
-          );
-          if (reconciledRequest === null) {
-            continue;
-          }
-
-          const requestCheckpoint = requestCheckpointFromResponse(
-            normalized,
-            reconciledRequest,
-            {
-              attemptId: checkpoint.attemptId,
-              startedAt: checkpoint.startedAt
+        const reconcilingCheckpoint = checkpoint;
+        const recoveredCheckpoint = await reconcileWithRetries({
+          attempts: QUICK_ANALYSIS_RECONCILE_ATTEMPTS,
+          intervalMs: QUICK_ANALYSIS_RECONCILE_INTERVAL_MS,
+          signal,
+          probe: async (requestSignal) => {
+            const reconciledData = await runQuickAnalysisRequestWithTimeout({
+              signal: requestSignal,
+              timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
+              operation: (probeSignal) => fetchDashboardViewModel(probeSignal)
+            });
+            if (!isActiveOperation()) {
+              return null;
             }
-          );
-          if (requestCheckpoint !== null) {
-            if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(requestCheckpoint),
-                checkpoint.attemptId
-              )
-            ) {
-              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-            }
-            checkpointRef.current = requestCheckpoint;
-            checkpoint = requestCheckpoint;
-            break;
+            const reconciledRequest = findReconciledQuickAnalysisRequest(
+              reconciledData,
+              reconcilingCheckpoint
+            );
+            return reconciledRequest === null
+              ? null
+              : requestCheckpointFromResponse(normalized, reconciledRequest, {
+                  attemptId: reconcilingCheckpoint.attemptId,
+                  startedAt: reconcilingCheckpoint.startedAt
+                });
           }
-        }
+        });
 
-        if (checkpoint.kind === "reconciling") {
+        if (recoveredCheckpoint === null) {
           throw new UserFacingError(
             "분석 요청의 처리 결과를 아직 확인하지 못했습니다. 잠시 후 다시 시도해 주세요. 새 분석 요청은 보내지 않습니다."
           );
         }
+        if (!persistCheckpoint(recoveredCheckpoint)) {
+          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+        }
+        checkpointRef.current = recoveredCheckpoint;
+        checkpoint = recoveredCheckpoint;
       }
 
       if (checkpoint.kind === "request") {
@@ -595,7 +598,7 @@ export function QuickAnalyzePanel({
 
         if (requestCheckpoint.status === "FAILED") {
           terminalRequestFailed = true;
-          if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
+          if (!clearPersistedCheckpoint()) {
             throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
           }
           checkpointRef.current = null;
@@ -629,10 +632,7 @@ export function QuickAnalyzePanel({
               throw new UserFacingError("분석 진행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
             }
             if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(nextCheckpoint),
-                requestCheckpoint.attemptId
-              )
+              !persistCheckpoint(nextCheckpoint)
             ) {
               throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
@@ -647,7 +647,7 @@ export function QuickAnalyzePanel({
 
             if (request.status === "FAILED") {
               terminalRequestFailed = true;
-              if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
+              if (!clearPersistedCheckpoint()) {
                 throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
               }
               checkpointRef.current = null;
@@ -678,10 +678,7 @@ export function QuickAnalyzePanel({
           updatedAt: requestCheckpoint.updatedAt
         };
         if (
-          !writeQuickAnalysisAttempt(
-            persistedAttemptFromQuickAnalysisCheckpoint(targetCheckpoint),
-            requestCheckpoint.attemptId
-          )
+          !persistCheckpoint(targetCheckpoint)
         ) {
           throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
         }
@@ -745,7 +742,7 @@ export function QuickAnalyzePanel({
         });
         return;
       }
-      if (!clearQuickAnalysisAttempt(checkpoint.attemptId)) {
+      if (!clearPersistedCheckpoint()) {
         throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
       checkpointRef.current = null;
@@ -765,7 +762,7 @@ export function QuickAnalyzePanel({
         message
       }));
     } finally {
-      if (finishOperation(operationId)) {
+      if (finishMutationOperation(operation)) {
         setIsSubmitting(false);
       }
     }

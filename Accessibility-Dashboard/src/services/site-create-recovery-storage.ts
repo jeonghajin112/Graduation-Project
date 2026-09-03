@@ -3,7 +3,8 @@ import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
   isRecoveryTimestampStale,
-  readSessionRecovery
+  readSessionRecovery,
+  writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 
 export const SITE_CREATE_RECOVERY_STORAGE_KEY =
@@ -235,27 +236,16 @@ export function writeSiteCreateRecovery(
   attempt: PersistedSiteCreateAttempt,
   expectedRawValue: string | null
 ): StoredSiteCreateAttempt | null {
-  try {
-    const normalizedAttempt = normalizePersistedSiteCreateAttempt(attempt);
-    if (normalizedAttempt === null) {
-      return null;
-    }
-    if (
-      window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY) !==
-      expectedRawValue
-    ) {
-      return null;
-    }
-
-    const rawValue = JSON.stringify(normalizedAttempt);
-    window.sessionStorage.setItem(SITE_CREATE_RECOVERY_STORAGE_KEY, rawValue);
-    if (window.sessionStorage.getItem(SITE_CREATE_RECOVERY_STORAGE_KEY) !== rawValue) {
-      return null;
-    }
-    return { attempt: normalizedAttempt, rawValue };
-  } catch {
+  const stored = writeSessionRecoveryIfUnchanged(
+    SITE_CREATE_RECOVERY_STORAGE_KEY,
+    attempt,
+    normalizePersistedSiteCreateAttempt,
+    expectedRawValue
+  );
+  if (stored === null) {
     return null;
   }
+  return { attempt: stored.value, rawValue: stored.rawValue };
 }
 
 export function clearSiteCreateRecovery(

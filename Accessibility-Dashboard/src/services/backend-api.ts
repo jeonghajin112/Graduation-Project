@@ -1,7 +1,7 @@
 import { buildApiUrl } from "@/config/api";
 import {
   ApiContractValidationError,
-  createEvaluationArtifactParser,
+  createEvaluationCaptureMetadataParser,
   createEvaluationIssuesResponseParser,
   createEvaluationRequestResponseParser,
   createEvaluationTargetResponseParser,
@@ -20,7 +20,7 @@ import type {
   AnalysisResult,
   CreateEvaluationTargetInput,
   DashboardViewModel,
-  EvaluationArtifact,
+  EvaluationCaptureMetadata,
   EvaluationIssue,
   EvaluationRequestModel,
   EvaluationTarget,
@@ -478,11 +478,8 @@ function buildOrganizationsFromApi(
       return {
         id: organization.id,
         name: organization.name,
-        type: organization.type,
-        homepageUrl: organization.homepageUrl ?? "",
         description: organization.description ?? "",
         status: latestOrganizationRequest?.status ?? organization.status,
-        createdAt: organization.createdAt,
         updatedAt: latestOrganizationRequest?.updatedAt ?? organization.updatedAt,
         evaluationTargets: evaluationTargetModels
       };
@@ -498,14 +495,14 @@ function fetchEvaluationIssues(requestId: number, signal?: AbortSignal): Promise
   );
 }
 
-export async function fetchEvaluationArtifact(
+export async function fetchEvaluationCaptureMetadata(
   requestId: number,
   signal?: AbortSignal
-): Promise<EvaluationArtifact | null> {
-  const artifactParser = createEvaluationArtifactParser(requestId);
+): Promise<EvaluationCaptureMetadata | null> {
+  const metadataParser = createEvaluationCaptureMetadataParser(requestId);
   return apiRequest(
-    `/results/requests/${requestId}/artifact`,
-    (value, path) => (value === null ? null : artifactParser(value, path)),
+    `/results/requests/${requestId}/capture-metadata`,
+    (value, path) => (value === null ? null : metadataParser(value, path)),
     {
       cache: "no-store",
       signal,
@@ -542,11 +539,6 @@ export async function renewLiveReportSession(
       signal
     }
   );
-}
-
-export function getEvaluationArtifactContentUrl(contentUrl: string): string {
-  const apiRelativePath = contentUrl.startsWith("/api/") ? contentUrl.slice(4) : contentUrl;
-  return buildApiUrl(apiRelativePath);
 }
 
 function getSyntheticAnalysisId(requestId: number, module: string): number {

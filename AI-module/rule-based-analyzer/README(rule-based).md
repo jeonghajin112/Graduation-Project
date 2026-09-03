@@ -11,7 +11,7 @@ Playwright로 웹페이지를 렌더링하고, axe-core로 접근성을 검사�
 rule-based-analyzer/
 ├── run.js        진입점. URL을 받아 전체 파이프라인을 실행
 ├── carousel-audit.js  숨은 캐러셀 슬라이드 상태를 제한적으로 순회해 axe 결과 병합
-├── artifact.js   DOM replay 직렬화와 typed locator 생성
+├── artifact.js   내부 분석용 DOM snapshot 직렬화와 typed locator 생성
 ├── adapter.js    axe-core 결과(WCAG 기준) → KWCAG 2.2 33개 항목으로 변환
 ├── mapping.js    KWCAG ↔ WCAG ↔ axe-core 규칙 ID 매핑 테이블
 └── scorer.js     KWCAG 변환 결과 → 100점 감점제 점수 산출
@@ -35,8 +35,8 @@ node run.js https://www.mohw.go.kr result.json
 |---|---|
 | `result.json` | 규칙기반모듈 최종 결과(내부 형식) (디버깅용, camelCase) |
 | `result_api.json` | result.json을 백엔드 스펙 형식으로 변환한 결과 (run_all.py가 읽어서 통합에 사용) |
-| `result.html` | 스크립트를 제거한 UTF-8 DOM replay (문장난이도·대시보드 입력용) |
-| `result_artifact.json` | 요청/최종 URL, 뷰포트·문서 크기, `DOM_REPLAY` 메타데이터 |
+| `result.html` | 스크립트를 제거한 UTF-8 DOM snapshot (문장난이도 내부 입력용, 외부 미전송) |
+| `result_artifact.json` | 최종 평가 JSON에 포함할 요청/최종 URL, 뷰포트·문서 크기 메타데이터 |
 
 > 실제 서비스에서는 `run_all.py`가 이 파일을 호출하여 결과를 `output/` 폴더에 저장한다.  
 > 단독 실행 시에는 `rule-based-analyzer/` 폴더 안에 결과 파일이 생성된다.
@@ -57,8 +57,8 @@ node run.js https://www.mohw.go.kr result.json
     │       │  100점 감점제 점수 산출
     │       ↓
     ├─ result.json / result_api.json 저장
-    ├─ result.html 저장 → text_extractor.py + 대시보드 DOM replay 입력
-    └─ result_artifact.json 저장 → replay 크기/URL 메타데이터
+    ├─ result.html 저장 → text_extractor.py 내부 입력
+    └─ result_artifact.json 저장 → result_final.json의 capture_metadata로 통합
 ```
 
 ---
@@ -72,7 +72,7 @@ node run.js https://www.mohw.go.kr result.json
 1. Playwright로 헤드리스 Chrome을 띄워 페이지 렌더링
 2. axe-core 실행 (기준 상태 + 제한된 캐러셀 슬라이드 상태, WCAG 2.0/2.1/2.2 A/AA)
 3. typed locator(`pathSteps` + 문서 CSS 좌표) 해석
-4. 같은 일시정지 DOM에서 정적 replay HTML과 `DOM_REPLAY` 메타데이터 저장
+4. 같은 일시정지 DOM에서 내부 분석용 HTML과 캡처 메타데이터 저장
 5. `adapter.convert()` 호출 → KWCAG 변환
 6. `scorer.score()` 호출 → 점수 산출
 7. `toApiFormat()` 호출 → snake_case 변환 후 JSON 저장
@@ -116,10 +116,9 @@ ID(1-based), 논리 슬라이드 index(0-based), clone을 제외한 논리 슬�
          data-ua-audit-slide-count="5">...</section>
 ```
 
-숨은 이슈의 `locator.pathSteps`는 해당 후손 노드를 가리킨다. replay bridge는 이
-path를 해석한 뒤 가장 가까운 위 annotation을 읽어 필요한 슬라이드를 연다.
-분석기 내부 JSON의 `locator.carouselContext`는 같은 값을 진단용으로도 보존하지만,
-백엔드 DTO 계약에는 의존하지 않는다.
+숨은 이슈의 `locator.pathSteps`는 해당 후손 노드를 가리킨다. 분석기 내부 JSON의
+`locator.carouselContext`는 같은 캐러셀 ID와 슬라이드 위치를 보존한다.
+`result.html`의 annotation은 로컬 분석·회귀 진단용이며 백엔드에 업로드하지 않는다.
 
 브라우저 회귀 테스트는 다음 명령으로 실행한다.
 

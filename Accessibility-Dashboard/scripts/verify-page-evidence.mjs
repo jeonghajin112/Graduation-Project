@@ -149,13 +149,13 @@ assert.match(
 );
 assert.match(
   evidenceCardSource,
-  /activeFrameKindRef\.current !== "artifact"[\s\S]*?parsePageReplayMessage\(event\.data\)/,
-  "the global window listener must remain artifact-only"
+  /activeFrameKindRef\.current !== "preview"[\s\S]*?parsePageReplayMessage\(event\.data\)/,
+  "only the isolated landing preview adapter may use the legacy window listener"
 );
 assert.match(
   evidenceCardSource,
   /function closeLiveReportPort\(\)[\s\S]*?connection\.port\.close\(\)/,
-  "live ports must be explicitly retired on navigation and fallback"
+  "live ports must be explicitly retired on navigation and reconnect"
 );
 assert.match(
   evidenceCardSource,
@@ -291,7 +291,7 @@ const issues = [
   }
 ];
 
-const artifact = {
+const captureMetadata = {
   id: 77,
   requestId: 501,
   requestedUrl: "https://example.com/",
@@ -301,14 +301,17 @@ const artifact = {
   viewportHeightCssPx: 720,
   deviceScaleFactor: 1,
   pageWidthCssPx: 1280,
-  pageHeightCssPx: 1600,
-  captureMode: "DOM_REPLAY",
-  contentUrl: "/results/artifacts/77/content",
-  contentType: "text/html",
-  sizeBytes: 12345,
-  sha256: "a".repeat(64),
-  createdAt: capturedAt,
-  updatedAt: capturedAt
+  pageHeightCssPx: 1600
+};
+
+const viewerOrigin = `http://${"a".repeat(40)}.localhost:9090`;
+const liveSession = {
+  sessionId: "session_501",
+  runtimeUrl: `${viewerOrigin}/api/live-reports/session_501/document/live_nonce_501`,
+  viewerOrigin,
+  nonce: "n".repeat(32),
+  bridgeSecret: "s".repeat(43),
+  expiresAt: "2099-12-31T23:59:59Z"
 };
 
 const replayHtml = `<!doctype html>
@@ -366,6 +369,11 @@ const replayHtml = `<!doctype html>
       (() => {
         const DASHBOARD_SOURCE = "accessibility-dashboard";
         const VIEWER_SOURCE = "accessibility-page-replay";
+        const LIVE_DASHBOARD_SOURCE = "accessibility-dashboard-live-report";
+        const LIVE_VIEWER_SOURCE = "accessibility-page-live-report";
+        const SESSION_ID = "session_501";
+        const BRIDGE_SECRET = "${"s".repeat(43)}";
+        const PROTOCOL_VERSION = 1;
         const HOLD_READY = __HOLD_READY__;
         const DROP_INITIAL_LOADING = __DROP_INITIAL_LOADING__;
         const DOCUMENT_TOKEN = "doc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
@@ -382,6 +390,11 @@ const replayHtml = `<!doctype html>
         let markerPreviewClearFrame = 0;
         let documentUnloadingSent = false;
         let readySent = false;
+        let activeChallenge = null;
+        let inboundSequence = 0;
+        let outboundSequence = 1;
+        let livePort = null;
+        const pendingEvents = [];
         window.__replayMessages = messages;
         window.__replayOutboundMessages = outboundMessages;
         window.__replayDocumentToken = DOCUMENT_TOKEN;
@@ -389,12 +402,35 @@ const replayHtml = `<!doctype html>
         function send(message) {
           const outbound = { ...message, documentToken: DOCUMENT_TOKEN };
           outboundMessages.push(JSON.parse(JSON.stringify(outbound)));
-          parent.postMessage({ source: VIEWER_SOURCE, ...outbound }, "*");
+          if (!livePort) {
+            pendingEvents.push(outbound);
+            return;
+          }
+          livePort.postMessage({
+            source: LIVE_VIEWER_SOURCE,
+            type: "EVENT",
+            protocolVersion: PROTOCOL_VERSION,
+            bridgeSecret: BRIDGE_SECRET,
+            challenge: activeChallenge,
+            documentToken: DOCUMENT_TOKEN,
+            sequence: ++outboundSequence,
+            payload: { source: VIEWER_SOURCE, ...outbound }
+          });
         }
         window.__sendReplayTestMessage = (message) => send(message);
         window.__sendRawReplayTestMessage = (message) => {
           outboundMessages.push(JSON.parse(JSON.stringify(message)));
-          parent.postMessage({ source: VIEWER_SOURCE, ...message }, "*");
+          if (!livePort) return;
+          livePort.postMessage({
+            source: LIVE_VIEWER_SOURCE,
+            type: "EVENT",
+            protocolVersion: PROTOCOL_VERSION,
+            bridgeSecret: BRIDGE_SECRET,
+            challenge: activeChallenge,
+            documentToken: DOCUMENT_TOKEN,
+            sequence: ++outboundSequence,
+            payload: { source: VIEWER_SOURCE, ...message }
+          });
         };
 
         function sendDocumentLoading() {
@@ -411,6 +447,16 @@ const replayHtml = `<!doctype html>
           if (readySent) return;
           readySent = true;
           send({ type: "READY", documentToken: DOCUMENT_TOKEN });
+          send({
+            type: "DOCUMENT_HEALTH",
+            status: "MEANINGFUL",
+            consecutiveMeaningfulSamples: 1,
+            visibleControlCount: 2,
+            visibleElementCount: 12,
+            visibleImageCount: 0,
+            largestVisibleVisualArea: 24_000,
+            visibleTextLength: 120
+          });
         }
 
         window.__sendReplayReady = sendReady;
@@ -556,9 +602,7 @@ const replayHtml = `<!doctype html>
           if (state.selectedIssueId !== null) focusIssue(state.selectedIssueId, false);
         }
 
-        addEventListener("message", (event) => {
-          if (event.source !== parent || !event.data || event.data.source !== DASHBOARD_SOURCE) return;
-          const message = event.data;
+        function handleDashboardCommand(message) {
           messages.push(JSON.parse(JSON.stringify(message)));
           if (message.type === "INIT_ISSUES" && Array.isArray(message.issues)) {
             state.issues = message.issues;
@@ -577,7 +621,64 @@ const replayHtml = `<!doctype html>
           } else if (message.type === "SET_VIEW_SCALE" && message.documentToken === DOCUMENT_TOKEN) {
             applyViewScale(message);
           }
+        }
+
+        addEventListener("message", (event) => {
+          const message = event.data;
+          if (
+            event.source !== parent ||
+            !message ||
+            message.source !== LIVE_DASHBOARD_SOURCE ||
+            message.type !== "CONNECT" ||
+            message.protocolVersion !== PROTOCOL_VERSION ||
+            message.bridgeSecret !== BRIDGE_SECRET ||
+            typeof message.challenge !== "string" ||
+            message.challenge.length < 32 ||
+            event.ports.length !== 1 ||
+            livePort
+          ) return;
+          activeChallenge = message.challenge;
+          livePort = event.ports[0];
+          livePort.onmessage = (portEvent) => {
+            const command = portEvent.data;
+            if (
+              !command ||
+              command.source !== LIVE_DASHBOARD_SOURCE ||
+              command.type !== "COMMAND" ||
+              command.protocolVersion !== PROTOCOL_VERSION ||
+              command.bridgeSecret !== BRIDGE_SECRET ||
+              command.challenge !== activeChallenge ||
+              command.documentToken !== DOCUMENT_TOKEN ||
+              command.sequence !== inboundSequence + 1
+            ) return;
+            inboundSequence = command.sequence;
+            handleDashboardCommand(command.payload);
+          };
+          livePort.start();
+          livePort.postMessage({
+            source: LIVE_VIEWER_SOURCE,
+            type: "ACK",
+            protocolVersion: PROTOCOL_VERSION,
+            bridgeSecret: BRIDGE_SECRET,
+            challenge: activeChallenge,
+            documentToken: DOCUMENT_TOKEN,
+            sequence: outboundSequence
+          });
+          while (pendingEvents.length > 0) send(pendingEvents.shift());
         });
+
+        const announceAvailability = () => {
+          if (livePort) return;
+          parent.postMessage({
+            source: LIVE_VIEWER_SOURCE,
+            type: "AVAILABLE",
+            protocolVersion: PROTOCOL_VERSION,
+            sessionId: SESSION_ID,
+            documentToken: DOCUMENT_TOKEN
+          }, "*");
+          setTimeout(announceAvailability, 100);
+        };
+        announceAvailability();
 
         document.addEventListener("click", (event) => {
           const link = event.target.closest("a[href]");
@@ -592,7 +693,6 @@ const replayHtml = `<!doctype html>
   </body>
 </html>`;
 
-let artifactResponseMode = "replay";
 let holdNextReplayReady = false;
 let dropNextReplayInitialLoading = false;
 let nextIssueResponseGate = null;
@@ -639,26 +739,16 @@ function payloadFor(pathname) {
     issueResponseFetchCount += 1;
     return issues;
   }
-  if (pathname === "/api/results/requests/501/artifact") {
-    if (artifactResponseMode === "legacy-png") {
-      return { ...artifact, captureMode: "FULL_PAGE", contentType: "image/png" };
-    }
-    return artifact;
-  }
-  if (pathname === "/api/scores/requests/501") return scoreResult;
+  if (pathname === "/api/results/requests/501/capture-metadata") return captureMetadata;
   if (pathname === "/api/targets/101") return target;
   return [];
 }
 
 async function installFixture(page) {
   await page.route("**/api/**", async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
-      dashboardRequestFetchCount += 1;
-      await fulfillJson(route, overview);
-      return;
-    }
-    if (pathname === "/api/results/artifacts/77/content") {
+    const requestUrl = new URL(route.request().url());
+    const pathname = requestUrl.pathname;
+    if (requestUrl.origin === viewerOrigin) {
       const holdReady = holdNextReplayReady;
       const dropInitialLoading = dropNextReplayInitialLoading;
       holdNextReplayReady = false;
@@ -670,6 +760,18 @@ async function installFixture(page) {
           .replace("__HOLD_READY__", holdReady ? "true" : "false")
           .replace("__DROP_INITIAL_LOADING__", dropInitialLoading ? "true" : "false")
       });
+      return;
+    }
+    if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
+      dashboardRequestFetchCount += 1;
+      await fulfillJson(route, overview);
+      return;
+    }
+    if (
+      route.request().method() === "POST" &&
+      pathname === "/api/results/requests/501/live-session"
+    ) {
+      await fulfillJson(route, liveSession);
       return;
     }
 
@@ -781,26 +883,26 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   ).length;
   assert.equal(initialInitCount, 1);
 
-  for (const malformedMessage of [
-    { type: "DOCUMENT_LOADING", documentToken: "contains whitespace" },
-    { type: "DOCUMENT_LOADING", documentToken: "x".repeat(129) },
-    { type: "DOCUMENT_LOADING" },
-    { type: "READY" },
-    { type: "READY", documentToken: initialDocumentToken, unexpected: true },
-    { type: "DOCUMENT_UNLOADING", documentToken: initialDocumentToken, unexpected: true }
+  // Invalid events on the authenticated live MessagePort deliberately fail the
+  // connection closed. Protocol parser unit tests cover those cases; this
+  // browser flow verifies that harmless duplicate lifecycle events from the
+  // active live document do not reinitialize the marker layer.
+  for (const duplicateMessage of [
+    { type: "DOCUMENT_LOADING", documentToken: initialDocumentToken },
+    { type: "READY", documentToken: initialDocumentToken }
   ]) {
-    await sendRawReplayTestMessage(frame, malformedMessage);
+    await sendRawReplayTestMessage(frame, duplicateMessage);
   }
   await page.waitForTimeout(80);
   assert.equal(
     await preview.getAttribute("data-connection-state"),
     "ready",
-    "malformed or enriched lifecycle messages must not change a ready connection"
+    "duplicate lifecycle messages must not change a ready connection"
   );
   assert.equal(
     (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
     initialInitCount,
-    "malformed lifecycle messages must not reinitialize markers"
+    "duplicate lifecycle messages must not reinitialize markers"
   );
 
   await frame.locator("html").evaluate(() => {
@@ -853,26 +955,20 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
     "all loading announcements must identify the replacement document"
   );
 
-  await sendRawReplayTestMessage(frame, { type: "READY", documentToken: initialDocumentToken });
-  await sendRawReplayTestMessage(frame, { type: "DOCUMENT_LOADING", documentToken: initialDocumentToken });
-  for (const staleMessage of [
-    { type: "ISSUE_SELECTED", issueId: 9002, documentToken: initialDocumentToken },
-    { type: "ISSUE_DETAIL_FALLBACK", issueId: 9002, documentToken: initialDocumentToken },
-    { type: "LOCATOR_STATUS", issueId: 9002, status: "UNAVAILABLE", documentToken: initialDocumentToken },
-    { type: "LINK_BLOCKED", href: "https://stale.example/", documentToken: initialDocumentToken }
-  ]) {
-    await sendRawReplayTestMessage(frame, staleMessage);
-  }
+  // A stale document cannot emit over the replacement document's authenticated
+  // port: the live envelope and payload tokens must match, otherwise the
+  // connection fails closed. Keep the replacement intentionally unready here
+  // and verify that the dashboard does not create a false-ready gap on its own.
   await page.waitForTimeout(80);
   assert.equal(
     await preview.getAttribute("data-connection-state"),
     "loading",
-    "a stale document token must not create a false-ready gap"
+    "the replacement document must not create a false-ready gap"
   );
   assert.equal(
     (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
     0,
-    "stale READY must not initialize the replacement document"
+    "the replacement document must not initialize before READY"
   );
   const statesBeforeFreshReady = await page.evaluate(() => window.__replayReloadConnectionStates);
   const loadingIndex = statesBeforeFreshReady.indexOf("loading");
@@ -900,7 +996,7 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
   assert.equal(freshInitMessages.length, 1, "a fresh document generation must receive exactly one INIT");
   assert.deepEqual(freshInitMessages[0], initialMessage, "reload recovery must replay the same dashboard state");
   assert.equal(await frame.locator(".replay-marker").count(), 2, "all connected markers must recover after reload");
-  assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "true");
+  assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "false");
   assert.equal(await frame.locator('[data-issue-id="9002"]').getAttribute("aria-pressed"), "false");
   await waitForUnavailableLocatorCount(evidence, 2);
   assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
@@ -922,27 +1018,18 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
     1,
     "duplicate READY for the active document must not churn INIT"
   );
-  for (const staleMessage of [
-    { type: "ISSUE_SELECTED", issueId: 9002, documentToken: initialDocumentToken },
-    { type: "ISSUE_DETAIL_FALLBACK", issueId: 9002, documentToken: initialDocumentToken },
-    { type: "LOCATOR_STATUS", issueId: 9003, status: "CONNECTED", documentToken: initialDocumentToken },
-    { type: "LINK_BLOCKED", href: "https://stale.example/", documentToken: initialDocumentToken }
-  ]) {
-    await sendRawReplayTestMessage(frame, staleMessage);
-  }
-  await page.waitForTimeout(80);
-  assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "true");
+  assert.equal(await frame.locator('[data-issue-id="9001"]').getAttribute("aria-pressed"), "false");
   assert.equal(await frame.locator('[data-issue-id="9002"]').getAttribute("aria-pressed"), "false");
   assert.equal(
     await preview.getAttribute("data-unavailable-locator-count"),
     "2",
-    "stale locator status must not mutate the active document"
+    "the recovered document must retain its locator status"
   );
   assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
   assert.equal(
     (await getReplayMessages(frame)).filter((message) => message.type === "INIT_ISSUES").length,
     1,
-    "stale post-ready messages must not mutate or reinitialize the active document"
+    "duplicate READY must not mutate or reinitialize the active document"
   );
   const finalStates = await page.evaluate(() => window.__replayReloadConnectionStates);
   assert.equal(finalStates.at(-1), "ready");
@@ -1169,7 +1256,7 @@ async function verifyNoExternalReplayControls(evidence, frame) {
   );
 }
 
-async function verifyArtifactBeforeResultDetails(page) {
+async function verifyMetadataBeforeResultDetails(page) {
   await page.setViewportSize({ width: 1440, height: 900 });
   let markIssueResponseStarted;
   let releaseIssueResponse;
@@ -1183,12 +1270,12 @@ async function verifyArtifactBeforeResultDetails(page) {
     markStarted: markIssueResponseStarted,
     releasePromise
   };
-  const artifactResponse = page.waitForResponse((response) =>
-    response.url().endsWith("/api/results/requests/501/artifact")
+  const metadataResponse = page.waitForResponse((response) =>
+    response.url().endsWith("/api/results/requests/501/capture-metadata")
   );
 
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
-  await artifactResponse;
+  await metadataResponse;
   await issueResponseStarted;
 
   const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
@@ -1197,7 +1284,7 @@ async function verifyArtifactBeforeResultDetails(page) {
     assert.equal(
       await evidence.locator("iframe.site-page-evidence-replay-frame").count(),
       0,
-      "the artifact may resolve before result details while the replay preview is not mounted"
+      "capture metadata may resolve before result details while the live viewer is not mounted"
     );
     await page.evaluate(() => new Promise((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -1223,7 +1310,10 @@ async function verifyArtifactBeforeResultDetails(page) {
     Number.parseFloat(await iframe.getAttribute("data-replay-visual-width")) > 0,
     "the iframe must not retain the pre-mount visualWidth=0 state"
   );
-  const expectedSourceWidth = Math.max(artifact.viewportWidthCssPx, artifact.pageWidthCssPx) + 10;
+  const expectedSourceWidth = Math.max(
+    captureMetadata.viewportWidthCssPx,
+    captureMetadata.pageWidthCssPx
+  ) + 10;
   const frameFit = await evidence.evaluate((element) => {
     const preview = element.querySelector(".site-page-evidence-preview");
     const replayFrame = element.querySelector("iframe.site-page-evidence-replay-frame");
@@ -1252,10 +1342,10 @@ async function verifyDesktop(page) {
   await waitForReplayReady(evidence);
 
   const iframe = evidence.locator("iframe.site-page-evidence-replay-frame");
-  assert.equal(await iframe.getAttribute("sandbox"), "allow-scripts");
+  assert.equal(await iframe.getAttribute("sandbox"), "allow-scripts allow-same-origin allow-forms");
   assert.equal(await iframe.getAttribute("referrerpolicy"), "no-referrer");
-  assert.match(await iframe.getAttribute("title"), /예제 쇼핑몰.*페이지 재현/);
-  assert.match(await iframe.getAttribute("src"), /\/api\/results\/artifacts\/77\/content$/);
+  assert.match(await iframe.getAttribute("title"), /예제 쇼핑몰.*동적 보기/);
+  assert.equal(await iframe.getAttribute("src"), liveSession.runtimeUrl);
   assert.equal(await evidence.locator(".site-page-evidence-canvas, .site-page-evidence-outline, .site-page-evidence-marker").count(), 0);
   assert.equal(await evidence.locator('img[src$=".png"], img[src*="image/png"]').count(), 0);
 
@@ -1287,12 +1377,12 @@ async function verifyDesktop(page) {
   assert.ok(initialMessage.issues[0].message.includes(issues[0].description.slice(0, 300)));
   assert.ok(initialMessage.issues[0].message.includes(issues[0].recommendation));
   assert.equal(initialMessage.issues[0].path, "#search-button");
-  assert.equal(initialMessage.selectedIssueId, 9001);
+  assert.equal(initialMessage.selectedIssueId, null);
   assert.equal(initialMessage.markersVisible, true);
   assert.equal(await frame.locator(".replay-marker").count(), 2);
   await waitForUnavailableLocatorCount(evidence, 2);
   const locatorStatus = evidence.locator(".site-page-evidence-locator-status");
-  assert.match(await locatorStatus.textContent(), /문제 2개의 위치를 재현 화면에 표시하지 못했습니다/);
+  assert.match(await locatorStatus.textContent(), /문제 2개의 위치를 현재 동적 화면에 표시하지 못했습니다/);
   await sendReplayTestMessage(frame, {
     type: "LOCATOR_STATUS",
     issueId: 999999,
@@ -1334,22 +1424,13 @@ async function verifyDesktop(page) {
   });
   await sendReplayTestMessage(frame, {
     type: "ISSUE_DETAIL_FALLBACK",
-    issueId: "9001"
-  });
-  await sendReplayTestMessage(frame, {
-    type: "ISSUE_DETAIL_FALLBACK",
-    issueId: 9001,
-    title: "신뢰하지 않는 iframe 텍스트"
-  });
-  await sendReplayTestMessage(frame, {
-    type: "ISSUE_DETAIL_FALLBACK",
     issueId: 999999
   });
   await page.waitForTimeout(100);
   assert.equal(
     await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(),
     0,
-    "forged, malformed, enriched, and unknown fallback messages must not render content"
+    "forged and unknown fallback messages must not render content"
   );
   assert.equal(
     await frame.locator("html").evaluate(() =>
@@ -1827,24 +1908,6 @@ async function verifyDesktop(page) {
 }
 
 
-async function verifyLegacyArtifactRejected(page) {
-  artifactResponseMode = "legacy-png";
-  await page.reload({ waitUntil: "domcontentloaded" });
-  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
-  await evidence.waitFor({ state: "visible" });
-  const artifactAlert = evidence.getByRole("alert");
-  await artifactAlert.waitFor({ state: "visible" });
-  const artifactAlertText = await artifactAlert.textContent();
-  assert.match(artifactAlertText, /페이지 재현 화면을 불러오지 못했어요/);
-  assert.doesNotMatch(
-    artifactAlertText,
-    /서버 응답 계약|captureMode|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/|\bHTTP\s+\d{3}\b/i,
-    "artifact errors must not expose response-contract or request diagnostics"
-  );
-  assert.equal(await evidence.locator("iframe").count(), 0);
-  artifactResponseMode = "replay";
-}
-
 async function verifyScaledReplayOverlays(page, evidence, frame) {
   const messages = await getReplayMessages(frame);
   const initIndex = messages.findIndex((message) => message.type === "INIT_ISSUES");
@@ -2117,13 +2180,12 @@ page.on("console", (message) => {
 try {
   await installFixture(page);
   if (verificationScope !== "scale") {
-    await verifyArtifactBeforeResultDetails(page);
+    await verifyMetadataBeforeResultDetails(page);
   }
   const desktop = verificationScope === "scale" ? null : await verifyDesktop(page);
   let responsive = null;
   let mobile = null;
   if (verificationScope === "full") {
-    await verifyLegacyArtifactRejected(page);
     responsive = await verifyResponsiveWidths(page);
     mobile = await verifyMobile(page);
   } else if (verificationScope === "scale") {

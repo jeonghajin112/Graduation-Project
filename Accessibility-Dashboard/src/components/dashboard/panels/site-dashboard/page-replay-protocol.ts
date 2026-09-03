@@ -196,7 +196,7 @@ const LIVE_DOCUMENT_MIN_TEXT_LENGTH = 12;
 const LIVE_DOCUMENT_MIN_CONTROL_COUNT = 2;
 const LIVE_DOCUMENT_MIN_IMAGE_COUNT = 2;
 const LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA = 10_000;
-const LIVE_DOCUMENT_MIN_STABLE_SAMPLES = 4;
+const LIVE_DOCUMENT_MIN_MEANINGFUL_SAMPLES = 1;
 
 export function isMeaningfulLiveDocumentHealth(
   message: LiveDocumentHealthMessage
@@ -208,7 +208,7 @@ export function isMeaningfulLiveDocumentHealth(
     message.largestVisibleVisualArea >= LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA;
   return (
     message.status === "MEANINGFUL" &&
-    message.consecutiveMeaningfulSamples >= LIVE_DOCUMENT_MIN_STABLE_SAMPLES &&
+    message.consecutiveMeaningfulSamples >= LIVE_DOCUMENT_MIN_MEANINGFUL_SAMPLES &&
     hasSubstantiveContent
   );
 }

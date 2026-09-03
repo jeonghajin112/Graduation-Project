@@ -1,6 +1,6 @@
 import type { ChartConfig } from "@/components/ui/line-charts-6";
 
-import type { SeverityChartItem, WcagCriterion } from "./types";
+import type { SeverityChartItem } from "./types";
 
 export const chartConfig = {
   score: {
@@ -20,34 +20,19 @@ export const severityChartItems: SeverityChartItem[] = [
   { key: "LOW", label: "낮음", color: "#10b981" }
 ];
 
-export const wcagCriterionByIssueCode: Record<string, WcagCriterion> = {
-  "img-alt": {
-    criterion: "5.1.1",
-    title: "적절한 대체 텍스트 제공"
-  },
-  "heading-order": {
-    criterion: "5.3.2",
-    title: "콘텐츠의 선형구조"
-  },
-  "color-contrast": {
-    criterion: "5.4.3",
-    title: "텍스트 콘텐츠의 명도 대비"
-  },
-  "keyboard-focus": {
-    criterion: "6.1.2",
-    title: "초점 이동과 표시"
-  },
-  "label-missing": {
-    criterion: "7.3.2",
-    title: "레이블 제공"
-  }
+const criterionByLegacyIssueCode: Record<string, string> = {
+  "img-alt": "5.1.1",
+  "heading-order": "5.3.2",
+  "color-contrast": "5.4.3",
+  "keyboard-focus": "6.1.2",
+  "label-missing": "7.3.2"
 };
 
 const kwcagCriterionPattern = /^[0-9]+(?:[.][0-9]+)+$/;
 
 export function normalizeIssueCode(issueCode: string): string {
   const normalizedCode = issueCode.trim();
-  return wcagCriterionByIssueCode[normalizedCode]?.criterion ?? normalizedCode;
+  return criterionByLegacyIssueCode[normalizedCode] ?? normalizedCode;
 }
 
 export function formatIssueCodeLabel(issueCode: string): string {
@@ -64,16 +49,4 @@ export function formatIssueCodeLabel(issueCode: string): string {
   return kwcagCriterionPattern.test(normalizedCode)
     ? `KWCAG ${normalizedCode}`
     : normalizedCode;
-}
-
-export function resolveWcagCriterion(issueCode: string, issueTitle: string): WcagCriterion {
-  const normalizedCode = issueCode.trim();
-  return (
-    wcagCriterionByIssueCode[normalizedCode] ?? {
-      // Backend KWCAG identifiers such as 5.3.3 are already canonical. Keep
-      // them intact; custom analyzer identifiers remain distinct as well.
-      criterion: normalizedCode,
-      title: issueTitle
-    }
-  );
 }

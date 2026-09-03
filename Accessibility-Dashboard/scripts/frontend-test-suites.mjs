@@ -15,7 +15,6 @@ const accessibility = viteTest("verify-accessibility-p0.mjs");
 const dashboardBootAccessibility = viteTest("verify-dashboard-boot-accessibility.mjs");
 const pollingCancel = viteTest("verify-analysis-polling-cancel.mjs");
 const dashboardStatusPolling = viteTest("verify-dashboard-status-polling.mjs");
-const artifactLateArrival = viteTest("verify-artifact-late-arrival.mjs");
 const apiResponseValidation = viteTest("verify-api-response-validation.mjs");
 const dashboardRequestBudget = viteTest("verify-dashboard-request-budget.mjs");
 const directoryRecoveryLeases = viteTest("verify-directory-recovery-leases.mjs");
@@ -55,7 +54,6 @@ const ci = [
   dashboardBootAccessibility,
   pollingCancel,
   dashboardStatusPolling,
-  artifactLateArrival,
   apiResponseValidation,
   dashboardRequestBudget,
   directoryRecoveryLeases,
@@ -92,15 +90,7 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
   recovery: [quickRecovery],
   visual: [landingDesign],
   scale: [pageEvidenceScale],
-  replay: [
-    nodeTest("verify-replay-interactions.mjs", { crossStack: true }),
-    nodeTest("verify-replay-interactive-obstacles.mjs", { crossStack: true }),
-    nodeTest("verify-replay-marker-collision.mjs", { crossStack: true }),
-    nodeTest("verify-replay-marker-hover.mjs", { crossStack: true }),
-    nodeTest("verify-replay-marker-performance.mjs", { crossStack: true }),
-    nodeTest("verify-replay-marker-popover.mjs", { crossStack: true }),
-    nodeTest("verify-replay-sector-grouping.mjs", { crossStack: true })
-  ],
+  replay: [nodeTest("verify-live-report-markers.mjs", { crossStack: true })],
   backend: [
     viteTest("verify-sidebar-browser.mjs", { needsBackend: true }),
     viteTest("verify-sidebar-disclosure.mjs", { needsBackend: true })
@@ -126,7 +116,7 @@ export const FRONTEND_TEST_MIGRATIONS = Object.freeze([
     replacements: [
       "verify-dashboard-request-budget.mjs",
       "verify-api-response-validation.mjs",
-      "verify-artifact-late-arrival.mjs"
+      "verify-page-evidence.mjs"
     ],
     reason: "The removed per-request directory/result cache made the legacy endpoint and clock-expiry contract obsolete."
   },

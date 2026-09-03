@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { API_BASE_URL } from "@/config/api";
-import { wait } from "@/services/async-cancellation";
 import {
   createEvaluationTargetModel,
   fetchEvaluationTargetsForOrganization
@@ -31,8 +30,10 @@ import {
   TARGET_CREATE_RECONCILE_INTERVAL_MS,
   TARGET_CREATE_RECOVERY_MESSAGE,
   TARGET_CREATE_TIMEOUT_MS,
+  commitMutationOnce,
   getPersistedTargetId,
   isDefinitiveMutationRejection,
+  reconcileWithRetries,
   runWithNetworkDeadline
 } from "./site-create-recovery-workflow";
 import type { DirectoryRecoveryToken, LoadDashboard } from "./use-dashboard-data";
@@ -43,6 +44,7 @@ type TargetCreateCheckpoint = {
   name: string;
   accessUrl: string;
   previousTargetIds: number[];
+  releaseAbortListener: (() => void) | null;
   recoveryToken: DirectoryRecoveryToken | null;
   resolvedTargetId: number | null;
   stored: StoredSiteCreateAttempt;
@@ -103,6 +105,44 @@ export function useEvaluationTargetCreation({
 }: UseEvaluationTargetCreationOptions) {
   const targetCreateCheckpointRef = useRef<TargetCreateCheckpoint | null>(null);
 
+  const releaseTargetCheckpoint = useCallback(
+    (checkpoint: TargetCreateCheckpoint | null) => {
+      checkpoint?.releaseAbortListener?.();
+      if (checkpoint) {
+        checkpoint.releaseAbortListener = null;
+      }
+      if (checkpoint?.recoveryToken !== null && checkpoint?.recoveryToken !== undefined) {
+        endDirectoryRecovery(checkpoint.recoveryToken);
+        checkpoint.recoveryToken = null;
+      }
+      if (targetCreateCheckpointRef.current === checkpoint) {
+        targetCreateCheckpointRef.current = null;
+      }
+    },
+    [endDirectoryRecovery]
+  );
+
+  const bindTargetCheckpointToSignal = useCallback(
+    (checkpoint: TargetCreateCheckpoint, signal?: AbortSignal) => {
+      checkpoint.releaseAbortListener?.();
+      checkpoint.releaseAbortListener = null;
+      if (!signal) {
+        return;
+      }
+
+      const handleAbort = () => releaseTargetCheckpoint(checkpoint);
+      if (signal.aborted) {
+        handleAbort();
+        return;
+      }
+      signal.addEventListener("abort", handleAbort, { once: true });
+      checkpoint.releaseAbortListener = () => {
+        signal.removeEventListener("abort", handleAbort);
+      };
+    },
+    [releaseTargetCheckpoint]
+  );
+
   useEffect(() => {
     const checkpoint = targetCreateCheckpointRef.current;
     if (
@@ -114,16 +154,18 @@ export function useEvaluationTargetCreation({
         )
       )
     ) {
-      if (checkpoint.recoveryToken !== null) {
-        endDirectoryRecovery(checkpoint.recoveryToken);
-      }
-      targetCreateCheckpointRef.current = null;
+      releaseTargetCheckpoint(checkpoint);
     }
   }, [
     dashboardData?.evaluationRequests,
     dashboardData?.organizations,
-    endDirectoryRecovery
+    releaseTargetCheckpoint
   ]);
+
+  useEffect(
+    () => () => releaseTargetCheckpoint(targetCreateCheckpointRef.current),
+    [releaseTargetCheckpoint]
+  );
 
   return useCallback(
     async (
@@ -136,15 +178,6 @@ export function useEvaluationTargetCreation({
         accessUrl: normalizeSiteCreateAccessUrl(input.accessUrl)
       };
       const key = buildTargetCreateKey(normalizedInput);
-
-      const releaseTargetCheckpoint = (checkpoint: TargetCreateCheckpoint | null) => {
-        if (checkpoint?.recoveryToken !== null && checkpoint?.recoveryToken !== undefined) {
-          endDirectoryRecovery(checkpoint.recoveryToken);
-        }
-        if (targetCreateCheckpointRef.current === checkpoint) {
-          targetCreateCheckpointRef.current = null;
-        }
-      };
 
       const finishTargetRecovery = (
         checkpoint: TargetCreateCheckpoint,
@@ -184,35 +217,30 @@ export function useEvaluationTargetCreation({
         );
 
         try {
-          for (let attempt = 0; attempt < TARGET_CREATE_RECONCILE_ATTEMPTS; attempt += 1) {
-            if (signal?.aborted) {
-              throw new DOMException("The operation was aborted.", "AbortError");
-            }
-            if (reconcileController.signal.aborted) {
-              return null;
-            }
-            if (attempt > 0) {
-              await wait(TARGET_CREATE_RECONCILE_INTERVAL_MS, reconcileController.signal);
-            }
-
-            const refreshedTargets = await fetchEvaluationTargetsForOrganization(
-              checkpoint.projectId,
-              reconcileController.signal
-            );
-            const recoveredTargetId = findCheckpointTargetId(checkpoint, refreshedTargets);
-            if (recoveredTargetId !== null) {
+          return await reconcileWithRetries({
+            attempts: TARGET_CREATE_RECONCILE_ATTEMPTS,
+            intervalMs: TARGET_CREATE_RECONCILE_INTERVAL_MS,
+            signal: reconcileController.signal,
+            probe: async (reconcileSignal) => {
+              const refreshedTargets = await fetchEvaluationTargetsForOrganization(
+                checkpoint.projectId,
+                reconcileSignal
+              );
+              const recoveredTargetId = findCheckpointTargetId(checkpoint, refreshedTargets);
+              if (recoveredTargetId === null) {
+                return null;
+              }
               // Best-effort UI refresh. Recovery correctness depends only on
               // the targeted list above, so an unrelated overview error
               // cannot cause another POST.
               await loadDashboard({
                 refreshAfterInFlight: true,
                 clearOnError: false,
-                signal: reconcileController.signal
+                signal: reconcileSignal
               });
               return recoveredTargetId;
             }
-          }
-          return null;
+          });
         } catch (error) {
           if (reconcileController.signal.aborted && !signal?.aborted) {
             return null;
@@ -250,6 +278,7 @@ export function useEvaluationTargetCreation({
               name: persistedRecovery.attempt.name,
               accessUrl: persistedRecovery.attempt.accessUrl,
               previousTargetIds: persistedRecovery.attempt.previousTargetIds,
+              releaseAbortListener: null,
               recoveryToken: beginDirectoryRecovery(),
               resolvedTargetId: null,
               stored: {
@@ -264,6 +293,7 @@ export function useEvaluationTargetCreation({
               rawValue: persistedRecovery.rawValue
             };
           }
+          bindTargetCheckpointToSignal(existingCheckpoint, signal);
 
           const recoveredTargetId = await reconcileCheckpoint(existingCheckpoint);
           if (recoveredTargetId !== null) {
@@ -320,29 +350,34 @@ export function useEvaluationTargetCreation({
         name: normalizedInput.name,
         accessUrl: normalizedInput.accessUrl,
         previousTargetIds,
+        releaseAbortListener: null,
         recoveryToken,
         resolvedTargetId: null,
         stored
       };
       targetCreateCheckpointRef.current = checkpoint;
+      bindTargetCheckpointToSignal(checkpoint, signal);
 
       try {
-        const createdTarget = await runWithNetworkDeadline(
-          (requestSignal) => createEvaluationTargetModel(normalizedInput, requestSignal),
-          signal
-        );
-        if (
-          !Number.isSafeInteger(createdTarget?.id) ||
-          createdTarget.id <= 0 ||
-          previousTargetIds.includes(createdTarget.id) ||
-          createdTarget.organizationId !== normalizedInput.projectId ||
-          createdTarget.status !== "ACTIVE" ||
-          createdTarget.name.trim() !== normalizedInput.name ||
-          normalizeSiteCreateAccessUrl(createdTarget.accessUrl) !== normalizedInput.accessUrl
-        ) {
-          throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
+        const commitOutcome = await commitMutationOnce({
+          signal,
+          timeoutMs: TARGET_CREATE_TIMEOUT_MS,
+          operation: (requestSignal) =>
+            createEvaluationTargetModel(normalizedInput, requestSignal),
+          accept: (createdTarget) =>
+            Number.isSafeInteger(createdTarget?.id) &&
+            createdTarget.id > 0 &&
+            !previousTargetIds.includes(createdTarget.id) &&
+            createdTarget.organizationId === normalizedInput.projectId &&
+            createdTarget.status === "ACTIVE" &&
+            createdTarget.name.trim() === normalizedInput.name &&
+            normalizeSiteCreateAccessUrl(createdTarget.accessUrl) === normalizedInput.accessUrl
+              ? createdTarget.id
+              : null
+        });
+        if (commitOutcome.kind === "accepted") {
+          return finishTargetRecovery(checkpoint, commitOutcome.value);
         }
-        return finishTargetRecovery(checkpoint, createdTarget.id);
       } catch (error) {
         if (isDefinitiveMutationRejection(error)) {
           const didClear = clearSiteCreateRecovery(checkpoint.stored.rawValue);
@@ -353,21 +388,23 @@ export function useEvaluationTargetCreation({
           throw error;
         }
 
-        // A timeout, connection reset, 5xx, or unusable success body can all
-        // occur after the server committed the target. The durable checkpoint
-        // was written before the POST, so every later retry is GET-only.
-        targetCreateCheckpointRef.current = checkpoint;
-        if (signal?.aborted) {
-          throw error;
-        }
+        throw error;
       }
 
+      // Timeout, connection reset, 5xx, and unusable success bodies are all
+      // ambiguous. The durable checkpoint keeps every later retry GET-only.
       const recoveredTargetId = await reconcileCheckpoint(checkpoint);
       if (recoveredTargetId !== null) {
         return finishTargetRecovery(checkpoint, recoveredTargetId);
       }
       throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
     },
-    [beginDirectoryRecovery, endDirectoryRecovery, loadDashboard]
+    [
+      beginDirectoryRecovery,
+      bindTargetCheckpointToSignal,
+      endDirectoryRecovery,
+      loadDashboard,
+      releaseTargetCheckpoint
+    ]
   );
 }

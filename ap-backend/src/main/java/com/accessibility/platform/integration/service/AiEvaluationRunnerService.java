@@ -34,7 +34,7 @@ public class AiEvaluationRunnerService {
     private static final long PYTHON_PROBE_TIMEOUT_SECONDS = 5;
     private static final long PROCESS_TERMINATION_GRACE_SECONDS = 3;
     // run_all.py can spend up to 720 seconds across its bounded analyzer
-    // subprocesses, followed by up to 70 seconds of backend/artifact I/O.
+    // subprocesses, followed by up to 70 seconds of backend result ingestion.
     static final long DEFAULT_PROCESS_TIMEOUT_SECONDS = 900;
 
     private final EvaluationRequestRepository requestRepository;

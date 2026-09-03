@@ -16,7 +16,7 @@
   Step 4: [Python]  난이도 높은 문장에 대한 LLM 수정 제안 생성 (GPT-4o-mini)
   Step 5: [Python]  CV 분석 (Step 1의 전용 임시 PNG를 입력으로 사용 후 즉시 삭제)
   Step 6: 위 결과들을 합쳐서 총점 계산 → result_final.json 생성
-  Step 7: result_final.json 저장 성공 후 request-scoped DOM replay를 multipart 전송
+  Step 7: capture metadata를 포함한 result_final.json을 백엔드에 한 번 전송
 
 [총점 계산 공식]
   총점 = (규칙 기반 점수 × 50%) + (난이도 page_score × 30%) + (CV 통과율 × 20%)
@@ -41,8 +41,8 @@
   output/ 폴더에 모든 결과 파일이 저장됨:
     result.json                 ← axe-core 원본 + KWCAG 매핑 결과
     result_api.json             ← 규칙 기반 결과 (API 스펙 형태)
-    result.html                 ← 정적 DOM replay (텍스트 추출 + 대시보드 렌더 입력)
-    result_artifact.json        ← 뷰포트/문서 크기/DOM_REPLAY 메타데이터
+    result.html                 ← 현재 실행의 텍스트 추출 내부 입력
+    result_artifact.json        ← 현재 실행의 URL/뷰포트/문서 크기 메타데이터
     result_text.json            ← 추출된 텍스트 블록 (카테고리별 분류)
     result_text_difficulty.json ← 블록별 난이도 점수
     result_text_suggestions.json ← 블록별 수정 제안
@@ -51,7 +51,9 @@
 """
 
 import json
+import ipaddress
 import math
+import re
 import sys
 import os
 import atexit
@@ -63,7 +65,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
-import uuid
 
 
 # ── 설정 ─────────────────────────────────────────────────────────────────────
@@ -350,8 +351,97 @@ def load_json(filepath: Path) -> Optional[Dict]:
         return None
 
 
+MAX_CAPTURE_URL_LENGTH = 2048
+MAX_BACKEND_INTEGER = 2_147_483_647
+CAPTURE_METADATA_FIELDS = (
+    "requestedUrl",
+    "finalUrl",
+    "capturedAt",
+    "viewportWidthCssPx",
+    "viewportHeightCssPx",
+    "deviceScaleFactor",
+    "pageWidthCssPx",
+    "pageHeightCssPx",
+)
+_INVALID_URI_CHARACTER = re.compile(r'[\x00-\x20\x7f<>"{}|\\^`]')
+_INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+_DNS_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_LOCAL_DATE_TIME = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?"
+)
+
+
+def valid_uri_host(host: str) -> bool:
+    """Approximate java.net.URI#getHost rather than urlparse's permissive host parsing."""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+
+    try:
+        ascii_host = host.encode("ascii").decode("ascii").rstrip(".")
+    except UnicodeError:
+        return False
+    if not ascii_host or len(ascii_host) > 253:
+        return False
+    return all(
+        _DNS_LABEL.fullmatch(label) is not None
+        for label in ascii_host.split(".")
+    )
+
+
+def parse_backend_http_url(value: Any):
+    """Return a parsed URL only when Spring's capture-metadata URI contract accepts it."""
+    try:
+        # Java String#length counts UTF-16 code units rather than Unicode code
+        # points. Match the backend's 2048-character guard for astral text too.
+        java_length = len(value.encode("utf-16-le")) // 2 if isinstance(value, str) else 0
+    except UnicodeEncodeError:
+        return None
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or java_length > MAX_CAPTURE_URL_LENGTH
+        or _INVALID_URI_CHARACTER.search(value)
+        or _INVALID_PERCENT_ESCAPE.search(value)
+    ):
+        return None
+    try:
+        parsed = urlparse(value)
+        host = parsed.hostname
+        # Accessing port makes urllib reject malformed/non-numeric ports too.
+        parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or not host
+        or not valid_uri_host(host)
+    ):
+        return None
+    # java.net.URI accepts brackets only as the delimiters of an IPv6 host.
+    # urllib is more permissive and otherwise accepts them in path/query/userinfo.
+    bracket_sensitive_parts = (
+        parsed.path,
+        parsed.params,
+        parsed.query,
+        parsed.fragment,
+        parsed.username or "",
+        parsed.password or "",
+    )
+    if any("[" in part or "]" in part for part in bracket_sensitive_parts):
+        return None
+    return parsed
+
+
 def normalized_host(value: str) -> str:
-    host = (urlparse(value).hostname or "").lower()
+    parsed = parse_backend_http_url(value)
+    if parsed is None:
+        return ""
+    host = (parsed.hostname or "").lower().rstrip(".")
     return host[4:] if host.startswith("www.") else host
 
 
@@ -360,7 +450,8 @@ def get_rule_result_url(rule_result: Optional[Dict]) -> str:
         return ""
     metadata = rule_result.get("metadata", {})
     if isinstance(metadata, dict):
-        return str(metadata.get("url") or "")
+        value = metadata.get("url")
+        return value if isinstance(value, str) else ""
     return ""
 
 
@@ -383,16 +474,140 @@ def validate_target_navigation(requested_url: str, rule_result: Optional[Dict]) 
     return True
 
 
-def validate_rule_artifact(requested_url: str, artifact_metadata: Any) -> bool:
-    """Validate the minimum request-scoped DOM replay metadata contract."""
-    if not isinstance(artifact_metadata, dict):
+def is_live_report_url(value: Any) -> bool:
+    """Validate the structural part of LiveReportUrlSafetyValidator's policy.
+
+    Public-address DNS validation remains authoritative in the backend because
+    resolving here would neither pin the later connection nor prevent rebinding.
+    """
+    parsed = parse_backend_http_url(value)
+    if parsed is None:
         return False
-    artifact_requested_url = str(artifact_metadata.get("requestedUrl") or "")
-    return bool(
-        artifact_metadata.get("captureMode") == "DOM_REPLAY"
-        and normalized_host(artifact_requested_url)
-        and normalized_host(artifact_requested_url) == normalized_host(requested_url)
+    try:
+        return bool(
+            parsed.scheme.lower() == "https"
+            and parsed.username is None
+            and parsed.password is None
+            and "#" not in value
+            and parsed.port in (None, 443)
+        )
+    except ValueError:
+        return False
+
+
+def canonical_navigation_url(value: Any):
+    """Canonical form used for strict request/result URL comparisons."""
+    parsed = parse_backend_http_url(value)
+    if parsed is None:
+        return None
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme.lower() == "https" else 80
+    path = parsed.path or "/"
+    if parsed.params:
+        path = f"{path};{parsed.params}"
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    without_fragment = value.split("#", 1)[0]
+    raw_fragment = value.split("#", 1)[1] if "#" in value else None
+    raw_query = parsed.query if "?" in without_fragment else None
+    raw_user_info = parsed.netloc.rsplit("@", 1)[0] if "@" in parsed.netloc else None
+    return (
+        parsed.scheme.lower(),
+        host,
+        port,
+        path,
+        raw_query,
+        raw_user_info,
+        raw_fragment,
     )
+
+
+def canonical_navigation_observation(value: Any):
+    """Canonical form for final browser URL versus analyzer observation.
+
+    The live gateway deliberately drops fragments. Keep host, scheme, port,
+    path, query, and user-info exact so this remains an origin-sensitive
+    navigation identity check rather than a loose same-site comparison.
+    """
+    canonical = canonical_navigation_url(value)
+    if canonical is None:
+        return None
+    scheme, host, port, path, query, user_info, _fragment = canonical
+    return (scheme, host, port, path, query, user_info, None)
+
+
+def valid_local_date_time(value: Any) -> bool:
+    if not isinstance(value, str) or _LOCAL_DATE_TIME.fullmatch(value) is None:
+        return False
+    try:
+        # datetime only supports microseconds, so validate the nanosecond-capable
+        # fractional suffix with the regex and use the fixed portion for ranges.
+        datetime.strptime(value[:19], "%Y-%m-%dT%H:%M:%S")
+        return True
+    except ValueError:
+        return False
+
+
+def positive_integer(value: Any) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 < value <= MAX_BACKEND_INTEGER
+    )
+
+
+def validate_capture_metadata(
+        requested_url: str,
+        capture_metadata: Any,
+        analyzed_url: str,
+) -> bool:
+    """Validate metadata before embedding it in the evaluation ingestion JSON."""
+    if not isinstance(capture_metadata, dict):
+        return False
+
+    metadata_requested_url = capture_metadata.get("requestedUrl")
+    final_url = capture_metadata.get("finalUrl")
+    captured_at = capture_metadata.get("capturedAt")
+
+    viewport_width = capture_metadata.get("viewportWidthCssPx")
+    viewport_height = capture_metadata.get("viewportHeightCssPx")
+    page_width = capture_metadata.get("pageWidthCssPx")
+    page_height = capture_metadata.get("pageHeightCssPx")
+    dimensions = (viewport_width, viewport_height, page_width, page_height)
+    device_scale_factor = capture_metadata.get("deviceScaleFactor")
+    valid_device_scale_factor = (
+        not isinstance(device_scale_factor, bool)
+        and isinstance(device_scale_factor, (int, float))
+        and math.isfinite(float(device_scale_factor))
+        and 0.1 <= float(device_scale_factor) <= 10.0
+    )
+
+    return bool(
+        parse_backend_http_url(metadata_requested_url) is not None
+        and is_live_report_url(final_url)
+        and canonical_navigation_url(metadata_requested_url)
+        == canonical_navigation_url(requested_url)
+        and canonical_navigation_observation(final_url)
+        == canonical_navigation_observation(analyzed_url)
+        and valid_local_date_time(captured_at)
+        and all(positive_integer(value) for value in dimensions)
+        and page_width >= viewport_width
+        and page_height >= viewport_height
+        and valid_device_scale_factor
+    )
+
+
+def capture_metadata_payload(capture_metadata: Any) -> Optional[Dict[str, Any]]:
+    """Keep the ingestion contract independent of generator-only metadata."""
+    if not isinstance(capture_metadata, dict):
+        return None
+    return {
+        field: capture_metadata[field]
+        for field in CAPTURE_METADATA_FIELDS
+        if field in capture_metadata
+    }
 
 
 # ── 총점 계산 ────────────────────────────────────────────────────────────────
@@ -414,6 +629,32 @@ def valid_rule_result(rule_result: Any) -> bool:
     if isinstance(score_value, dict):
         score_value = score_value.get("score")
     return finite_numeric_score(score_value) is not None
+
+
+def valid_difficulty_result(result: Any) -> bool:
+    if not isinstance(result, dict) or not isinstance(result.get("results"), list):
+        return False
+    meta = result.get("meta")
+    return (
+        isinstance(meta, dict)
+        and finite_numeric_score(meta.get("page_score")) is not None
+    )
+
+
+def valid_suggestion_result(result: Any) -> bool:
+    if not valid_difficulty_result(result):
+        return False
+    return isinstance(result["meta"].get("suggestion_stats"), dict)
+
+
+def valid_cv_result(result: Any) -> bool:
+    if not isinstance(result, dict) or not isinstance(result.get("violations"), list):
+        return False
+    summary = result.get("summary")
+    return (
+        isinstance(summary, dict)
+        and finite_numeric_score(summary.get("pass_rate")) is not None
+    )
 
 
 def calculate_total_score(rule_score: Optional[Dict],
@@ -518,7 +759,8 @@ def calculate_total_score(rule_score: Optional[Dict],
 
 
 def build_final_result(url, rule_result, difficulty_result,
-                       suggestion_result, cv_result, total_score, elapsed, request_id=None):
+                       suggestion_result, cv_result, capture_metadata,
+                       total_score, elapsed, request_id=None):
     """
     모든 모듈의 결과 + 총점을 하나의 JSON으로 합침.
     이 JSON(result_final.json)이 백엔드가 받아서 DB에 저장하는 최종 결과물임
@@ -526,6 +768,7 @@ def build_final_result(url, rule_result, difficulty_result,
     [구조]
     - 상단: URL, 총점, 등급, 소요 시간 등 요약 정보
     - score_breakdown: 모듈별 점수 + 적용된 가중치
+    - capture_metadata: 라이브 화면 정렬에 필요한 분석 당시 화면 정보
     - modules: 각 모듈의 상세 결과 전체 (위반 항목, 수정 가이드 등)
     
     프론트엔드 대시보드는 이 JSON 하나로
@@ -537,6 +780,7 @@ def build_final_result(url, rule_result, difficulty_result,
         "elapsed_seconds": elapsed,
         "platform_version": "1.0.0",
         "request_id": request_id,
+        "capture_metadata": capture_metadata_payload(capture_metadata),
 
         "total_score": total_score["total_score"],
         "grade": total_score["grade"],
@@ -551,13 +795,13 @@ def build_final_result(url, rule_result, difficulty_result,
             "rule_based": rule_result or {
                 "status": "failed", "message": "규칙 기반 평가 실패"
             },
-            "text_difficulty": difficulty_result or {
+            "text_difficulty": difficulty_result if valid_difficulty_result(difficulty_result) else {
                 "status": "failed", "message": "난이도 분석 실패"
             },
-            "text_suggestions": suggestion_result or {
+            "text_suggestions": suggestion_result if valid_suggestion_result(suggestion_result) else {
                 "status": "failed", "message": "수정 제안 생성 실패"
             },
-            "cv_visual": cv_result or {
+            "cv_visual": cv_result if valid_cv_result(cv_result) else {
                 "status": "failed", "message": "CV 분석 실패"
             },
         },
@@ -567,33 +811,7 @@ def build_final_result(url, rule_result, difficulty_result,
 # ── 백엔드 전송 ──────────────────────────────────────────────────────────────
 
 
-def extract_evaluation_request_id(response_body: str,
-                                  fallback_request_id: Optional[int] = None) -> Optional[int]:
-    """Read the saved request ID from direct or ApiResponse-wrapped JSON."""
-    try:
-        response_json = json.loads(response_body) if response_body else {}
-    except json.JSONDecodeError:
-        return fallback_request_id
-
-    candidates = [response_json]
-    if isinstance(response_json, dict) and isinstance(response_json.get("data"), dict):
-        candidates.insert(0, response_json["data"])
-
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        value = candidate.get("evaluation_request_id")
-        if value is None:
-            value = candidate.get("requestId")
-        try:
-            if value is not None:
-                return int(value)
-        except (TypeError, ValueError):
-            continue
-    return fallback_request_id
-
-
-def send_to_backend(final_result: Dict) -> Tuple[bool, Optional[int]]:
+def send_to_backend(final_result: Dict) -> bool:
     """
     result_final.json을 백엔드 서버에 HTTP POST로 전송함.
     
@@ -625,111 +843,40 @@ def send_to_backend(final_result: Dict) -> Tuple[bool, Optional[int]]:
                     response_json = json.loads(response_body) if response_body else {}
                     if isinstance(response_json, dict) and response_json.get("success") is False:
                         print(f"  백엔드 전송 실패: {response_json.get('message')}")
-                        return False, None
+                        return False
                 except json.JSONDecodeError:
                     pass
                 print(f"  백엔드 전송 성공 (HTTP {response.status})")
-                request_id = extract_evaluation_request_id(
-                    response_body,
-                    final_result.get("request_id"),
-                )
-                return True, request_id
+                return True
             else:
                 print(f"  백엔드 전송 실패 (HTTP {response.status})")
-                return False, None
+                return False
 
-    except urllib.error.URLError:
-        print(f"  백엔드 서버 연결 불가 ({API_BASE_URL})")
+    except urllib.error.HTTPError as error:
+        try:
+            response_body = error.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            response_body = ""
+        print(f"  백엔드 전송 실패 (HTTP {error.code})")
+        if response_body:
+            try:
+                response_json = json.loads(response_body)
+                detail = (
+                    response_json.get("message")
+                    if isinstance(response_json, dict)
+                    else response_body
+                )
+            except json.JSONDecodeError:
+                detail = response_body
+            print(f"  -> 응답: {str(detail)[:500]}")
+        return False
+    except urllib.error.URLError as error:
+        print(f"  백엔드 서버 연결 불가 ({API_BASE_URL}): {error.reason}")
         print(f"  -> 로컬 JSON 파일로만 저장됩니다.")
-        return False, None
+        return False
     except Exception as e:
         print(f"  백엔드 전송 오류: {e}")
         print(f"  -> 로컬 JSON 파일로만 저장됩니다.")
-        return False, None
-
-
-def build_artifact_multipart(metadata: Dict[str, Any], document: bytes,
-                             boundary: str) -> bytes:
-    """Build metadata + UTF-8 HTML using the exact Spring multipart contract."""
-    metadata_bytes = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
-    boundary_bytes = boundary.encode("ascii")
-    parts = [
-        b"--" + boundary_bytes + b"\r\n"
-        b'Content-Disposition: form-data; name="metadata"\r\n'
-        b"Content-Type: application/json\r\n\r\n"
-        + metadata_bytes + b"\r\n",
-        b"--" + boundary_bytes + b"\r\n"
-        b'Content-Disposition: form-data; name="document"; filename="page.html"\r\n'
-        b"Content-Type: text/html; charset=utf-8\r\n\r\n"
-        + document + b"\r\n",
-        b"--" + boundary_bytes + b"--\r\n",
-    ]
-    return b"".join(parts)
-
-
-def upload_artifact(request_id: int, metadata_path: Path, document_path: Path) -> bool:
-    """
-    Upload the render artifact after evaluation JSON ingestion succeeds.
-
-    Failure is intentionally isolated: the score/issues already committed by
-    the ingestion endpoint remain valid even if this optional evidence upload
-    is unavailable. The caller logs the failure but still exits successfully.
-    """
-    import urllib.error
-    import urllib.request
-
-    if not metadata_path.exists() or not document_path.exists():
-        print("  [artifact] 업로드 건너뜀: metadata 또는 DOM replay HTML이 없습니다.")
-        return False
-
-    try:
-        with metadata_path.open("r", encoding="utf-8") as metadata_file:
-            metadata = json.load(metadata_file)
-        document = document_path.read_text(encoding="utf-8").encode("utf-8")
-        if not document.strip():
-            print("  [artifact] 업로드 건너뜀: DOM replay HTML이 비어 있습니다.")
-            return False
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        print(f"  [artifact] 로컬 파일 읽기 실패: {error}")
-        return False
-
-    boundary = f"----AccessibilityArtifact{uuid.uuid4().hex}"
-    body = build_artifact_multipart(metadata, document, boundary)
-    url = f"{API_BASE_URL}/evaluations/{request_id}/artifact"
-    request = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Content-Length": str(len(body)),
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
-            if response.status not in (200, 201):
-                print(f"  [artifact] 업로드 실패 (HTTP {response.status})")
-                return False
-            try:
-                api_response = json.loads(response_body) if response_body else {}
-                if isinstance(api_response, dict) and api_response.get("success") is False:
-                    print(f"  [artifact] 서버가 업로드를 거부했습니다: {api_response.get('message')}")
-                    return False
-            except json.JSONDecodeError:
-                pass
-            print(f"  [artifact] DOM replay HTML 업로드 성공 (HTTP {response.status})")
-            return True
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        print(f"  [artifact] 업로드 실패 (HTTP {error.code}): {detail[:300]}")
-        return False
-    except urllib.error.URLError as error:
-        print(f"  [artifact] 백엔드 연결 실패: {error.reason}")
-        return False
-    except Exception as error:
-        print(f"  [artifact] 업로드 오류: {error}")
         return False
 
 
@@ -814,7 +961,7 @@ def main():
         sys.exit(NO_SCORABLE_RESULT_EXIT_CODE)
 
     # The screenshot is private input for the existing CV analyzer. It is
-    # deliberately outside output/ and is never part of the replay/upload
+    # deliberately outside output/ and is never part of the ingestion
     # contract. Step 5 deletes it in finally; atexit is a backstop for an
     # unexpected exception or early sys.exit before Step 5.
     cv_capture_path = create_ephemeral_cv_capture_path()
@@ -824,8 +971,8 @@ def main():
 
     # ── Step 1: 규칙 기반 평가 ──
     # run.js를 실행하여 Playwright로 페이지를 열고 axe-core 검사를 수행함.
-    # 결과: result.json(axe-core 결과), result.html(정적 DOM replay),
-    #       result_artifact.json(DOM replay 메타데이터)
+    # 결과: result.json(axe-core 결과), result.html(내부 텍스트 분석 입력),
+    #       result_artifact.json(라이브 화면 정렬용 캡처 메타데이터)
     run_step(1, total_steps, "규칙 기반 접근성 평가 (axe-core + KWCAG)")
 
     result_json = OUTPUT_DIR / "result.json"
@@ -847,9 +994,14 @@ def main():
         for path in rule_output_paths
     )
     rule_result = load_json(result_api) if step1_outputs_fresh else None
-    artifact_metadata = load_json(result_artifact) if step1_outputs_fresh else None
+    capture_metadata = load_json(result_artifact) if step1_outputs_fresh else None
     rule_result_valid = valid_rule_result(rule_result)
-    artifact_valid = validate_rule_artifact(url, artifact_metadata)
+    analyzed_url = get_rule_result_url(rule_result)
+    capture_metadata_valid = validate_capture_metadata(
+        url,
+        capture_metadata,
+        analyzed_url,
+    )
     navigation_valid = (
         validate_target_navigation(url, rule_result)
         if rule_result_valid
@@ -859,7 +1011,7 @@ def main():
         step1_process_ok
         and step1_outputs_fresh
         and rule_result_valid
-        and artifact_valid
+        and capture_metadata_valid
         and navigation_valid
     )
     rule_output_fingerprints = {
@@ -870,11 +1022,11 @@ def main():
     if not step1_process_ok:
         print("  [분석 실패] 규칙 기반 평가 프로세스가 완료되지 않았습니다.")
     elif not step1_outputs_fresh:
-        print("  [분석 실패] 현재 실행의 규칙 결과 또는 DOM replay가 완전하지 않습니다.")
+        print("  [분석 실패] 현재 실행의 규칙 결과 또는 캡처 메타데이터가 완전하지 않습니다.")
     elif not rule_result_valid:
         print("  [분석 실패] 규칙 기반 결과에 유효한 점수가 없습니다.")
-    elif not artifact_valid:
-        print("  [분석 실패] 현재 요청의 DOM replay 메타데이터가 유효하지 않습니다.")
+    elif not capture_metadata_valid:
+        print("  [분석 실패] 현재 요청의 캡처 메타데이터가 유효하지 않습니다.")
     elif not navigation_valid:
         sys.exit(2)
 
@@ -917,6 +1069,11 @@ def main():
             OUTPUT_DIR / "result_text_difficulty.json",
             step3_started_ns,
         )
+        if step3_ok and not valid_difficulty_result(
+            load_json(OUTPUT_DIR / "result_text_difficulty.json")
+        ):
+            print("  [분석 실패] 난이도 분석 결과 구조가 유효하지 않습니다.")
+            step3_ok = False
     else:
         print("  [건너뜀] 현재 실행의 텍스트 추출 결과가 없습니다.")
         step3_ok = False
@@ -940,12 +1097,17 @@ def main():
             OUTPUT_DIR / "result_text_suggestions.json",
             step4_started_ns,
         )
+        if step4_ok and not valid_suggestion_result(
+            load_json(OUTPUT_DIR / "result_text_suggestions.json")
+        ):
+            print("  [분석 실패] 수정 제안 결과 구조가 유효하지 않습니다.")
+            step4_ok = False
     else:
         print("  [건너뜀] 현재 실행의 난이도 분석 결과가 없습니다.")
         step4_ok = False
 
     # ── Step 5: CV 시각 분석 ──
-    # DOM replay 업로드와 CV 입력은 서로 독립적이다. Step 1이 OS 임시
+    # result.html과 CV 입력은 서로 독립적이다. Step 1이 OS 임시
     # 디렉터리에만 만든 PNG를 기존 CV 분석기에 전달하고, 성공/실패와 무관하게
     # run_cv_from_ephemeral_capture()의 finally에서 즉시 삭제한다.
     run_step(5, total_steps, "CV 시각 접근성 분석")
@@ -956,6 +1118,9 @@ def main():
             OUTPUT_DIR / "result_cv.json",
             step5_started_ns,
         )
+        if step5_ok and not valid_cv_result(load_json(OUTPUT_DIR / "result_cv.json")):
+            print("  [분석 실패] CV 분석 결과 구조가 유효하지 않습니다.")
+            step5_ok = False
     else:
         print("  [건너뜀] 유효한 현재 규칙 결과가 없어 CV 분석을 실행하지 않습니다.")
         cleanup_ephemeral_cv_capture(cv_capture_path)
@@ -982,6 +1147,7 @@ def main():
         difficulty_result=difficulty_result,
         suggestion_result=suggestion_result,
         cv_result=cv_result,
+        capture_metadata=capture_metadata if step1_ok else None,
         total_score=total_score,
         elapsed=elapsed,
         request_id=request_id,
@@ -997,7 +1163,7 @@ def main():
     # A zero score can be a valid finding, so do not decide from total_score.
     # module_scores is empty only when none of rule/difficulty/CV produced a
     # score-bearing result. Preserve result_final.json for local diagnosis, but
-    # never ingest it as a completed evaluation or upload its artifact.
+    # never ingest it as a completed evaluation.
     rule_outputs_unchanged = step1_ok and all(
         output_fingerprint(path) == fingerprint
         for path, fingerprint in rule_output_fingerprints.items()
@@ -1016,21 +1182,9 @@ def main():
     # 서버가 꺼져 있어도 로컬 파일은 이미 저장되어 있으므로 문제없음.
     run_step(7, total_steps, "백엔드 서버 전송")
 
-    ingestion_ok, saved_request_id = send_to_backend(final_result)
+    ingestion_ok = send_to_backend(final_result)
     if not ingestion_ok:
         sys.exit(1)
-
-    # Artifact upload is deliberately sequenced after successful JSON ingestion.
-    # A transport/storage failure here must not cause a retry of the already
-    # committed evaluation POST, which could duplicate score and issue records.
-    if saved_request_id is None:
-        print("  [artifact] 업로드 건너뜀: 저장된 evaluation request ID를 확인할 수 없습니다.")
-    else:
-        upload_artifact(
-            saved_request_id,
-            OUTPUT_DIR / "result_artifact.json",
-            OUTPUT_DIR / "result.html",
-        )
 
     # ── 최종 요약 출력 ──
     print("\n" + "=" * 60)

@@ -92,6 +92,18 @@ export async function installDashboardApiFixture(page) {
     createdAt: timestamp,
     updatedAt: timestamp
   };
+  const captureMetadata = {
+    id: 701,
+    requestId: request.id,
+    requestedUrl: target.accessUrl,
+    finalUrl: target.accessUrl,
+    capturedAt: timestamp,
+    viewportWidthCssPx: 1280,
+    viewportHeightCssPx: 720,
+    deviceScaleFactor: 1,
+    pageWidthCssPx: 1280,
+    pageHeightCssPx: 1440
+  };
   const overview = createDashboardOverview({
     organizations: [organization],
     evaluationTargets: [target],
@@ -119,12 +131,13 @@ export async function installDashboardApiFixture(page) {
       return;
     }
 
-    if (method === "GET" && pathname === `/api/results/requests/${request.id}/artifact`) {
-      await route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({ success: false, data: null, message: "Fixture has no replay artifact." })
-      });
+    if (method === "GET" && pathname === `/api/results/requests/${request.id}/capture-metadata`) {
+      await fulfillJson(route, captureMetadata);
+      return;
+    }
+
+    if (method === "POST" && pathname === `/api/results/requests/${request.id}/live-session`) {
+      await fulfillJson(route, null);
       return;
     }
 
@@ -139,6 +152,7 @@ export async function installDashboardApiFixture(page) {
 
   return {
     journal,
+    captureMetadata,
     organization,
     overview,
     request,

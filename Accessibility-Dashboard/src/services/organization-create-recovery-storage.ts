@@ -3,7 +3,8 @@ import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
   isRecoveryTimestampStale,
-  readSessionRecovery
+  readSessionRecovery,
+  writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 import type { RecoveryRead } from "@/services/recovery-storage";
 
@@ -24,6 +25,11 @@ export type PersistedOrganizationCreateAttempt = {
   | { phase: "posting" }
   | { phase: "reconciling"; organizationId: number | null }
 );
+
+export type StoredOrganizationCreateAttempt = {
+  attempt: PersistedOrganizationCreateAttempt;
+  rawValue: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
@@ -101,61 +107,27 @@ export function isPersistedOrganizationCreateAttemptStale(
 
 export function writePersistedOrganizationCreateAttempt(
   attempt: PersistedOrganizationCreateAttempt,
-  expectedAttemptId: string | null
-): boolean {
-  try {
-    const normalizedAttempt = normalizePersistedOrganizationCreateAttempt(attempt);
-    if (normalizedAttempt === null) {
-      return false;
-    }
-
-    const currentRawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    if (expectedAttemptId === null) {
-      if (currentRawValue !== null) {
-        return false;
-      }
-    } else {
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizePersistedOrganizationCreateAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    const serializedAttempt = JSON.stringify(normalizedAttempt);
-    window.sessionStorage.setItem(ORGANIZATION_CREATE_STORAGE_KEY, serializedAttempt);
-    return window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) === serializedAttempt;
-  } catch {
-    return false;
+  expectedRawValue: string | null
+): StoredOrganizationCreateAttempt | null {
+  const stored = writeSessionRecoveryIfUnchanged(
+    ORGANIZATION_CREATE_STORAGE_KEY,
+    attempt,
+    normalizePersistedOrganizationCreateAttempt,
+    expectedRawValue
+  );
+  if (stored === null) {
+    return null;
   }
+  return { attempt: stored.value, rawValue: stored.rawValue };
 }
 
 export function clearPersistedOrganizationCreateAttempt(
-  expectedAttemptId?: string
+  expectedRawValue: string
 ): boolean {
-  try {
-    const currentRawValue = window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    if (expectedAttemptId !== undefined) {
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizePersistedOrganizationCreateAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    window.sessionStorage.removeItem(ORGANIZATION_CREATE_STORAGE_KEY);
-    return window.sessionStorage.getItem(ORGANIZATION_CREATE_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
+  return clearSessionRecoveryIfUnchanged(
+    ORGANIZATION_CREATE_STORAGE_KEY,
+    expectedRawValue
+  );
 }
 
 export function clearBlockedOrganizationCreateRecovery(expectedRawValue: string): boolean {

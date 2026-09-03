@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type {
-  AnalyzerType,
   AnalysisResult,
-  EvaluationArtifact,
+  EvaluationCaptureMetadata,
   EvaluationResultSummary,
   EvaluationRequestModel,
   EvaluationTargetModel,
@@ -13,15 +12,14 @@ import type {
 
 import { selectLatestEvaluationRequest } from "../shared/evaluation-request-selection";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
-import { resolveWcagCriterion, severityChartItems } from "./site-dashboard/constants";
+import { severityChartItems } from "./site-dashboard/constants";
 import { PageInformationPanel } from "./site-dashboard/page-information-panel";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
 import type { RecentIssueRow } from "./site-dashboard/types";
-import { useEvaluationArtifact } from "./site-dashboard/use-evaluation-artifact";
+import { useEvaluationCaptureMetadata } from "./site-dashboard/use-evaluation-capture-metadata";
 import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
 import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
-import { getAnalyzerTypeLabel } from "./site-dashboard/utils";
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;
@@ -33,9 +31,9 @@ type SiteDashboardPanelProps = {
 
 export type SiteDashboardPreviewEvidence = {
   analysisResults: AnalysisResult[];
-  artifact: EvaluationArtifact | null;
-  artifactContentUrl?: string;
+  captureMetadata: EvaluationCaptureMetadata | null;
   issueResults: IssueResultModel[];
+  previewRuntimeUrl: string;
 };
 
 export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
@@ -97,13 +95,13 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
     [issueResults, latestResultRequestId, requestIdByAnalysisResultId]
   );
   const {
-    artifact,
-    errorMessage: artifactErrorMessage,
-    loadState: artifactLoadState,
-    retry: retryArtifact
-  } = useEvaluationArtifact(
+    captureMetadata,
+    retry: retryCaptureMetadata
+  } = useEvaluationCaptureMetadata(
     latestMaterializedResultRequest,
-    previewEvidence ? { artifact: previewEvidence.artifact } : undefined
+    previewEvidence
+      ? { captureMetadata: previewEvidence.captureMetadata }
+      : undefined
   );
   const {
     errorMessage: liveSessionErrorMessage,
@@ -137,39 +135,34 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
         return {
           issue,
           severity,
-          wcagCriterion: resolveWcagCriterion(issue.issueCode, issue.issueTitle),
-          issueGuides: [],
-          analyzerLabel: getAnalyzerTypeLabel(analyzerType),
-          analyzerType,
-          showsAiGuide: isTextAccessibilityIssue(issue, analyzerType)
+          analyzerType
         };
       }),
     [analysisResultById, latestIssues]
   );
-  const evidenceLoadState =
-    resultDetailsLoadState === "loading"
-      ? "loading"
-      : resultDetailsLoadState === "error"
-        ? "error"
-        : artifactLoadState;
-  const evidenceErrorMessage =
-    resultDetailsErrorMessage ?? artifactErrorMessage ?? liveSessionErrorMessage;
   const evidenceLiveSessionLoadState =
-    resultDetailsLoadState === "ready" ? liveSessionLoadState : "idle";
+    previewEvidence !== undefined
+      ? "idle"
+      : resultDetailsLoadState === "ready"
+        ? liveSessionLoadState
+        : resultDetailsLoadState === "error"
+          ? "error"
+          : latestResultRequestId === null
+            ? "idle"
+            : "loading";
   const retryEvidence = () => {
     if (resultDetailsLoadState === "error") {
       retryResultDetails();
       return;
     }
     retryLiveSession();
-    retryArtifact();
+    retryCaptureMetadata();
   };
-  // Severity comes from the result-details request, not from the replay
-  // artifact. Keep it available when only the DOM replay is missing or is
-  // still being reconciled.
+  // Severity comes from the result-details request and remains independent of
+  // whether the current live page can still resolve every historical locator.
   const showsRailDetailCards = resultDetailsLoadState === "ready";
   const latestAnalyzedAt =
-    artifact?.capturedAt ??
+    captureMetadata?.capturedAt ??
     latestMaterializedResultRequest?.requestedAt ??
     latestMaterializedResultRequest?.updatedAt ??
     null;
@@ -178,14 +171,12 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
     <div className="site-dashboard-layout grid min-h-[31rem] grid-cols-1 items-stretch">
       <div className="site-page-evidence-grid-item">
         <RenderedPageEvidenceCard
-          artifact={artifact}
-          artifactContentUrl={previewEvidence?.artifactContentUrl}
-          errorMessage={evidenceErrorMessage}
+          captureMetadata={captureMetadata}
+          errorMessage={resultDetailsErrorMessage ?? liveSessionErrorMessage}
           evaluationRequestId={latestResultRequestId}
           liveSession={liveSession}
-          liveSessionErrorMessage={liveSessionErrorMessage}
           liveSessionLoadState={evidenceLiveSessionLoadState}
-          loadState={evidenceLoadState}
+          previewRuntimeUrl={previewEvidence?.previewRuntimeUrl}
           rows={replayIssueRows}
           selectedIssueId={selectedIssueId}
           targetName={evaluationTarget.name}
@@ -214,19 +205,5 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
         )}
       </div>
     </div>
-  );
-}
-
-function isTextAccessibilityIssue(issue: IssueResultModel, analyzerType?: AnalyzerType): boolean {
-  if (analyzerType !== "AI_TEXT") {
-    return false;
-  }
-
-  const searchableText = [issue.issueCode, issue.issueTitle, issue.message].join(" ").toLowerCase();
-  return (
-    searchableText.includes("text") ||
-    searchableText.includes("difficulty") ||
-    searchableText.includes("텍스트") ||
-    searchableText.includes("난이도")
   );
 }

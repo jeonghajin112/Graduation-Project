@@ -22,21 +22,13 @@ spring:
         format_sql: true
     show-sql: true
 
-  servlet:
-    multipart:
-      max-file-size: 20MB
-      max-request-size: 21MB
-
   sql:
     init:
-      # schema.sql must run before Hibernate so legacy H2 enum constraints are
-      # widened without requiring a manual database edit.
+      # schema.sql must run before Hibernate so legacy replay-file columns can
+      # be relaxed without dropping historical capture metadata.
       mode: always
 
 accessibility:
-  artifacts:
-    directory: ./data/artifacts
-    max-file-size-bytes: 20971520
   live-report:
     # The proof-of-concept keeps only short-lived, in-memory public-page sessions.
     # Production must point this at a dedicated wildcard DNS/TLS zone. Keeping
@@ -81,7 +73,7 @@ accessibility:
     max-cookie-bytes-per-session: 32768
   ai:
     python-executable: ${AI_PYTHON_EXECUTABLE:}
-    # run_all.py: analyzers max 720s + ingestion/artifact I/O max 70s + overhead.
+    # run_all.py: analyzers max 720s + result ingestion max 70s + overhead.
     process-timeout-seconds: ${AI_PROCESS_TIMEOUT_SECONDS:900}
 
 server:

@@ -2,7 +2,11 @@ import type { PersistedSiteCreateAttempt } from "@/services/site-create-recovery
 
 import { runMutationRequestWithDeadline } from "./mutation-recovery";
 
-export { isDefinitiveMutationRejection } from "./mutation-recovery";
+export {
+  commitMutationOnce,
+  isDefinitiveMutationRejection,
+  reconcileWithRetries
+} from "./mutation-recovery";
 
 export const REQUEST_RECONCILE_ATTEMPTS = 3;
 export const REQUEST_RECONCILE_INTERVAL_MS = 250;

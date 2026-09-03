@@ -39,3 +39,11 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+tasks.register('exportLiveReportBrowserFixture', JavaExec) {
+	group = 'verification'
+	description = 'Exports the real rewritten live-report HTML used by the frontend browser regression.'
+	dependsOn testClasses
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.accessibility.platform.livereport.LiveReportBrowserFixtureExporterTest'
+}

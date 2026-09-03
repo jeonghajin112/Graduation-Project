@@ -120,7 +120,6 @@ function dashboardPayload(
   }
   if (pathname === "/api/results/requests/501/summary") return summary;
   if (pathname === "/api/results/requests/501/issues") return [];
-  if (pathname === "/api/scores/requests/501") return score;
   return [];
 }
 

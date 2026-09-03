@@ -1,9 +1,6 @@
 package com.accessibility.platform.integration.service;
 
-import com.accessibility.platform.artifact.domain.CaptureMode;
-import com.accessibility.platform.artifact.dto.EvaluationArtifactMetadataRequest;
-import com.accessibility.platform.artifact.repository.EvaluationArtifactRepository;
-import com.accessibility.platform.artifact.service.EvaluationArtifactService;
+import com.accessibility.platform.capturemetadata.repository.EvaluationCaptureMetadataRepository;
 import com.accessibility.platform.organization.domain.Organization;
 import com.accessibility.platform.organization.domain.OrganizationType;
 import com.accessibility.platform.organization.repository.OrganizationRepository;
@@ -20,12 +17,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.time.LocalDateTime;
-import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,10 +35,7 @@ class AiEvaluationIngestionLocatorIntegrationTest {
     EvaluationResultQueryService resultQueryService;
 
     @Autowired
-    EvaluationArtifactService artifactService;
-
-    @Autowired
-    EvaluationArtifactRepository artifactRepository;
+    EvaluationCaptureMetadataRepository captureMetadataRepository;
 
     @Autowired
     LegacyIssueStandardMigrationRunner legacyIssueStandardMigrationRunner;
@@ -87,22 +78,21 @@ class AiEvaluationIngestionLocatorIntegrationTest {
     @Test
     void persistsAndExposesRuleAndCvTypedLocatorsWithoutRemovingLegacySelector() {
         EvaluationRequest request = createRequest();
-        artifactService.replace(
-                request.getId(),
-                artifactMetadata(),
-                new MockMultipartFile(
-                        "document",
-                        "page.html",
-                        "text/html;charset=utf-8",
-                        "<html><body><button class=pay>Old replay</button></body></html>".getBytes(StandardCharsets.UTF_8)
-                )
-        );
-        assertThat(artifactRepository.findByEvaluationRequestId(request.getId())).isPresent();
         String resultJson = """
                 {
                   "url":"https://example.com/",
                   "request_id":%d,
                   "analyzed_at":"2026-08-11T12:00:00",
+                  "capture_metadata":{
+                    "requestedUrl":"https://example.com/",
+                    "finalUrl":"https://example.com/final",
+                    "capturedAt":"2026-08-11T11:59:00",
+                    "viewportWidthCssPx":1280,
+                    "viewportHeightCssPx":720,
+                    "deviceScaleFactor":1.0,
+                    "pageWidthCssPx":1280,
+                    "pageHeightCssPx":1600
+                  },
                   "total_score":81.5,
                   "score_breakdown":{"module_scores":{"rule_based":80,"difficulty":90,"cv":70}},
                   "modules":{
@@ -173,9 +163,10 @@ class AiEvaluationIngestionLocatorIntegrationTest {
         ingestionService.save(resultJson);
         List<EvaluationIssueResponse> issues = resultQueryService.getIssues(request.getId());
 
-        assertThat(artifactRepository.findByEvaluationRequestId(request.getId()))
-                .as("rerun ingestion must not leave stale visual evidence")
-                .isEmpty();
+        assertThat(captureMetadataRepository.findByEvaluationRequestId(request.getId())
+                .orElseThrow()
+                .getFinalUrl())
+                .isEqualTo("https://example.com/final");
 
         EvaluationIssueResponse ruleIssue = issues.stream()
                 .filter(issue -> issue.module().equals("rule_based"))
@@ -276,19 +267,5 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                 "https://example.com/favicon.ico"
         ));
         return requestRepository.save(new EvaluationRequest(target, "locator ingestion test"));
-    }
-
-    private EvaluationArtifactMetadataRequest artifactMetadata() {
-        return new EvaluationArtifactMetadataRequest(
-                "https://example.com/",
-                "https://example.com/",
-                LocalDateTime.of(2026, 8, 11, 11, 59),
-                2,
-                2,
-                1.0,
-                2,
-                2,
-                CaptureMode.DOM_REPLAY
-        );
     }
 }

@@ -136,7 +136,7 @@ function assertNoInternalErrorDetails(text) {
   );
   assert.doesNotMatch(
     text,
-    /\bdata(?:\.|\[)|\bsuccess\b|서버 응답 계약|API 응답|captureMode|ApiRequestError/i,
+    /\bdata(?:\.|\[)|\bsuccess\b|서버 응답 계약|API 응답|viewportWidthCssPx|ApiRequestError/i,
     "user-facing errors must not expose response-contract details"
   );
 }
@@ -375,9 +375,8 @@ async function runMalformedIssueScenario(browser) {
   const project = organization(2, "Issue contract project");
   const pageTarget = target(201, project.id, "Issue contract page");
   const evaluationRequest = request(601, pageTarget.id, pageTarget.name);
-  const artifactId = 8101;
-  const artifact = {
-    id: artifactId,
+  const captureMetadata = {
+    id: 8101,
     requestId: evaluationRequest.id,
     requestedUrl: pageTarget.accessUrl,
     finalUrl: pageTarget.accessUrl,
@@ -386,14 +385,7 @@ async function runMalformedIssueScenario(browser) {
     viewportHeightCssPx: 720,
     deviceScaleFactor: 1,
     pageWidthCssPx: 1280,
-    pageHeightCssPx: 720,
-    captureMode: "DOM_REPLAY",
-    contentUrl: `/api/results/artifacts/${artifactId}/content`,
-    contentType: "text/html",
-    sizeBytes: 128,
-    sha256: "a".repeat(64),
-    createdAt: timestamp,
-    updatedAt: timestamp
+    pageHeightCssPx: 720
   };
   const aggregateIssueTitle = "집계 응답에만 포함된 정상 이슈";
   const issueTitle = "렌더링되면 안 되는 오염된 상세 이슈";
@@ -462,20 +454,16 @@ async function runMalformedIssueScenario(browser) {
       }
       if (
         browserRequest.method() === "GET" &&
-        pathname === `/api/results/requests/${evaluationRequest.id}/artifact`
+        pathname === `/api/results/requests/${evaluationRequest.id}/capture-metadata`
       ) {
-        await fulfillJson(route, artifact);
+        await fulfillJson(route, captureMetadata);
         return;
       }
       if (
-        browserRequest.method() === "GET" &&
-        pathname === `/api/results/artifacts/${artifactId}/content`
+        browserRequest.method() === "POST" &&
+        pathname === `/api/results/requests/${evaluationRequest.id}/live-session`
       ) {
-        await route.fulfill({
-          status: 200,
-          contentType: "text/html",
-          body: "<!doctype html><html><body><main>응답 계약 검증 재현 문서</main></body></html>"
-        });
+        await fulfillJson(route, null);
         return;
       }
       unknownRequests.push(`${browserRequest.method()} ${pathname}`);
@@ -486,9 +474,7 @@ async function runMalformedIssueScenario(browser) {
       waitUntil: "networkidle"
     });
     const evidenceCard = page.getByRole("article", { name: "페이지 검사 화면" });
-    const alert = evidenceCard
-      .getByRole("alert")
-      .filter({ hasText: "페이지 재현 화면을 불러오지 못했어요" });
+    const alert = evidenceCard.getByRole("alert");
     await alert.waitFor();
     const alertText = await alert.innerText();
     assert.match(alertText, /페이지 검사 결과를 불러오지 못했어요/);
@@ -497,9 +483,8 @@ async function runMalformedIssueScenario(browser) {
 
     serveValidIssues = true;
     await alert.getByRole("button", { name: "다시 시도", exact: true }).click();
-    await alert.waitFor({ state: "hidden" });
     await evidenceCard
-      .getByRole("region", { name: `${pageTarget.name} 접근성 검사 페이지 재현 화면` })
+      .getByText("현재 동적 페이지를 열지 못했어요", { exact: true })
       .waitFor();
 
     assert.ok(issueGets >= 2);
@@ -578,9 +563,16 @@ async function runResultDetailsTimeoutScenario(browser) {
       }
       if (
         browserRequest.method() === "GET" &&
-        pathname === `/api/results/requests/${evaluationRequest.id}/artifact`
+        pathname === `/api/results/requests/${evaluationRequest.id}/capture-metadata`
       ) {
-        await route.fulfill({ status: 404, contentType: "application/json", body: "null" });
+        await fulfillJson(route, null);
+        return;
+      }
+      if (
+        browserRequest.method() === "POST" &&
+        pathname === `/api/results/requests/${evaluationRequest.id}/live-session`
+      ) {
+        await fulfillJson(route, null);
         return;
       }
       unknownRequests.push(`${browserRequest.method()} ${pathname}`);

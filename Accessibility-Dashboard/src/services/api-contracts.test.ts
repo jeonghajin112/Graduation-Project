@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   ApiContractValidationError,
-  createEvaluationArtifactParser,
+  createEvaluationCaptureMetadataParser,
+  createEvaluationIssuesResponseParser,
+  createEvaluationTargetResponseParser,
   parseDashboardOverviewResponse,
   parseLiveReportSessionResponse
 } from "./api-contracts";
@@ -89,7 +91,7 @@ function expectContractError(run: () => unknown, fieldPath: string): void {
   }
 }
 
-function createArtifact(contentUrl: string) {
+function createCaptureMetadata() {
   return {
     id: 701,
     requestId: 501,
@@ -100,26 +102,60 @@ function createArtifact(contentUrl: string) {
     viewportHeightCssPx: 720,
     deviceScaleFactor: 1,
     pageWidthCssPx: 1280,
-    pageHeightCssPx: 1440,
-    captureMode: "DOM_REPLAY",
-    contentUrl,
-    contentType: "text/html",
-    sizeBytes: 1024,
-    sha256: "a".repeat(64),
-    createdAt: validDate,
-    updatedAt: validDate
+    pageHeightCssPx: 1440
+  };
+}
+
+function createEvaluationIssue() {
+  return {
+    id: 801,
+    requestId: 501,
+    module: "rule_based",
+    severity: "SERIOUS",
+    title: "링크 이름",
+    description: "링크 이름이 목적을 설명하지 않습니다.",
+    recommendation: "목적을 드러내는 이름을 제공하세요.",
+    selector: "a.more",
+    locator: {
+      kind: "CSS_SELECTOR",
+      pathSteps: [{ context: "DOCUMENT", selector: "a.more", frameUrl: null }],
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      coordinateSpace: "CSS_PIXEL",
+      visible: true,
+      htmlSnippet: "<a class=\"more\">더 보기</a>"
+    },
+    wcagCode: "KWCAG-2.4.4",
+    createdAt: validDate
   };
 }
 
 describe("parseDashboardOverviewResponse", () => {
-  it("accepts leap-day timestamps and the maximum legal UTC offset", () => {
+  it("keeps the fields used by the dashboard and recovery guard", () => {
     const parsed = parseDashboardOverviewResponse(createValidOverview(), "$.data");
-    expect(parsed.organizations[0]?.createdAt).toBe(validDate);
+    expect(parsed.organizations[0]?.updatedAt).toBe(validDate);
+    expect(parsed.resultSummaries[0]).toEqual({
+      requestId: 501,
+      totalScore: 91,
+      totalIssueCount: 3,
+      requestedAt: validDate
+    });
+    expect(parsed.scoreResults[0]).toEqual({
+      id: 601,
+      evaluationRequestId: 501,
+      totalScore: 91
+    });
+    expect(parsed.latestIssueCounts[0]).toEqual({
+      evaluationTargetId: 101,
+      requestId: 501
+    });
   });
 
   it.each([
-    ["2023-02-29T12:00:00Z", "$.data.organizations[0].createdAt"],
-    ["2024-02-29T12:00:00+18:01", "$.data.organizations[0].createdAt"]
+    ["2023-02-29T12:00:00Z", "$.data.organizations[0].updatedAt"],
+    ["2024-02-29T12:00:00+18:01", "$.data.organizations[0].updatedAt"]
   ])("rejects impossible calendar values: %s", (date, fieldPath) => {
     expectContractError(
       () => parseDashboardOverviewResponse(createValidOverview(date), "$.data"),
@@ -127,48 +163,182 @@ describe("parseDashboardOverviewResponse", () => {
     );
   });
 
-  it("rejects a critical summary count larger than the total", () => {
-    const overview = createValidOverview();
-    overview.resultSummaries[0]!.criticalIssueCount = 4;
-    expectContractError(
-      () => parseDashboardOverviewResponse(overview, "$.data"),
-      "$.data.resultSummaries[0].criticalIssueCount"
-    );
-  });
-
-  it("rejects severity totals that disagree with issue groups", () => {
-    const overview = createValidOverview();
-    overview.latestIssueCounts[0]!.highIssueCount = 1;
-    expectContractError(
-      () => parseDashboardOverviewResponse(overview, "$.data"),
-      "$.data.latestIssueCounts[0].highIssueCount"
-    );
-  });
-
-  it("rejects requests that reference a target outside the organization tree", () => {
-    const overview = createValidOverview();
-    overview.evaluationRequests[0]!.evaluationTargetId = 999;
-    expectContractError(
-      () => parseDashboardOverviewResponse(overview, "$.data"),
+  it.each<[
+    string,
+    (overview: ReturnType<typeof createValidOverview>) => void,
+    string
+  ]>([
+    [
+      "non-positive organization IDs",
+      (overview) => { overview.organizations[0]!.id = 0; },
+      "$.data.organizations[0].id"
+    ],
+    [
+      "unknown request statuses",
+      (overview) => { overview.evaluationRequests[0]!.status = "RUNNING"; },
+      "$.data.evaluationRequests[0].status"
+    ],
+    [
+      "unknown target types",
+      (overview) => { overview.organizations[0]!.evaluationTargets[0]!.targetType = "BROWSER"; },
+      "$.data.organizations[0].evaluationTargets[0].targetType"
+    ],
+    [
+      "duplicate organization IDs",
+      (overview) => { overview.organizations.push({ ...overview.organizations[0]! }); },
+      "$.data.organizations[1].id"
+    ],
+    [
+      "duplicate target IDs",
+      (overview) => {
+        overview.organizations[0]!.evaluationTargets.push({
+          ...overview.organizations[0]!.evaluationTargets[0]!
+        });
+      },
+      "$.data.organizations[*].evaluationTargets[1].id"
+    ],
+    [
+      "targets owned by another organization",
+      (overview) => { overview.organizations[0]!.evaluationTargets[0]!.organizationId = 999; },
+      "$.data.organizations[0].evaluationTargets[0].organizationId"
+    ],
+    [
+      "duplicate request IDs",
+      (overview) => { overview.evaluationRequests.push({ ...overview.evaluationRequests[0]! }); },
+      "$.data.evaluationRequests[1].id"
+    ],
+    [
+      "requests for an unknown target",
+      (overview) => { overview.evaluationRequests[0]!.evaluationTargetId = 999; },
       "$.data.evaluationRequests[0].evaluationTargetId"
+    ],
+    [
+      "duplicate summaries for one request",
+      (overview) => { overview.resultSummaries.push({ ...overview.resultSummaries[0]! }); },
+      "$.data.resultSummaries[1].requestId"
+    ],
+    [
+      "summaries for an unknown request",
+      (overview) => { overview.resultSummaries[0]!.requestId = 999; },
+      "$.data.resultSummaries[0].requestId"
+    ],
+    [
+      "duplicate scores for one request",
+      (overview) => { overview.scoreResults.push({ ...overview.scoreResults[0]!, id: 602 }); },
+      "$.data.scoreResults[1].evaluationRequestId"
+    ],
+    [
+      "scores for an unknown request",
+      (overview) => { overview.scoreResults[0]!.evaluationRequestId = 999; },
+      "$.data.scoreResults[0].evaluationRequestId"
+    ],
+    [
+      "duplicate latest issue references for one target",
+      (overview) => { overview.latestIssueCounts.push({ ...overview.latestIssueCounts[0]! }); },
+      "$.data.latestIssueCounts[1].evaluationTargetId"
+    ],
+    [
+      "latest issue references for an unknown target",
+      (overview) => { overview.latestIssueCounts[0]!.evaluationTargetId = 999; },
+      "$.data.latestIssueCounts[0].evaluationTargetId"
+    ],
+    [
+      "latest issue references for an unrelated request",
+      (overview) => {
+        overview.organizations[0]!.evaluationTargets.push({
+          ...overview.organizations[0]!.evaluationTargets[0]!,
+          id: 102
+        });
+        overview.evaluationRequests.push({
+          ...overview.evaluationRequests[0]!,
+          id: 502,
+          evaluationTargetId: 102
+        });
+        overview.latestIssueCounts[0]!.requestId = 502;
+      },
+      "$.data.latestIssueCounts[0].requestId"
+    ]
+  ])("rejects %s", (_label, corrupt, fieldPath) => {
+    const overview = createValidOverview();
+    corrupt(overview);
+    expectContractError(
+      () => parseDashboardOverviewResponse(overview, "$.data"),
+      fieldPath
+    );
+  });
+
+  it("quarantines unsafe URLs from imported targets", () => {
+    const overview = createValidOverview();
+    overview.organizations[0]!.evaluationTargets[0]!.accessUrl = "javascript:alert(1)";
+    expect(parseDashboardOverviewResponse(overview, "$.data")
+      .organizations[0]?.evaluationTargets[0]?.accessUrl).toBe("");
+  });
+
+  it("rejects unsafe URLs for freshly created targets", () => {
+    const target = {
+      ...createValidOverview().organizations[0]!.evaluationTargets[0]!,
+      accessUrl: "javascript:alert(1)"
+    };
+    expectContractError(
+      () => createEvaluationTargetResponseParser({ strictAccessUrl: true })(target, "$.data"),
+      "$.data.accessUrl"
     );
   });
 });
 
-describe("createEvaluationArtifactParser", () => {
-  const parseArtifact = createEvaluationArtifactParser(501);
+describe("createEvaluationCaptureMetadataParser", () => {
+  const parseCaptureMetadata = createEvaluationCaptureMetadataParser(501);
 
-  it.each([
-    "/results/artifacts/701/content",
-    "/api/results/artifacts/701/content"
-  ])("accepts the supported artifact content path: %s", (contentUrl) => {
-    expect(parseArtifact(createArtifact(contentUrl), "$.data").contentUrl).toBe(contentUrl);
+  it("accepts capture geometry without stored HTML fields", () => {
+    expect(parseCaptureMetadata(createCaptureMetadata(), "$.data")).toEqual(
+      createCaptureMetadata()
+    );
   });
 
-  it("rejects external or mismatched artifact content URLs", () => {
+  it("rejects metadata owned by another evaluation request", () => {
     expectContractError(
-      () => parseArtifact(createArtifact("https://attacker.example/artifact"), "$.data"),
-      "$.data.contentUrl"
+      () => parseCaptureMetadata(
+        { ...createCaptureMetadata(), requestId: 999 },
+        "$.data"
+      ),
+      "$.data.requestId"
+    );
+  });
+
+  it.each([
+    [{ deviceScaleFactor: 0 }, "$.data.deviceScaleFactor"],
+    [{ deviceScaleFactor: 10.1 }, "$.data.deviceScaleFactor"],
+    [{ pageWidthCssPx: 1279 }, "$.data.pageWidthCssPx"],
+    [{ pageHeightCssPx: 719 }, "$.data.pageHeightCssPx"],
+    [{ requestedUrl: "file:///tmp/capture.html" }, "$.data.requestedUrl"],
+    [{ finalUrl: "javascript:alert(1)" }, "$.data.finalUrl"]
+  ])("rejects invalid capture geometry or URLs", (override, fieldPath) => {
+    expectContractError(
+      () => parseCaptureMetadata({ ...createCaptureMetadata(), ...override }, "$.data"),
+      fieldPath
+    );
+  });
+});
+
+describe("createEvaluationIssuesResponseParser", () => {
+  const parseIssues = createEvaluationIssuesResponseParser(501);
+
+  it("keeps the locator path used by live markers and drops unused wire metadata", () => {
+    const parsed = parseIssues([createEvaluationIssue()], "$.data");
+    expect(parsed[0]?.locator).toEqual({
+      pathSteps: [{ context: "DOCUMENT", selector: "a.more", frameUrl: null }]
+    });
+  });
+
+  it.each([
+    [{ requestId: 999 }, "$.data[0].requestId"],
+    [{ module: "legacy_engine" }, "$.data[0].module"],
+    [{ severity: "HIGH" }, "$.data[0].severity"],
+    [{ id: 0 }, "$.data[0].id"]
+  ])("rejects invalid issue identity and enums", (override, fieldPath) => {
+    expectContractError(
+      () => parseIssues([{ ...createEvaluationIssue(), ...override }], "$.data"),
+      fieldPath
     );
   });
 });

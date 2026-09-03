@@ -145,7 +145,7 @@ try {
     1
   );
   assert.equal(
-    await productPreview.getByRole("region", { name: "네이버 접근성 검사 페이지 재현 화면" }).count(),
+    await productPreview.getByRole("region", { name: "네이버 접근성 검사 제품 미리보기 화면" }).count(),
     1
   );
   assert.equal(landingApiRequestCount, 0, "recent preview navigation unexpectedly called an API");

@@ -1,9 +1,8 @@
 package com.accessibility.platform.integration.service;
 
 import com.accessibility.platform.analysis.repository.AnalysisResultRepository;
-import com.accessibility.platform.artifact.domain.CaptureMode;
-import com.accessibility.platform.artifact.domain.EvaluationArtifact;
-import com.accessibility.platform.artifact.repository.EvaluationArtifactRepository;
+import com.accessibility.platform.capturemetadata.domain.EvaluationCaptureMetadata;
+import com.accessibility.platform.capturemetadata.repository.EvaluationCaptureMetadataRepository;
 import com.accessibility.platform.common.exception.ErrorCode;
 import com.accessibility.platform.organization.domain.Organization;
 import com.accessibility.platform.organization.domain.OrganizationType;
@@ -67,7 +66,7 @@ class AiEvaluationRunnerTransactionIntegrationTest {
     AnalysisResultRepository analysisResultRepository;
 
     @Autowired
-    EvaluationArtifactRepository artifactRepository;
+    EvaluationCaptureMetadataRepository captureMetadataRepository;
 
     @Autowired
     AiEvaluationIngestionService ingestionService;
@@ -199,14 +198,10 @@ class AiEvaluationRunnerTransactionIntegrationTest {
                 .map(result -> result.getId())
                 .toList();
         assertThat(originalAnalysisIds).hasSize(3);
-        Long originalArtifactId = transactionTemplate.execute(status -> {
+        Long originalCaptureMetadataId = transactionTemplate.execute(status -> {
             EvaluationRequest request = requestRepository.findById(requestId).orElseThrow();
-            return artifactRepository.saveAndFlush(new EvaluationArtifact(
+            return captureMetadataRepository.saveAndFlush(new EvaluationCaptureMetadata(
                     request,
-                    "duplicate-completed-preserved.html",
-                    "text/html",
-                    42,
-                    "a".repeat(64),
                     url,
                     url,
                     LocalDateTime.of(2026, 9, 1, 13, 0),
@@ -214,8 +209,7 @@ class AiEvaluationRunnerTransactionIntegrationTest {
                     720,
                     1.0,
                     1280,
-                    1200,
-                    CaptureMode.DOM_REPLAY
+                    1200
             )).getId();
         });
 
@@ -231,8 +225,8 @@ class AiEvaluationRunnerTransactionIntegrationTest {
         assertThat(analysisResultRepository.findByEvaluationRequestId(requestId))
                 .extracting(result -> result.getId())
                 .containsExactlyInAnyOrderElementsOf(originalAnalysisIds);
-        assertThat(artifactRepository.findByEvaluationRequestId(requestId).orElseThrow().getId())
-                .isEqualTo(originalArtifactId);
+        assertThat(captureMetadataRepository.findByEvaluationRequestId(requestId).orElseThrow().getId())
+                .isEqualTo(originalCaptureMetadataId);
     }
 
     @Test

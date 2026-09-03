@@ -1,8 +1,7 @@
 import type {
-  DashboardIssueGroup,
   DashboardLatestIssueCount,
   DashboardOverviewApiResponse,
-  EvaluationArtifact,
+  EvaluationCaptureMetadata,
   EvaluationIssue,
   EvaluationIssueSeverity,
   EvaluationRequestModel,
@@ -13,8 +12,7 @@ import type {
   LiveReportSession,
   Organization,
   RequestStatus,
-  ScoreResult,
-  SeverityLevel
+  ScoreResult
 } from "@/types/accessibility-domain";
 
 export type ApiResponseParser<T> = (value: unknown, path: string) => T;
@@ -77,6 +75,24 @@ function readRequired(record: Record<string, unknown>, key: string, path: string
     return failContract(undefined, `${path}.${key}`, "필수 필드");
   }
   return record[key];
+}
+
+type ContractFields = {
+  required<T>(key: string, parser: ApiResponseParser<T>): T;
+  optional<T>(key: string, parser: ApiResponseParser<T>): T | undefined;
+};
+
+function readFields(value: unknown, path: string): ContractFields {
+  const record = parseRecord(value, path);
+  const parseField = <T>(key: string, parser: ApiResponseParser<T>): T =>
+    parser(readRequired(record, key, path), `${path}.${key}`);
+  return {
+    required: parseField,
+    optional: <T>(key: string, parser: ApiResponseParser<T>): T | undefined =>
+      Object.prototype.hasOwnProperty.call(record, key)
+        ? parser(record[key], `${path}.${key}`)
+        : undefined
+  };
 }
 
 function parseString(value: unknown, path: string): string {
@@ -167,38 +183,6 @@ function parseLegacyOptionalAbsoluteHttpUrl(
   return "";
 }
 
-function parseOptionalNullableString(
-  record: Record<string, unknown>,
-  key: string,
-  path: string
-): string | null | undefined {
-  if (!Object.prototype.hasOwnProperty.call(record, key)) {
-    return undefined;
-  }
-  return parseNullableString(record[key], `${path}.${key}`);
-}
-
-function parseOptionalNullableNonBlankString(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-  maxLength?: number
-): string | null | undefined {
-  if (!Object.prototype.hasOwnProperty.call(record, key)) {
-    return undefined;
-  }
-  return record[key] === null
-    ? null
-    : parseNonBlankString(record[key], `${path}.${key}`, maxLength);
-}
-
-function parseBoolean(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") {
-    return failContract(value, path, "불리언");
-  }
-  return value;
-}
-
 function parseFiniteNumber(value: unknown, path: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return failContract(value, path, "유한한 숫자");
@@ -220,10 +204,6 @@ function parsePositiveFiniteNumber(value: unknown, path: string): number {
     return failContract(value, path, "0보다 큰 유한한 숫자");
   }
   return parsed;
-}
-
-function parseNullableFiniteNumber(value: unknown, path: string): number | null {
-  return value === null ? null : parseFiniteNumber(value, path);
 }
 
 function parsePositiveInteger(value: unknown, path: string): number {
@@ -294,6 +274,47 @@ function parseArray<T>(value: unknown, path: string, itemParser: ApiResponsePars
   return value.map((item, index) => itemParser(item, `${path}[${index}]`));
 }
 
+function indexUnique<T>({
+  items,
+  getIdentifier,
+  pathFor,
+  expected
+}: {
+  items: readonly T[];
+  getIdentifier: (item: T) => number;
+  pathFor: (index: number) => string;
+  expected: string;
+}): Map<number, T> {
+  const indexed = new Map<number, T>();
+  items.forEach((item, index) => {
+    const identifier = getIdentifier(item);
+    if (indexed.has(identifier)) {
+      throw new ApiContractValidationError({
+        fieldPath: pathFor(index),
+        expected,
+        actualType: `중복 ID ${identifier}`
+      });
+    }
+    indexed.set(identifier, item);
+  });
+  return indexed;
+}
+
+function assertKnownIdentifier(
+  identifier: number,
+  indexed: ReadonlyMap<number, unknown> | ReadonlySet<number>,
+  path: string,
+  expected: string
+): void {
+  if (!indexed.has(identifier)) {
+    throw new ApiContractValidationError({
+      fieldPath: path,
+      expected,
+      actualType: `참조할 수 없는 ID ${identifier}`
+    });
+  }
+}
+
 function assertExpectedIdentifier(
   actual: number,
   expected: number | undefined,
@@ -324,32 +345,23 @@ function assertExpectedString(
   }
 }
 
-const organizationTypes = ["GOVERNMENT", "PUBLIC_AGENCY", "UNIVERSITY", "COMPANY", "ETC"] as const;
 const organizationStatuses = ["ACTIVE", "INACTIVE"] as const;
 const targetTypes = ["WEB", "MOBILE_APP", "DOCUMENT", "KIOSK", "ETC"] as const;
 const targetStatuses = ["ACTIVE", "INACTIVE", "DELETED"] as const;
 const requestStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"] as const;
 const issueModules = ["rule_based", "text_difficulty", "cv_visual"] as const;
 const issueSeverities = ["CRITICAL", "SERIOUS", "MODERATE", "MINOR"] as const;
-const severityLevels = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
 
 export const parseOrganizationResponse: ApiResponseParser<Organization> = (value, path) => {
-  const record = parseRecord(value, path);
+  const fields = readFields(value, path);
   return {
-    id: parsePositiveInteger(readRequired(record, "id", path), `${path}.id`),
-    name: parseNonBlankString(readRequired(record, "name", path), `${path}.name`, 100),
-    type: parseEnumValue(readRequired(record, "type", path), `${path}.type`, organizationTypes),
-    homepageUrl:
-      parseNullableString(readRequired(record, "homepageUrl", path), `${path}.homepageUrl`) ?? "",
-    description:
-      parseNullableString(readRequired(record, "description", path), `${path}.description`) ?? "",
-    status: parseEnumValue(
-      readRequired(record, "status", path),
-      `${path}.status`,
-      organizationStatuses
-    ),
-    createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`),
-    updatedAt: parseDateTime(readRequired(record, "updatedAt", path), `${path}.updatedAt`)
+    id: fields.required("id", parsePositiveInteger),
+    name: fields.required("name", (field, fieldPath) =>
+      parseNonBlankString(field, fieldPath, 100)),
+    description: fields.required("description", parseNullableString) ?? "",
+    status: fields.required("status", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, organizationStatuses)),
+    updatedAt: fields.required("updatedAt", parseDateTime)
   };
 };
 
@@ -368,37 +380,25 @@ function parseEvaluationTarget(
   path: string,
   { strictAccessUrl = false }: { strictAccessUrl?: boolean } = {}
 ): EvaluationTarget {
-  const record = parseRecord(value, path);
+  const fields = readFields(value, path);
   return {
-    id: parsePositiveInteger(readRequired(record, "id", path), `${path}.id`),
-    organizationId: parsePositiveInteger(
-      readRequired(record, "organizationId", path),
-      `${path}.organizationId`
-    ),
-    name: parseNonBlankString(readRequired(record, "name", path), `${path}.name`, 100),
-    targetType: parseEnumValue(
-      readRequired(record, "targetType", path),
-      `${path}.targetType`,
-      targetTypes
-    ),
+    id: fields.required("id", parsePositiveInteger),
+    organizationId: fields.required("organizationId", parsePositiveInteger),
+    name: fields.required("name", (field, fieldPath) =>
+      parseNonBlankString(field, fieldPath, 100)),
+    targetType: fields.required("targetType", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, targetTypes)),
     accessUrl: strictAccessUrl
-      ? parseAbsoluteHttpUrl(readRequired(record, "accessUrl", path), `${path}.accessUrl`, 500)
-      : parseLegacyOptionalAbsoluteHttpUrl(
-          readRequired(record, "accessUrl", path),
-          `${path}.accessUrl`,
-          500
-        ),
-    faviconUrl: parseOptionalNullableString(record, "faviconUrl", path),
-    description:
-      parseNullableString(readRequired(record, "description", path), `${path}.description`) ?? "",
-    status: parseEnumValue(readRequired(record, "status", path), `${path}.status`, targetStatuses),
-    createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`),
-    updatedAt: parseDateTime(readRequired(record, "updatedAt", path), `${path}.updatedAt`)
+      ? fields.required("accessUrl", (field, fieldPath) =>
+          parseAbsoluteHttpUrl(field, fieldPath, 500))
+      : fields.required("accessUrl", (field, fieldPath) =>
+          parseLegacyOptionalAbsoluteHttpUrl(field, fieldPath, 500)),
+    faviconUrl: fields.optional("faviconUrl", parseNullableString),
+    status: fields.required("status", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, targetStatuses)),
+    createdAt: fields.required("createdAt", parseDateTime)
   };
 }
-
-export const parseEvaluationTargetResponse: ApiResponseParser<EvaluationTarget> = (value, path) =>
-  parseEvaluationTarget(value, path);
 
 export function createEvaluationTargetResponseParser({
   expectedId,
@@ -448,16 +448,11 @@ export function createEvaluationTargetsResponseParser(
       path,
       createEvaluationTargetResponseParser({ expectedOrganizationId })
     );
-    const ids = new Set<number>();
-    targets.forEach((target, index) => {
-      if (ids.has(target.id)) {
-        throw new ApiContractValidationError({
-          fieldPath: `${path}[${index}].id`,
-          expected: "중복되지 않는 평가 대상 ID",
-          actualType: `중복 ID ${target.id}`
-        });
-      }
-      ids.add(target.id);
+    indexUnique({
+      items: targets,
+      getIdentifier: (target) => target.id,
+      pathFor: (index) => `${path}[${index}].id`,
+      expected: "중복되지 않는 평가 대상 ID"
     });
     return targets;
   };
@@ -467,29 +462,14 @@ export const parseEvaluationRequestResponse: ApiResponseParser<EvaluationRequest
   value,
   path
 ) => {
-  const record = parseRecord(value, path);
-  const targetName = parseOptionalNullableNonBlankString(record, "targetName", path, 100);
+  const fields = readFields(value, path);
   return {
-    id: parsePositiveInteger(readRequired(record, "id", path), `${path}.id`),
-    evaluationTargetId: parsePositiveInteger(
-      readRequired(record, "evaluationTargetId", path),
-      `${path}.evaluationTargetId`
-    ),
-    targetName: targetName ?? undefined,
-    faviconUrl: parseOptionalNullableString(record, "faviconUrl", path),
-    status: parseEnumValue(
-      readRequired(record, "status", path),
-      `${path}.status`,
-      requestStatuses
-    ) as RequestStatus,
-    requestNote:
-      parseNullableString(readRequired(record, "requestNote", path), `${path}.requestNote`) ?? "",
-    requestedAt: parseDateTime(
-      readRequired(record, "requestedAt", path),
-      `${path}.requestedAt`
-    ),
-    createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`),
-    updatedAt: parseDateTime(readRequired(record, "updatedAt", path), `${path}.updatedAt`)
+    id: fields.required("id", parsePositiveInteger),
+    evaluationTargetId: fields.required("evaluationTargetId", parsePositiveInteger),
+    status: fields.required("status", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, requestStatuses)) as RequestStatus,
+    requestedAt: fields.required("requestedAt", parseDateTime),
+    updatedAt: fields.required("updatedAt", parseDateTime)
   };
 };
 
@@ -518,94 +498,31 @@ export const parseEvaluationRequestsResponse: ApiResponseParser<EvaluationReques
   path
 ) => {
   const requests = parseArray(value, path, parseEvaluationRequestResponse);
-  const ids = new Set<number>();
-  requests.forEach((request, index) => {
-    if (ids.has(request.id)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}[${index}].id`,
-        expected: "중복되지 않는 평가 요청 ID",
-        actualType: `중복 ID ${request.id}`
-      });
-    }
-    ids.add(request.id);
+  indexUnique({
+    items: requests,
+    getIdentifier: (request) => request.id,
+    pathFor: (index) => `${path}[${index}].id`,
+    expected: "중복되지 않는 평가 요청 ID"
   });
   return requests;
 };
 
 const parseEvaluationResultSummary: ApiResponseParser<EvaluationResultSummary> = (value, path) => {
-  const record = parseRecord(value, path);
-  const totalIssueCount = parseNonNegativeInteger(
-    readRequired(record, "totalIssueCount", path),
-    `${path}.totalIssueCount`
-  );
-  const criticalIssueCount = parseNonNegativeInteger(
-    readRequired(record, "criticalIssueCount", path),
-    `${path}.criticalIssueCount`
-  );
-  if (criticalIssueCount > totalIssueCount) {
-    return failContract(
-      criticalIssueCount,
-      `${path}.criticalIssueCount`,
-      "전체 이슈 수 이하의 정수"
-    );
-  }
+  const fields = readFields(value, path);
   return {
-    requestId: parsePositiveInteger(readRequired(record, "requestId", path), `${path}.requestId`),
-    targetName: parseNonBlankString(
-      readRequired(record, "targetName", path),
-      `${path}.targetName`,
-      100
-    ),
-    status: parseEnumValue(
-      readRequired(record, "status", path),
-      `${path}.status`,
-      requestStatuses
-    ) as RequestStatus,
-    totalScore: parseScore(readRequired(record, "totalScore", path), `${path}.totalScore`),
-    totalIssueCount,
-    criticalIssueCount,
-    requestedAt: parseDateTime(readRequired(record, "requestedAt", path), `${path}.requestedAt`)
+    requestId: fields.required("requestId", parsePositiveInteger),
+    totalScore: fields.required("totalScore", parseScore),
+    totalIssueCount: fields.required("totalIssueCount", parseNonNegativeInteger),
+    requestedAt: fields.required("requestedAt", parseDateTime)
   };
 };
 
 const parseScoreResult: ApiResponseParser<ScoreResult> = (value, path) => {
-  const record = parseRecord(value, path);
+  const fields = readFields(value, path);
   return {
-    id: parsePositiveInteger(readRequired(record, "id", path), `${path}.id`),
-    evaluationRequestId: parsePositiveInteger(
-      readRequired(record, "evaluationRequestId", path),
-      `${path}.evaluationRequestId`
-    ),
-    totalScore: parseScore(readRequired(record, "totalScore", path), `${path}.totalScore`),
-    ruleScore: parseScore(readRequired(record, "ruleScore", path), `${path}.ruleScore`),
-    aiScore: parseScore(readRequired(record, "aiScore", path), `${path}.aiScore`),
-    cvScore: parseScore(readRequired(record, "cvScore", path), `${path}.cvScore`),
-    createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`),
-    updatedAt: parseDateTime(readRequired(record, "updatedAt", path), `${path}.updatedAt`)
-  };
-};
-
-const parseDashboardIssueGroup: ApiResponseParser<DashboardIssueGroup> = (value, path) => {
-  const record = parseRecord(value, path);
-  return {
-    issueCode: parseBoundedStringWithFallback(
-      readRequired(record, "issueCode", path),
-      `${path}.issueCode`,
-      100,
-      "UNKNOWN"
-    ),
-    issueTitle: parseBoundedStringWithFallback(
-      readRequired(record, "issueTitle", path),
-      `${path}.issueTitle`,
-      200,
-      "제목 없는 접근성 이슈"
-    ),
-    severity: parseEnumValue(
-      readRequired(record, "severity", path),
-      `${path}.severity`,
-      severityLevels
-    ) as SeverityLevel,
-    count: parseNonNegativeInteger(readRequired(record, "count", path), `${path}.count`)
+    id: fields.required("id", parsePositiveInteger),
+    evaluationRequestId: fields.required("evaluationRequestId", parsePositiveInteger),
+    totalScore: fields.required("totalScore", parseScore)
   };
 };
 
@@ -613,218 +530,129 @@ const parseDashboardLatestIssueCount: ApiResponseParser<DashboardLatestIssueCoun
   value,
   path
 ) => {
-  const record = parseRecord(value, path);
-  const result: DashboardLatestIssueCount = {
-    evaluationTargetId: parsePositiveInteger(
-      readRequired(record, "evaluationTargetId", path),
-      `${path}.evaluationTargetId`
-    ),
-    requestId: parsePositiveInteger(readRequired(record, "requestId", path), `${path}.requestId`),
-    totalIssueCount: parseNonNegativeInteger(
-      readRequired(record, "totalIssueCount", path),
-      `${path}.totalIssueCount`
-    ),
-    criticalIssueCount: parseNonNegativeInteger(
-      readRequired(record, "criticalIssueCount", path),
-      `${path}.criticalIssueCount`
-    ),
-    highIssueCount: parseNonNegativeInteger(
-      readRequired(record, "highIssueCount", path),
-      `${path}.highIssueCount`
-    ),
-    mediumIssueCount: parseNonNegativeInteger(
-      readRequired(record, "mediumIssueCount", path),
-      `${path}.mediumIssueCount`
-    ),
-    lowIssueCount: parseNonNegativeInteger(
-      readRequired(record, "lowIssueCount", path),
-      `${path}.lowIssueCount`
-    ),
-    groups: parseArray(
-      readRequired(record, "groups", path),
-      `${path}.groups`,
-      parseDashboardIssueGroup
-    )
+  const fields = readFields(value, path);
+  return {
+    evaluationTargetId: fields.required("evaluationTargetId", parsePositiveInteger),
+    requestId: fields.required("requestId", parsePositiveInteger)
   };
-  const groupTotal = result.groups.reduce((sum, group) => sum + group.count, 0);
-  const severityTotals = {
-    CRITICAL: 0,
-    HIGH: 0,
-    MEDIUM: 0,
-    LOW: 0
-  };
-  result.groups.forEach((group) => {
-    severityTotals[group.severity] += group.count;
-  });
-  const expectedCounts: Array<[keyof typeof severityTotals, number, string]> = [
-    ["CRITICAL", result.criticalIssueCount, "criticalIssueCount"],
-    ["HIGH", result.highIssueCount, "highIssueCount"],
-    ["MEDIUM", result.mediumIssueCount, "mediumIssueCount"],
-    ["LOW", result.lowIssueCount, "lowIssueCount"]
-  ];
-  if (groupTotal !== result.totalIssueCount) {
-    return failContract(
-      result.totalIssueCount,
-      `${path}.totalIssueCount`,
-      `groups 합계 ${groupTotal}과 같은 정수`
-    );
-  }
-  for (const [severity, actualCount, field] of expectedCounts) {
-    if (actualCount !== severityTotals[severity]) {
-      return failContract(
-        actualCount,
-        `${path}.${field}`,
-        `${severity} groups 합계 ${severityTotals[severity]}과 같은 정수`
-      );
-    }
-  }
-  return result;
 };
 
 export const parseDashboardOverviewResponse: ApiResponseParser<DashboardOverviewApiResponse> = (
   value,
   path
 ) => {
-  const record = parseRecord(value, path);
-  const organizations = parseArray(
-    readRequired(record, "organizations", path),
-    `${path}.organizations`,
-    (organizationValue, organizationPath) => {
-      const organizationRecord = parseRecord(organizationValue, organizationPath);
+  const fields = readFields(value, path);
+  const organizations = fields.required("organizations", (organizationsValue, organizationsPath) =>
+    parseArray(organizationsValue, organizationsPath, (organizationValue, organizationPath) => {
+      const organizationFields = readFields(organizationValue, organizationPath);
       const organization = parseOrganizationResponse(organizationValue, organizationPath);
-      const evaluationTargets = parseArray(
-        readRequired(organizationRecord, "evaluationTargets", organizationPath),
-        `${organizationPath}.evaluationTargets`,
-        createEvaluationTargetResponseParser({ expectedOrganizationId: organization.id })
+      const evaluationTargets = organizationFields.required(
+        "evaluationTargets",
+        (targetsValue, targetsPath) => parseArray(
+          targetsValue,
+          targetsPath,
+          createEvaluationTargetResponseParser({ expectedOrganizationId: organization.id })
+        )
       );
       return {
         ...organization,
         evaluationTargets
       };
-    }
+    })
   );
-  const evaluationRequests = parseArray(
-    readRequired(record, "evaluationRequests", path),
-    `${path}.evaluationRequests`,
-    parseEvaluationRequestResponse
-  );
-  const resultSummaries = parseArray(
-    readRequired(record, "resultSummaries", path),
-    `${path}.resultSummaries`,
-    parseEvaluationResultSummary
-  );
-  const scoreResults = parseArray(
-    readRequired(record, "scoreResults", path),
-    `${path}.scoreResults`,
-    parseScoreResult
-  );
-  const latestIssueCounts = parseArray(
-    readRequired(record, "latestIssueCounts", path),
-    `${path}.latestIssueCounts`,
-    parseDashboardLatestIssueCount
-  );
+  const evaluationRequests = fields.required("evaluationRequests", (field, fieldPath) =>
+    parseArray(field, fieldPath, parseEvaluationRequestResponse));
+  const resultSummaries = fields.required("resultSummaries", (field, fieldPath) =>
+    parseArray(field, fieldPath, parseEvaluationResultSummary));
+  const scoreResults = fields.required("scoreResults", (field, fieldPath) =>
+    parseArray(field, fieldPath, parseScoreResult));
+  const latestIssueCounts = fields.required("latestIssueCounts", (field, fieldPath) =>
+    parseArray(field, fieldPath, parseDashboardLatestIssueCount));
   const evaluationTargets = organizations.flatMap(
     (organization) => organization.evaluationTargets
   );
 
-  const organizationIds = new Set<number>();
-  organizations.forEach((organization, index) => {
-    if (organizationIds.has(organization.id)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.organizations[${index}].id`,
-        expected: "중복되지 않는 조직 ID",
-        actualType: `중복 ID ${organization.id}`
-      });
-    }
-    organizationIds.add(organization.id);
+  indexUnique({
+    items: organizations,
+    getIdentifier: (organization) => organization.id,
+    pathFor: (index) => `${path}.organizations[${index}].id`,
+    expected: "중복되지 않는 조직 ID"
   });
-
-  const targetsById = new Map<number, EvaluationTarget>();
-  evaluationTargets.forEach((target, index) => {
-    if (targetsById.has(target.id)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.organizations[*].evaluationTargets[${index}].id`,
-        expected: "중복되지 않는 평가 대상 ID",
-        actualType: `중복 ID ${target.id}`
-      });
-    }
-    targetsById.set(target.id, target);
+  const targetsById = indexUnique({
+    items: evaluationTargets,
+    getIdentifier: (target) => target.id,
+    pathFor: (index) => `${path}.organizations[*].evaluationTargets[${index}].id`,
+    expected: "중복되지 않는 평가 대상 ID"
   });
-
-  const requestsById = new Map<number, EvaluationRequestModel>();
+  const requestsById = indexUnique({
+    items: evaluationRequests,
+    getIdentifier: (request) => request.id,
+    pathFor: (index) => `${path}.evaluationRequests[${index}].id`,
+    expected: "중복되지 않는 평가 요청 ID"
+  });
   evaluationRequests.forEach((request, index) => {
-    if (requestsById.has(request.id)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.evaluationRequests[${index}].id`,
-        expected: "중복되지 않는 평가 요청 ID",
-        actualType: `중복 ID ${request.id}`
-      });
-    }
-    if (!targetsById.has(request.evaluationTargetId)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.evaluationRequests[${index}].evaluationTargetId`,
-        expected: "organizations에 포함된 평가 대상 ID",
-        actualType: `참조할 수 없는 ID ${request.evaluationTargetId}`
-      });
-    }
-    requestsById.set(request.id, request);
+    assertKnownIdentifier(
+      request.evaluationTargetId,
+      targetsById,
+      `${path}.evaluationRequests[${index}].evaluationTargetId`,
+      "organizations에 포함된 평가 대상 ID"
+    );
   });
 
-  const summaryRequestIds = new Set<number>();
+  indexUnique({
+    items: resultSummaries,
+    getIdentifier: (summary) => summary.requestId,
+    pathFor: (index) => `${path}.resultSummaries[${index}].requestId`,
+    expected: "중복되지 않는 평가 요청 ID"
+  });
   resultSummaries.forEach((summary, index) => {
-    if (!requestsById.has(summary.requestId) || summaryRequestIds.has(summary.requestId)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.resultSummaries[${index}].requestId`,
-        expected: "존재하며 중복되지 않는 평가 요청 ID",
-        actualType: `유효하지 않은 ID ${summary.requestId}`
-      });
-    }
-    summaryRequestIds.add(summary.requestId);
+    assertKnownIdentifier(
+      summary.requestId,
+      requestsById,
+      `${path}.resultSummaries[${index}].requestId`,
+      "존재하는 평가 요청 ID"
+    );
   });
 
-  const scoreRequestIds = new Set<number>();
+  indexUnique({
+    items: scoreResults,
+    getIdentifier: (score) => score.evaluationRequestId,
+    pathFor: (index) => `${path}.scoreResults[${index}].evaluationRequestId`,
+    expected: "중복되지 않는 평가 요청 ID"
+  });
   scoreResults.forEach((scoreResult, index) => {
-    if (
-      !requestsById.has(scoreResult.evaluationRequestId) ||
-      scoreRequestIds.has(scoreResult.evaluationRequestId)
-    ) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.scoreResults[${index}].evaluationRequestId`,
-        expected: "존재하며 중복되지 않는 평가 요청 ID",
-        actualType: `유효하지 않은 ID ${scoreResult.evaluationRequestId}`
-      });
-    }
-    scoreRequestIds.add(scoreResult.evaluationRequestId);
+    assertKnownIdentifier(
+      scoreResult.evaluationRequestId,
+      requestsById,
+      `${path}.scoreResults[${index}].evaluationRequestId`,
+      "존재하는 평가 요청 ID"
+    );
   });
 
-  const latestTargetIds = new Set<number>();
+  indexUnique({
+    items: latestIssueCounts,
+    getIdentifier: (statistics) => statistics.evaluationTargetId,
+    pathFor: (index) => `${path}.latestIssueCounts[${index}].evaluationTargetId`,
+    expected: "중복되지 않는 최신 이슈 대상 ID"
+  });
   latestIssueCounts.forEach((statistics, index) => {
     const referencedRequest = requestsById.get(statistics.requestId);
-    if (!targetsById.has(statistics.evaluationTargetId)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.latestIssueCounts[${index}].evaluationTargetId`,
-        expected: "organizations에 포함된 평가 대상 ID",
-        actualType: `참조할 수 없는 ID ${statistics.evaluationTargetId}`
-      });
-    }
+    assertKnownIdentifier(
+      statistics.evaluationTargetId,
+      targetsById,
+      `${path}.latestIssueCounts[${index}].evaluationTargetId`,
+      "organizations에 포함된 평가 대상 ID"
+    );
     if (
       referencedRequest === undefined ||
       referencedRequest.evaluationTargetId !== statistics.evaluationTargetId
     ) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.latestIssueCounts[${index}].requestId`,
-        expected: `평가 대상 ${statistics.evaluationTargetId}에 속한 요청 ID`,
-        actualType: `참조할 수 없는 ID ${statistics.requestId}`
-      });
+      failContract(
+        statistics.requestId,
+        `${path}.latestIssueCounts[${index}].requestId`,
+        `평가 대상 ${statistics.evaluationTargetId}에 속한 요청 ID`
+      );
     }
-    if (latestTargetIds.has(statistics.evaluationTargetId)) {
-      throw new ApiContractValidationError({
-        fieldPath: `${path}.latestIssueCounts[${index}].evaluationTargetId`,
-        expected: "중복되지 않는 최신 이슈 대상 ID",
-        actualType: `중복 ID ${statistics.evaluationTargetId}`
-      });
-    }
-    latestTargetIds.add(statistics.evaluationTargetId);
   });
 
   return {
@@ -837,88 +665,48 @@ export const parseDashboardOverviewResponse: ApiResponseParser<DashboardOverview
 };
 
 const parseIssueLocatorPathStep: ApiResponseParser<IssueLocatorPathStep> = (value, path) => {
-  const record = parseRecord(value, path);
+  const fields = readFields(value, path);
   return {
     // Stored locator metadata predates the current replay vocabulary and can
     // contain lowercase/custom contexts or null selectors. Preserve that
     // valid wire data; the replay adapter filters unsupported steps safely.
-    context:
-      parseNullableString(readRequired(record, "context", path), `${path}.context`) ?? "",
-    selector:
-      parseNullableString(readRequired(record, "selector", path), `${path}.selector`) ?? "",
-    frameUrl: parseNullableString(readRequired(record, "frameUrl", path), `${path}.frameUrl`)
+    context: fields.required("context", parseNullableString) ?? "",
+    selector: fields.required("selector", parseNullableString) ?? "",
+    frameUrl: fields.required("frameUrl", parseNullableString)
   };
 };
 
 const parseIssueLocator: ApiResponseParser<IssueLocator> = (value, path) => {
-  const record = parseRecord(value, path);
-  const visibleValue = readRequired(record, "visible", path);
+  const fields = readFields(value, path);
   return {
-    kind: parseNullableString(readRequired(record, "kind", path), `${path}.kind`) ?? "",
-    pathSteps: parseArray(
-      readRequired(record, "pathSteps", path),
-      `${path}.pathSteps`,
-      parseIssueLocatorPathStep
-    ),
-    x: parseNullableFiniteNumber(readRequired(record, "x", path), `${path}.x`),
-    y: parseNullableFiniteNumber(readRequired(record, "y", path), `${path}.y`),
-    width: parseNullableFiniteNumber(readRequired(record, "width", path), `${path}.width`),
-    height: parseNullableFiniteNumber(readRequired(record, "height", path), `${path}.height`),
-    coordinateSpace: parseNullableString(
-      readRequired(record, "coordinateSpace", path),
-      `${path}.coordinateSpace`
-    ),
-    visible: visibleValue === null ? null : parseBoolean(visibleValue, `${path}.visible`),
-    htmlSnippet: parseNullableString(
-      readRequired(record, "htmlSnippet", path),
-      `${path}.htmlSnippet`
-    )
+    pathSteps: fields.required("pathSteps", (field, fieldPath) =>
+      parseArray(field, fieldPath, parseIssueLocatorPathStep))
   };
 };
 
 const parseEvaluationIssue: ApiResponseParser<EvaluationIssue> = (value, path) => {
-  const record = parseRecord(value, path);
-  const locatorValue = readRequired(record, "locator", path);
+  const fields = readFields(value, path);
   return {
-    id: parsePositiveInteger(readRequired(record, "id", path), `${path}.id`),
-    requestId: parsePositiveInteger(readRequired(record, "requestId", path), `${path}.requestId`),
-    module: parseEnumValue(
-      readRequired(record, "module", path),
-      `${path}.module`,
-      issueModules
-    ),
-    severity: parseEnumValue(
-      readRequired(record, "severity", path),
-      `${path}.severity`,
-      issueSeverities
-    ) as EvaluationIssueSeverity,
-    title: parseBoundedStringWithFallback(
-      readRequired(record, "title", path),
-      `${path}.title`,
-      200,
-      "제목 없는 접근성 이슈"
-    ),
-    description: parseNullableString(
-      readRequired(record, "description", path),
-      `${path}.description`
-    ),
-    recommendation: parseNullableString(
-      readRequired(record, "recommendation", path),
-      `${path}.recommendation`
-    ),
-    selector: parseNullableString(readRequired(record, "selector", path), `${path}.selector`),
-    locator: locatorValue === null ? null : parseIssueLocator(locatorValue, `${path}.locator`),
-    wcagCode: parseBoundedStringWithFallback(
-      readRequired(record, "wcagCode", path),
-      `${path}.wcagCode`,
-      100,
-      "UNKNOWN"
-    ),
-    createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`)
+    id: fields.required("id", parsePositiveInteger),
+    requestId: fields.required("requestId", parsePositiveInteger),
+    module: fields.required("module", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, issueModules)),
+    severity: fields.required("severity", (field, fieldPath) =>
+      parseEnumValue(field, fieldPath, issueSeverities)) as EvaluationIssueSeverity,
+    title: fields.required("title", (field, fieldPath) =>
+      parseBoundedStringWithFallback(field, fieldPath, 200, "제목 없는 접근성 이슈")),
+    description: fields.required("description", parseNullableString),
+    recommendation: fields.required("recommendation", parseNullableString),
+    selector: fields.required("selector", parseNullableString),
+    locator: fields.required("locator", (field, fieldPath) =>
+      field === null ? null : parseIssueLocator(field, fieldPath)),
+    wcagCode: fields.required("wcagCode", (field, fieldPath) =>
+      parseBoundedStringWithFallback(field, fieldPath, 100, "UNKNOWN")),
+    createdAt: fields.required("createdAt", parseDateTime)
   };
 };
 
-export const parseEvaluationIssuesResponse: ApiResponseParser<EvaluationIssue[]> = (value, path) =>
+const parseEvaluationIssuesResponse: ApiResponseParser<EvaluationIssue[]> = (value, path) =>
   parseArray(value, path, parseEvaluationIssue);
 
 export function createEvaluationIssuesResponseParser(
@@ -938,60 +726,24 @@ export function createEvaluationIssuesResponseParser(
   };
 }
 
-export function createEvaluationArtifactParser(
+export function createEvaluationCaptureMetadataParser(
   expectedRequestId: number
-): ApiResponseParser<EvaluationArtifact> {
+): ApiResponseParser<EvaluationCaptureMetadata> {
   return (value, path) => {
-    const record = parseRecord(value, path);
-    const id = parsePositiveInteger(readRequired(record, "id", path), `${path}.id`);
-    const requestId = parsePositiveInteger(
-      readRequired(record, "requestId", path),
-      `${path}.requestId`
-    );
+    const fields = readFields(value, path);
+    const id = fields.required("id", parsePositiveInteger);
+    const requestId = fields.required("requestId", parsePositiveInteger);
     if (requestId !== expectedRequestId) {
       return failContract(requestId, `${path}.requestId`, `요청 ID ${expectedRequestId}`);
     }
-    const captureMode = parseEnumValue(
-      readRequired(record, "captureMode", path),
-      `${path}.captureMode`,
-      ["DOM_REPLAY"] as const
-    );
-    const contentType = parseEnumValue(
-      readRequired(record, "contentType", path),
-      `${path}.contentType`,
-      ["text/html"] as const
-    );
-    const contentUrl = parseString(readRequired(record, "contentUrl", path), `${path}.contentUrl`);
-    if (!["/api", ""].some((prefix) => contentUrl === `${prefix}/results/artifacts/${id}/content`)) {
-      return failContract(contentUrl, `${path}.contentUrl`, `artifact ${id}의 상대 콘텐츠 URL`);
-    }
-    const sha256 = parseString(readRequired(record, "sha256", path), `${path}.sha256`);
-    if (!/^[a-f\d]{64}$/i.test(sha256)) {
-      return failContract(sha256, `${path}.sha256`, "64자리 SHA-256 문자열");
-    }
-    const viewportWidthCssPx = parsePositiveInteger(
-      readRequired(record, "viewportWidthCssPx", path),
-      `${path}.viewportWidthCssPx`
-    );
-    const viewportHeightCssPx = parsePositiveInteger(
-      readRequired(record, "viewportHeightCssPx", path),
-      `${path}.viewportHeightCssPx`
-    );
-    const deviceScaleFactor = parsePositiveFiniteNumber(
-      readRequired(record, "deviceScaleFactor", path),
-      `${path}.deviceScaleFactor`
-    );
+    const viewportWidthCssPx = fields.required("viewportWidthCssPx", parsePositiveInteger);
+    const viewportHeightCssPx = fields.required("viewportHeightCssPx", parsePositiveInteger);
+    const deviceScaleFactor = fields.required("deviceScaleFactor", parsePositiveFiniteNumber);
     if (deviceScaleFactor < 0.1 || deviceScaleFactor > 10) {
       return failContract(deviceScaleFactor, `${path}.deviceScaleFactor`, "0.1 이상 10 이하의 숫자");
     }
-    const pageWidthCssPx = parsePositiveInteger(
-      readRequired(record, "pageWidthCssPx", path),
-      `${path}.pageWidthCssPx`
-    );
-    const pageHeightCssPx = parsePositiveInteger(
-      readRequired(record, "pageHeightCssPx", path),
-      `${path}.pageHeightCssPx`
-    );
+    const pageWidthCssPx = fields.required("pageWidthCssPx", parsePositiveInteger);
+    const pageHeightCssPx = fields.required("pageHeightCssPx", parsePositiveInteger);
     if (pageWidthCssPx < viewportWidthCssPx) {
       return failContract(pageWidthCssPx, `${path}.pageWidthCssPx`, "viewport 너비 이상의 숫자");
     }
@@ -1002,24 +754,14 @@ export function createEvaluationArtifactParser(
     return {
       id,
       requestId,
-      requestedUrl: parseAbsoluteHttpUrl(
-        readRequired(record, "requestedUrl", path),
-        `${path}.requestedUrl`
-      ),
-      finalUrl: parseAbsoluteHttpUrl(readRequired(record, "finalUrl", path), `${path}.finalUrl`),
-      capturedAt: parseDateTime(readRequired(record, "capturedAt", path), `${path}.capturedAt`),
+      requestedUrl: fields.required("requestedUrl", parseAbsoluteHttpUrl),
+      finalUrl: fields.required("finalUrl", parseAbsoluteHttpUrl),
+      capturedAt: fields.required("capturedAt", parseDateTime),
       viewportWidthCssPx,
       viewportHeightCssPx,
       deviceScaleFactor,
       pageWidthCssPx,
-      pageHeightCssPx,
-      captureMode,
-      contentUrl,
-      contentType,
-      sizeBytes: parsePositiveInteger(readRequired(record, "sizeBytes", path), `${path}.sizeBytes`),
-      sha256,
-      createdAt: parseDateTime(readRequired(record, "createdAt", path), `${path}.createdAt`),
-      updatedAt: parseDateTime(readRequired(record, "updatedAt", path), `${path}.updatedAt`)
+      pageHeightCssPx
     };
   };
 }
@@ -1028,25 +770,16 @@ export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession
   value,
   path
 ) => {
-  const record = parseRecord(value, path);
-  const sessionId = parseNonBlankString(
-    readRequired(record, "sessionId", path),
-    `${path}.sessionId`,
-    128
-  );
+  const fields = readFields(value, path);
+  const sessionId = fields.required("sessionId", (field, fieldPath) =>
+    parseNonBlankString(field, fieldPath, 128));
   if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) {
     return failContract(sessionId, `${path}.sessionId`, "URL-safe session identifier");
   }
 
-  const runtimeUrl = parseAbsoluteHttpUrl(
-    readRequired(record, "runtimeUrl", path),
-    `${path}.runtimeUrl`
-  );
-  const viewerOrigin = parseNonBlankString(
-    readRequired(record, "viewerOrigin", path),
-    `${path}.viewerOrigin`,
-    512
-  );
+  const runtimeUrl = fields.required("runtimeUrl", parseAbsoluteHttpUrl);
+  const viewerOrigin = fields.required("viewerOrigin", (field, fieldPath) =>
+    parseNonBlankString(field, fieldPath, 512));
   const parsedRuntimeUrl = new URL(runtimeUrl);
   if (viewerOrigin !== "null") {
     const parsedViewerOrigin = new URL(parseAbsoluteHttpUrl(viewerOrigin, `${path}.viewerOrigin`, 512));
@@ -1067,20 +800,14 @@ export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession
     }
   }
 
-  const nonce = parseNonBlankString(
-    readRequired(record, "nonce", path),
-    `${path}.nonce`,
-    256
-  );
+  const nonce = fields.required("nonce", (field, fieldPath) =>
+    parseNonBlankString(field, fieldPath, 256));
   if (!/^[A-Za-z0-9_-]{32,256}$/.test(nonce)) {
     return failContract(nonce, `${path}.nonce`, "32~256자 URL-safe nonce");
   }
 
-  const bridgeSecret = parseNonBlankString(
-    readRequired(record, "bridgeSecret", path),
-    `${path}.bridgeSecret`,
-    256
-  );
+  const bridgeSecret = fields.required("bridgeSecret", (field, fieldPath) =>
+    parseNonBlankString(field, fieldPath, 256));
   if (!/^[A-Za-z0-9_-]{32,256}$/.test(bridgeSecret)) {
     return failContract(
       bridgeSecret,
@@ -1102,7 +829,7 @@ export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession
     viewerOrigin,
     nonce,
     bridgeSecret,
-    expiresAt: parseDateTime(readRequired(record, "expiresAt", path), `${path}.expiresAt`)
+    expiresAt: fields.required("expiresAt", parseDateTime)
   };
 };
 

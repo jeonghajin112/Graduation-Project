@@ -1,6 +1,6 @@
 ﻿@import "tailwindcss";
 
-@import "pretendard/dist/web/variable/pretendardvariable.css";
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 @import "./styles/theme-tokens.css";
 
 @theme inline {
@@ -1386,11 +1386,40 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-loading-bar {
+  --site-page-evidence-loading-progress: 0;
+
+  position: relative;
+  isolation: isolate;
   width: min(16rem, 70%);
   height: 0.5rem;
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--dashboard-text-muted) 16%, transparent);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-loading-bar::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--dashboard-accent) 72%, white),
+    var(--dashboard-accent)
+  );
+  box-shadow: 0 0 0.625rem color-mix(in srgb, var(--dashboard-accent) 24%, transparent);
+  transform: scaleX(var(--site-page-evidence-loading-progress));
+  transform-origin: left center;
+  will-change: transform;
+  transition: transform 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-loading-bar::before {
+    transition: none;
+  }
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-empty {
@@ -1545,6 +1574,16 @@
 }
 
 @media (forced-colors: active) {
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-loading-bar {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-loading-bar::before {
+    background: Highlight;
+    box-shadow: none;
+  }
+
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-fallback-detail,
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-fallback-detail__tag,
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-fallback-detail__title,
@@ -1592,20 +1631,6 @@
   gap: 0.5rem 0.75rem;
   min-height: 2.25rem;
   padding: 0.5rem 0.125rem 0;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-connection {
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-connection {
-  color: var(--dashboard-text-muted);
-  font-weight: 700;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-connection[data-state="error"] {
-  color: var(--site-severity-high-text);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-locator-status {

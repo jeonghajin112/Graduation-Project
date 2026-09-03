@@ -95,7 +95,7 @@ npm test                 # 빌드 + CI용 격리 브라우저 검증
 npm run test:browser     # 페이지 증거 full 계약을 포함한 전체 격리 브라우저 검증
 npm run test:recovery    # Quick Analyze mutex·timeout·reload·SPA 복구 검증
 npm run test:visual      # 랜딩 화면 시각 검증
-npm run test:replay      # 백엔드 sanitizer 소스와 맞추는 replay 계약 검증
+npm run test:replay      # 실제 live rewriter 출력의 마커·보안 채널 브라우저 회귀 검증
 ```
 
 개별 `npm run verify:*` 명령도 같은 관리형 runner를 사용하므로 필요한 Vite 서버를 직접 시작하고, 격리된 API fixture를 주입한 뒤 종료합니다. 번들 경계 단독 검증도 항상 새 분석 빌드를 먼저 생성합니다.
@@ -140,7 +140,7 @@ CI fixture는 등록되지 않은 API 호출을 실패 처리하여 실제 DB나
 
 - `src/config/api.ts`: API base URL과 경로 조합 담당
 - `src/services/backend-api.ts`: HTTP 요청, 응답 envelope 처리, 계약 오류 변환, 대시보드 ViewModel 조립 담당
-- `src/services/api-contracts.ts`: overview·이슈·조직·페이지·평가 요청·artifact 응답의 런타임 계약 검증과 안전한 정규화 담당
+- `src/services/api-contracts.ts`: overview·이슈·조직·페이지·평가 요청·캡처 메타데이터·라이브 세션 응답의 런타임 계약 검증과 안전한 정규화 담당
 
 목 서버는 제거되어 있습니다. 로컬 실행 시 실제 백엔드 API를 실행하거나 Vite 프록시를 사용해야 합니다.
 
@@ -148,7 +148,8 @@ CI fixture는 등록되지 않은 API 호출을 실패 처리하여 실제 DB나
 
 - `GET http://localhost:9090/api/dashboard/overview`: 프로젝트·페이지·요청·점수·최신 이슈 집계
 - `GET http://localhost:9090/api/results/requests/{requestId}/issues`: 선택한 페이지 상세 이슈 지연 로딩
-- `GET http://localhost:9090/api/results/requests/{requestId}/artifact`: 선택한 페이지 재현 문서
+- `GET http://localhost:9090/api/results/requests/{requestId}/capture-metadata`: 분석 시각과 원본 viewport/page 크기
+- `POST http://localhost:9090/api/results/requests/{requestId}/live-session`: 동적 페이지 뷰어 세션과 일회성 runtime URL
 
 백엔드 성공 응답은 `{ success, data, message }` envelope를 반드시 포함해야 합니다. `success`가 `false`이면 API 에러로 처리하고, `true`여도 `data`를 바로 타입 단언하지 않고 엔드포인트별 런타임 파서로 검증한 뒤 화면용 모델로 변환합니다. 계약이 어긋나면 잘못된 필드 경로와 요청 경로를 포함한 `ApiRequestError`가 렌더링 전에 발생합니다. 페이지 주소는 새로 등록할 때 최대 500자의 절대 `http/https` URL만 허용하며, 기존 DB의 빈 주소는 링크 없이 안전하게 표시합니다. 프로젝트·페이지 생성과 분석 요청 같은 mutation은 각 작업의 전용 API를 사용하고, 성공 후 overview를 다시 불러와 화면 상태를 조정합니다.
 

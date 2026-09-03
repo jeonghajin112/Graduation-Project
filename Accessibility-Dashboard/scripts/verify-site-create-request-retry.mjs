@@ -270,11 +270,6 @@ try {
       return;
     }
 
-    if (method === "GET" && pathname === `/api/scores/requests/${completedRequest.id}`) {
-      await fulfillJson(route, score);
-      return;
-    }
-
     const requestLabel = `${method} ${pathname}`;
     observed.unknownRequests.add(requestLabel);
     await fulfillJson(
