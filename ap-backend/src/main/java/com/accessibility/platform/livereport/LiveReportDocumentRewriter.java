@@ -809,41 +809,54 @@ public class LiveReportDocumentRewriter {
                   }
                 }
                 #ap-live-marker-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none}
-                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;width:24px;height:24px;border:0;
-                border-radius:50%;background:var(--ap-marker-color,#0b6ff4);color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.3);
-                pointer-events:auto;cursor:pointer;display:grid;place-items:center;font:700 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
-                transform:translate(-50%,-50%);isolation:isolate}
+                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;display:inline-flex;align-items:center;gap:5px;
+                height:18px;padding:0 8px 0 7px;border:0;border-radius:999px;background:#1d1d1f;color:#fff;box-shadow:0 2px 6px rgba(16,24,40,.22);
+                pointer-events:auto;cursor:pointer;white-space:nowrap;font:700 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:0;
+                transform:translate(0,-50%);transform-origin:0 50%;isolation:isolate}
+                .ap-live-marker::before{content:"";box-sizing:border-box;flex:none;width:6px;height:6px;border-radius:50%;
+                background:var(--ap-marker-color,#0b6ff4);box-shadow:0 0 0 1.5px rgba(255,255,255,.18)}
+                .ap-live-marker__icon{all:initial;box-sizing:border-box;display:inline-block;color:inherit;font:inherit;letter-spacing:inherit;
+                white-space:nowrap;pointer-events:none}
                 .ap-live-marker[hidden]{display:none!important}
-                .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 3px 10px rgba(0,0,0,.34)}
+                .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 4px 10px rgba(16,24,40,.28)}
+                .ap-live-marker[aria-expanded="true"]{box-shadow:0 4px 10px rgba(16,24,40,.28)}
+                .ap-live-marker.is-selected{background:#0b6ff4;box-shadow:0 4px 12px rgba(11,111,244,.4)}
+                .ap-live-marker.is-selected::before{background:#fff;box-shadow:0 0 0 1.5px rgba(255,255,255,.35)}
                 .ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}
-                .ap-live-marker__count{all:initial;box-sizing:border-box;position:absolute;left:calc(50% + 10px);top:calc(50% - 10px);min-width:14px;height:14px;padding:0 3px;
-                border:0;border-radius:999px;background:#101828;color:#fff;display:grid;place-items:center;
-                font:700 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.28);
-                pointer-events:none;transform:translate(-50%,-50%)}
+                .ap-live-marker__count{all:initial;box-sizing:border-box;position:absolute;right:-6px;top:-6px;min-width:13px;height:13px;padding:0 3px;
+                border:0;border-radius:999px;background:#ff3b30;color:#fff;display:grid;place-items:center;
+                font:700 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 3px rgba(16,24,40,.25);
+                pointer-events:none}
                 .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(360px,calc(100vw - 24px));
-                min-height:218px;max-height:min(440px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
+                min-height:0;max-height:min(440px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
                 border-radius:14px;background:rgba(255,255,255,.96);color:#101828;box-shadow:0 18px 44px rgba(16,24,40,.25),inset 0 1px rgba(255,255,255,.9);
                 -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);pointer-events:auto;
                 font:400 13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:left;transform-origin:top left}
                 .ap-live-popover[hidden]{display:none!important}.ap-live-popover *{box-sizing:border-box}
-                .ap-live-popover__header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px 8px}
-                .ap-live-popover__group{margin:0;color:#344054;font:700 12px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
-                .ap-live-popover__close{all:initial;width:28px;height:28px;border-radius:8px;color:#475467;cursor:pointer;display:grid;place-items:center;
-                font:700 18px/1 system-ui,-apple-system,"Segoe UI",sans-serif}.ap-live-popover__close:hover{background:#f2f4f7}
-                .ap-live-popover__close:focus-visible,.ap-live-popover__tab:focus-visible{outline:2px solid #0b6ff4;outline-offset:1px}
-                .ap-live-popover__tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;max-height:108px;overflow:auto;padding:0 12px 9px}
-                .ap-live-popover__tabs,.ap-live-popover__detail{scrollbar-width:none!important;-ms-overflow-style:none!important}
-                .ap-live-popover__tabs::-webkit-scrollbar,.ap-live-popover__detail::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
-                .ap-live-popover__tabs[hidden]{display:none!important}
-                .ap-live-popover__tab{all:initial;min-width:0;padding:7px 8px;border-radius:8px;background:#f8fafc;color:#344054;cursor:pointer;
-                box-shadow:inset 0 0 0 1px rgba(16,24,40,.08);display:grid;grid-template-columns:18px minmax(0,1fr);gap:7px;align-items:start;
-                font:600 11px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif}
-                .ap-live-popover__tab[aria-selected=true]{background:#eff8ff;box-shadow:inset 0 0 0 2px #0b6ff4}.ap-live-popover__tab-icon{font-size:13px;text-align:center}
-                .ap-live-popover__tab-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ap-live-popover__tab-meta{display:block;color:#667085;font-size:10px}
-                .ap-live-popover__detail{min-height:142px;max-height:270px;overflow:auto;border-top:1px solid #eaecf0;padding:10px 12px 12px}
-                .ap-live-popover[data-grouped=true]{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:min(340px,calc(100vh - 24px));min-height:0}
-                .ap-live-popover[data-grouped=true] .ap-live-popover__detail{min-height:0;max-height:none}
-                .ap-live-popover__tags{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 7px}.ap-live-popover__tag{display:inline-flex;padding:3px 7px;border-radius:999px;background:#f2f4f7;color:#475467;font:700 10px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
+                .ap-live-popover__toolbar{display:flex;align-items:center;gap:8px;min-height:36px;padding:12px 12px 0}
+                .ap-live-popover__severity,.ap-live-popover__code{display:inline-flex;align-items:center;min-width:0;border-radius:999px;
+                font:700 9px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;white-space:nowrap}
+                .ap-live-popover__severity{padding:3px 6px;background:var(--ap-issue-severity-color,#98a2b3);color:#101828}
+                .ap-live-popover__code{max-width:140px;padding:3px 7px;background:#101828;color:#fff;
+                overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+                .ap-live-popover__tags{display:flex;align-items:center;justify-content:flex-start;gap:6px;min-width:0;margin:0}
+                .ap-live-popover__tags .ap-live-popover__severity,.ap-live-popover__tags .ap-live-popover__code{font-size:10px;padding:4px 8px}
+                .ap-live-popover__pager{display:inline-flex;align-items:center;gap:4px;margin-left:auto;padding:2px;border-radius:999px;background:#f2f4f7}
+                .ap-live-popover__pager[hidden]{display:none!important}
+                .ap-live-popover__pager-button{all:initial;box-sizing:border-box;width:24px;height:24px;border:0;border-radius:50%;
+                background:transparent;color:#475467;display:grid;place-items:center;cursor:pointer;
+                transition:background .15s ease,color .15s ease,box-shadow .15s ease}
+                .ap-live-popover__pager-button:not(:disabled):hover{background:#ffffff;color:#101828;box-shadow:0 1px 3px rgba(16,24,40,.18)}
+                .ap-live-popover__pager-button:not(:disabled):active{background:#e4e7ec;box-shadow:none}
+                .ap-live-popover__pager-button:focus-visible{outline:2px solid #0b6ff4;outline-offset:1px}
+                .ap-live-popover__pager-button:disabled{cursor:default;color:#c0c6cf}
+                .ap-live-popover__pager-glyph{display:block;width:12px;height:12px;overflow:visible}
+                .ap-live-popover__pager-glyph>path{fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+                .ap-live-popover__position{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+                overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+                .ap-live-popover__detail{min-height:142px;max-height:270px;overflow:auto;padding:8px 12px 12px;
+                scrollbar-width:none!important;-ms-overflow-style:none!important}
+                .ap-live-popover__detail::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}
                 .ap-live-popover__title{margin:0 0 6px;color:#101828;font:700 14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;word-break:keep-all;overflow-wrap:anywhere}
                 .ap-live-popover__message{margin:0 0 8px;color:#344054;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
                 .ap-live-popover__path{display:block;margin:0;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#f8fafc;color:#475467;
@@ -852,7 +865,10 @@ public class LiveReportDocumentRewriter {
                 width:0!important;height:0!important;overflow:visible!important;pointer-events:none!important}
                 .ap-live-highlight[hidden]{display:none!important}
                 .ap-live-highlight__fragment{all:initial!important;box-sizing:border-box!important;position:absolute!important;
-                border-style:solid!important;border-color:#0b6ff4!important;pointer-events:none!important;transform:none!important}
+                border-style:solid!important;border-color:var(--ap-highlight-color,#0b6ff4)!important;border-radius:8px!important;
+                background:color-mix(in srgb,var(--ap-highlight-color,#0b6ff4) 6%,transparent)!important;pointer-events:none!important;transform:none!important}
+                .ap-live-highlight.is-selected .ap-live-highlight__fragment{border-color:#0b6ff4!important;background:rgba(11,111,244,.1)!important;
+                box-shadow:0 0 0 4px rgba(11,111,244,.14)!important}
                 @media(prefers-reduced-motion:no-preference){.ap-live-marker{transition:box-shadow 120ms ease}}
                 @media(forced-colors:active){.ap-live-marker{forced-color-adjust:auto;border-color:Canvas}.ap-live-popover{background:Canvas;color:CanvasText;border:2px solid CanvasText;box-shadow:none}.ap-live-highlight__fragment{border-color:Highlight!important}}
                 """;
@@ -896,6 +912,7 @@ public class LiveReportDocumentRewriter {
                   const nativeNodeContains = Node.prototype.contains;
                   const nativeGetRootNode = Node.prototype.getRootNode;
                   const nativeClosest = Element.prototype.closest;
+                  const nativeScrollIntoView = Element.prototype.scrollIntoView;
                   const nativePortPostMessage = MessagePort.prototype.postMessage;
                   const nativePortStart = MessagePort.prototype.start;
                   const nativePortClose = MessagePort.prototype.close;
@@ -925,6 +942,15 @@ public class LiveReportDocumentRewriter {
                   let handleLiveCommand = null;
                   const pendingEvents = [];
                   let marked = [];
+                  let currentIssues = [];
+                  let focusRequestVersion = 0;
+                  let locatorTargetsNeedReconciliation = false;
+                  let lastFocusedIssueId = null;
+                  const locatorStateOnlyAttributes = new Set([
+                    'style', 'hidden', 'inert', 'aria-hidden', 'aria-current',
+                    'aria-expanded', 'aria-selected', 'tabindex'
+                  ]);
+                  const locatorStatusSignatures = new Map();
                   let ready = false;
                   let viewScale = 1;
                   let healthCheckTimer = 0;
@@ -946,21 +972,19 @@ public class LiveReportDocumentRewriter {
                   highlight.className = 'ap-live-highlight';
                   highlight.hidden = true;
                   highlight.setAttribute('aria-hidden', 'true');
-                  const markerIcons = Object.freeze({
-                    text:'T', visual:'◉', media:'▶', navigation:'↗', form:'▣', keyboard:'⌨',
-                    interaction:'◎', structure:'◇', general:'!', multiple:'＋'
-                  });
+                  // 마커 칩에는 어느 분석 엔진이 찾았는지만 짧게 적는다 (자세한 원인은 팝오버)
+                  const markerEngineLabels = Object.freeze({RULE_BASED:'규칙', AI_TEXT:'텍스트', CV_VISION:'시각'});
+                  const renderMarkerLabel = (container, engine) => {
+                    container.textContent = markerEngineLabels[String(engine || '').toUpperCase()] || '검사';
+                  };
                   const severityRanks = Object.freeze({LOW:1,MEDIUM:2,MODERATE:2,HIGH:3,SERIOUS:3,CRITICAL:4});
                   const severityColors = Object.freeze({
                     LOW:'#10b981',MEDIUM:'#f3b234',MODERATE:'#f3b234',HIGH:'#fb8a3d',SERIOUS:'#fb8a3d',CRITICAL:'#f35f63'
                   });
-                  const markerCircleSize = 24;
-                  const markerCountPillMinWidth = 14;
-                  const markerCountPillHorizontalPadding = 6;
-                  const markerCountPillDigitWidth = 5;
-                  const markerCountBadgeCenterX = 10;
-                  const markerCountBadgeCenterY = -10;
-                  const markerCountBadgeHeight = 14;
+                  const markerPillHeight = 18;
+                  const markerPillEstimatedWidth = 52;
+                  const markerCornerOverhang = 8;
+                  const markerCountBadgeOverhang = 6;
                   const markerCollisionGap = 6;
                   const markerTargetGap = 6;
                   const markerSlotStep = 40;
@@ -976,26 +1000,51 @@ public class LiveReportDocumentRewriter {
                   popover.tabIndex = -1;
                   popover.setAttribute('role', 'dialog');
                   popover.setAttribute('aria-label', '접근성 이슈 상세');
-                  const popoverHeader = document.createElement('header');
-                  popoverHeader.className = 'ap-live-popover__header';
-                  const popoverGroup = document.createElement('p');
-                  popoverGroup.className = 'ap-live-popover__group';
-                  const popoverClose = document.createElement('button');
-                  popoverClose.type = 'button';
-                  popoverClose.className = 'ap-live-popover__close';
-                  popoverClose.textContent = '×';
-                  popoverClose.setAttribute('aria-label', '이슈 상세 닫기');
-                  popoverHeader.append(popoverGroup, popoverClose);
-                  const popoverTabs = document.createElement('div');
-                  popoverTabs.className = 'ap-live-popover__tabs';
-                  popoverTabs.setAttribute('role', 'tablist');
-                  popoverTabs.setAttribute('aria-label', '같은 요소에서 발견된 문제');
+                  const popoverToolbar = document.createElement('div');
+                  popoverToolbar.className = 'ap-live-popover__toolbar';
+                  const popoverTags = document.createElement('div');
+                  popoverTags.className = 'ap-live-popover__tags';
+                  const popoverPager = document.createElement('div');
+                  popoverPager.className = 'ap-live-popover__pager';
+                  popoverPager.setAttribute('role', 'group');
+                  popoverPager.setAttribute('aria-label', '같은 요소의 접근성 문제 이동');
+                  const createPopoverPagerButton = (className, label, glyph) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = `ap-live-popover__pager-button ${className}`;
+                    button.setAttribute('aria-label', label);
+                    button.setAttribute('aria-controls', 'ap-live-issue-detail');
+                    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    icon.classList.add('ap-live-popover__pager-glyph');
+                    icon.setAttribute('viewBox', '0 0 24 24');
+                    icon.setAttribute('aria-hidden', 'true');
+                    icon.setAttribute('focusable', 'false');
+                    const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    chevron.setAttribute('d', glyph === '<' ? 'M15 6l-6 6 6 6' : 'M9 6l6 6-6 6');
+                    icon.append(chevron);
+                    button.append(icon);
+                    return button;
+                  };
+                  const popoverPrevious = createPopoverPagerButton(
+                    'ap-live-popover__pager-button--previous', '이전 문제', '<'
+                  );
+                  const popoverNext = createPopoverPagerButton(
+                    'ap-live-popover__pager-button--next', '다음 문제', '>'
+                  );
+                  popoverPager.append(popoverPrevious, popoverNext);
+                  const popoverPosition = document.createElement('span');
+                  popoverPosition.className = 'ap-live-popover__position';
+                  popoverPosition.setAttribute('role', 'status');
+                  popoverPosition.setAttribute('aria-live', 'polite');
+                  popoverPosition.setAttribute('aria-atomic', 'true');
+                  popoverToolbar.append(popoverTags, popoverPager, popoverPosition);
                   const popoverDetail = document.createElement('div');
                   popoverDetail.id = 'ap-live-issue-detail';
                   popoverDetail.className = 'ap-live-popover__detail';
                   popoverDetail.tabIndex = 0;
-                  popoverDetail.setAttribute('role', 'tabpanel');
-                  popover.append(popoverHeader, popoverTabs, popoverDetail);
+                  popoverDetail.setAttribute('role', 'region');
+                  popoverDetail.setAttribute('aria-label', '이슈 상세');
+                  popover.append(popoverToolbar, popoverDetail);
                   const readMessageValue = (getter, event, fallback) => getter
                     ? nativeApply(getter, event, [])
                     : fallback();
@@ -1029,6 +1078,14 @@ public class LiveReportDocumentRewriter {
                   };
                   const isObjectRecord = value => value !== null && typeof value === 'object' && !arrayIsArray(value);
                   const isIssueId = value => numberIsSafeInteger(value) && value > 0;
+                  const isBoundedCarouselContext = value => value === undefined || value === null || (
+                    isObjectRecord(value)
+                    && Object.keys(value).length <= 8
+                    && numberIsSafeInteger(value.carouselId) && value.carouselId > 0
+                    && numberIsSafeInteger(value.slideIndex) && value.slideIndex >= 0
+                    && numberIsSafeInteger(value.slideCount) && value.slideCount >= 2
+                    && value.slideCount <= 10000 && value.slideIndex < value.slideCount
+                  );
                   const isBoundedLiveCommand = payload => {
                     if (!isObjectRecord(payload) || payload.source !== parentSource || typeof payload.type !== 'string') return false;
                     if (payload.type === 'REQUEST_DOCUMENT_STATE') return true;
@@ -1049,7 +1106,10 @@ public class LiveReportDocumentRewriter {
                           || typeof issue.title !== 'string' || issue.title.length > 300
                           || typeof issue.message !== 'string' || issue.message.length > 1600
                           || typeof issue.code !== 'string' || issue.code.length > 128
-                          || !arrayIsArray(issue.pathSteps) || issue.pathSteps.length > 128) return false;
+                          || (issue.analyzer !== undefined && issue.analyzer !== null
+                            && (typeof issue.analyzer !== 'string' || issue.analyzer.length > 16))
+                          || !arrayIsArray(issue.pathSteps) || issue.pathSteps.length > 128
+                          || !isBoundedCarouselContext(issue.carouselContext)) return false;
                     }
                     return true;
                   };
@@ -1970,8 +2030,14 @@ public class LiveReportDocumentRewriter {
                   const startMarkerObserver = () => {
                     if (markerObserver || !NativeMutationObserver) return;
                     markerObserver = new NativeMutationObserver(records => {
-                      if (marked.length > 0 && records.some(record => !layer.contains(record.target))) {
-                        if (records.some(record => record.type === 'attributes' || record.type === 'childList')) {
+                      const externalRecords = records.filter(record => !layer.contains(record.target));
+                      if (currentIssues.length > 0 && externalRecords.length > 0) {
+                        if (externalRecords.some(record => (
+                          record.type === 'childList'
+                          || (record.type === 'attributes'
+                            && !locatorStateOnlyAttributes.has(String(record.attributeName || '').toLowerCase()))
+                        ))) {
+                          locatorTargetsNeedReconciliation = true;
                           marked.forEach(entry => {
                             entry.positionAnchor = undefined;
                           });
@@ -1996,11 +2062,65 @@ public class LiveReportDocumentRewriter {
                   };
                   const textValue = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
                   const severityKey = issue => String(issue?.severity || '').toUpperCase();
+                  const severityLabelFor = issue => textValue(issue?.severityLabel || issue?.severity, 32);
+                  const issueCodeLabelFor = issue => {
+                    const code = textValue(issue?.code, 128);
+                    if (!code) return '';
+                    const prefixed = code.match(/^(KWCAG|KWACG|WCAG)[\\s-]+(.+)$/i);
+                    if (prefixed) {
+                      const standard = prefixed[1].toUpperCase() === 'WCAG' ? 'WCAG' : 'KWCAG';
+                      return `${standard} ${prefixed[2].trim()}`;
+                    }
+                    return /^\\d+(?:\\.\\d+)+$/.test(code) ? `KWCAG ${code}` : code;
+                  };
+                  const createSeverityBadge = issue => {
+                    const label = severityLabelFor(issue);
+                    if (!label) return null;
+                    const badge = document.createElement('span');
+                    badge.className = 'ap-live-popover__severity';
+                    badge.textContent = label;
+                    badge.style.setProperty(
+                      '--ap-issue-severity-color',
+                      severityColors[severityKey(issue)] || '#98a2b3'
+                    );
+                    return badge;
+                  };
+                  const createCodeBadge = issue => {
+                    const label = issueCodeLabelFor(issue);
+                    if (!label) return null;
+                    const badge = document.createElement('code');
+                    badge.className = 'ap-live-popover__code';
+                    badge.textContent = label;
+                    badge.title = label;
+                    return badge;
+                  };
                   const highestSeverityIssue = issues => issues.reduce((highest, candidate) => {
                     if (!highest) return candidate;
                     return (severityRanks[severityKey(candidate)] || 0) > (severityRanks[severityKey(highest)] || 0)
                       ? candidate : highest;
                   }, null);
+                  // 클러스터: 코너 자리가 겹치는 이웃 요소의 이슈를 한 칩(host)에 모은다
+                  const sortIssuesBySeverity = issues => issues.slice().sort((left, right) =>
+                    (severityRanks[severityKey(right)] || 0) - (severityRanks[severityKey(left)] || 0) || left.id - right.id);
+                  const clusterIssuesFor = entry => (entry.clusterMembers && entry.clusterMembers.length > 0)
+                    ? sortIssuesBySeverity([...entry.issues, ...entry.clusterMembers.flatMap(member => member.issues)])
+                    : entry.issues;
+                  const entryForIssue = (host, issue) => {
+                    if (!host || !issue) return host;
+                    if (host.issues.includes(issue)) return host;
+                    return (host.clusterMembers || []).find(member => member.issues.includes(issue)) || host;
+                  };
+                  const leaveCluster = entry => {
+                    const host = entry.clusterHost;
+                    if (host && host.clusterMembers) host.clusterMembers = host.clusterMembers.filter(member => member !== entry);
+                    entry.clusterHost = null;
+                  };
+                  const joinCluster = (host, member) => {
+                    leaveCluster(member);
+                    member.clusterHost = host;
+                    if (!host.clusterMembers) host.clusterMembers = [];
+                    host.clusterMembers.push(member);
+                  };
                   const groupCategory = issues => {
                     const categories = new Set(issues.map(issue => String(issue.category || 'general')));
                     return categories.size === 1 ? categories.values().next().value : 'multiple';
@@ -2009,6 +2129,17 @@ public class LiveReportDocumentRewriter {
                     textValue(issue.severityLabel || issue.severity, 32), textValue(issue.code, 128),
                     textValue(issue.title, 300)
                   ].filter(Boolean).join(' ');
+                  const reportLocatorState = (issue, state) => {
+                    if (!issue || !isIssueId(issue.id) || !state?.status) return;
+                    const recoverable = state.status === 'HIDDEN_STATE' && state.recoverable === true;
+                    const signature = `${state.status}:${state.status === 'HIDDEN_STATE' ? recoverable : ''}`;
+                    if (locatorStatusSignatures.get(issue.id) === signature) return;
+                    locatorStatusSignatures.set(issue.id, signature);
+                    const event = {type:'LOCATOR_STATUS', issueId:issue.id, status:state.status};
+                    if (typeof state.reason === 'string' && state.reason) event.reason = state.reason;
+                    if (state.status === 'HIDDEN_STATE') event.recoverable = recoverable;
+                    post(event);
+                  };
                   const clearCloseTimer = () => {
                     if (!closeTimer) return;
                     clearTimeout(closeTimer);
@@ -2020,6 +2151,60 @@ public class LiveReportDocumentRewriter {
                     if (element.parentElement) return element.parentElement;
                     const root = element.getRootNode();
                     return root instanceof ShadowRoot && root.host instanceof Element ? root.host : null;
+                  };
+                  const closestComposedMatching = (element, selector) => {
+                    for (let current = element; current instanceof Element; current = composedElementParent(current)) {
+                      if (current.matches(selector)) return current;
+                    }
+                    return null;
+                  };
+                  const carouselSlideSelector = [
+                    '.swiper-slide', '.slick-slide', '.splide__slide', '[data-slide]',
+                    '[aria-roledescription="slide"]', '.carousel-slide', '.slide'
+                  ].join(',');
+                  const carouselRootSelector = [
+                    '.swiper', '.slick-slider', '.splide', '[data-carousel]',
+                    '[aria-roledescription="carousel"]', '.carousel', '.slider'
+                  ].join(',');
+                  const carouselCloneSelector = [
+                    '.swiper-slide-duplicate', '.slick-cloned', '.splide__slide--clone', '.is-clone'
+                  ].join(',');
+                  const truthyCarouselCloneMarker = (element, attribute) => {
+                    const rawValue = nativeGetAttribute.call(element, attribute);
+                    if (rawValue === null) return false;
+                    const value = String(rawValue).trim().toLowerCase();
+                    return value !== 'false' && value !== '0';
+                  };
+                  const isCarouselClone = element => (
+                    element.matches(carouselCloneSelector)
+                    || truthyCarouselCloneMarker(element, 'data-clone')
+                    || truthyCarouselCloneMarker(element, 'data-duplicate')
+                    || truthyCarouselCloneMarker(element, 'data-cloned')
+                  );
+                  const carouselDescriptorFor = (element, context) => {
+                    if (!context || !isBoundedCarouselContext(context)) return null;
+                    const slide = closestComposedMatching(element, carouselSlideSelector);
+                    if (!(slide instanceof Element)) return null;
+                    const wrapper = composedElementParent(slide);
+                    if (!(wrapper instanceof Element)) return null;
+                    let expectedSlideSelector = carouselSlideSelector;
+                    if (wrapper.matches('.swiper-wrapper')) expectedSlideSelector = '.swiper-slide';
+                    else if (wrapper.matches('.slick-track')) expectedSlideSelector = '.slick-slide';
+                    else if (wrapper.matches('.splide__list')) expectedSlideSelector = '.splide__slide';
+                    else if (!wrapper.matches('[data-carousel-track],.carousel-track,.slides,' + carouselRootSelector)) {
+                      return null;
+                    }
+                    const allSlides = Array.from(wrapper.children).filter(candidate => (
+                      candidate instanceof Element
+                      && candidate.matches(expectedSlideSelector)
+                    ));
+                    const slides = allSlides.filter(candidate => !isCarouselClone(candidate));
+                    if (slides.length !== context.slideCount
+                        || slides[context.slideIndex] !== slide) return null;
+                    return {
+                      root:closestComposedMatching(wrapper, carouselRootSelector) || wrapper,
+                      wrapper, slide, slides, allSlides
+                    };
                   };
                   const markerPositionAnchorForElement = element => {
                     for (let current = element; current; current = composedElementParent(current)) {
@@ -2193,19 +2378,29 @@ public class LiveReportDocumentRewriter {
                     });
                     highlight.hidden = false;
                   };
-                  const setHighlightedEntry = entry => {
+                  const setHighlightedEntry = (entry, selected = false) => {
                     highlightedEntry = entry?.element?.isConnected ? entry : null;
+                    const highest = highlightedEntry ? highestSeverityIssue(highlightedEntry.issues) : null;
+                    highlight.style.setProperty('--ap-highlight-color', severityColors[severityKey(highest)] || '#0b6ff4');
+                    highlight.classList.toggle('is-selected', Boolean(highlightedEntry) && selected);
                     positionHighlight();
                   };
                   const closePopover = ({restoreFocus = false} = {}) => {
                     clearCloseTimer();
                     const previous = openEntry;
                     openEntry = null;
+                    openTargetEntry = null;
                     setHighlightedEntry(null);
                     popover.hidden = true;
-                    popoverTabs.replaceChildren();
+                    popover.style.minHeight = '';
+                    popoverTags.replaceChildren();
+                    popoverPager.hidden = true;
+                    popoverPosition.textContent = '';
                     popoverDetail.replaceChildren();
-                    marked.forEach(entry => entry.marker.setAttribute('aria-expanded', 'false'));
+                    marked.forEach(entry => {
+                      entry.marker.setAttribute('aria-expanded', 'false');
+                      entry.marker.classList.remove('is-selected');
+                    });
                     if (restoreFocus && previous?.marker?.isConnected) {
                       restoringMarkerFocus = true;
                       previous.marker.focus({preventScroll:true});
@@ -2222,24 +2417,14 @@ public class LiveReportDocumentRewriter {
                       }
                     }, 180);
                   };
-                  const renderDetail = (entry, issue, notify = false) => {
-                    if (!entry || !issue) return;
-                    entry.selectedIssueId = issue.id;
-                    popoverTabs.querySelectorAll('.ap-live-popover__tab').forEach(tab => {
-                      const selected = tab.dataset.issueId === String(issue.id);
-                      tab.setAttribute('aria-selected', String(selected));
-                      tab.tabIndex = selected ? 0 : -1;
-                      if (selected) popoverDetail.setAttribute('aria-labelledby', tab.id);
-                    });
-                    if (entry.issues.length === 1) {
-                      popoverDetail.removeAttribute('aria-labelledby');
-                      popoverDetail.setAttribute('aria-label', '이슈 상세');
-                    } else popoverDetail.removeAttribute('aria-label');
-                    const tags = document.createElement('div');
-                    tags.className = 'ap-live-popover__tags';
-                    [textValue(issue.severityLabel || issue.severity, 32), textValue(issue.code, 128)].filter(Boolean).forEach(value => {
-                      const tag = document.createElement('span'); tag.className = 'ap-live-popover__tag'; tag.textContent = value; tags.append(tag);
-                    });
+                  let openSelected = false;
+                  let openTargetEntry = null;
+                  const renderDetailContent = issue => {
+                    const severityBadge = createSeverityBadge(issue);
+                    const codeBadge = createCodeBadge(issue);
+                    popoverTags.replaceChildren();
+                    if (severityBadge) popoverTags.append(severityBadge);
+                    if (codeBadge) popoverTags.append(codeBadge);
                     const title = document.createElement('h3');
                     title.className = 'ap-live-popover__title';
                     title.textContent = textValue(issue.title, 300) || '접근성 이슈';
@@ -2249,16 +2434,68 @@ public class LiveReportDocumentRewriter {
                     const path = document.createElement('code');
                     path.className = 'ap-live-popover__path';
                     path.textContent = textValue(issue.path, 2048) || '요소 경로 정보 없음';
-                    popoverDetail.replaceChildren(tags, title, message, path);
-                    if (notify) post({type:'ISSUE_SELECTED', issueId:issue.id});
+                    popoverDetail.replaceChildren(title, message, path);
+                  };
+                  // 묶인 이슈를 < > 로 넘길 때 팝오버 크기가 출렁이지 않도록, 가장 긴 이슈 높이에 맞춰 고정
+                  const sizePopoverForCluster = entry => {
+                    popover.style.minHeight = '';
+                    const issues = clusterIssuesFor(entry);
+                    if (issues.length < 2) return;
+                    const previousVisibility = popover.style.visibility;
+                    popover.style.visibility = 'hidden';
+                    let tallest = 0;
+                    issues.forEach(issue => {
+                      renderDetailContent(issue);
+                      tallest = Math.max(tallest, popover.offsetHeight);
+                    });
+                    popover.style.visibility = previousVisibility;
+                    if (tallest > 0) popover.style.minHeight = `${tallest}px`;
+                  };
+                  const renderDetail = (entry, issue, notify = false) => {
+                    if (!entry || !issue) return;
+                    entry.selectedIssueId = issue.id;
+                    const clusterIssues = clusterIssuesFor(entry);
+                    openTargetEntry = entryForIssue(entry, issue);
+                    setHighlightedEntry(openTargetEntry, openSelected);
+                    renderDetailContent(issue);
+                    const issueIndex = clusterIssues.findIndex(candidate => candidate.id === issue.id);
+                    const grouped = clusterIssues.length > 1;
+                    popoverPager.hidden = !grouped;
+                    popoverPrevious.disabled = !grouped || issueIndex <= 0;
+                    popoverNext.disabled = !grouped || issueIndex < 0 || issueIndex >= clusterIssues.length - 1;
+                    popoverPosition.textContent = grouped
+                      ? `총 ${clusterIssues.length}개 중 ${issueIndex + 1}번째 문제: ${textValue(issue.title, 300) || '접근성 이슈'}`
+                      : '';
+                    if (notify) {
+                      lastFocusedIssueId = issue.id;
+                      post({type:'ISSUE_SELECTED', issueId:issue.id});
+                    }
                     requestAnimationFrame(() => positionPopover());
                   };
+                  const navigatePopoverIssue = delta => {
+                    if (!openEntry || !Number.isInteger(delta) || delta === 0) return;
+                    const clusterIssues = clusterIssuesFor(openEntry);
+                    const currentIndex = clusterIssues.findIndex(issue => issue.id === openEntry.selectedIssueId);
+                    const nextIndex = Math.min(
+                      clusterIssues.length - 1,
+                      Math.max(0, (currentIndex < 0 ? 0 : currentIndex) + delta)
+                    );
+                    if (nextIndex === currentIndex || nextIndex < 0) return;
+                    renderDetail(openEntry, clusterIssues[nextIndex], true);
+                  };
+                  popoverPrevious.addEventListener('click', event => {
+                    event.preventDefault(); event.stopPropagation(); navigatePopoverIssue(-1);
+                  });
+                  popoverNext.addEventListener('click', event => {
+                    event.preventDefault(); event.stopPropagation(); navigatePopoverIssue(1);
+                  });
                   const positionPopover = (
                     documentLeft = globalThis.scrollX,
                     documentTop = globalThis.scrollY
                   ) => {
                     if (popover.hidden || !openEntry) return;
-                    const rect = openEntry.element.getBoundingClientRect();
+                    const targetEntry = openTargetEntry?.element?.isConnected ? openTargetEntry : openEntry;
+                    const rect = targetEntry.element.getBoundingClientRect();
                     const scale = 1 / viewScale;
                     popover.style.transform = `scale(${scale})`;
                     const width = popover.offsetWidth * scale;
@@ -2267,68 +2504,39 @@ public class LiveReportDocumentRewriter {
                     const viewportTop = 12;
                     const viewportRight = innerWidth - 12;
                     const viewportBottom = innerHeight - 12;
+                    const markerRect = openEntry.marker && !openEntry.marker.hidden
+                      ? openEntry.marker.getBoundingClientRect() : null;
+                    // 칩은 요소 위쪽에 붙어 있으므로, 팝오버가 위로 뒤집힐 때는 칩보다 더 위로 올린다
+                    const upperEdge = markerRect ? Math.min(rect.top, markerRect.top) : rect.top;
                     let left = rect.left + 18;
                     let top = rect.bottom + 10;
                     if (left + width > viewportRight) left = Math.max(viewportLeft, rect.right - width - 18);
-                    if (top + height > viewportBottom) top = Math.max(viewportTop, rect.top - height - 10);
-                    const viewportAttached = openEntry.markerViewportAttached === true;
+                    if (top + height > viewportBottom) top = Math.max(viewportTop, upperEdge - height - 10);
+                    const viewportAttached = targetEntry === openEntry
+                      ? openEntry.markerViewportAttached === true
+                      : targetEntry.viewportAttached === true;
                     popover.style.position = viewportAttached ? 'fixed' : 'absolute';
                     popover.style.left = `${Math.max(viewportLeft, left) + (viewportAttached ? 0 : documentLeft)}px`;
                     popover.style.top = `${Math.max(viewportTop, top) + (viewportAttached ? 0 : documentTop)}px`;
                   };
-                  const openPopover = (entry, preferredIssueId = null, notify = false) => {
+                  const openPopover = (entry, preferredIssueId = null, notify = false, selected = notify) => {
                     if (!entry) return;
                     clearCloseTimer();
                     openEntry = entry;
-                    setHighlightedEntry(entry);
-                    marked.forEach(candidate => candidate.marker.setAttribute('aria-expanded', String(candidate === entry)));
-                    const preferred = entry.issues.find(issue => issue.id === preferredIssueId)
-                      || entry.issues.find(issue => issue.id === entry.selectedIssueId)
-                      || highestSeverityIssue(entry.issues);
-                    popoverGroup.textContent = entry.issues.length > 1
-                      ? `같은 요소에서 발견된 문제 ${entry.issues.length}개`
-                      : '이 요소에서 발견된 문제';
-                    popover.dataset.grouped = String(entry.issues.length > 1);
-                    popoverTabs.hidden = entry.issues.length === 1;
-                    popoverTabs.replaceChildren();
-                    entry.issues.forEach(issue => {
-                      const tab = document.createElement('button');
-                      tab.type = 'button';
-                      tab.className = 'ap-live-popover__tab';
-                      tab.id = `ap-live-issue-tab-${issue.id}`;
-                      tab.dataset.issueId = String(issue.id);
-                      tab.setAttribute('role', 'tab');
-                      tab.setAttribute('aria-controls', popoverDetail.id);
-                      const icon = document.createElement('span');
-                      icon.className = 'ap-live-popover__tab-icon';
-                      icon.setAttribute('aria-hidden', 'true');
-                      icon.textContent = markerIcons[issue.category] || markerIcons.general;
-                      const label = document.createElement('span');
-                      label.className = 'ap-live-popover__tab-label';
-                      label.textContent = textValue(issue.title, 300) || '접근성 이슈';
-                      const meta = document.createElement('span');
-                      meta.className = 'ap-live-popover__tab-meta';
-                      meta.textContent = [textValue(issue.severityLabel || issue.severity, 32), textValue(issue.code, 128)].filter(Boolean).join(' · ');
-                      label.append(meta);
-                      tab.append(icon, label);
-                      tab.addEventListener('click', event => {
-                        event.preventDefault(); event.stopPropagation(); renderDetail(entry, issue, true);
-                      });
-                      tab.addEventListener('keydown', event => {
-                        const tabs = Array.from(popoverTabs.querySelectorAll('.ap-live-popover__tab'));
-                        const currentIndex = tabs.indexOf(tab);
-                        let nextIndex = null;
-                        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = currentIndex + 1 < tabs.length ? currentIndex + 1 : 0;
-                        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = currentIndex > 0 ? currentIndex - 1 : tabs.length - 1;
-                        if (event.key === 'Home') nextIndex = 0;
-                        if (event.key === 'End') nextIndex = tabs.length - 1;
-                        if (nextIndex === null || nextIndex === currentIndex) return;
-                        event.preventDefault(); tabs[nextIndex].focus(); tabs[nextIndex].click();
-                      });
-                      popoverTabs.append(tab);
+                    openSelected = selected;
+                    setHighlightedEntry(entry, selected);
+                    marked.forEach(candidate => {
+                      candidate.marker.setAttribute('aria-expanded', String(candidate === entry));
+                      candidate.marker.classList.toggle('is-selected', candidate === entry && selected);
                     });
-                    if (!popover.isConnected) layer.append(popover);
+                    const clusterIssues = clusterIssuesFor(entry);
+                    const preferred = clusterIssues.find(issue => issue.id === preferredIssueId)
+                      || clusterIssues.find(issue => issue.id === entry.selectedIssueId)
+                      || highestSeverityIssue(clusterIssues);
+                    popover.dataset.grouped = String(clusterIssues.length > 1);
+                    entry.marker.after(popover);
                     popover.hidden = false;
+                    sizePopoverForCluster(entry);
                     renderDetail(entry, preferred, notify && entry.issues.length === 1);
                     requestAnimationFrame(() => positionPopover());
                   };
@@ -2364,32 +2572,21 @@ public class LiveReportDocumentRewriter {
                     left.right <= right.left || right.right <= left.left
                     || left.bottom <= right.top || right.bottom <= left.top
                   );
-                  const markerCountPillWidth = entry => entry.issues.length > 1
-                    ? Math.max(
-                        markerCountPillMinWidth,
-                        String(entry.issues.length).length * markerCountPillDigitWidth
-                          + markerCountPillHorizontalPadding
-                      )
-                    : 0;
+                  const markerPillWidth = entry => {
+                    const width = entry.marker?.offsetWidth;
+                    return numberIsFinite(width) && width > 0 ? width : markerPillEstimatedWidth;
+                  };
                   const markerFootprint = (entry, left, top, collisionPadding = 0) => {
                     const inverseScale = 1 / viewScale;
-                    const radius = markerCircleSize / 2;
-                    const countPillWidth = markerCountPillWidth(entry);
-                    let leftExtent = radius;
-                    let topExtent = radius;
-                    let rightExtent = radius;
-                    let bottomExtent = radius;
-                    if (countPillWidth > 0) {
-                      const halfWidth = countPillWidth / 2;
-                      const halfHeight = markerCountBadgeHeight / 2;
-                      const badgeLeft = markerCountBadgeCenterX - halfWidth;
-                      const badgeTop = markerCountBadgeCenterY - halfHeight;
-                      const badgeRight = markerCountBadgeCenterX + halfWidth;
-                      const badgeBottom = markerCountBadgeCenterY + halfHeight;
-                      leftExtent = Math.max(leftExtent, -badgeLeft);
-                      topExtent = Math.max(topExtent, -badgeTop);
-                      rightExtent = Math.max(rightExtent, badgeRight);
-                      bottomExtent = Math.max(bottomExtent, badgeBottom);
+                    const width = markerPillWidth(entry);
+                    const half = markerPillHeight / 2;
+                    const leftExtent = 0;
+                    let topExtent = half;
+                    let rightExtent = width;
+                    const bottomExtent = half;
+                    if (entry.issues.length > 1) {
+                      topExtent = Math.max(topExtent, half + markerCountBadgeOverhang);
+                      rightExtent = Math.max(rightExtent, width + markerCountBadgeOverhang);
                     }
                     return {
                       left: left - (leftExtent + collisionPadding) * inverseScale,
@@ -2435,7 +2632,22 @@ public class LiveReportDocumentRewriter {
                       if (bucket) bucket.push(rect);
                       else cells.set(key, [rect]);
                     });
-                    return {add, overlaps};
+                    const collidingRect = rect => {
+                      const seen = new Set();
+                      let found = null;
+                      visitCells(rect, key => {
+                        if (found) return;
+                        const bucket = cells.get(key);
+                        if (!bucket) return;
+                        for (const occupied of bucket) {
+                          if (seen.has(occupied)) continue;
+                          seen.add(occupied);
+                          if (rectanglesOverlap(rect, occupied)) { found = occupied; return; }
+                        }
+                      });
+                      return found;
+                    };
+                    return {add, overlaps, collidingRect};
                   };
                   const targetVisibleInViewport = (element, rect) => (
                     element.isConnected
@@ -2480,6 +2692,64 @@ public class LiveReportDocumentRewriter {
                     bounds.width = bounds.right - bounds.left;
                     bounds.height = bounds.bottom - bounds.top;
                     return {rects, bounds, firstRect:rects[0], lastRect:rects[rects.length - 1]};
+                  };
+                  const rectIntersectsViewport = rect => (
+                    rect && numberIsFinite(rect.left) && numberIsFinite(rect.top)
+                    && numberIsFinite(rect.right) && numberIsFinite(rect.bottom)
+                    && rect.width > 0 && rect.height > 0
+                    && rect.right > 0 && rect.bottom > 0
+                    && rect.left < innerWidth && rect.top < innerHeight
+                  );
+                  const hiddenStateForElement = element => {
+                    for (let current = element; current instanceof Element; current = composedElementParent(current)) {
+                      const style = getComputedStyle(current);
+                      const opacity = Number.parseFloat(style.opacity);
+                      if (current.hidden) return {element:current, reason:'HIDDEN_ATTRIBUTE'};
+                      if (current.hasAttribute('inert')) return {element:current, reason:'INERT_STATE'};
+                      if (current.getAttribute('aria-hidden') === 'true') {
+                        return {element:current, reason:'ARIA_HIDDEN_STATE'};
+                      }
+                      if (style.display === 'none') return {element:current, reason:'DISPLAY_NONE'};
+                      if (style.visibility === 'hidden' || style.visibility === 'collapse') {
+                        return {element:current, reason:'VISIBILITY_HIDDEN'};
+                      }
+                      if (style.contentVisibility === 'hidden') {
+                        return {element:current, reason:'CONTENT_VISIBILITY_HIDDEN'};
+                      }
+                      if (numberIsFinite(opacity) && opacity <= 0) {
+                        return {element:current, reason:'ZERO_OPACITY'};
+                      }
+                    }
+                    return null;
+                  };
+                  const locatorStateForIssue = (element, issue, targetGeometry = null) => {
+                    if (!(element instanceof Element) || !element.isConnected) {
+                      return {status:'UNAVAILABLE', reason:'ELEMENT_DETACHED'};
+                    }
+                    const context = issue?.carouselContext;
+                    const carousel = carouselDescriptorFor(element, context);
+                    const hiddenState = hiddenStateForElement(element);
+                    if (hiddenState) {
+                      return {
+                        status:'HIDDEN_STATE', reason:hiddenState.reason,
+                        recoverable:Boolean(carousel && hiddenState.element === carousel.slide)
+                      };
+                    }
+                    const rect = element.getBoundingClientRect();
+                    const hasLayoutBox = element.getClientRects().length > 0
+                      && numberIsFinite(rect.width) && numberIsFinite(rect.height)
+                      && rect.width > 0 && rect.height > 0;
+                    if (!hasLayoutBox) {
+                      return {
+                        status:'HIDDEN_STATE', reason:'NO_LAYOUT_BOX',
+                        recoverable:Boolean(carousel && carousel.root.isConnected)
+                      };
+                    }
+                    if (targetGeometry) return {status:'VISIBLE'};
+                    if (carousel && rectIntersectsViewport(carousel.root.getBoundingClientRect())) {
+                      return {status:'HIDDEN_STATE', reason:'CAROUSEL_SLIDE_INACTIVE', recoverable:true};
+                    }
+                    return {status:'OFFSCREEN', reason:'OUTSIDE_VIEWPORT_OR_CLIPPED'};
                   };
                   const markerProtectedTextRectsForElement = (element, targetGeometry, maxRects) => {
                     if (maxRects <= 0 || element.childElementCount > 24) return [];
@@ -2532,44 +2802,123 @@ public class LiveReportDocumentRewriter {
                       viewportClamped:left !== requestedLeft || top !== requestedTop
                     };
                   };
-                  const markerGutterFamilies = (entry, targetGeometry) => {
-                    const footprint = markerFootprint(entry, 0, 0, markerCollisionGap / 2);
-                    const extents = {
-                      left:-footprint.left,
-                      top:-footprint.top,
-                      right:footprint.right,
-                      bottom:footprint.bottom
-                    };
+                  const markerLeftGutter = (entry, targetGeometry) => {
                     const gap = markerTargetGap / viewScale;
-                    const {firstRect, lastRect} = targetGeometry;
-                    return [
-                      {
-                        side:'left', axis:'vertical',
-                        baseLeft:firstRect.left - gap - extents.right,
-                        baseTop:firstRect.top + extents.top
-                      },
-                      {
-                        side:'right', axis:'vertical',
-                        baseLeft:firstRect.right + gap + extents.left,
-                        baseTop:firstRect.top + extents.top
-                      },
-                      {
-                        side:'top', axis:'horizontal',
-                        baseLeft:firstRect.left + extents.left,
-                        baseTop:firstRect.top - gap - extents.bottom
-                      },
-                      {
-                        side:'bottom', axis:'horizontal',
-                        baseLeft:lastRect.left + extents.left,
-                        baseTop:lastRect.bottom + gap + extents.top
-                      }
-                    ];
+                    const firstRect = targetGeometry.firstRect;
+                    return {
+                      side:'left', axis:'vertical',
+                      baseLeft:targetGeometry.bounds.left - markerCornerOverhang / viewScale,
+                      baseTop:firstRect.top - gap - (markerPillHeight / 2) / viewScale
+                    };
                   };
-                  const markerPlacementFor = (entry, targetGeometry, spatialIndex, contentSpatialIndex) => {
+                  const preferredMarkerLaneOffsets = measurements => {
+                    const railGroups = new Map();
+                    measurements.forEach((measurement, order) => {
+                      if (!measurement.targetGeometry) return;
+                      const {entry, targetGeometry} = measurement;
+                      const family = markerLeftGutter(entry, targetGeometry);
+                      const footprint = markerFootprint(
+                        entry, family.baseLeft, family.baseTop, markerCollisionGap / 2
+                      );
+                      const railKey = Math.round(family.baseLeft * viewScale);
+                      const descriptor = {
+                        entry,
+                        order,
+                        desiredTop:family.baseTop,
+                        topExtent:family.baseTop - footprint.top,
+                        bottomExtent:footprint.bottom - family.baseTop
+                      };
+                      const rail = railGroups.get(railKey);
+                      if (rail) rail.push(descriptor);
+                      else railGroups.set(railKey, [descriptor]);
+                    });
+                    const offsets = new Map();
+                    const viewportMargin = markerViewportMargin / viewScale;
+                    railGroups.forEach(rail => {
+                      rail.sort((left, right) => left.desiredTop - right.desiredTop
+                        || left.order - right.order);
+                      const cumulativeSeparation = new Array(rail.length).fill(0);
+                      for (let index = 1; index < rail.length; index += 1) {
+                        cumulativeSeparation[index] = cumulativeSeparation[index - 1]
+                          + rail[index - 1].bottomExtent + rail[index].topExtent;
+                      }
+
+                      // Solve the one-dimensional label packing problem with isotonic
+                      // regression. This keeps the target order and required gaps while
+                      // centering each dense group around its real anchors instead of
+                      // greedily pushing every later marker farther down the page.
+                      const blocks = [];
+                      rail.forEach((descriptor, index) => {
+                        const transformedTop = descriptor.desiredTop - cumulativeSeparation[index];
+                        blocks.push({start:index, end:index, sum:transformedTop, count:1, mean:transformedTop});
+                        while (blocks.length > 1) {
+                          const right = blocks[blocks.length - 1];
+                          const left = blocks[blocks.length - 2];
+                          if (left.mean <= right.mean) break;
+                          blocks.splice(blocks.length - 2, 2, {
+                            start:left.start,
+                            end:right.end,
+                            sum:left.sum + right.sum,
+                            count:left.count + right.count,
+                            mean:(left.sum + right.sum) / (left.count + right.count)
+                          });
+                        }
+                      });
+                      blocks.forEach(block => {
+                        const centeredTops = [];
+                        for (let index = block.start; index <= block.end; index += 1) {
+                          centeredTops.push(block.mean + cumulativeSeparation[index]);
+                        }
+                        let minimumShift = Number.NEGATIVE_INFINITY;
+                        let maximumShift = Number.POSITIVE_INFINITY;
+                        centeredTops.forEach((top, localIndex) => {
+                          const descriptor = rail[block.start + localIndex];
+                          minimumShift = Math.max(
+                            minimumShift,
+                            viewportMargin + descriptor.topExtent - top
+                          );
+                          maximumShift = Math.min(
+                            maximumShift,
+                            innerHeight - viewportMargin - descriptor.bottomExtent - top
+                          );
+                        });
+                        const viewportShift = minimumShift <= maximumShift
+                          ? Math.max(minimumShift, Math.min(0, maximumShift))
+                          : 0;
+                        centeredTops.forEach((top, localIndex) => {
+                          const descriptor = rail[block.start + localIndex];
+                          offsets.set(
+                            descriptor.entry,
+                            top + viewportShift - descriptor.desiredTop
+                          );
+                        });
+                      });
+                    });
+                    return offsets;
+                  };
+                  const markerPlacementFor = (
+                    entry,
+                    targetGeometry,
+                    spatialIndex,
+                    contentSpatialIndex,
+                    preferredLaneOffset = 0
+                  ) => {
                     const step = markerSlotStep / viewScale;
                     const seenCandidates = new Set();
                     const anchorRect = targetGeometry.firstRect;
-                    const families = markerGutterFamilies(entry, targetGeometry);
+                    const family = markerLeftGutter(entry, targetGeometry);
+                    const laneOffsets = [];
+                    const addLaneOffset = laneOffset => {
+                      if (!numberIsFinite(laneOffset)) return;
+                      if (laneOffsets.some(candidate => Math.abs(candidate - laneOffset) <= 0.01)) return;
+                      laneOffsets.push(laneOffset);
+                    };
+                    addLaneOffset(preferredLaneOffset);
+                    addLaneOffset(0);
+                    for (let ring = 1; ring <= markerSearchRingLimit; ring += 1) {
+                      addLaneOffset(ring * step);
+                      addLaneOffset(-ring * step);
+                    }
                     const visibleWidth = Math.max(0,
                       Math.min(innerWidth, targetGeometry.bounds.right)
                         - Math.max(0, targetGeometry.bounds.left));
@@ -2581,74 +2930,71 @@ public class LiveReportDocumentRewriter {
                       || entry.element === document.body;
                     const pageLevelOverlapAllowed = pageLevelTarget
                       && visibleWidth * visibleHeight >= viewportArea * 0.75;
-                    const tryCandidate = (left, top, markerOffset, allowTargetOverlap = false) => {
+                    const tryCandidate = (left, top, markerOffset, allowTargetOverlap = false, ignoreProtectedText = false) => {
                       const candidate = clampMarkerCenter(entry, left, top);
                       if (!candidate) return null;
                       const key = `${allowTargetOverlap ? 'fallback' : 'safe'}:`
                         + `${Math.round(candidate.left * 100)}:${Math.round(candidate.top * 100)}`;
                       if (seenCandidates.has(key)) return null;
                       seenCandidates.add(key);
+                      // 코너 자리(자연 위치)는 충돌 여유 없이 대상 위 여백에 딱 붙는다
+                      const targetFootprint = ignoreProtectedText
+                        ? markerFootprint(entry, candidate.left, candidate.top, 0)
+                        : candidate.footprint;
                       if (!allowTargetOverlap
-                          && !markerClearsTarget(candidate.footprint, targetGeometry.rects)) return null;
-                      if (contentSpatialIndex.overlaps(candidate.footprint)) return null;
+                          && !markerClearsTarget(targetFootprint, targetGeometry.rects)) return null;
+                      if (!ignoreProtectedText && contentSpatialIndex.overlaps(candidate.footprint)) return null;
                       if (spatialIndex.overlaps(candidate.footprint)) return null;
                       return {...candidate, markerOffset};
                     };
                     let placement = null;
-                    if (entry.markerOffset) {
-                      const previousFamily = families.find(
-                        family => family.side === entry.markerOffset.side
-                      );
-                      if (previousFamily && numberIsFinite(entry.markerOffset.laneOffset)) {
-                        const laneOffset = entry.markerOffset.laneOffset;
-                        const left = previousFamily.baseLeft
-                          + (previousFamily.axis === 'horizontal' ? laneOffset : 0);
-                        const top = previousFamily.baseTop
-                          + (previousFamily.axis === 'vertical' ? laneOffset : 0);
-                        const pageFallback = entry.markerOffset.pageFallback === true
-                          && pageLevelOverlapAllowed;
-                        placement = tryCandidate(left, top, {
-                          left:left - anchorRect.left,
-                          top:top - anchorRect.top,
-                          side:previousFamily.side,
-                          laneOffset,
-                          pageFallback
-                        }, pageFallback);
-                      }
+                    // 코너 탭: 박스 왼쪽 위 모서리가 기본 자리. 같은 모서리를 다른 칩이 쓰고 있으면
+                    // 같은 줄에서 오른쪽으로 한 칩씩 밀고, 그래도 안 되면 위아래 슬롯을 본다.
+                    // 코너 자리는 뷰포트 경계로 끌어오지 않는다. 요소가 화면 밖으로 나가면 칩도 같이 나가고,
+                    // 스크롤 중에도 항상 요소 왼쪽 위에 그대로 붙어 있어야 한다.
+                    const cornerCandidate = (left, top, markerOffset) => {
+                      const footprint = markerFootprint(entry, left, top, markerCollisionGap / 2);
+                      if (!markerClearsTarget(markerFootprint(entry, left, top, 0), targetGeometry.rects)) return null;
+                      if (spatialIndex.overlaps(footprint)) return null;
+                      return {left, top, footprint, viewportClamped:false, markerOffset};
+                    };
+                    const shiftStep = (markerPillWidth(entry) + markerCollisionGap) / viewScale;
+                    for (let shift = 0; shift <= markerSearchRingLimit; shift += 1) {
+                      const left = family.baseLeft + shift * shiftStep;
+                      const top = family.baseTop;
+                      placement = cornerCandidate(left, top, {
+                        left:left - anchorRect.left,
+                        top:top - anchorRect.top,
+                        side:family.side,
+                        laneOffset:0,
+                        pageFallback:false
+                      });
+                      if (placement) return placement;
                     }
-                    if (placement) return placement;
-                    // Probe every side at the same distance before moving farther away so
-                    // dense groups stay associated with their element without covering it.
-                    for (let ring = 0; ring <= markerSearchRingLimit; ring += 1) {
-                      const distance = ring * step;
-                      const laneOffsets = ring === 0 ? [0] : [distance, -distance];
-                      for (const family of families) {
-                        for (const laneOffset of laneOffsets) {
-                          const left = family.baseLeft
-                            + (family.axis === 'horizontal' ? laneOffset : 0);
-                          const top = family.baseTop
-                            + (family.axis === 'vertical' ? laneOffset : 0);
-                          placement = tryCandidate(left, top, {
-                            left:left - anchorRect.left,
-                            top:top - anchorRect.top,
-                            side:family.side,
-                            laneOffset,
-                            pageFallback:false
-                          });
-                          if (placement) return placement;
-                        }
-                      }
+                    for (const laneOffset of laneOffsets) {
+                      if (laneOffset === 0) continue;
+                      const left = family.baseLeft;
+                      const top = family.baseTop + laneOffset;
+                      placement = tryCandidate(left, top, {
+                        left:left - anchorRect.left,
+                        top:top - anchorRect.top,
+                        side:family.side,
+                        laneOffset,
+                        pageFallback:false
+                      });
+                      if (placement) return placement;
                     }
                     // Page-level issues can legitimately target body-sized containers with
                     // no outside gutter. Keep those markers available as a last resort only;
                     // ordinary text and controls never use this overlap fallback.
                     if (pageLevelOverlapAllowed) {
-                      for (const family of families) {
-                        placement = tryCandidate(family.baseLeft, family.baseTop, {
+                      for (const laneOffset of laneOffsets) {
+                        const top = family.baseTop + laneOffset;
+                        placement = tryCandidate(family.baseLeft, top, {
                           left:family.baseLeft - anchorRect.left,
-                          top:family.baseTop - anchorRect.top,
+                          top:top - anchorRect.top,
                           side:family.side,
-                          laneOffset:0,
+                          laneOffset,
                           pageFallback:true
                         }, true);
                         if (placement) return placement;
@@ -2657,11 +3003,20 @@ public class LiveReportDocumentRewriter {
                     return null;
                   };
                   const position = (mode = 'full') => {
+                    if (locatorTargetsNeedReconciliation
+                        || marked.some(entry => !entry.element?.isConnected)) {
+                      if (reconcileIssueTargets(lastFocusedIssueId)) {
+                        const issueIdToRefocus = lastFocusedIssueId;
+                        if (issueIdToRefocus !== null) {
+                          queueMicrotask(() => { void focusIssue(issueIdToRefocus); });
+                        }
+                        return;
+                      }
+                    }
                     const preserveRootPlacement = mode === 'preserve-root';
                     const documentLeft = globalThis.scrollX;
                     const documentTop = globalThis.scrollY;
                     const spatialIndex = createMarkerSpatialIndex();
-                    let remainingProtectedTextRects = markerProtectedTextRectBudget;
                     const measurements = marked.map(entry => {
                       if (!preserveRootPlacement) entry.positionAnchor = undefined;
                       const targetRect = entry.element.getBoundingClientRect();
@@ -2675,6 +3030,9 @@ public class LiveReportDocumentRewriter {
                       const targetGeometry = initiallyVisible
                         ? markerTargetGeometryForElement(entry.element)
                         : null;
+                      entry.issues.forEach(issue => {
+                        reportLocatorState(issue, locatorStateForIssue(entry.element, issue, targetGeometry));
+                      });
                       const preservePlacement = preserveRootPlacement
                         && !tracksRootScroll
                         && entry.markerWasVisible
@@ -2682,52 +3040,85 @@ public class LiveReportDocumentRewriter {
                         && numberIsFinite(entry.markerDocumentTop)
                         && markerDocumentRectsMatch(entry.markerAnchorDocumentRect, targetDocumentRect)
                         && (!initiallyVisible || targetGeometry !== null);
-                      const protectedTextRects = targetGeometry && remainingProtectedTextRects > 0
-                        ? markerProtectedTextRectsForElement(
-                            entry.element, targetGeometry, remainingProtectedTextRects
-                          )
-                        : [];
-                      remainingProtectedTextRects -= protectedTextRects.length;
                       return {
                         entry,
                         targetDocumentRect,
                         targetGeometry,
-                        protectedTextRects,
+                        protectedTextRects:[],
                         visible:targetGeometry !== null,
                         viewportAttached,
                         preservePlacement
                       };
                     });
+                    const markerEntryOrder = entry => entry.issues.reduce(
+                      (lowest, issue) => Math.min(lowest, issue.id),
+                      Number.MAX_SAFE_INTEGER
+                    );
+                    const orderedMeasurements = measurements.slice().sort((left, right) => {
+                      const leftBounds = left.targetGeometry?.bounds;
+                      const rightBounds = right.targetGeometry?.bounds;
+                      if (leftBounds && rightBounds) {
+                        return leftBounds.top - rightBounds.top
+                          || leftBounds.left - rightBounds.left
+                          || markerEntryOrder(left.entry) - markerEntryOrder(right.entry);
+                      }
+                      if (leftBounds) return -1;
+                      if (rightBounds) return 1;
+                      return markerEntryOrder(left.entry) - markerEntryOrder(right.entry);
+                    });
+                    let remainingProtectedTextRects = markerProtectedTextRectBudget;
+                    orderedMeasurements.forEach(measurement => {
+                      if (!measurement.targetGeometry || remainingProtectedTextRects <= 0) return;
+                      measurement.protectedTextRects = markerProtectedTextRectsForElement(
+                        measurement.entry.element,
+                        measurement.targetGeometry,
+                        remainingProtectedTextRects
+                      );
+                      remainingProtectedTextRects -= measurement.protectedTextRects.length;
+                    });
                     const contentSpatialIndex = createMarkerSpatialIndex();
-                    measurements.forEach(measurement => {
+                    orderedMeasurements.forEach(measurement => {
                       measurement.protectedTextRects.forEach(rect => contentSpatialIndex.add(rect));
-                      if (!measurement.preservePlacement) return;
-                      spatialIndex.add(markerFootprint(
+                      if (!measurement.preservePlacement || !measurement.visible) return;
+                      const preservedFootprint = markerFootprint(
                         measurement.entry,
                         measurement.entry.markerDocumentLeft - documentLeft,
                         measurement.entry.markerDocumentTop - documentTop,
                         markerCollisionGap / 2
-                      ));
+                      );
+                      preservedFootprint.entry = measurement.entry;
+                      spatialIndex.add(preservedFootprint);
                     });
                     const placements = new Map();
+                    const preferredLaneOffsets = preferredMarkerLaneOffsets(orderedMeasurements);
                     const placeMeasurement = measurement => {
-                      if (measurement.preservePlacement || !measurement.visible) return;
+                      const entry = measurement.entry;
+                      if (measurement.preservePlacement) return;
+                      leaveCluster(entry);
+                      if (!measurement.visible) return;
+                      // 코너 자리가 이미 놓인 칩과 겹치면 옆으로 밀지 않고 그 칩에 합류한다
+                      const family = markerLeftGutter(entry, measurement.targetGeometry);
+                      const natural = clampMarkerCenter(entry, family.baseLeft, family.baseTop);
+                      const hostRect = natural ? spatialIndex.collidingRect(natural.footprint) : null;
+                      const host = hostRect?.entry || null;
+                      if (host && host !== entry && !host.clusterHost && host.element?.isConnected
+                          && markerClearsTarget(markerFootprint(entry, natural.left, natural.top, 0), measurement.targetGeometry.rects)) {
+                        joinCluster(host, entry);
+                        return;
+                      }
                       const placement = markerPlacementFor(
                         measurement.entry,
                         measurement.targetGeometry,
                         spatialIndex,
-                        contentSpatialIndex
+                        contentSpatialIndex,
+                        0
                       );
                       if (!placement) return;
                       placements.set(measurement.entry, placement);
+                      placement.footprint.entry = measurement.entry;
                       spatialIndex.add(placement.footprint);
                     };
-                    measurements.forEach(measurement => {
-                      if (measurement.entry.markerWasVisible) placeMeasurement(measurement);
-                    });
-                    measurements.forEach(measurement => {
-                      if (!measurement.entry.markerWasVisible) placeMeasurement(measurement);
-                    });
+                    orderedMeasurements.forEach(placeMeasurement);
                     let closeOpenPopover = false;
                     let preserveOpenUi = false;
                     measurements.forEach(measurement => {
@@ -2774,17 +3165,48 @@ public class LiveReportDocumentRewriter {
                       const left = `${markerLeft}px`;
                       const top = `${markerTop}px`;
                       const position = markerViewportAttached ? 'fixed' : 'absolute';
-                      const transform = `translate(-50%%, -50%%) scale(${1 / viewScale})`;
+                      const transform = `translate(0, -50%%) scale(${1 / viewScale})`;
                       if (marker.style.position !== position) marker.style.position = position;
                       if (marker.style.left !== left) marker.style.left = left;
                       if (marker.style.top !== top) marker.style.top = top;
                       if (marker.style.transform !== transform) marker.style.transform = transform;
                     });
+                    marked.forEach(refreshMarkerCluster);
                     if (closeOpenPopover) closePopover();
                     else if (!preserveOpenUi) {
                       positionHighlight(documentLeft, documentTop);
                       positionPopover(documentLeft, documentTop);
                     }
+                  };
+                  const refreshMarkerCluster = entry => {
+                    const {marker} = entry;
+                    if (!marker) return;
+                    const issues = clusterIssuesFor(entry);
+                    const clustered = (entry.clusterMembers?.length || 0) > 0;
+                    const highest = highestSeverityIssue(issues);
+                    const label = marker.querySelector('.ap-live-marker__icon');
+                    if (label) renderMarkerLabel(label, highest?.analyzer || issues[0]?.analyzer);
+                    marker.style.setProperty('--ap-marker-color', severityColors[severityKey(highest)] || '#0b6ff4');
+                    marker.classList.toggle('ap-live-marker--cluster', clustered);
+                    let count = marker.querySelector('.ap-live-marker__count');
+                    if (issues.length > 1) {
+                      if (!count) {
+                        count = document.createElement('span');
+                        count.className = 'ap-live-marker__count';
+                        count.setAttribute('aria-hidden', 'true');
+                        marker.append(count);
+                      }
+                      const text = String(issues.length);
+                      if (count.textContent !== text) count.textContent = text;
+                    } else if (count) {
+                      count.remove();
+                    }
+                    const elementCount = 1 + (entry.clusterMembers?.length || 0);
+                    marker.setAttribute('aria-label', issues.length > 1
+                      ? (clustered
+                        ? `근처 요소 ${elementCount}곳에서 발견된 접근성 문제 ${issues.length}개. ${issues.slice(0, 3).map(issueLabel).join('. ')}`
+                        : `같은 요소에서 발견된 접근성 문제 ${issues.length}개. ${issues.slice(0, 3).map(issueLabel).join('. ')}`)
+                      : issueLabel(issues[0]) || '접근성 이슈');
                   };
                   const schedulePosition = (mode = 'full') => {
                     if (mode === 'full') pendingMarkerPositionMode = 'full';
@@ -2823,21 +3245,44 @@ public class LiveReportDocumentRewriter {
                     } catch (_) { return {element:null, reason:'INVALID_SELECTOR'}; }
                     return {element:current, reason:null};
                   };
+                  const reconcileIssueTargets = preferredIssueId => {
+                    locatorTargetsNeedReconciliation = false;
+                    if (currentIssues.length === 0) return false;
+                    const currentElementByIssueId = new Map();
+                    marked.forEach(entry => {
+                      entry.issues.forEach(issue => currentElementByIssueId.set(issue.id, entry.element));
+                    });
+                    const changed = currentIssues.some(issue => {
+                      if (!issue || !Number.isSafeInteger(issue.id) || issue.id <= 0) return false;
+                      const previousElement = currentElementByIssueId.get(issue.id) || null;
+                      const resolvedElement = resolveIssue(issue).element || null;
+                      return resolvedElement !== previousElement;
+                    });
+                    if (!changed) return false;
+                    apply(currentIssues, preferredIssueId);
+                    return true;
+                  };
                   const apply = (items, selectedIssueId = null) => {
                     mount(); clear();
+                    focusRequestVersion += 1;
+                    locatorStatusSignatures.clear();
+                    currentIssues = (Array.isArray(items) ? items : []).slice(0, 5000);
+                    locatorTargetsNeedReconciliation = false;
+                    lastFocusedIssueId = isIssueId(selectedIssueId)
+                        && currentIssues.some(issue => issue?.id === selectedIssueId)
+                      ? selectedIssueId : null;
                     const groups = new Map();
-                    (Array.isArray(items) ? items : []).slice(0, 5000).forEach(item => {
+                    currentIssues.forEach(item => {
                       if (!item || !Number.isSafeInteger(item.id) || item.id <= 0) return;
                       const resolved = resolveIssue(item);
                       const element = resolved.element;
                       if (!element) {
-                        post({type:'LOCATOR_STATUS', issueId:item.id, status:'UNAVAILABLE', reason:resolved.reason});
+                        reportLocatorState(item, {status:'UNAVAILABLE', reason:resolved.reason});
                         return;
                       }
                       const group = groups.get(element) || {element, issues:[]};
                       group.issues.push(item);
                       groups.set(element, group);
-                      post({type:'LOCATOR_STATUS', issueId:item.id, status:'CONNECTED'});
                     });
                     groups.forEach(group => {
                       group.issues.sort((left, right) => (severityRanks[severityKey(right)] || 0) - (severityRanks[severityKey(left)] || 0) || left.id - right.id);
@@ -2854,11 +3299,16 @@ public class LiveReportDocumentRewriter {
                       group.markerDocumentLeft = null;
                       group.markerDocumentTop = null;
                       group.markerAnchorDocumentRect = null;
+                      group.clusterHost = null;
+                      group.clusterMembers = [];
                       observeMarkerShadowScrollRoots(group.element);
                       marker.dataset.issueId = String(group.selectedIssueId || group.issues[0].id);
-                      const markerCategory = groupCategory(group.issues);
-                      marker.textContent = markerIcons[markerCategory] || markerIcons.general;
                       const highest = highestSeverityIssue(group.issues);
+                      const markerIcon = document.createElement('span');
+                      markerIcon.className = 'ap-live-marker__icon';
+                      markerIcon.setAttribute('aria-hidden', 'true');
+                      renderMarkerLabel(markerIcon, highest?.analyzer || group.issues[0]?.analyzer);
+                      marker.append(markerIcon);
                       marker.style.setProperty('--ap-marker-color', severityColors[severityKey(highest)] || '#0b6ff4');
                       marker.setAttribute('aria-haspopup', 'dialog');
                       marker.setAttribute('aria-controls', popover.id);
@@ -2887,9 +3337,122 @@ public class LiveReportDocumentRewriter {
                     });
                     position();
                   };
-                  popoverClose.addEventListener('click', event => {
-                    event.preventDefault(); event.stopPropagation(); closePopover({restoreFocus:true});
+                  const activateCarouselState = (element, context) => {
+                    const carousel = carouselDescriptorFor(element, context);
+                    if (!carousel) return false;
+                    const activeDisplay = carousel.slides
+                      .map(candidate => getComputedStyle(candidate).display)
+                      .find(display => display && display !== 'none') || 'block';
+                    carousel.wrapper.style.setProperty('transform', 'none', 'important');
+                    carousel.wrapper.style.setProperty('transition', 'none', 'important');
+                    carousel.wrapper.style.setProperty('height', 'auto', 'important');
+                    carousel.allSlides.forEach(candidate => {
+                      const active = candidate === carousel.slide;
+                      candidate.hidden = !active;
+                      nativeSetAttribute.call(candidate, 'aria-hidden', active ? 'false' : 'true');
+                      if (active) nativeRemoveAttribute.call(candidate, 'inert');
+                      else nativeSetAttribute.call(candidate, 'inert', '');
+                      candidate.style.setProperty('display', active ? activeDisplay : 'none', 'important');
+                      if (!active) return;
+                      candidate.style.setProperty('visibility', 'visible', 'important');
+                      candidate.style.setProperty('opacity', '1', 'important');
+                      candidate.style.setProperty('position', 'relative', 'important');
+                      candidate.style.setProperty('transform', 'none', 'important');
+                      candidate.style.setProperty('left', '0', 'important');
+                      candidate.style.setProperty('right', 'auto', 'important');
+                      candidate.style.setProperty('top', '0', 'important');
+                      candidate.style.setProperty('bottom', 'auto', 'important');
+                      candidate.style.setProperty('width', '100%%', 'important');
+                    });
+                    return true;
+                  };
+                  const waitForLocatorLayout = () => new Promise(resolve => {
+                    requestAnimationFrame(() => requestAnimationFrame(resolve));
                   });
+                  const measuredLocatorState = (entry, issue) => {
+                    if (!entry?.element?.isConnected) {
+                      return {status:'UNAVAILABLE', reason:'ELEMENT_DETACHED'};
+                    }
+                    const rect = entry.element.getBoundingClientRect();
+                    const targetGeometry = targetVisibleInViewport(entry.element, rect)
+                      ? markerTargetGeometryForElement(entry.element)
+                      : null;
+                    return locatorStateForIssue(entry.element, issue, targetGeometry);
+                  };
+                  const scrollLocatorIntoView = element => {
+                    try {
+                      nativeApply(nativeScrollIntoView, element, [
+                        {block:'center', inline:'center', behavior:'auto'}
+                      ]);
+                      return true;
+                    } catch (_) { return false; }
+                  };
+                  const showIssueFallback = issueId => {
+                    closePopover();
+                    post({type:'ISSUE_DETAIL_FALLBACK', issueId});
+                  };
+                  const focusIssue = async issueId => {
+                    let requestVersion = ++focusRequestVersion;
+                    if (issueId === null) {
+                      lastFocusedIssueId = null;
+                      closePopover();
+                      post({type:'ISSUE_DETAIL_FALLBACK', issueId:null});
+                      return;
+                    }
+                    const issue = currentIssues.find(candidate => candidate.id === issueId);
+                    if (!issue) {
+                      showIssueFallback(issueId);
+                      return;
+                    }
+                    lastFocusedIssueId = issueId;
+                    if (reconcileIssueTargets(issueId)) requestVersion = focusRequestVersion;
+                    const entry = marked.find(candidate => candidate.issues.some(item => item.id === issueId));
+                    if (!entry) {
+                      reportLocatorState(issue, {status:'UNAVAILABLE', reason:'SELECTOR_NOT_FOUND'});
+                      showIssueFallback(issueId);
+                      return;
+                    }
+                    entry.selectedIssueId = issueId;
+                    let state = measuredLocatorState(entry, issue);
+                    reportLocatorState(issue, state);
+                    let attemptedCarouselRecovery = false;
+                    if (state.status === 'HIDDEN_STATE' && state.recoverable) {
+                      attemptedCarouselRecovery = true;
+                      if (!activateCarouselState(entry.element, issue.carouselContext)) {
+                        reportLocatorState(issue, {
+                          status:'HIDDEN_STATE', reason:'CAROUSEL_CONTEXT_MISMATCH', recoverable:false
+                        });
+                        showIssueFallback(issueId);
+                        return;
+                      }
+                      entry.positionAnchor = undefined;
+                      await waitForLocatorLayout();
+                      if (requestVersion !== focusRequestVersion) return;
+                      state = measuredLocatorState(entry, issue);
+                      reportLocatorState(issue, state);
+                    }
+                    if (state.status === 'OFFSCREEN') {
+                      if (!scrollLocatorIntoView(entry.element)) {
+                        showIssueFallback(issueId);
+                        return;
+                      }
+                      await waitForLocatorLayout();
+                      if (requestVersion !== focusRequestVersion) return;
+                      state = measuredLocatorState(entry, issue);
+                      reportLocatorState(issue, state);
+                    }
+                    if (state.status === 'VISIBLE') {
+                      position();
+                      post({type:'ISSUE_DETAIL_FALLBACK', issueId:null});
+                      openPopover(entry.clusterHost || entry, issueId, false, true);
+                      return;
+                    }
+                    if (attemptedCarouselRecovery && state.status === 'HIDDEN_STATE') {
+                      state = {status:'HIDDEN_STATE', reason:'CAROUSEL_RECOVERY_FAILED', recoverable:false};
+                      reportLocatorState(issue, state);
+                    }
+                    showIssueFallback(issueId);
+                  };
                   popover.addEventListener('pointerenter', clearCloseTimer);
                   popover.addEventListener('pointerleave', scheduleClosePopover);
                   popover.addEventListener('focusin', clearCloseTimer);
@@ -2919,13 +3482,7 @@ public class LiveReportDocumentRewriter {
                       apply(data.issues, data.selectedIssueId);
                     }
                     if (data.type === 'FOCUS_ISSUE') {
-                      if (data.issueId === null) closePopover();
-                      const entry = marked.find(candidate => candidate.issues.some(issue => issue.id === data.issueId));
-                      if (entry) {
-                        entry.selectedIssueId = data.issueId;
-                        entry.element.scrollIntoView({block:'center', inline:'center', behavior:'smooth'});
-                        openPopover(entry, data.issueId);
-                      }
+                      void focusIssue(data.issueId);
                     }
                     if (data.type === 'SET_MARKERS_VISIBLE') {
                       layer.hidden = data.markersVisible === false;

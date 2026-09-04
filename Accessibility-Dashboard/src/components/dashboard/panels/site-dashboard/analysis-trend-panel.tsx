@@ -116,7 +116,7 @@ export function AnalysisTrendPanel({
         <ChartContainer config={chartConfig} className="site-page-evidence-trend-chart">
           <ComposedChart
             data={data}
-            margin={{ top: 18, right: 16, bottom: 0, left: 16 }}
+            margin={{ top: 10, right: 12, bottom: 0, left: 12 }}
             accessibilityLayer
           >
             <defs>

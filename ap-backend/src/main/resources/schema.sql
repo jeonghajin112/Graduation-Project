@@ -16,3 +16,12 @@ ALTER TABLE IF EXISTS evaluation_artifact
     ALTER COLUMN IF EXISTS image_height_px DROP NOT NULL;
 ALTER TABLE IF EXISTS evaluation_artifact
     ALTER COLUMN IF EXISTS capture_mode DROP NOT NULL;
+
+-- Locator state is optional so historical issues remain readable. On a fresh
+-- database Hibernate creates these columns after this additive legacy step.
+ALTER TABLE IF EXISTS issue_result
+    ADD COLUMN IF NOT EXISTS locator_carousel_id INTEGER;
+ALTER TABLE IF EXISTS issue_result
+    ADD COLUMN IF NOT EXISTS locator_carousel_slide_index INTEGER;
+ALTER TABLE IF EXISTS issue_result
+    ADD COLUMN IF NOT EXISTS locator_carousel_slide_count INTEGER;

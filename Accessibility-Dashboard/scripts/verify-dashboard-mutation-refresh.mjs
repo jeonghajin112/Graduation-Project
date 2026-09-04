@@ -558,7 +558,7 @@ async function runUnmountScenario(browser) {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     await page.locator("[data-dashboard-app-shell]").waitFor({ state: "detached" });
-    await page.locator(".ua-hero__headline").waitFor();
+    await page.locator("#ua-hero-title").waitFor();
     const probe = await readOverviewProbe(page);
     assert.equal(probe.calls, 2);
     assert.equal(probe.aborts, 2);

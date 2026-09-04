@@ -1,4 +1,5 @@
 import type {
+  IssueLocatorCarouselContext,
   IssueLocatorContext,
   IssueLocatorPathStep,
   IssueResultModel
@@ -39,6 +40,32 @@ export function getReplayIssuePathSteps(issue: IssueResultModel): IssueLocatorPa
   return fallbackSelector.length > 0
     ? [{ context: "DOCUMENT", selector: fallbackSelector }]
     : [];
+}
+
+export function getReplayIssueCarouselContext(
+  issue: IssueResultModel
+): IssueLocatorCarouselContext | null {
+  const context = issue.locator?.carouselContext;
+  if (
+    context === null ||
+    context === undefined ||
+    !Number.isSafeInteger(context.carouselId) ||
+    context.carouselId <= 0 ||
+    !Number.isSafeInteger(context.slideIndex) ||
+    context.slideIndex < 0 ||
+    !Number.isSafeInteger(context.slideCount) ||
+    context.slideCount < 2 ||
+    context.slideCount > 10_000 ||
+    context.slideIndex >= context.slideCount
+  ) {
+    return null;
+  }
+
+  return {
+    carouselId: context.carouselId,
+    slideIndex: context.slideIndex,
+    slideCount: context.slideCount
+  };
 }
 
 export function hasUsableIssueLocator(issue: IssueResultModel): boolean {

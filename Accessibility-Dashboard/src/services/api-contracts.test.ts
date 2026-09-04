@@ -125,7 +125,12 @@ function createEvaluationIssue() {
       height: 40,
       coordinateSpace: "CSS_PIXEL",
       visible: true,
-      htmlSnippet: "<a class=\"more\">더 보기</a>"
+      htmlSnippet: "<a class=\"more\">더 보기</a>",
+      carouselContext: {
+        carouselId: 2,
+        slideIndex: 1,
+        slideCount: 4
+      }
     },
     wcagCode: "KWCAG-2.4.4",
     createdAt: validDate
@@ -323,11 +328,30 @@ describe("createEvaluationCaptureMetadataParser", () => {
 describe("createEvaluationIssuesResponseParser", () => {
   const parseIssues = createEvaluationIssuesResponseParser(501);
 
-  it("keeps the locator path used by live markers and drops unused wire metadata", () => {
+  it("keeps the locator path and carousel state used by live markers", () => {
     const parsed = parseIssues([createEvaluationIssue()], "$.data");
     expect(parsed[0]?.locator).toEqual({
-      pathSteps: [{ context: "DOCUMENT", selector: "a.more", frameUrl: null }]
+      pathSteps: [{ context: "DOCUMENT", selector: "a.more", frameUrl: null }],
+      carouselContext: {
+        carouselId: 2,
+        slideIndex: 1,
+        slideCount: 4
+      }
     });
+  });
+
+  it.each([
+    [{ carouselId: 0, slideIndex: 1, slideCount: 4 }, "carouselId"],
+    [{ carouselId: 2, slideIndex: -1, slideCount: 4 }, "slideIndex"],
+    [{ carouselId: 2, slideIndex: 2, slideCount: 2 }, "slideIndex"],
+    [{ carouselId: 2, slideIndex: 0, slideCount: 1 }, "slideCount"],
+    [{ carouselId: 2, slideIndex: 0, slideCount: 10_001 }, "slideCount"]
+  ])("rejects an invalid carousel locator context %#", (carouselContext, field) => {
+    const issue = createEvaluationIssue();
+    expectContractError(
+      () => parseIssues([{ ...issue, locator: { ...issue.locator, carouselContext } }], "$.data"),
+      `$.data[0].locator.carouselContext.${field}`
+    );
   });
 
   it.each([

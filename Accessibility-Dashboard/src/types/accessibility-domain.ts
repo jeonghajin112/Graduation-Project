@@ -59,8 +59,15 @@ export type IssueLocatorPathStep = {
   frameUrl?: string | null;
 };
 
+export type IssueLocatorCarouselContext = {
+  carouselId: number;
+  slideIndex: number;
+  slideCount: number;
+};
+
 export type IssueLocator = {
   pathSteps: IssueLocatorPathStep[];
+  carouselContext?: IssueLocatorCarouselContext | null;
 };
 
 export type EvaluationCaptureMetadata = {

@@ -1,648 +1,475 @@
 /**
- * Verifies the current editorial landing surface: responsive display type,
- * 44px actions, rounded stage surface, off-black ink, 3px keyboard focus,
- * and no horizontal overflow from 320 through 4K.
+ * Verifies the scroll-world landing across desktop and mobile breakpoints.
+ * The suite uses reduced motion for the viewport matrix so visual checks do
+ * not download or decode the 1080p demo clips, then runs one focused motion
+ * check to prove that the desktop clip path still initializes.
  *
- * Usage: npm run test:visual
+ * Usage: npm run verify:landing-design
  */
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium } from "playwright";
-import { installDashboardApiFixture } from "./fixtures/dashboard-api-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
 const outDir = process.env.OUT_DIR ?? "artifacts/design-migration/landing";
 mkdirSync(outDir, { recursive: true });
 
-const HERO_MIN_PX = 30;
-const HERO_MAX_PX = 86;
-const HERO_ULTRAWIDE_MAX_PX = 100;
 const CONTROL_MIN_HEIGHT_PX = 44;
-const STAGE_MIN_RADIUS_PX = 20;
-
 const viewports = [
   { width: 3840, height: 2160 },
+  { width: 2560, height: 1440 },
+  { width: 2545, height: 1337, deviceScaleFactor: 1.5 },
   { width: 1440, height: 900 },
   { width: 1024, height: 900 },
   { width: 768, height: 900 },
+  { width: 860, height: 844 },
+  { width: 768, height: 844 },
   { width: 390, height: 844 },
   { width: 320, height: 700 }
 ];
 
-function channelToLinear(channel) {
-  const normalized = channel / 255;
-  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+async function settle(page) {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  );
 }
 
-function relativeLuminance([r, g, b]) {
-  return 0.2126 * channelToLinear(r) + 0.7152 * channelToLinear(g) + 0.0722 * channelToLinear(b);
-}
+async function verifyReducedMotionViewport(browser, viewport) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
+    reducedMotion: "reduce"
+  });
+  const page = await context.newPage();
+  const pageErrors = [];
+  const videoRequests = [];
+  let apiRequestCount = 0;
 
-function parseColor(value) {
-  const matched = value.match(/-?[\d.]+/g);
-  if (!matched || matched.length < 3) {
-    throw new Error(`Cannot parse colour: ${value}`);
-  }
-  const numbers = matched.map(Number);
-  const scale = value.startsWith("color(") ? 255 : 1;
-  return numbers.slice(0, 3).map((channel) => channel * scale);
-}
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith(".mp4")) videoRequests.push(pathname);
+  });
+  await page.route("**/api/**", async (route) => {
+    apiRequestCount += 1;
+    await route.abort("blockedbyclient");
+  });
 
-/** Alpha is the 4th component in both `rgba(r,g,b,a)` and `color(srgb r g b / a)`. */
-function parseAlpha(value) {
-  const matched = value.match(/-?[\d.]+/g);
-  if (!matched || matched.length < 4) {
-    return 1;
-  }
-  return Number(matched[3]);
-}
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  await page.locator("#ua-hero-title").waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  await settle(page);
 
-function contrastRatio(foreground, background) {
-  const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
-  const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
-  return (lighter + 0.05) / (darker + 0.05);
-}
-
-function isPureBlack(value) {
-  const [r, g, b] = parseColor(value);
-  return r === 0 && g === 0 && b === 0;
-}
-
-async function readLandingFacts(page) {
-  return page.evaluate(() => {
-    const read = (selector, keys) => {
-      const element = document.querySelector(selector);
-      if (!element) return null;
+  const facts = await page.evaluate(() => {
+    const isVisible = (element) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
-      const result = { height: Math.round(rect.height), width: Math.round(rect.width) };
-      for (const key of keys) {
-        result[key] = style[key];
-      }
-      return result;
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+    const controls = [...document.querySelectorAll(".sw-brand,.sw-topcta,.sw-nav__item,.sw-route__dot")]
+      .filter(isVisible)
+      .map((element) => ({
+        label: element.textContent?.trim() || element.getAttribute("aria-label") || element.className,
+        height: element.getBoundingClientRect().height,
+        width: element.getBoundingClientRect().width
+      }));
+    const title = document.querySelector("#ua-hero-title");
+    const root = document.querySelector("[data-scroll-world-ready=true]");
+    const topbar = document.querySelector(".sw-topbar");
+    const route = document.querySelector(".sw-route");
+    const stage = document.querySelector(".sw-stage");
+    const openingPoster = document.querySelector(".sw-scene .sw-scene__still");
+    const activeCopy = document.querySelector('.sw-copy[aria-hidden="false"]');
+    const wordmark = document.querySelector(".sw-wordmark,.sw-brand__name");
+    const topCta = document.querySelector(".sw-topcta");
+    const titleStyle = title ? getComputedStyle(title) : null;
+    const rootStyle = root ? getComputedStyle(root) : null;
+    const routeStyle = route ? getComputedStyle(route) : null;
+    const routeFillStyle = route ? getComputedStyle(route, "::after") : null;
+    const topbarRect = topbar?.getBoundingClientRect();
+    const rect = (element) => {
+      const bounds = element?.getBoundingClientRect();
+      return bounds
+        ? { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom, width: bounds.width, height: bounds.height }
+        : null;
     };
 
-    const severityHigh = document.querySelector(".ua-art__state:not(.is-pass)");
-    let severity = null;
-    if (severityHigh) {
-      const chipStyle = getComputedStyle(severityHigh);
-      // The chip tint and its ancestors can both be translucent, so collect the
-      // whole paint stack down to the first opaque layer and composite in Node.
-      const isTransparent = (value) => !value || value === "rgba(0, 0, 0, 0)" || value === "transparent";
-      const alphaOf = (value) => {
-        const numbers = value.match(/-?[\d.]+/g);
-        return numbers && numbers.length >= 4 ? Number(numbers[3]) : 1;
-      };
-      const stack = [];
-      let node = severityHigh;
-      while (node) {
-        const value = getComputedStyle(node).backgroundColor;
-        if (!isTransparent(value)) {
-          stack.push(value);
-          if (alphaOf(value) >= 1) break;
-        }
-        node = node.parentElement;
-      }
-      if (stack.length === 0 || alphaOf(stack[stack.length - 1]) < 1) {
-        stack.push("rgb(255, 255, 255)");
-      }
-      severity = {
-        color: chipStyle.color,
-        backgroundColor: chipStyle.backgroundColor,
-        backgroundStack: stack,
-        fontSize: chipStyle.fontSize,
-        text: severityHigh.textContent.trim()
-      };
-    }
-
     return {
-      heroHeadline: read(".ua-hero__headline", ["fontSize"]),
-      hero: read(".ua-hero", ["backgroundColor"]),
-      principles: read(".ua-boundary", ["backgroundColor"]),
-      stage: read(".ua-stage__surface", ["borderTopLeftRadius"]),
-      primaryAction: read(".ua-hero__copy .ua-action", ["borderTopLeftRadius", "minHeight", "display"]),
-      outlineAction: read(".ua-rail-button", ["borderTopLeftRadius", "minHeight", "display"]),
-      heroLogin: read(".ua-text-action[data-login-cta]", ["borderTopLeftRadius", "minHeight", "display"]),
-      severity,
+      ready: Boolean(root),
+      mainCount: document.querySelectorAll("main#uni-access-main").length,
+      h1Count: document.querySelectorAll("h1").length,
+      copyCount: document.querySelectorAll(".sw-copy").length,
+      activeCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="false"]:not([inert])').length,
+      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
+      routeCount: document.querySelectorAll(".sw-route__dot").length,
+      routeLabelCount: document.querySelectorAll(".sw-route__label").length,
+      routeMarkerCount: document.querySelectorAll(".sw-route__dot i").length,
+      horizontalProgressCount: document.querySelectorAll(".sw-scrollbar").length,
+      routeProgress: Number.parseFloat(routeStyle?.getPropertyValue("--sw-route-progress") || "0"),
+      routeGaugeWidth: Number.parseFloat(routeFillStyle?.width || "0"),
+      routeGaugeFillColor: routeFillStyle?.backgroundColor,
+      routeGaugeOriginY: Number.parseFloat(routeFillStyle?.transformOrigin?.split(/\s+/)[1] || "0"),
+      sectionNumberCount: document.querySelectorAll(".sw-copy__num").length,
+      hintCount: document.querySelectorAll(".sw-hint").length,
+      particleCount: document.querySelectorAll(".sw-pt").length,
+      videoCount: document.querySelectorAll("video").length,
+      posterReady: [...document.querySelectorAll(".sw-scene__still")].every((image) => image.complete && image.naturalWidth > 0),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      pageHeight: document.documentElement.scrollHeight,
+      topNavCount: document.querySelectorAll(".sw-nav").length,
+      titleFontSize: titleStyle ? Number.parseFloat(titleStyle.fontSize) : 0,
+      titleColor: titleStyle?.color,
+      rootBackground: rootStyle?.backgroundColor,
+      stageRect: rect(stage),
+      openingPosterRect: rect(openingPoster),
+      copyWidth: activeCopy?.getBoundingClientRect().width ?? 0,
+      wordmarkFontSize: wordmark ? Number.parseFloat(getComputedStyle(wordmark).fontSize) : 0,
+      topCtaHeight: topCta?.getBoundingClientRect().height ?? 0,
+      tagStyles: [...document.querySelectorAll(".sw-copy__tags li")].map((tag) => {
+        const style = getComputedStyle(tag);
+        return { color: style.color, backgroundColor: style.backgroundColor };
+      }),
+      hasLegacyStageClass: Boolean(document.querySelector(".sw-stage.ua-stage")),
+      hasLegacyTitleClass: Boolean(document.querySelector(".sw-copy__title.ua-hero__headline")),
+      topbarWithinViewport: Boolean(
+        topbarRect && topbarRect.left >= -0.5 && topbarRect.right <= document.documentElement.clientWidth + 0.5
+      ),
+      controls
+    };
+  });
+
+  const label = `${viewport.width}x${viewport.height}${viewport.deviceScaleFactor ? `@${viewport.deviceScaleFactor}x` : ""}`;
+  assert.equal(facts.ready, true, `${label}: scroll world did not initialize`);
+  assert.equal(facts.mainCount, 1, `${label}: landing must expose one main landmark`);
+  assert.equal(facts.h1Count, 1, `${label}: landing must expose one h1`);
+  assert.equal(facts.copyCount, 5, `${label}: expected five narrative scenes`);
+  assert.equal(facts.activeCopyCount, 1, `${label}: exactly one scene copy must be active`);
+  assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy escaped inert state`);
+  assert.equal(facts.routeCount, 5, `${label}: expected five route controls`);
+  assert.equal(facts.routeLabelCount, 0, `${label}: route text labels must stay hidden`);
+  assert.equal(facts.routeMarkerCount, 0, `${label}: circular route markers must stay removed`);
+  assert.equal(facts.horizontalProgressCount, 0, `${label}: obsolete top progress bar is still rendered`);
+  assert.ok(Math.abs(facts.routeProgress) <= 0.002, `${label}: vertical gauge must start empty`);
+  assert.ok(facts.routeGaugeWidth >= 2.5, `${label}: vertical gauge is too thin to perceive`);
+  assert.notEqual(facts.routeGaugeFillColor, "rgba(0, 0, 0, 0)", `${label}: vertical gauge fill is transparent`);
+  assert.ok(facts.routeGaugeOriginY <= 0.5, `${label}: vertical gauge must fill from the top`);
+  assert.equal(facts.sectionNumberCount, 0, `${label}: decorative section counters must stay removed`);
+  assert.equal(facts.hintCount, 0, `${label}: scroll instruction cue must stay removed`);
+  assert.equal(facts.particleCount, 0, `${label}: studio layout must not render particles`);
+  assert.equal(facts.videoCount, 0, `${label}: reduced motion must not create videos`);
+  assert.deepEqual(videoRequests, [], `${label}: reduced motion unexpectedly requested video media`);
+  assert.equal(facts.posterReady, true, `${label}: one or more scene posters failed to load`);
+  assert.equal(facts.overflow, 0, `${label}: page-level horizontal overflow detected`);
+  assert.ok(facts.pageHeight > viewport.height * 6, `${label}: scroll narrative track is too short`);
+  assert.equal(facts.topbarWithinViewport, true, `${label}: top bar exceeds the viewport`);
+  assert.equal(facts.hasLegacyStageClass, false, `${label}: scroll stage leaked the legacy width-capped class`);
+  assert.equal(facts.hasLegacyTitleClass, false, `${label}: scroll title leaked the legacy headline class`);
+  assert.ok(
+    facts.stageRect &&
+      Math.abs(facts.stageRect.left) < 0.5 &&
+      Math.abs(facts.stageRect.top) < 0.5 &&
+      Math.abs(facts.stageRect.width - viewport.width) < 0.5 &&
+      Math.abs(facts.stageRect.height - viewport.height) < 0.5,
+    `${label}: stage does not match the visual viewport`
+  );
+  assert.ok(
+    facts.openingPosterRect &&
+      facts.openingPosterRect.left <= 0.5 &&
+      facts.openingPosterRect.top <= 0.5 &&
+      facts.openingPosterRect.right >= viewport.width - 0.5 &&
+      facts.openingPosterRect.bottom >= viewport.height - 0.5,
+    `${label}: opening media does not cover the visual viewport`
+  );
+  assert.equal(facts.rootBackground, "rgb(245, 245, 247)", `${label}: landing canvas token changed`);
+  assert.notEqual(facts.titleColor, "rgb(0, 0, 0)", `${label}: title must use off-black ink`);
+  assert.ok(facts.tagStyles.length > 0, `${label}: landing tags are missing`);
+  for (const tagStyle of facts.tagStyles) {
+    assert.deepEqual(
+      tagStyle,
+      { color: "rgb(255, 255, 255)", backgroundColor: "rgb(29, 29, 31)" },
+      `${label}: landing tags must use white text on the black surface`
+    );
+  }
+  if (viewport.width >= 3840 && viewport.height >= 2000) {
+    assert.ok(facts.titleFontSize >= 90 && facts.titleFontSize <= 100, `${label}: 4K title scale is out of bounds`);
+    assert.ok(facts.copyWidth >= 840 && facts.copyWidth <= 900, `${label}: 4K copy measure is out of bounds`);
+    assert.ok(facts.topCtaHeight >= 68, `${label}: 4K primary action did not scale`);
+    assert.ok(facts.wordmarkFontSize >= 25, `${label}: 4K wordmark did not scale`);
+    assert.ok(facts.routeGaugeWidth >= 5.5, `${label}: 4K route gauge did not scale`);
+  } else if (viewport.width >= 2500 && viewport.height >= 1200) {
+    assert.ok(facts.titleFontSize >= 68 && facts.titleFontSize <= 80, `${label}: QHD title scale is out of bounds`);
+    assert.ok(facts.copyWidth >= 600 && facts.copyWidth <= 660, `${label}: QHD copy measure is out of bounds`);
+    assert.ok(facts.topCtaHeight >= 50, `${label}: QHD primary action did not scale`);
+    assert.ok(facts.wordmarkFontSize >= 21, `${label}: QHD wordmark did not scale`);
+    assert.ok(facts.routeGaugeWidth >= 3.5, `${label}: QHD route gauge did not scale`);
+  } else {
+    assert.ok(
+      facts.titleFontSize >= 30 && facts.titleFontSize <= 58,
+      `${label}: title scale is out of bounds (${facts.titleFontSize}px)`
+    );
+  }
+  assert.equal(facts.topNavCount, 0, `${label}: header must stay focused on brand and primary action`);
+  for (const control of facts.controls) {
+    assert.ok(
+      control.height >= CONTROL_MIN_HEIGHT_PX - 0.5,
+      `${label}: ${control.label} target is only ${control.height}px high`
+    );
+  }
+
+  if (viewport.width === 3840) {
+    await page.screenshot({ path: `${outDir}/scroll-world-${label}-opening.png`, fullPage: false });
+  }
+
+  if ([390, 1440, 2545, 3840].includes(viewport.width)) {
+    const progressSamples = [];
+    for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+      await page.evaluate((targetFraction) => {
+        const maxScroll = document.documentElement.scrollHeight - innerHeight;
+        window.scrollTo(0, maxScroll * targetFraction);
+      }, fraction);
+      await settle(page);
+      await page.waitForFunction((targetFraction) => {
+        const route = document.querySelector(".sw-route");
+        if (!route) return false;
+        const maxScroll = document.documentElement.scrollHeight - innerHeight;
+        const actualFraction = maxScroll > 0 ? scrollY / maxScroll : 0;
+        const value = Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress"));
+        const transform = getComputedStyle(route, "::after").transform;
+        const renderedScale = transform === "none" ? 1 : new DOMMatrixReadOnly(transform).m22;
+        return Number.isFinite(value)
+          && Math.abs(actualFraction - targetFraction) <= 0.002
+          && Math.abs(value - targetFraction) <= 0.015
+          && Math.abs(renderedScale - value) <= 0.02;
+      }, fraction);
+      progressSamples.push(await page.evaluate(() => {
+        const route = document.querySelector(".sw-route");
+        if (!route) return null;
+        const routeStyle = getComputedStyle(route);
+        const fillStyle = getComputedStyle(route, "::after");
+        const transform = fillStyle.transform;
+        return {
+          expected: scrollY / (document.documentElement.scrollHeight - innerHeight),
+          value: Number.parseFloat(routeStyle.getPropertyValue("--sw-route-progress")),
+          renderedScale: transform === "none" ? 1 : new DOMMatrixReadOnly(transform).m22,
+          current: route.querySelector('.sw-route__dot[aria-current="step"]')?.getAttribute("aria-label")
+        };
+      }));
+    }
+    progressSamples.forEach((sample, index) => {
+      assert.ok(sample, `${label}: vertical gauge disappeared during scrolling`);
+      assert.ok(sample.value >= 0 && sample.value <= 1, `${label}: gauge value escaped its range at sample ${index}`);
+      assert.ok(Math.abs(sample.value - sample.expected) <= 0.015, `${label}: gauge value drifted at sample ${index}`);
+      assert.ok(Math.abs(sample.renderedScale - sample.value) <= 0.02, `${label}: rendered gauge fill drifted at sample ${index}`);
+      if (index > 0) {
+        assert.ok(sample.value > progressSamples[index - 1].value + 0.03, `${label}: gauge did not advance at sample ${index}`);
+      }
+    });
+    assert.ok(progressSamples[0]?.value <= 0.002, `${label}: gauge did not begin empty`);
+    assert.ok(progressSamples.at(-1)?.value >= 0.998, `${label}: gauge did not finish full`);
+    assert.equal(progressSamples.at(-1)?.current, "5. 프로젝트", `${label}: final gauge state did not select the last scene`);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await settle(page);
+  }
+
+  await page.keyboard.press("Tab");
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      href: document.activeElement?.getAttribute("href"),
+      text: document.activeElement?.textContent?.trim()
+    })),
+    { href: "#uni-access-main", text: "본문으로 바로가기" },
+    `${label}: skip link must be first in the tab order`
+  );
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "uni-access-main");
+
+  const focus = await page.locator(".sw-topcta").evaluate((element) => {
+    element.focus();
+    const style = getComputedStyle(element);
+    return { width: style.outlineWidth, offset: style.outlineOffset, style: style.outlineStyle };
+  });
+  assert.equal(focus.width, "3px", `${label}: CTA focus outline must be 3px`);
+  assert.equal(focus.offset, "3px", `${label}: CTA focus separation must be 3px`);
+  assert.notEqual(focus.style, "none", `${label}: CTA focus outline is missing`);
+
+  await page.getByRole("button", { name: "4. 라이브 리포트", exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "문제가 있는 자리를 그대로"
+  );
+  await settle(page);
+  const report = await page.evaluate(() => {
+    const scene = document.querySelectorAll(".sw-scene")[3];
+    const media = scene?.querySelector(".sw-scene__video, .sw-scene__still");
+    const copy = document.querySelector('.sw-copy[aria-hidden="false"]');
+    const rect = media?.getBoundingClientRect();
+    const copyRect = copy?.getBoundingClientRect();
+    const overlaps = Boolean(
+      rect && copyRect &&
+      rect.left < copyRect.right - 1 && rect.right > copyRect.left + 1 &&
+      rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1
+    );
+    return {
+      current: document.querySelector('.sw-route__dot[aria-current="step"]')?.getAttribute("aria-label"),
+      title: document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent,
+      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
+      cardElementFound: Boolean(media),
+      cardWidth: rect?.width ?? 0,
+      cardRadius: media ? Number.parseFloat(getComputedStyle(media).borderTopLeftRadius) : 0,
+      overlapsCopy: overlaps,
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
   });
-}
-
-async function readDashboardSignature(root) {
-  return root.evaluate((rootElement) => {
-    const documentElement = rootElement.ownerDocument.documentElement;
-    const view = rootElement.ownerDocument.defaultView;
-    const rootRect = rootElement.getBoundingClientRect();
-    const round = (value) => Math.round(value * 4) / 4;
-    const read = (selector, styleKeys = []) => {
-      const element = selector === ":scope"
-        ? rootElement
-        : rootElement.querySelector(selector);
-      if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      const result = {
-        x: round(rect.x - rootRect.x),
-        y: round(rect.y - rootRect.y),
-        width: round(rect.width),
-        height: round(rect.height)
-      };
-      for (const key of styleKeys) {
-        result[key] = style[key];
-      }
-      return result;
-    };
-    const cards = [...rootElement.querySelectorAll(".dashboard-project-card")];
-    const selectedItems = [...rootElement.querySelectorAll('[aria-current="page"]')];
-
-    return {
-      viewport: {
-        innerWidth: view?.innerWidth ?? null,
-        innerHeight: view?.innerHeight ?? null,
-        clientWidth: documentElement.clientWidth,
-        clientHeight: documentElement.clientHeight
-      },
-      root: read(":scope", ["fontSize", "lineHeight", "backgroundColor"]),
-      shell: read(".dashboard-shell", ["display", "flexDirection"]),
-      sidebar: read("aside", [
-        "position",
-        "paddingTop",
-        "paddingRight",
-        "paddingBottom",
-        "paddingLeft"
-      ]),
-      accountTrigger: read(".dashboard-account-menu-trigger", ["fontSize", "columnGap"]),
-      analyzeNav: read(".sidebar-nav-link", [
-        "fontSize",
-        "paddingTop",
-        "paddingRight",
-        "paddingBottom",
-        "paddingLeft",
-        "borderTopLeftRadius"
-      ]),
-      projectRow: read(".sidebar-tree-parent-row", [
-        "fontSize",
-        "paddingTop",
-        "paddingRight",
-        "paddingBottom",
-        "paddingLeft",
-        "borderTopLeftRadius"
-      ]),
-      main: read("main"),
-      topZone: read(".dashboard-top-zone", ["paddingLeft", "paddingRight"]),
-      contentZone: read(".dashboard-content-zone", ["paddingLeft", "paddingRight"]),
-      projectTitle: read(".dashboard-project-title", ["fontSize", "lineHeight"]),
-      projectAddButton: read(".dashboard-project-add-button", ["fontSize", "borderTopLeftRadius"]),
-      grid: read(".dashboard-project-grid", ["gridTemplateColumns", "columnGap", "rowGap"]),
-      card: read(".dashboard-project-card", ["paddingTop", "paddingRight", "borderTopLeftRadius"]),
-      favicon: read(".dashboard-project-favicon", ["borderTopLeftRadius"]),
-      cardTitle: read(".dashboard-project-card-title", ["fontSize", "lineHeight", "whiteSpace"]),
-      cardMeta: read(".dashboard-project-card-meta", ["fontSize", "lineHeight"]),
-      cardUrl: read(".dashboard-project-card-url", ["fontSize", "lineHeight"]),
-      cardScore: read(".dashboard-project-card-score", ["fontSize", "lineHeight"]),
-      cardStatus: read(".dashboard-project-card-status", ["fontSize", "lineHeight"]),
-      cardWidths: cards.map((card) => round(card.getBoundingClientRect().width)),
-      selectedLabels: selectedItems.map((item) => item.textContent?.trim() ?? ""),
-      overflowX: documentElement.scrollWidth - documentElement.clientWidth
-    };
-  });
-}
-
-function readSharedDashboardLayout(signature) {
-  const select = (box, keys) => {
-    if (!box) return null;
-    return Object.fromEntries(keys.map((key) => [key, box[key]]));
-  };
-  const mainOriginY = signature.main?.y ?? 0;
-  const selectInMain = (box, keys) => {
-    const selected = select(box, keys);
-    return selected && "y" in selected
-      ? { ...selected, y: selected.y - mainOriginY }
-      : selected;
-  };
-
-  return {
-    viewport: signature.viewport,
-    root: select(signature.root, ["width", "fontSize", "lineHeight", "backgroundColor"]),
-    shell: select(signature.shell, ["x", "y", "width", "display", "flexDirection"]),
-    sidebar: select(signature.sidebar, [
-      "x",
-      "y",
-      "width",
-      "position",
-      "paddingTop",
-      "paddingRight",
-      "paddingBottom",
-      "paddingLeft"
-    ]),
-    accountTrigger: signature.accountTrigger,
-    analyzeNav: signature.analyzeNav,
-    projectRow: signature.projectRow,
-    main: selectInMain(signature.main, ["x", "y", "width"]),
-    topZone: selectInMain(signature.topZone, [
-      "x",
-      "y",
-      "width",
-      "height",
-      "paddingLeft",
-      "paddingRight"
-    ]),
-    contentZone: selectInMain(signature.contentZone, [
-      "x",
-      "y",
-      "width",
-      "paddingLeft",
-      "paddingRight"
-    ]),
-    projectTitle: selectInMain(signature.projectTitle, [
-      "x",
-      "y",
-      "fontSize",
-      "lineHeight"
-    ]),
-    projectAddButton: signature.projectAddButton,
-    grid: signature.grid
-      ? {
-          ...selectInMain(signature.grid, ["x", "y", "width", "columnGap", "rowGap"]),
-          columnWidths: signature.grid.gridTemplateColumns
-            .split(/\s+/)
-            .filter(Boolean)
-            .map((value) => Math.round(Number.parseFloat(value) * 4) / 4)
-        }
-      : null,
-    card: selectInMain(signature.card, [
-      "x",
-      "y",
-      "width",
-      "height",
-      "paddingTop",
-      "paddingRight",
-      "borderTopLeftRadius"
-    ]),
-    cardTitle: select(signature.cardTitle, ["fontSize", "lineHeight", "whiteSpace"]),
-    favicon: select(signature.favicon, ["width", "height", "borderTopLeftRadius"]),
-    cardMeta: select(signature.cardMeta, ["fontSize", "lineHeight"]),
-    cardUrl: select(signature.cardUrl, ["fontSize", "lineHeight"]),
-    cardScore: select(signature.cardScore, ["fontSize", "lineHeight"]),
-    cardStatus: select(signature.cardStatus, ["fontSize", "lineHeight"]),
-    overflowX: signature.overflowX
-  };
-}
-
-async function settleDocument(locator) {
-  await locator.evaluate(async (element) => {
-    await element.ownerDocument.fonts.ready;
-    const view = element.ownerDocument.defaultView;
-    await new Promise((resolve) => view?.requestAnimationFrame(() => resolve()));
-    await new Promise((resolve) => view?.requestAnimationFrame(() => resolve()));
-  });
-}
-
-async function readProjectFaviconPresentation(page) {
-  return page.locator(".dashboard-project-favicon").first().evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      loaded: element.dataset.faviconLoaded,
-      borderTopWidth: style.borderTopWidth,
-      backgroundColor: style.backgroundColor,
-      fallbackIconCount: element.querySelectorAll("svg").length,
-      imageCount: element.querySelectorAll("img").length
-    };
-  });
-}
-
-async function verifyProjectFaviconPresentation(browser) {
-  const faviconUrl = `${baseUrl}/__test-assets__/favicon.svg`;
-  const missingFaviconUrl = `${baseUrl}/__test-assets__/missing-favicon.svg`;
-  const loadedPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await loadedPage.route("**/__test-assets__/favicon.svg", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "image/svg+xml",
-      body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#0071e3"/></svg>'
-    })
-  );
-  const loadedFixture = await installDashboardApiFixture(loadedPage);
-  loadedFixture.target.faviconUrl = faviconUrl;
-  await loadedPage.goto(`${baseUrl}/projects/${loadedFixture.organization.id}`, { waitUntil: "networkidle" });
-  await loadedPage.locator('.dashboard-project-favicon[data-favicon-loaded="true"]').waitFor();
-  const loaded = await readProjectFaviconPresentation(loadedPage);
-  loadedFixture.assertIsolated();
-  await loadedPage.close();
-
-  const fallbackPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await fallbackPage.route("**/__test-assets__/missing-favicon.svg", (route) =>
-    route.fulfill({ status: 404, contentType: "text/plain", body: "missing" })
-  );
-  const fallbackFixture = await installDashboardApiFixture(fallbackPage);
-  fallbackFixture.target.faviconUrl = missingFaviconUrl;
-  await fallbackPage.goto(`${baseUrl}/projects/${fallbackFixture.organization.id}`, { waitUntil: "networkidle" });
-  await fallbackPage.waitForFunction(() => {
-    const favicon = document.querySelector('.dashboard-project-favicon[data-favicon-loaded="false"]');
-    return favicon && !favicon.querySelector("img");
-  });
-  const fallback = await readProjectFaviconPresentation(fallbackPage);
-  fallbackFixture.assertIsolated();
-  await fallbackPage.close();
-
-  assert.equal(loaded.loaded, "true", "a successfully loaded favicon must enter the loaded state");
-  assert.equal(loaded.borderTopWidth, "0px", "a successfully loaded favicon must not keep its frame border");
-  assert.equal(parseAlpha(loaded.backgroundColor), 0, "a successfully loaded favicon must use a transparent surface");
-  assert.equal(loaded.fallbackIconCount, 0, "a successfully loaded favicon must hide the fallback icon");
-  assert.equal(loaded.imageCount, 1, "a successfully loaded favicon must remain visible");
-
-  assert.equal(fallback.loaded, "false", "a failed favicon must stay in the fallback state");
+  assert.equal(report.current, "4. 라이브 리포트", `${label}: report route state did not update`);
+  assert.equal(report.title, "문제가 있는 자리를 그대로", `${label}: report copy did not activate`);
+  assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
+  assert.equal(report.cardElementFound, true, `${label}: report card surface is missing`);
+  assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
   assert.ok(
-    Number.parseFloat(fallback.borderTopWidth) > 0,
-    "a failed favicon must retain the fallback frame border"
+    report.cardRadius >= 20,
+    `${label}: report media must retain rounded card framing (${report.cardRadius}px)`
   );
-  assert.equal(parseAlpha(fallback.backgroundColor), 1, "a failed favicon must retain its solid fallback surface");
-  assert.equal(fallback.fallbackIconCount, 1, "a failed favicon must render the target-type fallback icon");
-  assert.equal(fallback.imageCount, 0, "a failed favicon image must be removed from the rendered state");
+  const configuredCardRatio = viewport.width <= 860 ? 0.92 : viewport.width < 1280 ? 0.48 : 0.54;
+  const cardMaxHeightRatio = viewport.width <= 860 ? 0.46 : 0.82;
+  const expectedCardWidth = Math.min(
+    viewport.width * configuredCardRatio,
+    viewport.height * cardMaxHeightRatio * (16 / 9)
+  );
+  assert.ok(
+    Math.abs(report.cardWidth - expectedCardWidth) < 1,
+    `${label}: report card width is ${Math.round(report.cardWidth)}px; expected ${Math.round(expectedCardWidth)}px`
+  );
+  assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
 
-  return { loaded, fallback };
-}
+  await page.getByRole("button", { name: "5. 프로젝트", exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
+  );
+  assert.deepEqual(
+    await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__cta a').allTextContents(),
+    ["새 페이지 분석", "라이브 리포트 보기"],
+    `${label}: final actions are missing`
+  );
+  await page.getByRole("link", { name: "라이브 리포트 보기", exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "문제가 있는 자리를 그대로"
+  );
 
-/**
- * Composites a paint stack ordered top-most first onto an opaque base, so the
- * measured ratio matches what a user actually sees through translucent tints.
- */
-function flattenStack(stack) {
-  let result = parseColor(stack[stack.length - 1]);
-  for (let index = stack.length - 2; index >= 0; index -= 1) {
-    const layer = stack[index];
-    const alpha = parseAlpha(layer);
-    const channels = parseColor(layer);
-    result = channels.map((channel, position) => channel * alpha + result[position] * (1 - alpha));
+  assert.equal(apiRequestCount, 0, `${label}: landing unexpectedly requested an API`);
+  assert.deepEqual(pageErrors, [], `${label}: browser page errors detected`);
+
+  if (viewport.width === 1440 || viewport.width === 390) {
+    await page.screenshot({ path: `${outDir}/scroll-world-${label}.png`, fullPage: false });
   }
-  return result;
+
+  if (viewport.width === 1440) {
+    await Promise.all([
+      page.waitForURL("**/analyze"),
+      page.locator(".sw-topcta").click()
+    ]);
+    await page.locator(".sw-root").waitFor({ state: "detached" });
+    assert.equal(await page.locator(".sw-root").count(), 0, "route change must unmount the scroll world");
+    assert.equal(await page.locator("video").count(), 0, "route change must release landing videos");
+    assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 0, "app entry must reset page scroll");
+  }
+
+  await context.close();
+  return { label, facts, report };
 }
 
-async function verifyProductReplayOverlayScale(productPreviewRoot) {
-  await productPreviewRoot
-    .getByRole("button", { name: "www.hongik.ac.kr 상세 보기", exact: true })
-    .click();
+async function verifyDesktopMotionPath(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    reducedMotion: "no-preference"
+  });
+  const page = await context.newPage();
+  const pageErrors = [];
+  const videoRequests = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith(".mp4")) videoRequests.push(pathname);
+  });
 
-  const outerFrame = productPreviewRoot.locator("iframe.site-page-evidence-replay-frame");
-  await outerFrame.waitFor();
-  const replayFrame = productPreviewRoot.frameLocator("iframe.site-page-evidence-replay-frame");
-  const marker = replayFrame.locator(".preview-marker").first();
-  await marker.waitFor({ state: "visible" });
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  await page.waitForFunction(() => document.querySelectorAll("video").length === 1, null, { timeout: 15_000 });
+  assert.equal(await page.locator("video").count(), 1, "initial desktop view must load only the opening clip");
+  assert.deepEqual(videoRequests, ["/landing/scroll-world/vid/opening-1080.mp4"]);
+  assert.deepEqual(pageErrors, [], "desktop motion path raised a page error");
+  await context.close();
+}
 
-  const outerScale = Number.parseFloat(await outerFrame.getAttribute("data-replay-scale"));
-  const outerVisualWidth = Number.parseFloat(
-    await outerFrame.getAttribute("data-replay-visual-width")
-  );
-  const innerMetrics = await replayFrame.locator("html").evaluate((element) => {
-    const style = getComputedStyle(element);
+async function verifyMobileHeightOnlyResize(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 700 },
+    isMobile: true,
+    hasTouch: true,
+    reducedMotion: "reduce"
+  });
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settle(page);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForFunction(() => {
+    const route = document.querySelector(".sw-route");
+    const value = Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress"));
+    return value >= 0.998;
+  });
+  const progress = await page.locator(".sw-route").evaluate((route) => ({
+    value: Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress")),
+    current: route.querySelector('[aria-current="step"]')?.getAttribute("aria-label")
+  }));
+  assert.ok(progress.value >= 0.998, "mobile height-only resize left the vertical gauge incomplete");
+  assert.equal(progress.current, "5. 프로젝트", "mobile height-only resize lost the final scene state");
+  await context.close();
+}
+
+async function verifyProductPreviewAccountMenu(browser) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await page.goto(`${baseUrl}/product-preview`, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-dashboard-product-preview="true"]').waitFor();
+  await page.locator(".dashboard-account-menu-trigger").click();
+  const menu = page.getByRole("menu", { name: "계정 메뉴" });
+  await menu.waitFor();
+  const metrics = await menu.evaluate((element) => {
+    const item = element.querySelector(".dashboard-account-menu-item");
+    const icon = item?.querySelector("svg");
+    if (!item || !icon) return null;
+    const menuStyle = getComputedStyle(element);
     return {
-      inverseScale: Number.parseFloat(style.getPropertyValue("--replay-overlay-inverse-scale")),
-      visualWidth: Number.parseFloat(style.getPropertyValue("--replay-visual-width"))
+      width: Math.round(element.getBoundingClientRect().width),
+      borderTopWidth: menuStyle.borderTopWidth,
+      itemFontSize: Number.parseFloat(getComputedStyle(item).fontSize),
+      iconWidth: Math.round(icon.getBoundingClientRect().width)
     };
   });
-  const markerBox = await marker.boundingBox();
-
-  assert.ok(outerScale >= 0.01 && outerScale < 1, `product replay scale must fit: ${outerScale}`);
-  assert.ok(outerVisualWidth > 0, `product replay visual width must be positive: ${outerVisualWidth}`);
-  assert.ok(
-    Math.abs(outerScale * innerMetrics.inverseScale - 1) <= 0.01,
-    `product replay overlay scale must cancel the iframe scale: ${JSON.stringify({ outerScale, ...innerMetrics })}`
-  );
-  assert.ok(
-    Math.abs(innerMetrics.visualWidth - outerVisualWidth) <= 0.5,
-    `product replay visual width must match its parent: ${JSON.stringify({ outerVisualWidth, ...innerMetrics })}`
-  );
-  assert.ok(markerBox, "product replay marker must be visible");
-  assert.ok(Math.abs(markerBox.width - 24) <= 0.75, `product replay marker width: ${markerBox.width}px`);
-  assert.ok(Math.abs(markerBox.height - 24) <= 0.75, `product replay marker height: ${markerBox.height}px`);
+  assert.ok(metrics, "account dropdown metrics missing");
+  assert.equal(metrics.borderTopWidth, "0px", "account dropdown must not render an outer border");
+  assert.ok(metrics.width <= 240, `account dropdown is too wide (${metrics.width}px)`);
+  assert.ok(metrics.itemFontSize <= 14, `account dropdown type is too large (${metrics.itemFontSize}px)`);
+  assert.ok(metrics.iconWidth <= 20, `account dropdown icon is too large (${metrics.iconWidth}px)`);
+  await page.locator('[data-dashboard-product-preview="true"]').screenshot({
+    path: `${outDir}/product-preview-account-menu.png`
+  });
+  await context.close();
 }
 
 const browser = await chromium.launch({ headless: true });
-const report = [];
-let faviconPresentation = null;
-
 try {
+  const results = [];
   for (const viewport of viewports) {
-    const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
-    let unexpectedApiRequestCount = 0;
-    await page.route("**/api/**", async (route) => {
-      unexpectedApiRequestCount += 1;
-      await route.abort("blockedbyclient");
-    });
-    await page.goto(`${baseUrl}/`, { waitUntil: "networkidle" });
-    await page.locator(".ua-hero__headline").waitFor();
-    const productPreviewRoot = page
-      .frameLocator(".ua-stage__frame")
-      .locator('[data-dashboard-product-preview="true"]');
-    await productPreviewRoot.waitFor();
-    await settleDocument(productPreviewRoot);
-
-    const facts = await readLandingFacts(page);
-    const label = `${viewport.width}x${viewport.height}`;
-    const frameViewport = await page.locator(".ua-stage__frame").evaluate((frame) => ({
-      width: frame.clientWidth,
-      height: frame.clientHeight
-    }));
-    const embeddedDashboard = await readDashboardSignature(productPreviewRoot);
-    const referencePage = await browser.newPage({
-      viewport: frameViewport,
-      reducedMotion: "reduce"
-    });
-    const referenceFixture = await installDashboardApiFixture(referencePage);
-    await referencePage.goto(
-      `${baseUrl}/projects/${referenceFixture.organization.id}`,
-      { waitUntil: "networkidle" }
-    );
-    const actualDashboardRoot = referencePage.locator(".bridge-dashboard");
-    await actualDashboardRoot.waitFor();
-    await actualDashboardRoot.locator(".dashboard-project-grid").waitFor();
-    await settleDocument(actualDashboardRoot);
-    const referenceDashboard = await readDashboardSignature(actualDashboardRoot);
-    referenceFixture.assertIsolated();
-    await referencePage.close();
-
-    const productPreview = {
-      cardCount: embeddedDashboard.cardWidths.length,
-      cardWidths: embeddedDashboard.cardWidths,
-      columnCount: embeddedDashboard.grid?.gridTemplateColumns.split(/\s+/).filter(Boolean).length ?? 0,
-      gridWidth: embeddedDashboard.grid?.width ?? 0,
-      titleWhiteSpace: embeddedDashboard.cardTitle?.whiteSpace ?? null
-    };
-
-    assert.ok(facts.heroHeadline, `${label}: hero headline missing`);
-    assert.ok(facts.hero, `${label}: hero section missing`);
-    assert.ok(facts.stage, `${label}: stage surface missing`);
-    assert.ok(facts.primaryAction, `${label}: primary CTA missing`);
-    assert.ok(productPreview.cardCount > 0, `${label}: product preview missing`);
-    assert.deepEqual(
-      readSharedDashboardLayout(embeddedDashboard),
-      readSharedDashboardLayout(referenceDashboard),
-      `${label}: embedded dashboard layout differs from the live project route at ${frameViewport.width}x${frameViewport.height}`
-    );
-    assert.equal(
-      unexpectedApiRequestCount,
-      0,
-      `${label}: the read-only product preview unexpectedly requested a live API`
-    );
-
-    // Responsive Korean display range from the current landing type scale.
-    const heroFontSize = Number.parseFloat(facts.heroHeadline.fontSize);
-    const heroMaxPx = viewport.width >= 3840 ? HERO_ULTRAWIDE_MAX_PX : HERO_MAX_PX;
-    assert.ok(
-      heroFontSize >= HERO_MIN_PX && heroFontSize <= heroMaxPx,
-      `${label}: hero ${heroFontSize}px outside ${HERO_MIN_PX}-${heroMaxPx}px range`
-    );
-
-    // Off-black, not pure black.
-    assert.ok(!isPureBlack(facts.hero.backgroundColor), `${label}: hero uses pure black`);
-    if (facts.principles) {
-      assert.ok(!isPureBlack(facts.principles.backgroundColor), `${label}: principles uses pure black`);
-    }
-
-    // The current card token is 20px on compact screens and grows on desktop.
-    assert.ok(
-      Number.parseFloat(facts.stage.borderTopLeftRadius) >= STAGE_MIN_RADIUS_PX,
-      `${label}: stage radius ${facts.stage.borderTopLeftRadius} below ${STAGE_MIN_RADIUS_PX}px`
-    );
-
-    // All interactive landing actions meet the 44px target size floor.
-    for (const [name, control] of [
-      ["primary", facts.primaryAction],
-      ["outline", facts.outlineAction],
-      ["login", facts.heroLogin]
-    ]) {
-      if (!control || control.display === "none" || control.height === 0) continue;
-      assert.ok(
-        control.height >= CONTROL_MIN_HEIGHT_PX,
-        `${label}: ${name} CTA height ${control.height}px below ${CONTROL_MIN_HEIGHT_PX}px`
-      );
-    }
-
-    // Severity label must clear AA for its text size.
-    let severityRatio = null;
-    if (facts.severity) {
-      const chipBackground = flattenStack(facts.severity.backgroundStack);
-      severityRatio = Number(contrastRatio(parseColor(facts.severity.color), chipBackground).toFixed(2));
-      assert.ok(
-        severityRatio >= 4.5,
-        `${label}: severity "${facts.severity.text}" contrast ${severityRatio} < 4.5 ` +
-          `(color=${facts.severity.color} stack=${facts.severity.backgroundStack.join(" | ")})`
-      );
-    }
-
-    // 3px action focus with the current 3px separation from the control.
-    const focus = await page.evaluate(() => {
-      const cta = document.querySelector(".ua-hero__copy .ua-action");
-      if (!cta) return null;
-      cta.focus();
-      const style = getComputedStyle(cta);
-      return { width: style.outlineWidth, offset: style.outlineOffset, style: style.outlineStyle };
-    });
-    if (focus) {
-      assert.equal(focus.width, "3px", `${label}: focus ring ${focus.width} !== 3px`);
-      assert.equal(focus.offset, "3px", `${label}: focus offset ${focus.offset} !== 3px`);
-    }
-
-    assert.ok(facts.overflow <= 0, `${label}: horizontal overflow ${facts.overflow}px`);
-    assert.equal(
-      productPreview.titleWhiteSpace,
-      "nowrap",
-      `${label}: landing typography leaked into the product card title`
-    );
-
-    if (viewport.width >= 768) {
-      assert.ok(
-        Math.min(...productPreview.cardWidths) >= 240,
-        `${label}: product cards are too narrow (${productPreview.cardWidths.join(", ")}px)`
-      );
-    }
-
-    if (viewport.width === 3840) {
-      assert.ok(
-        productPreview.columnCount >= 3,
-        `${label}: product grid did not expand for its ${frameViewport.width}px internal viewport`
-      );
-      assert.ok(
-        productPreview.cardCount >= productPreview.columnCount,
-        `${label}: project preview must fill its first card row`
-      );
-      const accountTrigger = productPreviewRoot.locator(".dashboard-account-menu-trigger");
-      await accountTrigger.click();
-      const accountMenu = productPreviewRoot.locator(".dashboard-account-menu");
-      await accountMenu.waitFor();
-      const accountMenuMetrics = await accountMenu.evaluate((menu) => {
-        const item = menu.querySelector(".dashboard-account-menu-item");
-        const icon = item?.querySelector("svg");
-        if (!item || !icon) return null;
-        return {
-          width: Math.round(menu.getBoundingClientRect().width),
-          itemFontSize: Number.parseFloat(getComputedStyle(item).fontSize),
-          iconWidth: Math.round(icon.getBoundingClientRect().width)
-        };
-      });
-      assert.ok(accountMenuMetrics, `${label}: account dropdown metrics missing`);
-      assert.ok(
-        accountMenuMetrics.width <= 240,
-        `${label}: account dropdown is too wide (${accountMenuMetrics.width}px)`
-      );
-      assert.ok(
-        accountMenuMetrics.itemFontSize <= 16,
-        `${label}: account dropdown text is too large (${accountMenuMetrics.itemFontSize}px)`
-      );
-      assert.ok(
-        accountMenuMetrics.iconWidth <= 20,
-        `${label}: account dropdown icon is too large (${accountMenuMetrics.iconWidth}px)`
-      );
-      await page.locator(".ua-stage").screenshot({ path: `${outDir}/after-account-menu-${label}.png` });
-      await accountTrigger.click();
-      await page.locator(".ua-stage").screenshot({ path: `${outDir}/after-product-preview-${label}.png` });
-    }
-
-    if (viewport.width === 1440 || viewport.width === 390) {
-      await page.screenshot({ path: `${outDir}/after-landing-${label}.png`, fullPage: false });
-    }
-    if (viewport.width === 1440) {
-      await verifyProductReplayOverlayScale(productPreviewRoot);
-    }
-
-    report.push({
-      viewport: label,
-      heroFontSize,
-      heroBackground: facts.hero.backgroundColor,
-      principlesBackground: facts.principles?.backgroundColor ?? null,
-      stageRadius: facts.stage.borderTopLeftRadius,
-      ctaRadius: {
-        primary: facts.primaryAction?.borderTopLeftRadius ?? null,
-        outline: facts.outlineAction?.borderTopLeftRadius ?? null,
-        login: facts.heroLogin?.borderTopLeftRadius ?? null
-      },
-      ctaHeight: {
-        primary: facts.primaryAction?.height ?? null,
-        outline: facts.outlineAction?.height ?? null,
-        login: facts.heroLogin?.height ?? null
-      },
-      severity: facts.severity ? { text: facts.severity.text, ratio: severityRatio } : null,
-      productPreview,
-      dashboardParity: {
-        frameViewport,
-        matched: true
-      },
-      focus,
-      overflow: facts.overflow
-    });
-
-    await page.close();
+    results.push(await verifyReducedMotionViewport(browser, viewport));
   }
-
-  faviconPresentation = await verifyProjectFaviconPresentation(browser);
-  console.log(JSON.stringify({ result: "PASS", report, faviconPresentation }, null, 2));
+  await verifyMobileHeightOnlyResize(browser);
+  await verifyDesktopMotionPath(browser);
+  await verifyProductPreviewAccountMenu(browser);
+  writeFileSync(`${outDir}/landing-design-summary.json`, JSON.stringify(results, null, 2));
+  console.log("Landing scroll-world visual checks passed.");
 } finally {
-  writeFileSync(
-    `${outDir}/landing-facts.json`,
-    JSON.stringify({ report, faviconPresentation }, null, 2),
-    "utf8"
-  );
   await browser.close();
 }

@@ -14,7 +14,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: var(--site-rail-card-padding);
+  padding: clamp(0.875rem, 0.5rem + 0.35cqi, 1.25rem);
   border: 1px solid var(--dashboard-card-border);
   border-radius: var(--dashboard-site-card-radius);
   background: var(--site-glass-bg-opaque);
@@ -38,12 +38,12 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: clamp(0.5rem, 0.125rem + 0.4cqi, 1rem);
-  margin-top: var(--site-rail-section-space);
+  margin-top: clamp(0.625rem, 0.25rem + 0.3cqi, 0.875rem);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics > div {
   min-width: 0;
-  padding: clamp(0.75rem, 0.25rem + 0.5cqi, 1.25rem);
+  padding: clamp(0.625rem, 0.25rem + 0.3cqi, 0.875rem);
   border-radius: var(--dashboard-site-nested-radius);
   background: var(--site-inset-surface);
 }
@@ -72,8 +72,8 @@
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart {
   width: 100%;
-  height: clamp(8.75rem, 2.5rem + 5cqi, 13rem);
-  margin-top: clamp(0.75rem, 0.4rem + 0.25cqi, 1rem);
+  height: clamp(6.25rem, 1.75rem + 3.5cqi, 8.5rem);
+  margin-top: 0.5rem;
   overflow: visible;
 }
 
@@ -157,8 +157,8 @@
     height: 100%;
   }
 
-  /* The rail is a stack of cards, so it starts at the top of the row and grows
-     with its content instead of one card stretching to the replay height. */
+  /* Keep ordinary desktop cards compact; the 4K rule below opts into stretching
+     only when the extra block space is useful for multi-item issue pages. */
   .bridge-dashboard.dashboard-site-detail .site-dashboard-rail {
     grid-column: auto;
     align-self: start;
@@ -167,7 +167,7 @@
 
 @media (max-width: 767px) {
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart {
-    height: 8rem;
+    height: 6.5rem;
   }
 }
 
@@ -394,6 +394,296 @@
   visibility: visible;
   transform: translate(-50%, 0);
   opacity: 1;
+}
+
+/* Issues that remain valid in the analysis but cannot be anchored in the
+   current live document remain inspectable as compact cards in the rail. */
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__count {
+  display: inline-flex;
+  min-width: max-content;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0.625rem;
+  border-radius: 999px;
+  color: var(--dashboard-accent);
+  background: color-mix(in srgb, var(--dashboard-accent) 11%, transparent);
+  font-size: var(--site-rail-caption-size);
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issues {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+/* 이슈 카드: 왼쪽 심각도 색 띠 + 배지 + 제목/설명 + 하단 메타 */
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+  padding: clamp(0.75rem, 0.375rem + 0.3cqi, 0.9375rem);
+  padding-inline-start: calc(clamp(0.75rem, 0.375rem + 0.3cqi, 0.9375rem) + 0.375rem);
+  overflow: hidden;
+  border: 1px solid var(--dashboard-nested-border);
+  border-radius: var(--dashboard-site-nested-radius);
+  background: var(--site-row-surface);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue::before {
+  content: "";
+  position: absolute;
+  inset-block: 0.75rem;
+  inset-inline-start: 0;
+  width: 0.25rem;
+  border-radius: 0 999px 999px 0;
+  background: var(--site-unavailable-issue-color);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.375rem;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__severity,
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__code {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 1.5rem;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.5rem;
+  flex: none;
+  border-radius: 0.4375rem;
+  font-size: var(--site-rail-caption-size);
+  font-weight: 750;
+  line-height: 1;
+}
+
+/* 심각도: 색 점 + 글자 (채운 칩 대신 옅은 배경이라 어느 테마에서도 읽힌다) */
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__severity {
+  color: var(--dashboard-text-strong);
+  background: color-mix(in srgb, var(--site-unavailable-issue-color) 16%, transparent);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__severity::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--site-unavailable-issue-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--site-unavailable-issue-color) 28%, transparent);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__code {
+  flex: 0 1 auto;
+  max-width: 65%;
+  overflow: hidden;
+  color: var(--dashboard-text-strong);
+  border: 1px solid var(--dashboard-nested-border);
+  background: var(--site-inset-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue h4 {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dashboard-text-strong);
+  font-size: var(--site-rail-body-size);
+  font-weight: 750;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__message {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dashboard-text-muted);
+  font-size: var(--site-rail-caption-size);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-top: 0.125rem;
+  padding: 0.375rem 0.625rem;
+  color: var(--dashboard-accent);
+  border: 1px solid color-mix(in srgb, var(--dashboard-accent) 32%, var(--dashboard-nested-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--dashboard-accent) 7%, var(--site-row-surface));
+  font-size: var(--site-rail-caption-size);
+  font-weight: 750;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal:hover {
+  border-color: color-mix(in srgb, var(--dashboard-accent) 58%, var(--dashboard-nested-border));
+  background: color-mix(in srgb, var(--dashboard-accent) 12%, var(--site-row-surface));
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: 2px;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.125rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--dashboard-nested-border);
+  color: var(--dashboard-text-muted);
+  font-size: var(--site-rail-caption-size);
+  line-height: 1;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__analyzer {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__analyzer::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--dashboard-accent);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__ordinal {
+  flex: none;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__pagination {
+  position: relative;
+  min-width: 0;
+  margin-top: var(--site-rail-section-space);
+  padding-inline: 0.75rem;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--dashboard-nested-border);
+  border-radius: 50%;
+  color: var(--dashboard-text-strong);
+  background: var(--site-glass-bg-opaque);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, 0.1);
+  transform: translateY(-50%);
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+  cursor: default;
+}
+
+.bridge-dashboard.dashboard-site-detail
+  .site-unavailable-locator-panel__navigation--previous {
+  inset-inline-start: 0;
+}
+
+.bridge-dashboard.dashboard-site-detail
+  .site-unavailable-locator-panel__navigation--next {
+  inset-inline-end: 0;
+}
+
+.bridge-dashboard.dashboard-site-detail
+  .site-unavailable-locator-panel__navigation:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--dashboard-accent) 45%, var(--dashboard-nested-border));
+  color: var(--dashboard-accent);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--dashboard-accent) 22%, transparent);
+}
+
+@media (min-width: 2560px) and (min-height: 1400px) {
+  .bridge-dashboard.dashboard-site-detail .site-dashboard-layout {
+    --site-rail-card-padding: 2rem;
+    --site-rail-heading-size: 1.25rem;
+    --site-rail-body-size: 1.0625rem;
+    --site-rail-caption-size: 0.9375rem;
+    --site-rail-section-space: 1.25rem;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-dashboard-rail {
+    align-self: stretch;
+    gap: 1.25rem;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-panel {
+    padding: var(--site-rail-card-padding);
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart {
+    height: 11.75rem;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-rail-severity__row {
+    grid-template-rows: 11rem auto;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-rail-severity__track {
+    height: 11rem;
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue {
+    gap: 0.625rem;
+    padding: 1rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

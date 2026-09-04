@@ -17,6 +17,7 @@ import { PageInformationPanel } from "./site-dashboard/page-information-panel";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
 import type { RecentIssueRow } from "./site-dashboard/types";
+import { UnavailableLocatorPanel } from "./site-dashboard/unavailable-locator-panel";
 import { useEvaluationCaptureMetadata } from "./site-dashboard/use-evaluation-capture-metadata";
 import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
 import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
@@ -113,9 +114,19 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
     previewEvidence === undefined
   );
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
+  const [selectedIssueFocusRequestId, setSelectedIssueFocusRequestId] = useState(0);
+  const [unavailableLocatorIssueIds, setUnavailableLocatorIssueIds] = useState<number[]>([]);
+  const [recoverableHiddenLocatorIssueIds, setRecoverableHiddenLocatorIssueIds] = useState<number[]>([]);
   const latestIssueSignature = latestIssues.map((issue) => issue.id).join(",");
 
+  function revealHiddenIssue(issueId: number) {
+    setSelectedIssueId(issueId);
+    setSelectedIssueFocusRequestId((current) => current + 1);
+  }
+
   useEffect(() => {
+    setUnavailableLocatorIssueIds([]);
+    setRecoverableHiddenLocatorIssueIds([]);
     setSelectedIssueId((current) => {
       if (current !== null && latestIssues.some((issue) => issue.id === current)) {
         return current;
@@ -140,6 +151,14 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
       }),
     [analysisResultById, latestIssues]
   );
+  const unavailableLocatorIssueRows = useMemo(() => {
+    const unavailableIssueIds = new Set(unavailableLocatorIssueIds);
+    return replayIssueRows.filter(({ issue }) => unavailableIssueIds.has(issue.id));
+  }, [replayIssueRows, unavailableLocatorIssueIds]);
+  const recoverableHiddenLocatorIssueRows = useMemo(() => {
+    const hiddenIssueIds = new Set(recoverableHiddenLocatorIssueIds);
+    return replayIssueRows.filter(({ issue }) => hiddenIssueIds.has(issue.id));
+  }, [recoverableHiddenLocatorIssueIds, replayIssueRows]);
   const evidenceLiveSessionLoadState =
     previewEvidence !== undefined
       ? "idle"
@@ -179,10 +198,13 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
           previewRuntimeUrl={previewEvidence?.previewRuntimeUrl}
           rows={replayIssueRows}
           selectedIssueId={selectedIssueId}
+          selectedIssueFocusRequestId={selectedIssueFocusRequestId}
           targetName={evaluationTarget.name}
           onRetry={retryEvidence}
           onRetryLiveSession={retryLiveSession}
+          onRecoverableHiddenLocatorIssueIdsChange={setRecoverableHiddenLocatorIssueIds}
           onSelectIssue={setSelectedIssueId}
+          onUnavailableLocatorIssueIdsChange={setUnavailableLocatorIssueIds}
         />
       </div>
       <div className="site-dashboard-rail">
@@ -201,7 +223,15 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
         />
 
         {showsRailDetailCards && (
-          <SeverityDistributionPanel issues={latestIssues} />
+          <>
+            <SeverityDistributionPanel issues={latestIssues} />
+            <UnavailableLocatorPanel
+              mode="recoverable"
+              rows={recoverableHiddenLocatorIssueRows}
+              onSelectIssue={revealHiddenIssue}
+            />
+            <UnavailableLocatorPanel rows={unavailableLocatorIssueRows} />
+          </>
         )}
       </div>
     </div>

@@ -328,7 +328,7 @@ export function DashboardSurface({
                   role="menu"
                   aria-label="계정 메뉴"
                   onKeyDown={handleAccountMenuKeyDown}
-                  className="dashboard-account-menu dashboard-account-menu-open absolute left-0 right-auto top-full z-40 mt-1.5 origin-top rounded-2xl border border-slate-200 bg-white p-1.5 shadow-lg"
+                  className="dashboard-account-menu dashboard-account-menu-open absolute left-0 right-auto top-full z-40 mt-1.5 origin-top rounded-2xl bg-white p-1.5 shadow-lg"
                 >
                   <button
                     ref={(element) => {

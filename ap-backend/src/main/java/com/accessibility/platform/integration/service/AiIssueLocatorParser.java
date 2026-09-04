@@ -1,6 +1,7 @@
 package com.accessibility.platform.integration.service;
 
 import com.accessibility.platform.analysis.domain.IssueLocator;
+import com.accessibility.platform.analysis.domain.IssueLocatorCarouselContext;
 import com.accessibility.platform.analysis.domain.IssueLocatorPathStep;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
@@ -48,7 +49,8 @@ public class AiIssueLocatorParser {
                 height,
                 firstText(location, "coordinateSpace", "coordinate_space", "SCREENSHOT_PX"),
                 booleanValue(location, "visible", true),
-                bounded(firstText(location, "htmlSnippet", "html_snippet", null), MAX_HTML_SNIPPET_LENGTH)
+                bounded(firstText(location, "htmlSnippet", "html_snippet", null), MAX_HTML_SNIPPET_LENGTH),
+                carouselContext(location)
         );
     }
 
@@ -88,8 +90,40 @@ public class AiIssueLocatorParser {
                 height,
                 firstText(source, "coordinateSpace", "coordinate_space", hasBox ? defaultCoordinateSpace : null),
                 nullableBoolean(source, "visible"),
-                htmlSnippet
+                htmlSnippet,
+                carouselContext(source)
         );
+    }
+
+    private IssueLocatorCarouselContext carouselContext(JsonNode locator) {
+        JsonNode context = locator.path("carouselContext");
+        if (!context.isObject()) {
+            context = locator.path("carousel_context");
+        }
+        if (!context.isObject()) {
+            return null;
+        }
+
+        Integer carouselId = strictInteger(context, "carouselId", "carousel_id");
+        Integer slideIndex = strictInteger(context, "slideIndex", "slide_index");
+        Integer slideCount = strictInteger(context, "slideCount", "slide_count");
+        if (carouselId == null
+                || slideIndex == null
+                || slideCount == null
+                || !IssueLocatorCarouselContext.isValid(carouselId, slideIndex, slideCount)) {
+            return null;
+        }
+        return new IssueLocatorCarouselContext(carouselId, slideIndex, slideCount);
+    }
+
+    private Integer strictInteger(JsonNode node, String primaryField, String fallbackField) {
+        JsonNode value = node.get(primaryField);
+        if (value == null || value.isNull()) {
+            value = node.get(fallbackField);
+        }
+        return value != null && value.isIntegralNumber() && value.canConvertToInt()
+                ? value.intValue()
+                : null;
     }
 
     private List<IssueLocatorPathStep> pathSteps(JsonNode locator, String fallbackSelector) {

@@ -90,20 +90,30 @@ try {
   });
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
   await page.locator("#ua-hero-title").waitFor();
-  await page.locator(".ua-stage").waitFor();
-  const productPreviewFrame = page.frameLocator(".ua-stage__frame");
-  const productPreview = productPreviewFrame.locator('[data-dashboard-product-preview="true"]');
-  await productPreview.waitFor();
-  assert.equal(await page.locator(".ua-stage__toolbar").count(), 0, "demo toolbar must stay removed");
-  assert.equal(await page.locator(".ua-hero__caption").count(), 0, "demo caption must stay removed");
-
-  const previewFrameElement = page.locator(".ua-stage__frame");
-  assert.equal(await previewFrameElement.count(), 1, "product demo must render in one isolated preview frame");
+  assert.equal(await page.locator("main#uni-access-main").count(), 1);
+  assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
+  assert.equal(await page.getByRole("navigation", { name: "현재 장면" }).count(), 1);
+  assert.equal(await page.locator(".sw-route__dot").count(), 5);
+  assert.equal(await page.locator(".sw-route__dot i").count(), 0, "circular route markers must stay removed");
+  assert.equal(await page.locator(".sw-scrollbar").count(), 0, "obsolete top progress bar must stay removed");
+  assert.equal(await page.locator("video").count(), 0, "reduced-motion landing must not load videos");
   assert.equal(
-    await previewFrameElement.getAttribute("title"),
-    "UNI ACCESS 실제 서비스 읽기 전용 미리보기"
+    await page.locator('.sw-copy[aria-hidden="true"]:not([inert])').count(),
+    0,
+    "inactive landing copy must stay outside the keyboard and accessibility trees"
   );
+  assert.equal(await page.locator('.sw-copy[aria-hidden="false"]').count(), 1);
+  assert.equal(landingApiRequestCount, 0, "landing unexpectedly called an API");
+
+  // The product preview remains a dedicated route. Keep its read-only product
+  // regression coverage without coupling the landing to an iframe again.
+  await page.setViewportSize({ width: 1440, height: 720 });
+  await page.goto(`${baseUrl}/product-preview`, { waitUntil: "domcontentloaded" });
+  const productPreviewFrame = page;
+  const productPreview = page.locator('[data-dashboard-product-preview="true"]');
+  await productPreview.waitFor();
   assert.equal(
     await productPreview.locator(".site-page-evidence-replay-frame").count(),
     0,
@@ -263,6 +273,8 @@ try {
   await page.evaluate(() => {
     window.sessionStorage.removeItem("accessibility-dashboard.quick-analysis-attempt.v1");
   });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
 
   for (const width of widths) {
     await page.setViewportSize({ width, height: 900 });
@@ -278,42 +290,54 @@ try {
     );
   }
 
-  const selectedTab = () => page.locator('[role="tab"][aria-selected="true"]');
-  const rulesTab = page.getByRole("tab", { name: "규칙", exact: true });
-
-  assert.equal(await rulesTab.getAttribute("tabindex"), "0");
-  assert.equal(await page.locator('[role="tabpanel"][hidden]').count(), 2);
-
-  await rulesTab.press("ArrowRight");
-  assert.equal(await selectedTab().innerText(), "난이도");
-  await page.getByRole("tab", { name: "난이도", exact: true }).press("End");
-  assert.equal(await selectedTab().innerText(), "명암비");
-  await page.getByRole("tab", { name: "명암비", exact: true }).press("Home");
-  assert.equal(await selectedTab().innerText(), "규칙");
-  await rulesTab.press("ArrowLeft");
-  assert.equal(await selectedTab().innerText(), "명암비");
-  assert.equal(await page.locator('[role="tabpanel"][hidden]').count(), 2);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const reportNav = page.getByRole("navigation", { name: "현재 장면" }).getByRole("button", {
+    name: "4. 라이브 리포트",
+    exact: true
+  });
+  await reportNav.click();
+  await page.waitForFunction(
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent?.includes("문제가 있는 자리")
+  );
+  assert.equal(await reportNav.getAttribute("aria-current"), "step");
+  assert.equal(
+    await page.locator('.sw-copy[aria-hidden="true"]:not([inert])').count(),
+    0,
+    "scene navigation exposed inactive copy"
+  );
 
   const landingReducedMotion = await page.evaluate(() => {
-    const tab = document.querySelector(".ua-tabs button");
+    const action = document.querySelector(".sw-topcta");
     return {
       matches: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
       scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
-      transitionDuration: tab ? getComputedStyle(tab).transitionDuration : null
+      transitionDuration: action ? getComputedStyle(action).transitionDuration : null,
+      videos: document.querySelectorAll("video").length
     };
   });
 
   assert.equal(landingReducedMotion.matches, true);
   assert.equal(landingReducedMotion.scrollBehavior, "auto");
+  assert.equal(landingReducedMotion.videos, 0);
   assert.ok(
     Number.parseFloat(landingReducedMotion.transitionDuration ?? "1") <= 0.00001,
     `landing reduced-motion transition is not effectively disabled: ${landingReducedMotion.transitionDuration}`
   );
 
-  const heroCta = page.locator(".ua-hero__copy").getByRole("button", {
-    name: "새 페이지 분석",
-    exact: true
-  });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  await page.keyboard.press("Tab");
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      href: document.activeElement?.getAttribute("href"),
+      text: document.activeElement?.textContent?.trim()
+    })),
+    { href: "#uni-access-main", text: "본문으로 바로가기" }
+  );
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "uni-access-main");
+
+  const heroCta = page.locator(".sw-topcta");
   await Promise.all([
     page.waitForURL("**/analyze"),
     heroCta.click()

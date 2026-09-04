@@ -8,6 +8,7 @@ import type {
   EvaluationResultSummary,
   EvaluationTarget,
   IssueLocator,
+  IssueLocatorCarouselContext,
   IssueLocatorPathStep,
   LiveReportSession,
   Organization,
@@ -676,11 +677,34 @@ const parseIssueLocatorPathStep: ApiResponseParser<IssueLocatorPathStep> = (valu
   };
 };
 
+const parseIssueLocatorCarouselContext: ApiResponseParser<IssueLocatorCarouselContext> = (
+  value,
+  path
+) => {
+  const fields = readFields(value, path);
+  const carouselId = fields.required("carouselId", parsePositiveInteger);
+  const slideIndex = fields.required("slideIndex", parseNonNegativeInteger);
+  const slideCount = fields.required("slideCount", parsePositiveInteger);
+  if (slideCount < 2) {
+    return failContract(slideCount, `${path}.slideCount`, "2 이상의 정수");
+  }
+  if (slideCount > 10_000) {
+    return failContract(slideCount, `${path}.slideCount`, "10,000 이하의 정수");
+  }
+  if (slideIndex >= slideCount) {
+    return failContract(slideIndex, `${path}.slideIndex`, "slideCount보다 작은 정수");
+  }
+  return { carouselId, slideIndex, slideCount };
+};
+
 const parseIssueLocator: ApiResponseParser<IssueLocator> = (value, path) => {
   const fields = readFields(value, path);
+  const carouselContext = fields.optional("carouselContext", (field, fieldPath) =>
+    field === null ? null : parseIssueLocatorCarouselContext(field, fieldPath));
   return {
     pathSteps: fields.required("pathSteps", (field, fieldPath) =>
-      parseArray(field, fieldPath, parseIssueLocatorPathStep))
+      parseArray(field, fieldPath, parseIssueLocatorPathStep)),
+    ...(carouselContext !== undefined ? { carouselContext } : {})
   };
 };
 

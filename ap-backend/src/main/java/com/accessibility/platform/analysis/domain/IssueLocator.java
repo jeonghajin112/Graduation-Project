@@ -11,7 +11,8 @@ public record IssueLocator(
         Double height,
         String coordinateSpace,
         Boolean visible,
-        String htmlSnippet
+        String htmlSnippet,
+        IssueLocatorCarouselContext carouselContext
 ) {
     public IssueLocator {
         pathSteps = pathSteps == null ? List.of() : List.copyOf(pathSteps);

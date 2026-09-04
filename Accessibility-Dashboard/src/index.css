@@ -657,7 +657,6 @@
 
   .bridge-dashboard.theme-dark .dashboard-account-menu {
     background-color: #242424 !important;
-    border-color: rgba(148, 163, 184, 0.28);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
   }
 
@@ -1622,23 +1621,6 @@
   background: var(--site-inset-surface);
   font-size: 0.75rem;
   font-weight: 700;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-replay-feedback {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  min-height: 2.25rem;
-  padding: 0.5rem 0.125rem 0;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-locator-status {
-  margin: 0;
-  color: var(--dashboard-text-muted);
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.5;
 }
 
 @container (min-width: 64rem) {

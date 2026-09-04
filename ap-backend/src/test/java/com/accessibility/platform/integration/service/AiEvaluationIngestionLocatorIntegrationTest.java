@@ -13,6 +13,7 @@ import com.accessibility.platform.score.repository.ScoreResultRepository;
 import com.accessibility.platform.target.domain.EvaluationTarget;
 import com.accessibility.platform.target.domain.TargetType;
 import com.accessibility.platform.target.repository.EvaluationTargetRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.DefaultApplicationArguments;
@@ -51,6 +52,9 @@ class AiEvaluationIngestionLocatorIntegrationTest {
 
     @Autowired
     ScoreResultRepository scoreResultRepository;
+
+    @Autowired
+    EntityManager entityManager;
 
     @Test
     void failedRequestCannotBeResurrectedByLateIngestion() {
@@ -112,10 +116,11 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                               "kind":"DOM_RECT",
                               "pathSteps":[{"context":"document","selector":"button.pay","frameUrl":null}],
                               "x":20,"y":30,"width":120,"height":40,
-                              "coordinateSpace":"DOCUMENT_CSS_PX",
-                              "visible":true,
-                              "htmlSnippet":"<button class=pay>Pay</button>"
-                            }
+                               "coordinateSpace":"DOCUMENT_CSS_PX",
+                               "visible":true,
+                               "htmlSnippet":"<button class=pay>Pay</button>",
+                               "carouselContext":{"carouselId":1,"slideIndex":1,"slideCount":3}
+                             }
                           }]
                         }]
                       }]
@@ -161,6 +166,8 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                 """.formatted(request.getId());
 
         ingestionService.save(resultJson);
+        entityManager.flush();
+        entityManager.clear();
         List<EvaluationIssueResponse> issues = resultQueryService.getIssues(request.getId());
 
         assertThat(captureMetadataRepository.findByEvaluationRequestId(request.getId())
@@ -178,6 +185,10 @@ class AiEvaluationIngestionLocatorIntegrationTest {
         assertThat(ruleIssue.locator().pathSteps().getFirst().selector()).isEqualTo("button.pay");
         assertThat(ruleIssue.locator().x()).isEqualTo(20.0);
         assertThat(ruleIssue.locator().htmlSnippet()).contains("button");
+        assertThat(ruleIssue.locator().carouselContext()).isNotNull();
+        assertThat(ruleIssue.locator().carouselContext().carouselId()).isEqualTo(1);
+        assertThat(ruleIssue.locator().carouselContext().slideIndex()).isEqualTo(1);
+        assertThat(ruleIssue.locator().carouselContext().slideCount()).isEqualTo(3);
 
         List<EvaluationIssueResponse> textIssues = issues.stream()
                 .filter(issue -> issue.module().equals("text_difficulty"))

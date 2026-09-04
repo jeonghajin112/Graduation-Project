@@ -1,7 +1,7 @@
-import type { IssueLocatorPathStep } from "@/types/accessibility-domain";
+import type { AnalyzerType, IssueLocatorCarouselContext, IssueLocatorPathStep } from "@/types/accessibility-domain";
 
 import { normalizeIssueCode } from "./constants";
-import { getReplayIssuePathSteps } from "./issue-locator";
+import { getReplayIssueCarouselContext, getReplayIssuePathSteps } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
 
 export const DASHBOARD_REPLAY_SOURCE = "accessibility-dashboard" as const;
@@ -100,12 +100,15 @@ export type PageReplayIssue = {
   severity: RecentIssueRow["severity"]["key"];
   severityLabel: string;
   category: ReplayIssueCategory;
+  /** 어느 분석 엔진이 찾았는지 — 마커 칩 라벨(규칙/텍스트/시각)에 쓴다 */
+  analyzer: AnalyzerType | null;
   code: string;
   title: string;
   message: string;
   textAnalysis: ReplayTextAnalysisDetail | null;
   path: string | null;
   pathSteps: IssueLocatorPathStep[];
+  carouselContext: IssueLocatorCarouselContext | null;
 };
 
 export type DashboardToPageReplayMessage =
@@ -138,7 +141,12 @@ export type DashboardToPageReplayMessage =
       visualWidth: number;
     };
 
-export type LocatorConnectionStatus = "CONNECTED" | "UNAVAILABLE";
+export type LocatorConnectionStatus =
+  | "CONNECTED"
+  | "VISIBLE"
+  | "OFFSCREEN"
+  | "HIDDEN_STATE"
+  | "UNAVAILABLE";
 
 export type LiveDocumentHealthStatus = "EMPTY" | "MEANINGFUL";
 
@@ -179,6 +187,7 @@ export type PageReplayToDashboardMessage =
       issueId: number;
       status: LocatorConnectionStatus;
       reason?: string;
+      recoverable?: boolean;
     }
   | {
       source: typeof PAGE_REPLAY_SOURCE;
@@ -285,6 +294,7 @@ export function toPageReplayIssue(row: RecentIssueRow): PageReplayIssue {
       row.severity.key
     ),
     category: classifyReplayIssueCategory(row, code),
+    analyzer: row.analyzerType ?? null,
     code,
     title: toBoundedReplayText(
       row.issue.issueTitle,
@@ -298,7 +308,8 @@ export function toPageReplayIssue(row: RecentIssueRow): PageReplayIssue {
     ),
     textAnalysis,
     path: toOptionalBoundedReplayText(row.issue.locationPath, REPLAY_TEXT_LIMITS.path),
-    pathSteps: getReplayIssuePathSteps(row.issue)
+    pathSteps: getReplayIssuePathSteps(row.issue),
+    carouselContext: getReplayIssueCarouselContext(row.issue)
   };
 }
 
@@ -623,14 +634,28 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
     value.type === "LOCATOR_STATUS" &&
     hasExactOwnKeys(
       value,
-      hasOwnKey(value, "reason")
-        ? ["source", "type", "documentToken", "issueId", "status", "reason"]
-        : ["source", "type", "documentToken", "issueId", "status"]
+      [
+        "source",
+        "type",
+        "documentToken",
+        "issueId",
+        "status",
+        ...(hasOwnKey(value, "reason") ? ["reason"] : []),
+        ...(hasOwnKey(value, "recoverable") ? ["recoverable"] : [])
+      ]
     ) &&
     isDocumentToken(value.documentToken) &&
     isIssueId(value.issueId) &&
-    (value.status === "CONNECTED" || value.status === "UNAVAILABLE") &&
-    (value.reason === undefined || typeof value.reason === "string")
+    (
+      value.status === "CONNECTED" ||
+      value.status === "VISIBLE" ||
+      value.status === "OFFSCREEN" ||
+      value.status === "HIDDEN_STATE" ||
+      value.status === "UNAVAILABLE"
+    ) &&
+    (value.reason === undefined || typeof value.reason === "string") &&
+    (value.recoverable === undefined || typeof value.recoverable === "boolean") &&
+    (value.recoverable === undefined || value.status === "HIDDEN_STATE")
   ) {
     return {
       source: PAGE_REPLAY_SOURCE,
@@ -638,7 +663,8 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
       documentToken: value.documentToken,
       issueId: value.issueId,
       status: value.status,
-      ...(typeof value.reason === "string" ? { reason: value.reason } : {})
+      ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
+      ...(typeof value.recoverable === "boolean" ? { recoverable: value.recoverable } : {})
     };
   }
 

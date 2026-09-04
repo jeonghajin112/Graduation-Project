@@ -1381,8 +1381,190 @@ async function verifyDesktop(page) {
   assert.equal(initialMessage.markersVisible, true);
   assert.equal(await frame.locator(".replay-marker").count(), 2);
   await waitForUnavailableLocatorCount(evidence, 2);
-  const locatorStatus = evidence.locator(".site-page-evidence-locator-status");
-  assert.match(await locatorStatus.textContent(), /문제 2개의 위치를 현재 동적 화면에 표시하지 못했습니다/);
+  const unavailableLocatorPanel = page.locator(".site-unavailable-locator-panel");
+  await page
+    .locator('.site-unavailable-locator-panel[data-unavailable-locator-count="2"]')
+    .waitFor({ state: "visible" });
+  assert.match(await unavailableLocatorPanel.textContent(), /화면에 표시되지 않은 문제/);
+  assert.match(await unavailableLocatorPanel.textContent(), /2건/);
+  assert.doesNotMatch(
+    await unavailableLocatorPanel.textContent(),
+    /현재 동적 페이지에서 요소 위치를 찾지 못한 분석 결과입니다/
+  );
+  assert.equal(
+    await unavailableLocatorPanel.locator(".site-unavailable-locator-panel__summary").count(),
+    0,
+    "the rail must render issue cards instead of the old count-only summary"
+  );
+  const unavailableIssueCards = unavailableLocatorPanel.locator(
+    ".site-unavailable-locator-panel__issue"
+  );
+  const unavailablePosition = unavailableLocatorPanel.locator(
+    ".site-unavailable-locator-panel__position"
+  );
+  const previousUnavailableIssue = unavailableLocatorPanel.getByRole("button", {
+    name: "이전 문제"
+  });
+  const nextUnavailableIssue = unavailableLocatorPanel.getByRole("button", {
+    name: "다음 문제"
+  });
+  assert.equal(await unavailableIssueCards.count(), 1);
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9003"],
+    "the first unavailable issue must be shown on its own"
+  );
+  assert.match(await unavailablePosition.textContent(), /총 2건 중 1번째 문제/);
+  assert.match(await unavailablePosition.getAttribute("class"), /\bsr-only\b/);
+  const unavailablePositionBox = await unavailablePosition.boundingBox();
+  assert.ok(
+    unavailablePositionBox &&
+      unavailablePositionBox.width <= 1 &&
+      unavailablePositionBox.height <= 1,
+    `the issue position status must be visually hidden: ${JSON.stringify(unavailablePositionBox)}`
+  );
+  assert.equal(await previousUnavailableIssue.isDisabled(), true);
+  assert.equal(await nextUnavailableIssue.isDisabled(), false);
+  assert.equal((await previousUnavailableIssue.textContent())?.trim(), "");
+  assert.equal((await nextUnavailableIssue.textContent())?.trim(), "");
+  assert.equal(await previousUnavailableIssue.locator("svg").count(), 1);
+  assert.equal(await nextUnavailableIssue.locator("svg").count(), 1);
+  const missingBannerCard = unavailableLocatorPanel.locator('[data-issue-id="9003"]');
+  assert.match(await missingBannerCard.textContent(), /중간/);
+  assert.match(await missingBannerCard.textContent(), /KWCAG 2\.4\.6/);
+  assert.match(await missingBannerCard.textContent(), /사라진 배너 제목 구조가 올바르지 않습니다/);
+  assert.match(await missingBannerCard.textContent(), /현재 재현 DOM에는 이 요소가 없습니다/);
+  await nextUnavailableIssue.click();
+  const readingLevelCard = unavailableLocatorPanel.locator('[data-issue-id="9004"]');
+  await readingLevelCard.waitFor({ state: "visible" });
+  assert.equal(await unavailableIssueCards.count(), 1);
+  assert.match(await unavailablePosition.textContent(), /총 2건 중 2번째 문제: 읽기 수준/);
+  assert.equal(await previousUnavailableIssue.isDisabled(), false);
+  assert.equal(await nextUnavailableIssue.isDisabled(), true);
+  assert.match(await readingLevelCard.textContent(), /낮음/);
+  assert.match(await readingLevelCard.textContent(), /KWCAG 3\.1\.5/);
+  assert.match(await readingLevelCard.textContent(), /읽기 수준/);
+  assert.match(await readingLevelCard.textContent(), /건축학부 제70회 졸업 전시회 개최/);
+  const readingLevelBadgeLayout = await readingLevelCard.evaluate((card) => {
+    const severityRect = card
+      .querySelector(".site-unavailable-locator-panel__severity")
+      ?.getBoundingClientRect();
+    const codeRect = card
+      .querySelector(".site-unavailable-locator-panel__code")
+      ?.getBoundingClientRect();
+
+    return {
+      gap: severityRect && codeRect ? codeRect.left - severityRect.right : Number.NaN,
+      leftDelta: severityRect && codeRect ? codeRect.left - severityRect.left : Number.NaN
+    };
+  });
+  assert.ok(
+    readingLevelBadgeLayout.gap >= 4 && readingLevelBadgeLayout.gap <= 8 &&
+      readingLevelBadgeLayout.leftDelta < 100,
+    `the WCAG badge must sit directly beside the severity badge: ${JSON.stringify(readingLevelBadgeLayout)}`
+  );
+  assert.equal(await unavailablePosition.getAttribute("role"), "status");
+  assert.equal(await unavailablePosition.getAttribute("aria-live"), "polite");
+  assert.equal(await unavailablePosition.getAttribute("aria-atomic"), "true");
+  const unavailableNavigationLayout = await unavailableLocatorPanel.evaluate((panel) => {
+    const issueRect = panel
+      .querySelector(".site-unavailable-locator-panel__issue")
+      ?.getBoundingClientRect();
+    const previousRect = panel
+      .querySelector(".site-unavailable-locator-panel__navigation--previous")
+      ?.getBoundingClientRect();
+    const nextRect = panel
+      .querySelector(".site-unavailable-locator-panel__navigation--next")
+      ?.getBoundingClientRect();
+    const previousButton = panel.querySelector(
+      ".site-unavailable-locator-panel__navigation--previous"
+    );
+    const nextButton = panel.querySelector(
+      ".site-unavailable-locator-panel__navigation--next"
+    );
+
+    return {
+      issue: issueRect && {
+        bottom: issueRect.bottom,
+        centerY: (issueRect.top + issueRect.bottom) / 2,
+        left: issueRect.left,
+        right: issueRect.right
+      },
+      next: nextRect && nextButton && {
+        borderRadius: Number.parseFloat(getComputedStyle(nextButton).borderRadius),
+        centerX: (nextRect.left + nextRect.right) / 2,
+        centerY: (nextRect.top + nextRect.bottom) / 2,
+        height: nextRect.height,
+        left: nextRect.left,
+        width: nextRect.width
+      },
+      previous: previousRect && previousButton && {
+        borderRadius: Number.parseFloat(getComputedStyle(previousButton).borderRadius),
+        centerX: (previousRect.left + previousRect.right) / 2,
+        centerY: (previousRect.top + previousRect.bottom) / 2,
+        height: previousRect.height,
+        right: previousRect.right,
+        width: previousRect.width
+      }
+    };
+  });
+  assert.ok(unavailableNavigationLayout.issue);
+  assert.ok(unavailableNavigationLayout.previous);
+  assert.ok(unavailableNavigationLayout.next);
+  assert.ok(
+    Math.abs(
+      unavailableNavigationLayout.previous.centerY - unavailableNavigationLayout.issue.centerY
+    ) <= 1 &&
+      Math.abs(unavailableNavigationLayout.next.centerY - unavailableNavigationLayout.issue.centerY) <= 1,
+    `navigation buttons must share the issue card's vertical center: ${JSON.stringify(unavailableNavigationLayout)}`
+  );
+  for (const button of [unavailableNavigationLayout.previous, unavailableNavigationLayout.next]) {
+    assert.ok(Math.abs(button.width - button.height) <= 1);
+    assert.ok(button.width >= 23 && button.width <= 25);
+    assert.ok(button.borderRadius >= button.width / 2 - 1);
+  }
+  assert.ok(
+    unavailableNavigationLayout.previous.centerX <= unavailableNavigationLayout.issue.left &&
+      unavailableNavigationLayout.previous.right > unavailableNavigationLayout.issue.left &&
+      unavailableNavigationLayout.next.centerX >= unavailableNavigationLayout.issue.right &&
+      unavailableNavigationLayout.next.left < unavailableNavigationLayout.issue.right,
+    `navigation buttons must straddle the issue card sides: ${JSON.stringify(unavailableNavigationLayout)}`
+  );
+  const unavailablePanelOverflow = await unavailableLocatorPanel.evaluate((panel) => ({
+    clientWidth: panel.clientWidth,
+    scrollWidth: panel.scrollWidth,
+    issueListClientWidth:
+      panel.querySelector(".site-unavailable-locator-panel__issues")?.clientWidth ?? 0,
+    issueListScrollWidth:
+      panel.querySelector(".site-unavailable-locator-panel__issues")?.scrollWidth ?? 0,
+    paginationClientWidth:
+      panel.querySelector(".site-unavailable-locator-panel__pagination")?.clientWidth ?? 0,
+    paginationScrollWidth:
+      panel.querySelector(".site-unavailable-locator-panel__pagination")?.scrollWidth ?? 0
+  }));
+  assert.ok(
+    unavailablePanelOverflow.scrollWidth <= unavailablePanelOverflow.clientWidth + 1 &&
+      unavailablePanelOverflow.issueListScrollWidth <=
+        unavailablePanelOverflow.issueListClientWidth + 1 &&
+      unavailablePanelOverflow.paginationScrollWidth <=
+        unavailablePanelOverflow.paginationClientWidth + 1,
+    `unavailable issue cards must not create horizontal overflow: ${JSON.stringify(unavailablePanelOverflow)}`
+  );
+  assert.equal(
+    await evidence.locator(".site-page-evidence-locator-status").count(),
+    0,
+    "the unavailable-locator notice must move out of the replay card"
+  );
+  const railCardOrder = await page.locator(".site-dashboard-rail > .site-rail-card").allTextContents();
+  const severityCardIndex = railCardOrder.findIndex((text) => text.includes("심각도 분포"));
+  const unavailableCardIndex = railCardOrder.findIndex((text) => text.includes("화면에 표시되지 않은 문제"));
+  assert.equal(
+    unavailableCardIndex,
+    severityCardIndex + 1,
+    "the unavailable-locator card must follow the severity distribution"
+  );
   await sendReplayTestMessage(frame, {
     type: "LOCATOR_STATUS",
     issueId: 999999,
@@ -1395,15 +1577,125 @@ async function verifyDesktop(page) {
     "2",
     "unknown locator statuses must not affect the dashboard"
   );
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9004"],
+    "unknown locator statuses must not replace the currently displayed issue"
+  );
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9003, status: "CONNECTED" });
   await waitForUnavailableLocatorCount(evidence, 1);
+  await page
+    .locator('.site-unavailable-locator-panel[data-unavailable-locator-count="1"]')
+    .waitFor({ state: "visible" });
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9004"],
+    "reconnected issues must be removed without changing the remaining card"
+  );
+  assert.match(await unavailablePosition.textContent(), /총 1건 중 1번째 문제/);
+  assert.equal(await previousUnavailableIssue.isDisabled(), true);
+  assert.equal(await nextUnavailableIssue.isDisabled(), true);
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "CONNECTED" });
+  await waitForUnavailableLocatorCount(evidence, 0);
+  await unavailableLocatorPanel.waitFor({ state: "detached" });
+  const focusMessageCountBeforeHiddenReveal = await frame.locator("html").evaluate(() =>
+    window.__replayMessages.filter((message) => message.type === "FOCUS_ISSUE").length
+  );
+  await sendReplayTestMessage(frame, {
+    type: "LOCATOR_STATUS",
+    issueId: 9003,
+    status: "HIDDEN_STATE",
+    reason: "CAROUSEL_STATE_AVAILABLE",
+    recoverable: true
+  });
+  const hiddenStatePanel = page.locator(
+    '.site-unavailable-locator-panel[data-locator-mode="recoverable"]'
+  );
+  await hiddenStatePanel.waitFor({ state: "visible" });
+  assert.equal(
+    await evidence.locator(".site-page-evidence-preview").getAttribute("data-hidden-state-locator-count"),
+    "1"
+  );
+  assert.match(await hiddenStatePanel.textContent(), /다른 화면 상태의 문제/);
+  await hiddenStatePanel.getByRole("button", { name: "해당 장면에서 보기" }).click();
+  assert.equal(
+    await evidence.locator(".site-page-evidence-preview").getAttribute("data-focus-request-id"),
+    "1",
+    "the hidden-state reveal action must create an explicit focus request"
+  );
+  await frame.locator("html").evaluate((_html, initialCount) => new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5_000;
+    const inspect = () => {
+      const focusMessages = window.__replayMessages.filter((message) => message.type === "FOCUS_ISSUE");
+      if (focusMessages.length > initialCount && focusMessages.at(-1)?.issueId === 9003) {
+        resolve();
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error(
+          "hidden-state issue did not request replay focus: "
+            + JSON.stringify({ initialCount, issueIds: focusMessages.map((message) => message.issueId) })
+        ));
+        return;
+      }
+      setTimeout(inspect, 25);
+    };
+    inspect();
+  }), focusMessageCountBeforeHiddenReveal);
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9003, status: "VISIBLE" });
+  await hiddenStatePanel.waitFor({ state: "detached" });
   await sendReplayTestMessage(frame, {
     type: "LOCATOR_STATUS",
     issueId: 9003,
     status: "UNAVAILABLE",
     reason: "SELECTOR_NOT_FOUND"
   });
+  await waitForUnavailableLocatorCount(evidence, 1);
+  await page
+    .locator('.site-unavailable-locator-panel[data-unavailable-locator-count="1"]')
+    .waitFor({ state: "visible" });
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9003"]
+  );
+  await sendReplayTestMessage(frame, {
+    type: "LOCATOR_STATUS",
+    issueId: 9004,
+    status: "UNAVAILABLE",
+    reason: "LOCATOR_MISSING"
+  });
   await waitForUnavailableLocatorCount(evidence, 2);
+  await page
+    .locator('.site-unavailable-locator-panel[data-unavailable-locator-count="2"]')
+    .waitFor({ state: "visible" });
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9003"]
+  );
+  assert.match(await unavailablePosition.textContent(), /총 2건 중 1번째 문제/);
+  assert.equal(await previousUnavailableIssue.isDisabled(), true);
+  assert.equal(await nextUnavailableIssue.isDisabled(), false);
+  await nextUnavailableIssue.click();
+  await unavailableLocatorPanel.locator('[data-issue-id="9004"]').waitFor({ state: "visible" });
+  assert.deepEqual(
+    await unavailableIssueCards.evaluateAll((cards) =>
+      cards.map((card) => card.getAttribute("data-issue-id"))
+    ),
+    ["9004"]
+  );
+  assert.match(await unavailablePosition.textContent(), /총 2건 중 2번째 문제/);
+  mkdirSync(outDir, { recursive: true });
+  await page.locator(".site-dashboard-rail").screenshot({
+    path: `${outDir}/desktop-right-rail-unavailable-issues.png`
+  });
   await verifyNoExternalReplayControls(evidence, frame);
   await page.waitForTimeout(100);
   assert.equal(
@@ -1413,8 +1705,9 @@ async function verifyDesktop(page) {
     1,
     "the replay must be initialized exactly once"
   );
-  await verifyIframeReloadRecovery(page, evidence, frame, initialMessage);
-  await verifyMissedInitialLoadingRecovery(page, evidence, frame, initialMessage);
+  const recoveryMessage = { ...initialMessage, selectedIssueId: 9003 };
+  await verifyIframeReloadRecovery(page, evidence, frame, recoveryMessage);
+  await verifyMissedInitialLoadingRecovery(page, evidence, frame, recoveryMessage);
   assert.equal(await evidence.locator(FALLBACK_DETAIL_SELECTOR).count(), 0);
   await page.evaluate(() => {
     window.postMessage(
@@ -1470,6 +1763,7 @@ async function verifyDesktop(page) {
 
     return {
       chartHeight: chartRect?.height ?? 0,
+      panelHeight: panelRect.height,
       // The legend was removed: a single score series needs no key, so the chart
       // is now the last element in the card.
       legendCount: panel.querySelectorAll(".site-page-evidence-trend-legend").length,
@@ -1483,8 +1777,12 @@ async function verifyDesktop(page) {
     };
   });
   assert.ok(
-    trendLayout.chartHeight >= 136 && trendLayout.chartHeight <= 144,
+    trendLayout.chartHeight >= 98 && trendLayout.chartHeight <= 112,
     `desktop trend chart must stay compact: ${JSON.stringify(trendLayout)}`
+  );
+  assert.ok(
+    trendLayout.panelHeight <= 290,
+    `desktop trend card height must be reduced: ${JSON.stringify(trendLayout)}`
   );
   assert.equal(
     trendLayout.legendCount,
@@ -1954,6 +2252,7 @@ async function verifyScaledReplayOverlays(page, evidence, frame) {
 async function verifyResponsiveWidths(page) {
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
   const viewports = [
+    { width: 3840, height: 2021 },
     { width: 1920, height: 1080 },
     { width: 1024, height: 900 },
     { width: 768, height: 860 },
@@ -1967,6 +2266,20 @@ async function verifyResponsiveWidths(page) {
     const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
     await evidence.waitFor({ state: "visible" });
     await waitForReplayReady(evidence);
+    await waitForUnavailableLocatorCount(evidence, 2);
+    const isFourK = viewport.width === 3840;
+    const expectedVisibleUnavailableIssueCount = isFourK ? 2 : 1;
+    const unavailableLocatorPanel = page.locator(
+      `.site-unavailable-locator-panel[data-visible-issue-count="${expectedVisibleUnavailableIssueCount}"]`
+    );
+    await unavailableLocatorPanel.waitFor({ state: "visible" });
+    if (isFourK) {
+      assert.equal(
+        await unavailableLocatorPanel.getAttribute("data-unavailable-page-size"),
+        "4",
+        "4K must expose the four-item unavailable-issue page capacity"
+      );
+    }
     const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
     await verifyNoExternalReplayControls(evidence, frame);
 
@@ -1974,10 +2287,47 @@ async function verifyResponsiveWidths(page) {
       const card = document.querySelector(".site-page-evidence-card");
       const preview = document.querySelector(".site-page-evidence-preview");
       const frameElement = document.querySelector(".site-page-evidence-replay-frame");
+      const rail = document.querySelector(".site-dashboard-rail");
+      const unavailablePanel = document.querySelector(".site-unavailable-locator-panel");
+      const unavailableIssues = unavailablePanel?.querySelector(
+        ".site-unavailable-locator-panel__issues"
+      );
+      const unavailableIssue = unavailablePanel?.querySelector(
+        ".site-unavailable-locator-panel__issue"
+      );
+      const unavailableMeta = unavailableIssue?.querySelector(
+        ".site-unavailable-locator-panel__meta"
+      );
+      const unavailableSeverity = unavailableMeta?.querySelector(
+        ".site-unavailable-locator-panel__severity"
+      );
+      const unavailableCode = unavailableMeta?.querySelector(
+        ".site-unavailable-locator-panel__code"
+      );
+      const unavailablePagination = unavailablePanel?.querySelector(
+        ".site-unavailable-locator-panel__pagination"
+      );
       const cardRect = card?.getBoundingClientRect();
+      const unavailablePanelRect = unavailablePanel?.getBoundingClientRect();
+      const unavailableIssuesRect = unavailableIssues?.getBoundingClientRect();
+      const unavailableSeverityRect = unavailableSeverity?.getBoundingClientRect();
+      const unavailableCodeRect = unavailableCode?.getBoundingClientRect();
+      const unavailableButtonRects = unavailablePagination
+        ? [...unavailablePagination.querySelectorAll("button")].map((button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              centerY: (rect.top + rect.bottom) / 2,
+              disabled: button.disabled,
+              left: rect.left,
+              right: rect.right
+            };
+          })
+        : [];
       return {
         viewportWidth: window.innerWidth,
         documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        documentVerticalOverflow:
+          document.documentElement.scrollHeight - document.documentElement.clientHeight,
         cardLeft: cardRect?.left ?? 0,
         cardRight: cardRect?.right ?? 0,
         removedToolbarFeatureCount: document.querySelectorAll(
@@ -1993,7 +2343,57 @@ async function verifyResponsiveWidths(page) {
         previewFrameDelta: Math.abs(
           (preview?.getBoundingClientRect().width ?? 0) -
           (frameElement?.getBoundingClientRect().width ?? 0)
-        )
+        ),
+        unavailablePanelOverflow: unavailablePanel
+          ? unavailablePanel.scrollWidth - unavailablePanel.clientWidth
+          : Number.NaN,
+        unavailablePanelVerticalOverflow: unavailablePanel
+          ? unavailablePanel.scrollHeight - unavailablePanel.clientHeight
+          : Number.NaN,
+        unavailablePanelOverflowY: unavailablePanel
+          ? getComputedStyle(unavailablePanel).overflowY
+          : null,
+        unavailableIssueCount:
+          unavailablePanel?.querySelectorAll(".site-unavailable-locator-panel__issue").length ?? 0,
+        unavailableIssueIds: unavailablePanel
+          ? [...unavailablePanel.querySelectorAll(".site-unavailable-locator-panel__issue")].map(
+              (issue) => issue.getAttribute("data-issue-id")
+            )
+          : [],
+        unavailablePageSize: unavailablePanel?.getAttribute("data-unavailable-page-size") ?? null,
+        unavailableVisibleIssueCount:
+          unavailablePanel?.getAttribute("data-visible-issue-count") ?? null,
+        unavailableIssuesVerticalOverflow: unavailableIssues
+          ? unavailableIssues.scrollHeight - unavailableIssues.clientHeight
+          : Number.NaN,
+        unavailableIssuesOverflowY: unavailableIssues
+          ? getComputedStyle(unavailableIssues).overflowY
+          : null,
+        unavailableIssuesCenterY: unavailableIssuesRect
+          ? (unavailableIssuesRect.top + unavailableIssuesRect.bottom) / 2
+          : Number.NaN,
+        unavailableMetaOverflow: unavailableMeta
+          ? unavailableMeta.scrollWidth - unavailableMeta.clientWidth
+          : Number.NaN,
+        unavailablePaginationOverflow: unavailablePagination
+          ? unavailablePagination.scrollWidth - unavailablePagination.clientWidth
+          : Number.NaN,
+        unavailableButtonsInsidePanel:
+          unavailablePanelRect && unavailableButtonRects.length === 2
+            ? unavailableButtonRects.every(
+                (rect) =>
+                  rect.left >= unavailablePanelRect.left - 1 &&
+                  rect.right <= unavailablePanelRect.right + 1
+              )
+            : false,
+        unavailableButtonCenters: unavailableButtonRects.map((rect) => rect.centerY),
+        unavailableButtonsDisabled: unavailableButtonRects.map((rect) => rect.disabled),
+        unavailableBadgeGap:
+          unavailableSeverityRect && unavailableCodeRect
+            ? unavailableCodeRect.left - unavailableSeverityRect.right
+            : Number.NaN,
+        railVerticalOverflow: rail ? rail.scrollHeight - rail.clientHeight : Number.NaN,
+        railOverflowY: rail ? getComputedStyle(rail).overflowY : null
       };
     });
 
@@ -2004,6 +2404,80 @@ async function verifyResponsiveWidths(page) {
     assert.equal(facts.inspectorCount, 0, `${viewport.width}px must not render the removed inspector`);
     assert.equal(facts.gridColumnCount, 1, `${viewport.width}px replay layout must remain single-column`);
     assert.ok(facts.previewFrameDelta <= 2);
+    assert.ok(
+      facts.unavailablePanelOverflow <= 1 &&
+        facts.unavailableMetaOverflow <= 1 &&
+        facts.unavailablePaginationOverflow <= 1,
+      `${viewport.width}px unavailable issue card must not overflow horizontally: ${JSON.stringify(facts)}`
+    );
+    assert.equal(
+      facts.unavailableIssueCount,
+      expectedVisibleUnavailableIssueCount,
+      `${viewport.width}px must show the responsive number of unavailable issues`
+    );
+    assert.equal(
+      facts.unavailableVisibleIssueCount,
+      String(expectedVisibleUnavailableIssueCount),
+      `${viewport.width}px visible-issue metadata must match the rendered cards`
+    );
+    assert.equal(
+      facts.unavailableButtonsInsidePanel,
+      true,
+      `${viewport.width}px unavailable issue navigation must stay inside the panel`
+    );
+    assert.ok(
+      facts.unavailableBadgeGap >= 4 && facts.unavailableBadgeGap <= 8,
+      `${viewport.width}px WCAG badge must remain beside severity: ${JSON.stringify(facts)}`
+    );
+    if (isFourK) {
+      assert.equal(facts.unavailablePageSize, "4", "4K must retain the four-item page capacity");
+      assert.deepEqual(
+        facts.unavailableIssueIds,
+        ["9003", "9004"],
+        "4K must show every unavailable fixture issue together in source order"
+      );
+      assert.ok(
+        facts.unavailablePanelVerticalOverflow <= 1 &&
+          facts.unavailableIssuesVerticalOverflow <= 1 &&
+          facts.railVerticalOverflow <= 1,
+        `4K unavailable issues and rail must not overflow vertically: ${JSON.stringify(facts)}`
+      );
+      for (const [name, overflowY] of [
+        ["panel", facts.unavailablePanelOverflowY],
+        ["issues", facts.unavailableIssuesOverflowY],
+        ["rail", facts.railOverflowY]
+      ]) {
+        assert.ok(
+          overflowY !== "auto" && overflowY !== "scroll",
+          `4K ${name} must not create a vertical scrollbar: ${JSON.stringify(facts)}`
+        );
+      }
+      assert.ok(
+        facts.documentVerticalOverflow <= 1,
+        `4K dashboard must fit without outer vertical scrolling: ${JSON.stringify(facts)}`
+      );
+      assert.equal(
+        facts.unavailableButtonCenters.length,
+        2,
+        "4K unavailable issue navigation must retain both arrow buttons"
+      );
+      assert.ok(
+        facts.unavailableButtonCenters.every(
+          (centerY) => Math.abs(centerY - facts.unavailableIssuesCenterY) <= 1
+        ),
+        `4K navigation arrows must share the full issue list's vertical center: ${JSON.stringify(facts)}`
+      );
+      assert.deepEqual(
+        facts.unavailableButtonsDisabled,
+        [true, true],
+        "4K arrows must be disabled when all unavailable issues fit on one page"
+      );
+      mkdirSync(outDir, { recursive: true });
+      await page.screenshot({
+        path: path.join(outDir, "responsive-4k-unavailable-issues.png"),
+        fullPage: false
+      });
+    }
     if (viewport.width === 390) {
       await verifyScaledReplayOverlays(page, evidence, frame);
     }

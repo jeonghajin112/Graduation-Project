@@ -34,7 +34,11 @@ function classify(issueCode: string, analyzerType?: AnalyzerType, issueTitle = "
   return classifyReplayIssueCategory({ issue, analyzerType });
 }
 
-function replayIssue(message: string, analyzerType: AnalyzerType = "AI_TEXT") {
+function replayIssue(
+  message: string,
+  analyzerType: AnalyzerType = "AI_TEXT",
+  locator?: IssueResultModel["locator"]
+) {
   const issue: IssueResultModel = {
     id: 7,
     analysisResultId: 2,
@@ -42,6 +46,7 @@ function replayIssue(message: string, analyzerType: AnalyzerType = "AI_TEXT") {
     issueTitle: "읽기 수준",
     severity: "LOW",
     locationPath: "#target",
+    ...(locator !== undefined ? { locator } : {}),
     message,
     resolved: false,
     createdAt: "2026-08-31T00:00:00",
@@ -79,8 +84,29 @@ describe("replay marker issue category", () => {
   });
 });
 
+describe("replay locator adaptation", () => {
+  it("forwards a validated carousel state and drops malformed state hints", () => {
+    const valid = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 1, slideCount: 4 }
+    });
+    const invalid = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 4, slideCount: 4 }
+    });
+    const oversized = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 1, slideCount: 10_001 }
+    });
+
+    expect(valid.carouselContext).toEqual({ carouselId: 3, slideIndex: 1, slideCount: 4 });
+    expect(invalid.carouselContext).toBeNull();
+    expect(oversized.carouselContext).toBeNull();
+  });
+});
+
 describe("replay locator status messages", () => {
-  it("accepts the exact connected and unavailable message contracts", () => {
+  it("accepts legacy and render-aware locator status contracts", () => {
     expect(parsePageReplayMessage({
       source: PAGE_REPLAY_SOURCE,
       type: "LOCATOR_STATUS",
@@ -109,6 +135,32 @@ describe("replay locator status messages", () => {
       status: "UNAVAILABLE",
       reason: "SELECTOR_NOT_FOUND"
     });
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9003",
+      issueId: 9003,
+      status: "HIDDEN_STATE",
+      reason: "CAROUSEL_STATE_AVAILABLE",
+      recoverable: true
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9003",
+      issueId: 9003,
+      status: "HIDDEN_STATE",
+      reason: "CAROUSEL_STATE_AVAILABLE",
+      recoverable: true
+    });
+    for (const status of ["VISIBLE", "OFFSCREEN"] as const) {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE,
+        type: "LOCATOR_STATUS",
+        documentToken: "doc_9004",
+        issueId: 9004,
+        status
+      })).toMatchObject({ type: "LOCATOR_STATUS", status });
+    }
   });
 
   it.each([
@@ -117,6 +169,8 @@ describe("replay locator status messages", () => {
     { issueId: 1.5, status: "UNAVAILABLE" },
     { issueId: 9001, status: "UNAVAILABLE", documentToken: "bad token" },
     { issueId: 9001, status: "UNAVAILABLE", reason: 42 },
+    { issueId: 9001, status: "VISIBLE", recoverable: true },
+    { issueId: 9001, status: "HIDDEN_STATE", recoverable: "yes" },
     { issueId: 9001, status: "UNAVAILABLE", extra: true }
   ])("rejects malformed locator status payload %#", (overrides) => {
     const payload: Record<string, unknown> = {
