@@ -1,9 +1,0 @@
-Use case: ui-mockup.
-Asset type: second-round non-shipping refinement of a Korean web accessibility landing-page direction.
-Reference role: Image 1 defines the winning “signal manifesto” ism: black paper, white grotesque type, sulfur-yellow signal accent, sharp interface geometry, and asymmetric hierarchy. Preserve the ism and palette.
-Desired result: Refine only the page navigation rhythm by adding one narrow editorial rail that anchors the composition and continues through subsequent sections.
-Change only: Place the compact “UNI ACCESS” wordmark horizontally at top-left, then a 72px-wide vertical rail begins below it and runs down the left edge. The rail carries three simple unlabeled markers and one active sulfur marker. The hero headline begins at column three, uses an equivalent 64-68px Korean sans weight 600, and a single CTA sits below. The full-width signal field starts behind the lower half and the rail continues into the next section. Do not make the rail a sidebar application shell.
-Preserve exactly: carbon #10110F, warm white #F2F0E8, sulfur #D8F04A as only accent, high contrast, sharp geometry, extremely subtle paper grain, sparse top navigation, one CTA, no gradients or glow.
-Text (verbatim): Brand “UNI ACCESS”. Korean headline exactly “접근성은 점수가 아니라, 고칠 수 있는 일이어야 합니다.” CTA exactly “대시보드 열기”. No other readable text.
-Composition/framing: 1536x1024 landscape full-page landing concept, no device frame, CTA above fold, next section visible.
-Do not add or remove: No URL input, card grid, fake dashboard, fake numbers, icons, photos, browser frame, rounded pills, secondary CTA, logos, watermarks, or extra color.
