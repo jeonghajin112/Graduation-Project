@@ -2,13 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type {
-  AnalysisResult,
   EvaluationTargetModel,
   EvaluationRequestModel,
-  IssueResultModel,
   OrganizationModel,
   ScoreResult
 } from "@/types/accessibility-domain";
@@ -32,6 +31,61 @@ function getFallbackFaviconUrl(accessUrl: string): string | null {
   }
 }
 
+function ProjectFavicon({
+  faviconUrl,
+  isDarkMode,
+  targetType
+}: {
+  faviconUrl: string | null;
+  isDarkMode: boolean;
+  targetType: EvaluationTargetModel["targetType"];
+}) {
+  const [loadedFaviconUrl, setLoadedFaviconUrl] = useState<string | null>(null);
+  const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
+  const hasLoadedFavicon = faviconUrl !== null && loadedFaviconUrl === faviconUrl;
+
+  return (
+    <span
+      className={cn(
+        "dashboard-project-favicon relative inline-flex shrink-0 items-center justify-center overflow-hidden",
+        hasLoadedFavicon
+          ? "bg-transparent"
+          : isDarkMode
+            ? "border border-white/10 bg-white text-[#6e6e73]"
+            : "border border-[#e5e5ea] bg-white text-[#86868b]"
+      )}
+      data-favicon-loaded={hasLoadedFavicon ? "true" : "false"}
+      aria-hidden="true"
+    >
+      {!hasLoadedFavicon ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          {renderTargetTypeIcon(targetType)}
+        </span>
+      ) : null}
+      {faviconUrl !== null && failedFaviconUrl !== faviconUrl ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          className={cn(
+            "absolute inset-0 h-full w-full object-cover",
+            hasLoadedFavicon ? "opacity-100" : "opacity-0"
+          )}
+          onLoad={() => {
+            setLoadedFaviconUrl(faviconUrl);
+            setFailedFaviconUrl(null);
+          }}
+          onError={() => {
+            setLoadedFaviconUrl(null);
+            setFailedFaviconUrl(faviconUrl);
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
 
 export function OrganizationModelDetailPanel({
   organization,
@@ -40,17 +94,17 @@ export function OrganizationModelDetailPanel({
   isDarkMode,
   onOpenCreateSiteModal,
   onSiteClick,
-  onDeleteEvaluationTargetModel
+  onDeleteEvaluationTargetModel,
+  readOnly = false
 }: {
   organization: OrganizationModel;
   evaluationRequests: EvaluationRequestModel[];
-  analysisResults: AnalysisResult[];
   scoreResults: ScoreResult[];
-  issueResults: IssueResultModel[];
   isDarkMode: boolean;
   onOpenCreateSiteModal: () => void;
   onSiteClick: (siteId: number) => void;
   onDeleteEvaluationTargetModel: (input: { projectId: number; siteId: number }) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [siteSortConfig, setSiteSortConfig] = useState<{
     key: ProjectDetailSiteSortKey;
@@ -266,7 +320,9 @@ export function OrganizationModelDetailPanel({
       }
     } catch (error) {
       if (activeDeleteEvaluationTargetOperationIdRef.current === operationId) {
-        setDeleteEvaluationTargetError(getApiErrorMessage(error, "페이지 제거 중 오류가 발생했습니다."));
+        setDeleteEvaluationTargetError(
+          getApiErrorMessage(error, "페이지를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+        );
       }
     } finally {
       if (activeDeleteEvaluationTargetOperationIdRef.current === operationId) {
@@ -287,7 +343,9 @@ export function OrganizationModelDetailPanel({
         <button
           type="button"
           onClick={onOpenCreateSiteModal}
-          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40"
+          disabled={readOnly}
+          title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
+          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"
         >
           페이지 추가
         </button>
@@ -304,7 +362,7 @@ export function OrganizationModelDetailPanel({
           등록된 페이지가 없습니다.
         </div>
       ) : (
-        <div className="dashboard-project-content dashboard-project-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div className="dashboard-project-content dashboard-project-grid grid">
           {sortedSiteRows.map((row) => (
             <article
               key={row.id}
@@ -321,7 +379,7 @@ export function OrganizationModelDetailPanel({
                 className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/45"
               />
 
-              <div className="dashboard-project-card-delete absolute z-10">
+              {!readOnly ? <div className="dashboard-project-card-delete absolute z-10">
                 <button
                   type="button"
                   onClick={(event) => {
@@ -334,38 +392,21 @@ export function OrganizationModelDetailPanel({
                   aria-label={`${row.name} 제거`}
                   className={`dashboard-project-card-delete-button inline-flex items-center justify-center rounded-full opacity-0 transition group-hover:opacity-100 focus:opacity-100 ${
                     isDarkMode
-                      ? "text-[#a1a1a6] hover:bg-white/[0.07]"
-                      : "text-[#86868b] hover:bg-black/[0.05]"
+                      ? "text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                      : "text-red-600 hover:bg-red-50 hover:text-red-700"
                   }`}
                 >
                   <Trash2 size={13} aria-hidden="true" />
                 </button>
-              </div>
+              </div> : null}
 
               <div className="dashboard-project-card-header pointer-events-none relative z-[1] flex min-w-0 items-start">
-                <span
-                  className={`dashboard-project-favicon relative inline-flex shrink-0 items-center justify-center overflow-hidden border bg-white ${
-                    isDarkMode ? "border-white/10 text-[#6e6e73]" : "border-[#e5e5ea] text-[#86868b]"
-                  }`}
-                  aria-hidden="true"
-                >
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    {renderTargetTypeIcon(row.targetType)}
-                  </span>
-                  {row.faviconUrl ? (
-                    <img
-                      src={row.faviconUrl}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      referrerPolicy="no-referrer"
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={(event) => {
-                        event.currentTarget.style.display = "none";
-                      }}
-                    />
-                  ) : null}
-                </span>
+                <ProjectFavicon
+                  key={row.faviconUrl ?? "fallback"}
+                  faviconUrl={row.faviconUrl}
+                  isDarkMode={isDarkMode}
+                  targetType={row.targetType}
+                />
 
                 <div className="min-w-0">
                   <h3
@@ -382,8 +423,8 @@ export function OrganizationModelDetailPanel({
                 </div>
               </div>
 
-              <div className="dashboard-project-card-main relative z-[1] flex items-center justify-between">
-                {row.accessUrl ? (
+              <div className="dashboard-project-card-main pointer-events-none relative z-[1] flex items-center justify-between">
+                {row.accessUrl && !readOnly ? (
                   <a
                     href={row.accessUrl}
                     target="_blank"
@@ -397,6 +438,15 @@ export function OrganizationModelDetailPanel({
                     <span className="truncate">{row.accessUrl}</span>
                     <ExternalLink size={10} className="shrink-0" aria-hidden="true" />
                   </a>
+                ) : row.accessUrl ? (
+                  <p
+                    className={`dashboard-project-card-url min-w-0 truncate ${
+                      isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"
+                    }`}
+                    title={row.accessUrl}
+                  >
+                    {row.accessUrl}
+                  </p>
                 ) : (
                   <p className={`dashboard-project-card-url min-w-0 truncate ${isDarkMode ? "text-[#6e6e73]" : "text-[#a1a1a6]"}`}>
                     등록된 주소 없음
@@ -617,9 +667,9 @@ export function OrganizationModelDetailPanel({
             </div>
           </div>
       </div>
-      {deletingEvaluationTargetModel
+      {!readOnly && deletingEvaluationTargetModel
         ? createPortal(
-            <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
+            <div className="dashboard-modal-layer">
               <div
                 className="absolute inset-0"
                 onClick={() => {
@@ -635,55 +685,49 @@ export function OrganizationModelDetailPanel({
                 aria-labelledby="site-delete-title"
                 aria-describedby="site-delete-description"
                 tabIndex={-1}
-                className={`relative z-10 w-full max-w-md rounded-[18px] border p-6 ${
-                  isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
-                }`}
+                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
               >
                 <h3
                   id="site-delete-title"
-                  className={`text-lg font-semibold tracking-[-0.015em] ${
-                    isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-                  }`}
+                  className="dashboard-modal-title"
                 >
                   페이지 제거
                 </h3>
                 <p
                   id="site-delete-description"
-                  className={`mt-3 text-sm leading-6 ${isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"}`}
+                  className="dashboard-modal-description mt-3"
                 >
-                  <span className={isDarkMode ? "font-semibold text-[#f5f5f7]" : "font-semibold text-[#1d1d1f]"}>
+                  <span className="font-semibold text-foreground">
                     {deletingEvaluationTargetModel.name}
                   </span>
                   {" "}페이지를 제거하시겠습니까?
                 </p>
 
                 {deleteEvaluationTargetError.length > 0 && (
-                  <PanelMessage label={`페이지 제거 실패: ${deleteEvaluationTargetError}`} isError />
+                  <PanelMessage className="dashboard-modal-message" label={`페이지 제거 실패: ${deleteEvaluationTargetError}`} isError />
                 )}
 
-                <div className="mt-6 flex items-center justify-end gap-2">
+                <div className="dashboard-modal-actions">
                   <button
                     type="button"
                     disabled={isDeletingEvaluationTarget}
                     onClick={closeDeleteEvaluationTargetModel}
-                    className={`inline-flex h-7 items-center rounded-md px-5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isDarkMode
-                        ? "bg-[#2c2c2e] text-[#f5f5f7] hover:bg-[#3a3a3c] focus-visible:ring-white/30"
-                        : "bg-[#e5e5ea] text-[#1d1d1f] hover:bg-[#d2d2d7] focus-visible:ring-[#1d1d1f]/20"
-                    }`}
+                    className="dashboard-modal-button"
                   >
                     취소
                   </button>
-                  <button
+                  <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
                     disabled={isDeletingEvaluationTarget}
                     onClick={() => {
                       void handleConfirmDeleteEvaluationTargetModel();
                     }}
-                    className="inline-flex h-7 items-center rounded-md bg-[#0071e3] px-5 text-xs font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="dashboard-modal-button dashboard-modal-button--danger"
                   >
                     {isDeletingEvaluationTarget ? "제거 중..." : "제거"}
-                  </button>
+                  </Button>
                 </div>
               </article>
             </div>,

@@ -9,5 +9,6 @@ import java.util.Optional;
 
 public interface OrganizationRepository extends JpaRepository<Organization, Long> {
     Optional<Organization> findByName(String name);
+    Optional<Organization> findByCreationIdempotencyKey(String creationIdempotencyKey);
     List<Organization> findByStatus(OrganizationStatus status);
 }

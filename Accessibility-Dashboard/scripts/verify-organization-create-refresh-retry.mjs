@@ -3,12 +3,14 @@
  * directory refresh fails, closing/reopening the modal and retrying must issue
  * only a GET. The organization POST must never be repeated.
  *
- * Usage: BASE_URL=http://127.0.0.1:5173 node scripts/verify-organization-create-refresh-retry.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-10T10:00:00.000Z";
 const project = {
   id: 77,
@@ -48,6 +50,7 @@ const observed = {
   organizationGets: 0,
   organizationPosts: 0,
   postBody: null,
+  idempotencyKey: null,
   postMutationOrganizationGets: 0,
   successfulRecoveryGets: 0,
   unknownRequests: new Set()
@@ -66,21 +69,12 @@ try {
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
 
-    if (method === "GET" && pathname === "/api/requests") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-      return;
-    }
-
-    if (method === "GET" && pathname === "/api/organizations") {
+    if (method === "GET" && pathname === "/api/dashboard/overview") {
       observed.organizationGets += 1;
 
       if (organizationCommitted && !allowRecovery) {
         observed.postMutationOrganizationGets += 1;
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: "[]"
-        });
+        await fulfillJson(route, createDashboardOverview());
         firstRefreshMissedProject.resolve();
         return;
       }
@@ -88,29 +82,17 @@ try {
       if (organizationCommitted) {
         observed.successfulRecoveryGets += 1;
       }
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(organizations)
-      });
-      return;
-    }
-
-    if (method === "GET" && pathname === `/api/organizations/${project.id}/evaluation-targets`) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      await fulfillJson(route, createDashboardOverview({ organizations }));
       return;
     }
 
     if (method === "POST" && pathname === "/api/organizations") {
       observed.organizationPosts += 1;
       observed.postBody = JSON.parse(request.postData() ?? "null");
+      observed.idempotencyKey = request.headers()["idempotency-key"];
       organizations = [project];
       organizationCommitted = true;
-      await route.fulfill({
-        status: 201,
-        contentType: "application/json",
-        body: JSON.stringify(project)
-      });
+      await fulfillJson(route, project, { status: 201 });
       return;
     }
 
@@ -141,10 +123,11 @@ try {
   assert.equal(postResponse.status(), 201);
   await dialog.getByRole("alert").filter({ hasText: "프로젝트는 생성되었지만" }).waitFor();
   await dialog
-    .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+    .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
     .waitFor();
   assert.equal(new URL(page.url()).pathname, "/analyze");
   assert.equal(observed.organizationPosts, 1);
+  assert.match(observed.idempotencyKey ?? "", /^[0-9a-f-]{36}$/i);
   assert.equal(await dialog.getByRole("button", { name: "생성", exact: true }).count(), 0);
 
   // Closing the modal is not a rollback. Reopening it must keep the saved ID
@@ -163,10 +146,10 @@ try {
   allowRecovery = true;
   const recoveryRequestPromise = page.waitForRequest(
     (request) =>
-      request.method() === "GET" && new URL(request.url()).pathname === "/api/organizations"
+      request.method() === "GET" && new URL(request.url()).pathname === "/api/dashboard/overview"
   );
   await dialog
-    .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+    .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
     .click();
   await withTimeout(recoveryRequestPromise, 5_000, "organization recovery GET");
 

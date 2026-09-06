@@ -1,4 +1,4 @@
-import type { OrganizationModel } from "@/types/accessibility-domain";
+import type { OrganizationModel, EvaluationRequestModel } from "@/types/accessibility-domain";
 
 export const QUICK_ANALYSIS_REGISTRY_KEY = "uni-access.quick-analysis-results.v2";
 export const QUICK_ANALYSIS_REGISTRY_VERSION = 2;
@@ -21,6 +21,7 @@ export type RecentAnalyzedPage = {
   pageName: string;
   projectId: number;
   projectName: string;
+  systemManaged?: boolean;
   sortTimestamp: number;
 };
 
@@ -205,15 +206,31 @@ export function recordQuickAnalysisResult(input: QuickAnalysisResultRecord): voi
 export function buildRecentAnalyzedPages({
   organizations,
   quickAnalysisResults,
+  evaluationRequests = [],
   limit = MAX_RECENT_ANALYZED_PAGES
 }: {
   organizations: readonly OrganizationModel[];
   quickAnalysisResults: readonly QuickAnalysisResultRecord[];
+  evaluationRequests?: readonly EvaluationRequestModel[];
   limit?: number;
 }): RecentAnalyzedPage[] {
   const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : MAX_RECENT_ANALYZED_PAGES;
 
-  return quickAnalysisResults
+  // Server receipts survive reloads while jobs are pending. Keep old local
+  // records as a compatibility source, but never infer quick analyses from all
+  // project requests or completion status alone.
+  const records = [...quickAnalysisResults];
+  for (const request of evaluationRequests) {
+    if (!request.quickAnalysis) continue;
+    const project = organizations.find((organization) =>
+      organization.evaluationTargets.some((target) => target.id === request.evaluationTargetId));
+    const timestamp = Date.parse(request.requestedAt);
+    if (project && Number.isFinite(timestamp)) {
+      records.push({ projectId: project.id, pageId: request.evaluationTargetId, timestamp });
+    }
+  }
+  const seenPages = new Set<number>();
+  return records
     .map((result): RecentAnalyzedPage | null => {
       const project = organizations.find((candidate) => candidate.id === result.projectId);
       const page = project?.evaluationTargets.find((candidate) => candidate.id === result.pageId);
@@ -226,6 +243,7 @@ export function buildRecentAnalyzedPages({
         pageName: page.name,
         projectId: project.id,
         projectName: project.name,
+        systemManaged: project.systemManaged,
         sortTimestamp: result.timestamp
       };
     })
@@ -236,5 +254,10 @@ export function buildRecentAnalyzedPages({
         left.pageId - right.pageId ||
         left.projectId - right.projectId
     )
+    .filter((page) => {
+      if (seenPages.has(page.pageId)) return false;
+      seenPages.add(page.pageId);
+      return true;
+    })
     .slice(0, safeLimit);
 }

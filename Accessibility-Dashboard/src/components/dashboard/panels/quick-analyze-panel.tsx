@@ -1,21 +1,10 @@
-import { ArrowRight, Check, Loader2, Search, X } from "lucide-react";
+import { ArrowRight, Loader2, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import {
-  Stepper,
-  StepperIndicator,
-  StepperItem,
-  StepperNav,
-  StepperSeparator,
-  StepperTitle,
-  StepperTrigger
-} from "@/components/ui/stepper";
 import { API_BASE_URL } from "@/config/api";
 import {
-  ApiRequestError,
   fetchDashboardViewModel,
   fetchEvaluationRequest,
-  fetchEvaluationTarget,
   getApiErrorMessage,
   isAbortError,
   startUrlEvaluation
@@ -26,28 +15,30 @@ import {
   writeQuickAnalysisAttempt,
   type PersistedQuickAnalysisAttempt
 } from "@/services/analysis-recovery-storage";
-import { throwIfAborted, wait } from "@/services/async-cancellation";
-import { recordQuickAnalysisResult } from "@/services/quick-analysis-registry";
+
+import {
+  SITE_URL_MAX_LENGTH,
+  isValidEvaluationTargetAccessUrl
+} from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
   EvaluationRequestModel,
   EvaluationStatus
 } from "@/types/accessibility-domain";
 
-import { useCancellationScope } from "../shared/use-cancellation-scope";
+import {
+  commitMutationOnce,
+  isDefinitiveMutationRejection,
+  reconcileWithRetries,
+  runMutationRequestWithDeadline
+} from "../shared/mutation-recovery";
 
-const ANALYSIS_POLL_INTERVAL_MS = 1500;
-const ANALYSIS_POLL_ATTEMPTS = 120;
-const QUICK_ANALYSIS_REQUEST_TIMEOUT_MS = 15_000;
+import { useMutationOperation } from "../shared/use-mutation-operation";
+import { QuickAnalysisProgress, type AnalysisPhase } from "./quick-analysis-progress";
+
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
-
-const DEFINITIVE_QUICK_ANALYSIS_REJECTION_STATUSES = new Set([
-  400, 401, 402, 403, 404, 405, 406, 407, 410, 411, 413, 414, 415, 416, 417, 418,
-  421, 422, 423, 424, 426, 428, 431, 451
-]);
-
-type AnalysisPhase = "idle" | "requesting" | "queued" | "running" | "completed" | "failed";
 
 type ProgressState = {
   phase: AnalysisPhase;
@@ -90,71 +81,13 @@ const emptyProgress: ProgressState = {
 };
 
 const QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE =
-  "브라우저에 분석 복구 정보를 안전하게 저장하지 못해 새 분석 요청을 보내지 않았습니다.";
+  "이전 분석 정보를 브라우저에 저장하지 못해 새 분석을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
 const QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE =
-  "확인할 수 없는 분석 복구 정보가 남아 있어 중복 분석을 막기 위해 새 요청을 차단했습니다. 로그아웃 후 다시 시도해 주세요.";
+  "확인할 수 없는 이전 분석 작업이 남아 있어 중복 요청을 막았습니다. 로그아웃한 뒤 다시 시도해 주세요.";
 const QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE =
-  "이전 URL의 분석 요청 결과를 먼저 확인해야 합니다. 복구 중인 URL로 되돌렸습니다.";
+  "이전 주소의 접수 여부를 먼저 확인해야 합니다. 중복 접수를 막기 위해 기존 주소로 되돌렸습니다.";
 
-const analysisJourneySteps = ["페이지 연결", "접근성 검사", "결과 준비"] as const;
 
-function phaseFromRequestStatus(status: EvaluationStatus | string): AnalysisPhase {
-  if (status === "PENDING") {
-    return "queued";
-  }
-  if (status === "COMPLETED") {
-    return "completed";
-  }
-  if (status === "FAILED") {
-    return "failed";
-  }
-  return "running";
-}
-
-function messageFromRequestStatus(status: EvaluationStatus | string): string {
-  if (status === "PENDING") {
-    return "분석 요청이 대기열에 등록되었습니다.";
-  }
-  if (status === "COMPLETED") {
-    return "분석이 완료되었습니다. 결과 화면으로 이동합니다.";
-  }
-  if (status === "FAILED") {
-    return "분석에 실패했습니다. 대상 사이트 접속이 막혀 있거나 리다이렉트되었을 수 있습니다.";
-  }
-  return "페이지 접근성 분석을 진행하고 있습니다.";
-}
-
-function labelFromPhase(phase: AnalysisPhase): string {
-  if (phase === "requesting") {
-    return "분석 요청 중";
-  }
-  if (phase === "queued") {
-    return "대기열 등록 중";
-  }
-  if (phase === "running") {
-    return "페이지 분석 중";
-  }
-  if (phase === "completed") {
-    return "결과 준비 완료";
-  }
-  if (phase === "failed") {
-    return "분석 실패";
-  }
-  return "분석 준비";
-}
-
-function journeyStepIndexFromPhase(phase: AnalysisPhase): number {
-  if (phase === "requesting" || phase === "queued") {
-    return 0;
-  }
-  if (phase === "running" || phase === "failed") {
-    return 1;
-  }
-  if (phase === "completed") {
-    return 2;
-  }
-  return 0;
-}
 
 function normalizeUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -168,24 +101,11 @@ function normalizeUrl(raw: string): string {
 }
 
 function isLikelyUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return isValidEvaluationTargetAccessUrl(value);
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
-}
-
-function isDefinitiveQuickAnalysisRejection(error: unknown): boolean {
-  return (
-    error instanceof ApiRequestError &&
-    error.status !== null &&
-    DEFINITIVE_QUICK_ANALYSIS_REJECTION_STATUSES.has(error.status)
-  );
 }
 
 function toComparableUrl(value: string): string | null {
@@ -207,32 +127,7 @@ async function runQuickAnalysisRequestWithTimeout<T>({
   signal: AbortSignal;
   timeoutMessage: string;
 }): Promise<T> {
-  throwIfAborted(signal);
-  const controller = new AbortController();
-  let timedOut = false;
-  const forwardAbort = () => controller.abort();
-  signal.addEventListener("abort", forwardAbort, { once: true });
-  const timeoutId = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, QUICK_ANALYSIS_REQUEST_TIMEOUT_MS);
-
-  try {
-    const result = await operation(controller.signal);
-    if (timedOut && !signal.aborted) {
-      throw new Error(timeoutMessage);
-    }
-    throwIfAborted(signal);
-    return result;
-  } catch (error) {
-    if (timedOut && !signal.aborted) {
-      throw new Error(timeoutMessage);
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-    signal.removeEventListener("abort", forwardAbort);
-  }
+  return runMutationRequestWithDeadline({ operation, signal, timeoutMessage });
 }
 
 function requestCheckpointFromResponse(
@@ -357,14 +252,18 @@ function findReconciledQuickAnalysisRequest(
 
 export function QuickAnalyzePanel({
   isDarkMode,
-  onAnalysisComplete
+  onAnalysisAccepted,
+  readOnly = false
 }: {
   isDarkMode: boolean;
-  onAnalysisComplete: (route: { projectId: number; siteId: number }) => void | Promise<void>;
+  onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
+  readOnly?: boolean;
 }) {
   const initialRecoveryRef = useRef<ReturnType<typeof readQuickAnalysisRecovery> | null>(null);
   if (initialRecoveryRef.current === null) {
-    initialRecoveryRef.current = readQuickAnalysisRecovery();
+    initialRecoveryRef.current = readOnly
+      ? { kind: "none" }
+      : readQuickAnalysisRecovery();
   }
   const initialRecovery = initialRecoveryRef.current;
   const restoredAttempt = initialRecovery.kind === "valid" ? initialRecovery.value : null;
@@ -373,45 +272,92 @@ export function QuickAnalyzePanel({
     initialRecovery.kind === "blocked" ? QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE : ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [acceptedMessage, setAcceptedMessage] = useState("");
+  const urlInputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ProgressState>(emptyProgress);
-  const { beginScope, cancelScope } = useCancellationScope();
-  const submissionLockRef = useRef(false);
-  const isMountedRef = useRef(false);
-  const activeOperationIdRef = useRef<symbol | null>(null);
+  const {
+    beginMutationOperation,
+    cancelMutationOperation,
+    finishMutationOperation,
+    isMutationOperationCurrent,
+    isMutationOperationLocked
+  } = useMutationOperation();
   const checkpointRef = useRef<QuickAnalysisCheckpoint | null>(
     restoredAttempt === null
       ? null
       : checkpointFromPersistedQuickAnalysisAttempt(restoredAttempt)
   );
+  const checkpointRawValueRef = useRef<string | null>(
+    initialRecovery.kind === "valid" ? initialRecovery.rawValue : null
+  );
   const recoveryBlockedRef = useRef(initialRecovery.kind === "blocked");
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      activeOperationIdRef.current = null;
-      submissionLockRef.current = false;
-    };
-  }, []);
+  const persistCheckpoint = (
+    checkpoint: QuickAnalysisCheckpoint | PersistedQuickAnalysisAttempt,
+    expectedRawValue = checkpointRawValueRef.current
+  ): boolean => {
+    const attempt = "kind" in checkpoint
+      ? persistedAttemptFromQuickAnalysisCheckpoint(checkpoint)
+      : checkpoint;
+    const stored = writeQuickAnalysisAttempt(attempt, expectedRawValue);
+    if (stored === null) {
+      return false;
+    }
+    checkpointRawValueRef.current = stored.rawValue;
+    return true;
+  };
 
-  const isAnalyzing = progress.phase !== "idle" && progress.phase !== "failed";
+  const clearPersistedCheckpoint = (): boolean => {
+    const rawValue = checkpointRawValueRef.current;
+    if (rawValue === null || !clearQuickAnalysisAttempt(rawValue)) {
+      return false;
+    }
+    checkpointRawValueRef.current = null;
+    return true;
+  };
+
   const showProgressView = progress.phase !== "idle";
-  const isBusy = isSubmitting || (progress.phase !== "idle" && progress.phase !== "failed" && progress.phase !== "completed");
+  const isBusy =
+    isSubmitting ||
+    (progress.phase !== "idle" &&
+      progress.phase !== "paused" &&
+      progress.phase !== "failed" &&
+      progress.phase !== "completed");
   const hasUrlInput = urlInput.trim().length > 0;
-  const canSubmit = hasUrlInput && !isBusy;
+  const canSubmit = hasUrlInput && !isBusy && !readOnly;
   const hasError = errorMessage.length > 0;
 
+  useEffect(() => {
+    const restored = checkpointRef.current;
+    if (readOnly || !restored || restored.kind === "reconciling" || restored.targetId === null) return;
+    onAnalysisAccepted({
+      id: restored.requestId,
+      evaluationTargetId: restored.targetId,
+      status: restored.kind === "target" ? "COMPLETED" : (restored.status as EvaluationRequestModel["status"] ?? "PENDING"),
+      requestedAt: new Date(restored.startedAt).toISOString(),
+      updatedAt: restored.updatedAt ?? ""
+    }, restored.url);
+    if (clearPersistedCheckpoint()) {
+      checkpointRef.current = null;
+      setUrlInput("");
+      setAcceptedMessage("접수된 분석은 사이드바에서 확인할 수 있습니다. 다음 주소를 입력해 주세요.");
+    }
+    // Consume mount-time recovery once; the dashboard owns ongoing requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, onAnalysisAccepted]);
+
   const handleReset = () => {
-    cancelScope();
-    activeOperationIdRef.current = null;
-    submissionLockRef.current = false;
+    cancelMutationOperation();
     setProgress(emptyProgress);
     setErrorMessage("");
     setIsSubmitting(false);
   };
 
   const handleSubmit = async () => {
-    if (submissionLockRef.current || !hasUrlInput) {
+    if (readOnly) {
+      return;
+    }
+    if (isMutationOperationLocked() || !hasUrlInput) {
       return;
     }
 
@@ -426,12 +372,12 @@ export function QuickAnalyzePanel({
       return;
     }
 
-    submissionLockRef.current = true;
-    const operationId = Symbol("quick-analysis-operation");
-    activeOperationIdRef.current = operationId;
-    const signal = beginScope();
-    const isActiveOperation = () =>
-      isMountedRef.current && activeOperationIdRef.current === operationId;
+    const operation = beginMutationOperation("quick-analysis-operation");
+    if (operation === null) {
+      return;
+    }
+    const { signal } = operation;
+    const isActiveOperation = () => isMutationOperationCurrent(operation);
 
     setIsSubmitting(true);
     setErrorMessage("");
@@ -442,11 +388,14 @@ export function QuickAnalyzePanel({
       message: "분석 요청을 생성하고 있습니다."
     });
 
+    let requiresInputReset = false;
+
     try {
       let checkpoint = checkpointRef.current;
       if (checkpoint !== null && checkpoint.url !== normalized) {
+        requiresInputReset = true;
         setUrlInput(checkpoint.url);
-        throw new Error(QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE);
+        throw new UserFacingError(QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE);
       }
 
       if (checkpoint === null) {
@@ -455,9 +404,9 @@ export function QuickAnalyzePanel({
         // without sending the mutation again.
         const baseline = await runQuickAnalysisRequestWithTimeout({
           signal,
-          timeoutMessage: "분석 요청 전 기존 작업 목록을 확인하는 시간이 초과되었습니다.",
+          timeoutMessage: "분석을 준비하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
           operation: (requestSignal) =>
-            fetchDashboardViewModel(requestSignal, true)
+            fetchDashboardViewModel(requestSignal)
         });
         if (!isActiveOperation()) {
           return;
@@ -475,8 +424,8 @@ export function QuickAnalyzePanel({
           phase: "posting",
           knownRequestIds
         };
-        if (!writeQuickAnalysisAttempt(postingAttempt, null)) {
-          throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+        if (!persistCheckpoint(postingAttempt, null)) {
+          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
         }
 
         const reconcilingCheckpoint: Extract<
@@ -493,296 +442,153 @@ export function QuickAnalyzePanel({
         checkpoint = reconcilingCheckpoint;
 
         try {
-          const created = await runQuickAnalysisRequestWithTimeout({
+          const commitOutcome = await commitMutationOnce({
             signal,
-            timeoutMessage: "분석 요청 응답을 기다리는 시간이 초과되었습니다.",
+            timeoutMessage: "분석을 시작하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
-              startUrlEvaluation(normalized, requestSignal)
+              startUrlEvaluation(normalized, requestSignal),
+            accept: (created) => {
+              const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
+                attemptId,
+                startedAt
+              });
+              return requestCheckpoint !== null &&
+                !knownRequestIds.includes(requestCheckpoint.requestId)
+                ? requestCheckpoint
+                : null;
+            }
           });
           if (!isActiveOperation()) {
             return;
           }
 
-          const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
-            attemptId,
-            startedAt
-          });
-          if (requestCheckpoint !== null) {
-            if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(requestCheckpoint),
-                attemptId
-              )
-            ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+          if (commitOutcome.kind === "accepted") {
+            if (!persistCheckpoint(commitOutcome.value)) {
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
-            checkpointRef.current = requestCheckpoint;
-            checkpoint = requestCheckpoint;
+            checkpointRef.current = commitOutcome.value;
+            checkpoint = commitOutcome.value;
           }
         } catch (error) {
-          if (isDefinitiveQuickAnalysisRejection(error)) {
-            if (!clearQuickAnalysisAttempt(attemptId)) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+          if (isDefinitiveMutationRejection(error)) {
+            if (!clearPersistedCheckpoint()) {
+              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
             }
             checkpointRef.current = null;
             throw error;
           }
-          if (!isActiveOperation()) {
-            return;
-          }
-          // A timeout, network error, 5xx, or unusable success body may happen
-          // after commit. Keep the pre-POST checkpoint and reconcile by GET.
+          throw error;
         }
 
         if (checkpoint.kind === "reconciling") {
           if (
-            !writeQuickAnalysisAttempt(
-              persistedAttemptFromQuickAnalysisCheckpoint(checkpoint),
-              checkpoint.attemptId
-            )
+            !persistCheckpoint(checkpoint)
           ) {
-            throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+            throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
           }
         }
       }
 
       if (checkpoint.kind === "reconciling") {
-        for (let attempt = 0; attempt < QUICK_ANALYSIS_RECONCILE_ATTEMPTS; attempt += 1) {
-          if (attempt > 0) {
-            await wait(QUICK_ANALYSIS_RECONCILE_INTERVAL_MS, signal);
-          }
-
-          const reconciledData = await runQuickAnalysisRequestWithTimeout({
-            signal,
-            timeoutMessage: "분석 요청 결과를 확인하는 시간이 초과되었습니다.",
-            operation: (requestSignal) =>
-              fetchDashboardViewModel(requestSignal, true)
-          });
-          if (!isActiveOperation()) {
-            return;
-          }
-
-          const reconciledRequest = findReconciledQuickAnalysisRequest(
-            reconciledData,
-            checkpoint
-          );
-          if (reconciledRequest === null) {
-            continue;
-          }
-
-          const requestCheckpoint = requestCheckpointFromResponse(
-            normalized,
-            reconciledRequest,
-            {
-              attemptId: checkpoint.attemptId,
-              startedAt: checkpoint.startedAt
+        const reconcilingCheckpoint = checkpoint;
+        const recoveredCheckpoint = await reconcileWithRetries({
+          attempts: QUICK_ANALYSIS_RECONCILE_ATTEMPTS,
+          intervalMs: QUICK_ANALYSIS_RECONCILE_INTERVAL_MS,
+          signal,
+          probe: async (requestSignal) => {
+            const reconciledData = await runQuickAnalysisRequestWithTimeout({
+              signal: requestSignal,
+              timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
+              operation: (probeSignal) => fetchDashboardViewModel(probeSignal)
+            });
+            if (!isActiveOperation()) {
+              return null;
             }
-          );
-          if (requestCheckpoint !== null) {
-            if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(requestCheckpoint),
-                checkpoint.attemptId
-              )
-            ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-            }
-            checkpointRef.current = requestCheckpoint;
-            checkpoint = requestCheckpoint;
-            break;
+            const reconciledRequest = findReconciledQuickAnalysisRequest(
+              reconciledData,
+              reconcilingCheckpoint
+            );
+            return reconciledRequest === null
+              ? null
+              : requestCheckpointFromResponse(normalized, reconciledRequest, {
+                  attemptId: reconcilingCheckpoint.attemptId,
+                  startedAt: reconcilingCheckpoint.startedAt
+                });
           }
-        }
+        });
 
-        if (checkpoint.kind === "reconciling") {
-          throw new Error(
+        if (recoveredCheckpoint === null) {
+          throw new UserFacingError(
             "분석 요청의 처리 결과를 아직 확인하지 못했습니다. 잠시 후 다시 시도해 주세요. 새 분석 요청은 보내지 않습니다."
           );
         }
+        if (!persistCheckpoint(recoveredCheckpoint)) {
+          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+        }
+        checkpointRef.current = recoveredCheckpoint;
+        checkpoint = recoveredCheckpoint;
       }
 
-      if (checkpoint.kind === "request") {
-        let requestCheckpoint = checkpoint;
-        if (requestCheckpoint.status !== null) {
-          setProgress({
-            phase: phaseFromRequestStatus(requestCheckpoint.status),
-            requestId: requestCheckpoint.requestId,
-            status: requestCheckpoint.status,
-            message: messageFromRequestStatus(requestCheckpoint.status)
-          });
+      // A positive receipt releases this form. Status/result reads are owned by
+      // the dashboard and cannot hold the next submission hostage.
+      if (checkpoint.targetId === null) {
+        const requestId = checkpoint.requestId;
+        const request = await runQuickAnalysisRequestWithTimeout({
+          signal,
+          timeoutMessage: "분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.",
+          operation: (requestSignal) => fetchEvaluationRequest(requestId, requestSignal)
+        });
+        const recovered = requestCheckpointFromResponse(normalized, request, checkpoint);
+        if (!isActiveOperation()) return;
+        if (!recovered || recovered.requestId !== requestId || recovered.targetId === null) {
+          throw new UserFacingError("분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.");
         }
-
-        if (requestCheckpoint.status === "FAILED") {
-          if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
-            throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-          }
-          checkpointRef.current = null;
-          throw new Error("분석 엔진 실행에 실패했습니다. URL을 확인한 뒤 다시 시도해 주세요.");
-        }
-
-        if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
-          let reachedUsableFinalRequest = false;
-          for (let attempt = 0; attempt < ANALYSIS_POLL_ATTEMPTS; attempt += 1) {
-            if (attempt > 0) {
-              await wait(ANALYSIS_POLL_INTERVAL_MS, signal);
-            }
-
-            const request = await runQuickAnalysisRequestWithTimeout({
-              signal,
-              timeoutMessage: "분석 상태 응답을 기다리는 시간이 초과되었습니다.",
-              operation: (requestSignal) =>
-                fetchEvaluationRequest(requestCheckpoint.requestId, requestSignal)
-            });
-            if (!isActiveOperation()) {
-              return;
-            }
-
-            const nextCheckpoint = requestCheckpointFromResponse(normalized, request, {
-              attemptId: requestCheckpoint.attemptId,
-              startedAt: requestCheckpoint.startedAt
-            });
-            if (nextCheckpoint === null) {
-              throw new Error("분석 상태 응답에서 요청 ID를 확인하지 못했습니다.");
-            }
-            if (
-              !writeQuickAnalysisAttempt(
-                persistedAttemptFromQuickAnalysisCheckpoint(nextCheckpoint),
-                requestCheckpoint.attemptId
-              )
-            ) {
-              throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-            }
-            requestCheckpoint = nextCheckpoint;
-            checkpointRef.current = requestCheckpoint;
-            setProgress({
-              phase: phaseFromRequestStatus(request.status),
-              requestId: requestCheckpoint.requestId,
-              status: request.status,
-              message: messageFromRequestStatus(request.status)
-            });
-
-            if (request.status === "FAILED") {
-              if (!clearQuickAnalysisAttempt(requestCheckpoint.attemptId)) {
-                throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-              }
-              checkpointRef.current = null;
-              throw new Error("분석 엔진 실행에 실패했습니다. URL을 확인한 뒤 다시 시도해 주세요.");
-            }
-            if (request.status === "COMPLETED" && requestCheckpoint.targetId !== null) {
-              reachedUsableFinalRequest = true;
-              break;
-            }
-          }
-
-          if (!reachedUsableFinalRequest) {
-            throw new Error("분석이 시간 내에 완료되지 않았습니다. 잠시 후 다시 시도해 주세요.");
-          }
-        }
-
-        if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
-          throw new Error("완료된 분석의 페이지 정보를 확인하지 못했습니다.");
-        }
-
-        const targetCheckpoint: Extract<QuickAnalysisCheckpoint, { kind: "target" }> = {
-          kind: "target",
-          attemptId: requestCheckpoint.attemptId,
-          startedAt: requestCheckpoint.startedAt,
-          url: normalized,
-          requestId: requestCheckpoint.requestId,
-          targetId: requestCheckpoint.targetId,
-          updatedAt: requestCheckpoint.updatedAt
-        };
-        if (
-          !writeQuickAnalysisAttempt(
-            persistedAttemptFromQuickAnalysisCheckpoint(targetCheckpoint),
-            requestCheckpoint.attemptId
-          )
-        ) {
-          throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-        }
-        checkpointRef.current = targetCheckpoint;
-        checkpoint = targetCheckpoint;
+        checkpoint = recovered;
+        checkpointRef.current = recovered;
+        if (!persistCheckpoint(recovered)) throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
-
-      if (checkpoint.kind !== "target") {
-        throw new Error("분석 결과 페이지 정보를 확인하지 못했습니다.");
-      }
-
-      const target = await runQuickAnalysisRequestWithTimeout({
-        signal,
-        timeoutMessage: "분석 대상 정보를 기다리는 시간이 초과되었습니다.",
-        operation: (requestSignal) =>
-          fetchEvaluationTarget(checkpoint.targetId, requestSignal)
-      });
-      if (!isActiveOperation()) {
-        return;
-      }
-      const completedTimestamp = Date.parse(checkpoint.updatedAt ?? "");
-      recordQuickAnalysisResult({
-        projectId: target.organizationId,
-        pageId: target.id,
-        timestamp: Number.isFinite(completedTimestamp) ? completedTimestamp : Date.now()
-      });
-      setProgress({
-        phase: "completed",
-        requestId: checkpoint.requestId,
-        status: "COMPLETED",
-        message: "분석이 완료되었습니다. 결과 화면으로 이동합니다."
-      });
-      await wait(350, signal);
-      await onAnalysisComplete({
-        projectId: target.organizationId,
-        siteId: target.id
-      });
-      if (!clearQuickAnalysisAttempt(checkpoint.attemptId)) {
-        throw new Error(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+      onAnalysisAccepted({
+        id: checkpoint.requestId,
+        evaluationTargetId: checkpoint.targetId!,
+        status: checkpoint.kind === "target" ? "COMPLETED" : (checkpoint.status as EvaluationRequestModel["status"] ?? "PENDING"),
+        requestedAt: new Date(checkpoint.startedAt).toISOString(),
+        updatedAt: checkpoint.updatedAt ?? ""
+      }, normalized);
+      if (!clearPersistedCheckpoint()) {
+        throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
       checkpointRef.current = null;
+      setUrlInput("");
+      setProgress(emptyProgress);
+      setAcceptedMessage("분석을 접수했습니다. 사이드바에서 진행 상태를 확인하고 다음 주소를 입력해 주세요.");
+      window.requestAnimationFrame(() => urlInputRef.current?.focus());
     } catch (error) {
       if (!isActiveOperation() || isAbortError(error)) {
         return;
       }
 
-      const message = getApiErrorMessage(error, "페이지 분석 중 오류가 발생했습니다.");
+      const message = getApiErrorMessage(error, "페이지 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       setErrorMessage(message);
       setProgress((current) => ({
         ...current,
-        phase: "failed",
+        phase:
+          requiresInputReset || checkpointRef.current === null
+            ? "failed"
+            : "paused",
         message
       }));
     } finally {
-      if (activeOperationIdRef.current === operationId) {
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
-          setIsSubmitting(false);
-        }
+      if (finishMutationOperation(operation)) {
+        setIsSubmitting(false);
       }
     }
   };
 
-  const journeyStepIndex = journeyStepIndexFromPhase(progress.phase);
-
   return (
-    <div className="quick-analyze-layout relative min-h-0 w-full flex-1">
+    <div className={`quick-analyze-layout min-h-0 w-full flex-1 ${showProgressView ? "quick-analyze-layout--progress" : "relative"}`}>
       <article
-        className="absolute left-1/2 top-[40%] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[28px] bg-transparent p-5 sm:max-w-2xl sm:p-7 lg:max-w-3xl lg:p-8"
+        className={showProgressView ? "quick-analyze-progress-panel" : "absolute left-1/2 top-[40%] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[28px] bg-transparent p-5 sm:max-w-2xl sm:p-7 lg:max-w-3xl lg:p-8"}
       >
-        {showProgressView && (
-          <div className="mb-8 text-center sm:mb-10">
-            <h2
-              className={`text-2xl font-black tracking-tight sm:text-3xl ${
-                isDarkMode ? "text-white" : "text-slate-900"
-              }`}
-            >
-              {progress.phase === "failed"
-                ? "분석을 완료하지 못했습니다"
-                : progress.phase === "completed"
-                  ? "분석이 완료되었습니다"
-                  : "페이지를 분석하고 있습니다"}
-            </h2>
-          </div>
-        )}
-
         {!showProgressView ? (
           <div>
             <h2
@@ -816,6 +622,7 @@ export function QuickAnalyzePanel({
                   }`}
                 />
                 <input
+                  ref={urlInputRef}
                   id="quick-analyze-url"
                   value={urlInput}
                   onChange={(event) => {
@@ -831,8 +638,10 @@ export function QuickAnalyzePanel({
                     }
                   }}
                   disabled={isBusy}
+                  maxLength={SITE_URL_MAX_LENGTH}
                   aria-invalid={hasError}
                   aria-describedby={hasError ? "quick-analyze-url-error" : undefined}
+                  readOnly={readOnly}
                   placeholder="https://example.com"
                   className={`h-full w-full min-w-0 rounded-[inherit] border-0 bg-transparent pl-9 pr-3 text-sm outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
                     isDarkMode
@@ -843,7 +652,7 @@ export function QuickAnalyzePanel({
               </div>
               <button
                 type="button"
-                disabled={!canSubmit}
+                disabled={!canSubmit || readOnly}
                 onClick={() => {
                   void handleSubmit();
                 }}
@@ -854,6 +663,7 @@ export function QuickAnalyzePanel({
                 {!isBusy && <ArrowRight size={15} aria-hidden="true" />}
               </button>
             </div>
+            {acceptedMessage && <p role="status" className="mt-3 text-center text-xs text-[var(--dashboard-text-muted)]">{acceptedMessage}</p>}
             {hasError && (
               <p id="quick-analyze-url-error" className="mt-2 text-left text-xs text-[#ff453a]">
                 {errorMessage}
@@ -861,101 +671,10 @@ export function QuickAnalyzePanel({
             )}
           </div>
         ) : (
-          <section className="mx-auto w-full max-w-2xl" aria-live="polite" aria-busy={isAnalyzing}>
-            <p
-              className={`mb-6 text-center text-sm font-medium ${
-                progress.phase === "failed"
-                  ? "text-[#ff453a]"
-                  : isDarkMode
-                    ? "text-[#a1a1a6]"
-                    : "text-[#6e6e73]"
-              }`}
-            >
-              {labelFromPhase(progress.phase)}
-            </p>
-
-            <Stepper
-              value={journeyStepIndex + 1}
-              role="group"
-              aria-label="분석 진행 단계"
-              indicators={{
-                completed: <Check className="size-3.5" strokeWidth={2.5} aria-hidden="true" />,
-                loading: <Loader2 className="size-3.5 animate-spin" strokeWidth={2.5} aria-hidden="true" />
-              }}
-            >
-              <StepperNav className="items-start px-2 sm:px-8" aria-label="URL 분석 과정">
-                {analysisJourneySteps.map((step, index) => {
-                  const stepNumber = index + 1;
-                  const isCompletedStep = progress.phase === "completed" || index < journeyStepIndex;
-                  const isFailedStep = progress.phase === "failed" && index === journeyStepIndex;
-                  const isActiveStep =
-                    !isCompletedStep && !isFailedStep && index === journeyStepIndex && progress.phase !== "idle";
-
-                  return (
-                    <StepperItem
-                      key={step}
-                      step={stepNumber}
-                      completed={isCompletedStep}
-                      loading={isActiveStep}
-                      aria-current={isActiveStep ? "step" : undefined}
-                    >
-                      <StepperTrigger
-                        asChild
-                        className="pointer-events-none flex min-w-[4.75rem] shrink-0 flex-col items-center gap-2"
-                      >
-                        <StepperIndicator
-                          className={`size-7 border ${
-                            isFailedStep
-                              ? "border-[#ff453a] bg-[#ff453a] text-white"
-                              : isDarkMode
-                                ? "border-[#3a3a3c] bg-[#242426] text-[#8e8e93]"
-                                : "border-[#d2d2d7] bg-[#f5f5f7] text-[#86868b]"
-                          } data-[state=active]:border-[#0071e3] data-[state=active]:bg-[#0071e3] data-[state=active]:text-white data-[state=completed]:border-[#0071e3] data-[state=completed]:bg-[#0071e3] data-[state=completed]:text-white`}
-                        >
-                          {isFailedStep ? (
-                            <X className="size-3.5" strokeWidth={2.5} aria-hidden="true" />
-                          ) : (
-                            stepNumber
-                          )}
-                        </StepperIndicator>
-                        <StepperTitle
-                          className={`whitespace-nowrap text-xs ${
-                            isFailedStep
-                              ? "text-[#ff453a]"
-                              : isActiveStep || isCompletedStep
-                                ? isDarkMode
-                                  ? "text-[#f5f5f7]"
-                                  : "text-[#1d1d1f]"
-                                : isDarkMode
-                                  ? "text-[#636366]"
-                                  : "text-[#86868b]"
-                          }`}
-                        >
-                          {step}
-                        </StepperTitle>
-                      </StepperTrigger>
-                      {stepNumber < analysisJourneySteps.length && (
-                        <StepperSeparator
-                          className={`mt-3 ${
-                            isDarkMode ? "bg-[#3a3a3c]" : "bg-[#d2d2d7]"
-                          } group-data-[state=completed]/step:bg-[#0071e3]`}
-                        />
-                      )}
-                    </StepperItem>
-                  );
-                })}
-              </StepperNav>
-            </Stepper>
-
-            {urlInput.trim().length > 0 && (
-              <p className={`mt-7 truncate text-center text-xs ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
-                {normalizeUrl(urlInput)}
-              </p>
-            )}
-
+          <QuickAnalysisProgress phase={progress.phase} url={normalizeUrl(urlInput)} isBusy={isBusy}>
             {progress.phase === "failed" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p className="text-center text-xs text-rose-500">{errorMessage || progress.message}</p>
+                <p role="alert" className="text-center text-xs text-rose-500">{errorMessage || progress.message}</p>
                 <button
                   type="button"
                   onClick={handleReset}
@@ -965,7 +684,39 @@ export function QuickAnalyzePanel({
                 </button>
               </div>
             )}
-          </section>
+
+            {progress.phase === "paused" && (
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage || progress.message}</p>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    void handleSubmit();
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
+                </button>
+              </div>
+            )}
+
+            {progress.phase === "completed" && hasError && (
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage}</p>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    void handleSubmit();
+                  }}
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isSubmitting ? "결과 불러오는 중..." : "결과 다시 불러오기"}
+                </button>
+              </div>
+            )}
+          </QuickAnalysisProgress>
         )}
       </article>
     </div>

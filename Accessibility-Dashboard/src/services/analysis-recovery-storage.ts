@@ -1,4 +1,12 @@
 import { API_BASE_URL } from "@/config/api";
+import {
+  clearSessionRecoveryIfUnchanged,
+  clearSessionRecoveryStorage,
+  isRecoveryTimestampStale,
+  readSessionRecovery,
+  writeSessionRecoveryIfUnchanged
+} from "@/services/recovery-storage";
+import type { RecoveryRead } from "@/services/recovery-storage";
 
 export const QUICK_ANALYSIS_STORAGE_KEY =
   "accessibility-dashboard.quick-analysis-attempt.v1";
@@ -6,26 +14,15 @@ export const TARGET_RESCAN_STORAGE_KEY =
   "accessibility-dashboard.target-rescan-attempts.v1";
 
 export function clearAnalysisRecoveryStorage(): void {
-  try {
-    window.sessionStorage.removeItem(QUICK_ANALYSIS_STORAGE_KEY);
-    window.sessionStorage.removeItem(TARGET_RESCAN_STORAGE_KEY);
-  } catch {
-    // Logout must remain available when storage is blocked by the browser.
-  }
+  clearSessionRecoveryStorage(QUICK_ANALYSIS_STORAGE_KEY);
+  clearSessionRecoveryStorage(TARGET_RESCAN_STORAGE_KEY);
 }
 
-const RECOVERY_STALE_AFTER_MS = 24 * 60 * 60 * 1_000;
-const RECOVERY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const ATTEMPT_ID_MAX_LENGTH = 100;
 const URL_MAX_LENGTH = 4096;
 const STATUS_MAX_LENGTH = 100;
 const REQUEST_IDS_MAX_LENGTH = 10_000;
 const RESCAN_ATTEMPTS_MAX_LENGTH = 100;
-
-type RecoveryRead<T> =
-  | { kind: "none" }
-  | { kind: "valid"; value: T }
-  | { kind: "blocked" };
 
 type PersistedAttemptBase = {
   attemptId: string;
@@ -55,6 +52,11 @@ export type PersistedQuickAnalysisAttempt = PersistedAttemptBase & {
         updatedAt: string | null;
       }
   );
+
+export type StoredQuickAnalysisAttempt = {
+  attempt: PersistedQuickAnalysisAttempt;
+  rawValue: string;
+};
 
 export type PersistedTargetRescanAttempt = PersistedAttemptBase & {
   targetId: number;
@@ -194,81 +196,40 @@ function normalizeQuickAnalysisAttempt(
   return null;
 }
 
-function isAttemptStale(startedAt: number, now: number): boolean {
-  return (
-    startedAt < now - RECOVERY_STALE_AFTER_MS ||
-    startedAt > now + RECOVERY_MAX_FUTURE_SKEW_MS
-  );
-}
-
 export function readQuickAnalysisRecovery(
   now = Date.now()
 ): RecoveryRead<PersistedQuickAnalysisAttempt> {
-  try {
-    const rawValue = window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY);
-    if (rawValue === null) {
-      return { kind: "none" };
-    }
-    const attempt = normalizeQuickAnalysisAttempt(JSON.parse(rawValue) as unknown);
-    return attempt !== null && !isAttemptStale(attempt.startedAt, now)
-      ? { kind: "valid", value: attempt }
-      : { kind: "blocked" };
-  } catch {
-    return { kind: "blocked" };
-  }
+  const recovery = readSessionRecovery(
+    QUICK_ANALYSIS_STORAGE_KEY,
+    normalizeQuickAnalysisAttempt
+  );
+  return recovery.kind === "valid" &&
+    isRecoveryTimestampStale(recovery.value.startedAt, now)
+    ? { kind: "blocked", rawValue: recovery.rawValue }
+    : recovery;
 }
 
 export function writeQuickAnalysisAttempt(
   attempt: PersistedQuickAnalysisAttempt,
-  expectedAttemptId: string | null
-): boolean {
-  try {
-    const normalizedAttempt = normalizeQuickAnalysisAttempt(attempt);
-    if (normalizedAttempt === null) {
-      return false;
-    }
-    const currentRawValue = window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY);
-    if (expectedAttemptId === null) {
-      if (currentRawValue !== null) {
-        return false;
-      }
-    } else {
-      if (currentRawValue === null) {
-        return false;
-      }
-      const currentAttempt = normalizeQuickAnalysisAttempt(
-        JSON.parse(currentRawValue) as unknown
-      );
-      if (currentAttempt?.attemptId !== expectedAttemptId) {
-        return false;
-      }
-    }
-
-    const serializedAttempt = JSON.stringify(normalizedAttempt);
-    window.sessionStorage.setItem(QUICK_ANALYSIS_STORAGE_KEY, serializedAttempt);
-    return window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY) === serializedAttempt;
-  } catch {
-    return false;
+  expectedRawValue: string | null
+): StoredQuickAnalysisAttempt | null {
+  const stored = writeSessionRecoveryIfUnchanged(
+    QUICK_ANALYSIS_STORAGE_KEY,
+    attempt,
+    normalizeQuickAnalysisAttempt,
+    expectedRawValue
+  );
+  if (stored === null) {
+    return null;
   }
+  return { attempt: stored.value, rawValue: stored.rawValue };
 }
 
-export function clearQuickAnalysisAttempt(expectedAttemptId: string): boolean {
-  try {
-    const currentRawValue = window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY);
-    if (currentRawValue === null) {
-      return false;
-    }
-    const currentAttempt = normalizeQuickAnalysisAttempt(
-      JSON.parse(currentRawValue) as unknown
-    );
-    if (currentAttempt?.attemptId !== expectedAttemptId) {
-      return false;
-    }
-    window.sessionStorage.removeItem(QUICK_ANALYSIS_STORAGE_KEY);
-    return window.sessionStorage.getItem(QUICK_ANALYSIS_STORAGE_KEY) === null;
-  } catch {
-    return false;
-  }
+export function clearQuickAnalysisAttempt(expectedRawValue: string): boolean {
+  return clearSessionRecoveryIfUnchanged(
+    QUICK_ANALYSIS_STORAGE_KEY,
+    expectedRawValue
+  );
 }
 
 function normalizeTargetRescanAttempt(
@@ -329,18 +290,18 @@ function normalizeTargetRescanAttempts(
 export function readTargetRescanRecovery(
   now = Date.now()
 ): RecoveryRead<PersistedTargetRescanAttempt[]> {
-  try {
-    const rawValue = window.sessionStorage.getItem(TARGET_RESCAN_STORAGE_KEY);
-    if (rawValue === null) {
-      return { kind: "none" };
-    }
-    const record = normalizeTargetRescanAttempts(JSON.parse(rawValue) as unknown);
-    return record !== null && record.attempts.every((attempt) => !isAttemptStale(attempt.startedAt, now))
-      ? { kind: "valid", value: record.attempts }
-      : { kind: "blocked" };
-  } catch {
-    return { kind: "blocked" };
+  const recovery = readSessionRecovery(
+    TARGET_RESCAN_STORAGE_KEY,
+    normalizeTargetRescanAttempts
+  );
+  if (recovery.kind !== "valid") {
+    return recovery;
   }
+  return recovery.value.attempts.every(
+    (attempt) => !isRecoveryTimestampStale(attempt.startedAt, now)
+  )
+    ? { kind: "valid", rawValue: recovery.rawValue, value: recovery.value.attempts }
+    : { kind: "blocked", rawValue: recovery.rawValue };
 }
 
 function writeTargetRescanRecord(record: PersistedTargetRescanAttempts): boolean {

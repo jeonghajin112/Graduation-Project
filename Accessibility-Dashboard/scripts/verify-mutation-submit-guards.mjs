@@ -3,12 +3,14 @@
  * page delete. Each mutation is held in flight while the DOM button is clicked
  * twice synchronously; exactly one PATCH may reach the API.
  *
- * Usage: BASE_URL=http://127.0.0.1:4173 node scripts/verify-mutation-submit-guards.mjs
+ * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5173";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-11T10:00:00.000Z";
 
 let organization = {
@@ -42,6 +44,18 @@ function createDeferred() {
   return { promise, resolve };
 }
 
+async function assertDestructiveButton(button, label) {
+  const colors = await button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      color: style.color
+    };
+  });
+  assert.equal(colors.backgroundColor, "rgb(215, 0, 21)", `${label} must use the destructive red`);
+  assert.equal(colors.color, "rgb(255, 255, 255)", `${label} must keep readable white text`);
+}
+
 const pageDeleteStarted = createDeferred();
 const releasePageDelete = createDeferred();
 const projectSaveStarted = createDeferred();
@@ -66,26 +80,26 @@ try {
     const method = request.method();
     const pathname = new URL(request.url()).pathname;
 
+    if (method === "GET" && pathname === "/api/dashboard/overview") {
+      await fulfillJson(route, createDashboardOverview({
+        organizations: organizationActive ? [organization] : [],
+        evaluationTargets: organizationActive ? targets : []
+      }));
+      return;
+    }
+
     if (method === "GET" && pathname === "/api/organizations") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(organizationActive ? [organization] : [])
-      });
+      await fulfillJson(route, organizationActive ? [organization] : []);
       return;
     }
 
     if (method === "GET" && pathname === `/api/organizations/${organization.id}/evaluation-targets`) {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify(targets)
-      });
+      await fulfillJson(route, targets);
       return;
     }
 
     if (method === "GET" && pathname === "/api/requests") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      await fulfillJson(route, []);
       return;
     }
 
@@ -93,8 +107,16 @@ try {
       observed.pageDeletePatches += 1;
       pageDeleteStarted.resolve();
       await releasePageDelete.promise;
+      if (observed.pageDeletePatches === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, data: {}, message: null })
+        });
+        return;
+      }
       targets = [];
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, null);
       return;
     }
 
@@ -104,7 +126,7 @@ try {
       await releaseProjectSave.promise;
       const body = JSON.parse(request.postData() ?? "{}");
       organization = { ...organization, name: body.name, description: body.description, updatedAt: timestamp };
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, organization);
       return;
     }
 
@@ -112,8 +134,20 @@ try {
       observed.projectDeletePatches += 1;
       projectDeleteStarted.resolve();
       await releaseProjectDelete.promise;
+      if (observed.projectDeletePatches === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: false,
+            data: null,
+            message: "프로젝트 제거가 거부되었습니다."
+          })
+        });
+        return;
+      }
       organizationActive = false;
-      await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      await fulfillJson(route, null);
       return;
     }
 
@@ -127,6 +161,7 @@ try {
   await page.getByRole("button", { name: `${target.name} 제거`, exact: true }).click();
   const pageDeleteDialog = page.getByRole("dialog", { name: "페이지 제거", exact: true });
   const pageDeleteButton = pageDeleteDialog.getByRole("button", { name: "제거", exact: true });
+  await assertDestructiveButton(pageDeleteButton, "page delete confirmation");
   await pageDeleteButton.evaluate((button) => {
     button.click();
     button.click();
@@ -135,7 +170,19 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.pageDeletePatches, 1, "page delete must issue one PATCH");
   releasePageDelete.resolve();
+  const pageDeleteAlert = pageDeleteDialog
+    .getByRole("alert")
+    .filter({ hasText: "페이지를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+  await pageDeleteAlert.waitFor();
+  assert.doesNotMatch(
+    await pageDeleteAlert.innerText(),
+    /data|success|null|HTTP|PATCH|\/(?:api|targets)\//i,
+    "void response contract details must not be exposed to the user"
+  );
+  assert.equal(await pageDeleteDialog.isVisible(), true);
+  await pageDeleteButton.click();
   await pageDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
+  assert.equal(observed.pageDeletePatches, 2, "void contract failure retry must issue one new PATCH");
 
   const sidebar = page.locator("aside");
   await sidebar.getByRole("button", { name: organization.name, exact: true }).click({ button: "right" });
@@ -156,9 +203,45 @@ try {
   await page.getByRole("heading", { level: 1, name: updatedName, exact: true }).waitFor();
 
   await sidebar.getByRole("button", { name: updatedName, exact: true }).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "삭제", exact: true }).click();
+  const projectDeleteMenuItem = page.getByRole("menuitem", { name: "삭제", exact: true });
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(215, 0, 21)",
+    "project delete menu item must use the destructive red"
+  );
+  await projectDeleteMenuItem.evaluate((element) => {
+    const dashboardSurface = element.closest(".bridge-dashboard");
+    if (!(dashboardSurface instanceof HTMLElement)) {
+      throw new Error("project delete menu is outside the dashboard surface");
+    }
+    dashboardSurface.classList.remove("theme-light");
+    dashboardSurface.classList.add("theme-dark");
+  });
+  await page.waitForTimeout(200);
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(255, 69, 58)",
+    "project delete menu item must use the accessible dark-theme destructive red"
+  );
+  await projectDeleteMenuItem.hover();
+  await page.waitForTimeout(200);
+  assert.equal(
+    await projectDeleteMenuItem.evaluate((element) => getComputedStyle(element).color),
+    "rgb(255, 69, 58)",
+    "project delete menu item must remain red on dark-theme hover"
+  );
+  await projectDeleteMenuItem.evaluate((element) => {
+    const dashboardSurface = element.closest(".bridge-dashboard");
+    if (!(dashboardSurface instanceof HTMLElement)) {
+      throw new Error("project delete menu is outside the dashboard surface");
+    }
+    dashboardSurface.classList.remove("theme-dark");
+    dashboardSurface.classList.add("theme-light");
+  });
+  await projectDeleteMenuItem.click();
   const projectDeleteDialog = page.getByRole("dialog", { name: "프로젝트 제거", exact: true });
   const projectDeleteButton = projectDeleteDialog.getByRole("button", { name: "네", exact: true });
+  await assertDestructiveButton(projectDeleteButton, "project delete confirmation");
   await projectDeleteButton.evaluate((button) => {
     button.click();
     button.click();
@@ -167,8 +250,24 @@ try {
   await page.waitForTimeout(50);
   assert.equal(observed.projectDeletePatches, 1, "project delete must issue one PATCH");
   releaseProjectDelete.resolve();
+  const projectDeleteAlert = projectDeleteDialog
+    .getByRole("alert")
+    .filter({ hasText: "프로젝트를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+  await projectDeleteAlert.waitFor();
+  assert.doesNotMatch(
+    await projectDeleteAlert.innerText(),
+    /거부되었습니다|success|data|null|HTTP|PATCH|\/(?:api|organizations)\//i,
+    "server payload and request details must not be exposed to the user"
+  );
+  assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
+  await projectDeleteButton.click();
   await projectDeleteDialog.waitFor({ state: "hidden", timeout: 10_000 });
   await page.waitForURL("**/analyze", { timeout: 10_000 });
+  assert.equal(
+    observed.projectDeletePatches,
+    2,
+    "success:false retry must issue one new PATCH"
+  );
 
   assert.deepEqual([...observed.unknownRequests], []);
   console.log(

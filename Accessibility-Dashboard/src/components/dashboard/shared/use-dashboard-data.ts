@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchDashboardViewModel, getApiErrorMessage, isAbortError } from "@/services/backend-api";
-import type { DashboardViewModel } from "@/types/accessibility-domain";
+import {
+  fetchDashboardViewModel,
+  fetchEvaluationRequest,
+  getApiErrorMessage,
+  isAbortError
+} from "@/services/backend-api";
+import type { DashboardViewModel, EvaluationRequestModel } from "@/types/accessibility-domain";
 
 type LoadDashboardOptions = {
+  background?: boolean;
   awaitInFlight?: boolean;
   refreshAfterInFlight?: boolean;
   showLoading?: boolean;
   clearOnError?: boolean;
-  forceDirectoryRefresh?: boolean;
   signal?: AbortSignal;
 };
 
@@ -20,9 +25,8 @@ type DirectoryRecoveryLease = {
   baselineOrganizations: DashboardViewModel["organizations"];
   baselineEvaluationRequests: DashboardViewModel["evaluationRequests"];
   baselineResultSummaries: DashboardViewModel["resultSummaries"];
-  baselineEvaluationIssues: DashboardViewModel["evaluationIssues"];
+  baselineLatestIssueCounts: DashboardViewModel["latestIssueCounts"];
   baselineScoreResults: DashboardViewModel["scoreResults"];
-  autoForceLoadsRemaining: number;
   incompleteSnapshotCount: number;
   protectionActive: boolean;
 };
@@ -32,8 +36,28 @@ type DirectoryRecovery = {
   lastConsistentData: DashboardViewModel | null;
 };
 
+type ActiveDashboardLoad = {
+  cleanup: () => void;
+  controller: AbortController;
+  id: symbol;
+  isBackground: boolean;
+  managesLoading: boolean;
+  promise: Promise<DashboardViewModel | null>;
+};
+
 const MAX_INCOMPLETE_RECOVERY_SNAPSHOTS = 4;
-const MAX_AUTO_FORCE_RECOVERY_LOADS = 4;
+export const DASHBOARD_STATUS_POLL_INTERVAL_MS = 5_000;
+export const DASHBOARD_STATUS_POLL_TIMEOUT_MS = 10_000;
+export const DASHBOARD_OVERVIEW_TIMEOUT_MS = 15_000;
+export const DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE =
+  "대시보드를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
+
+function createDashboardSnapshotSignature(data: DashboardViewModel): string {
+  // The aggregate response is already the UI's complete source of truth. A
+  // stable serialized signature lets a successful poll clear a transient
+  // error without replacing React state when none of that truth changed.
+  return JSON.stringify(data);
+}
 
 function getRequestStatusProgress(status: string): number | null {
   switch (status) {
@@ -84,29 +108,6 @@ function requestHasNotRolledBack(
   }
 
   return requestStatusHasNotRolledBack(baseline.status, next.status);
-}
-
-function shouldForceRecoveryDirectory(recovery: DirectoryRecovery | null): boolean {
-  if (!recovery) {
-    return false;
-  }
-
-  let shouldForce = false;
-  for (const lease of recovery.leases.values()) {
-    if (!lease.protectionActive || lease.autoForceLoadsRemaining <= 0) {
-      continue;
-    }
-
-    // One fresh directory request advances every lease that was active when
-    // it started, while a lease created later receives its own full budget.
-    lease.autoForceLoadsRemaining -= 1;
-    shouldForce = true;
-  }
-
-  // Cache bypass and snapshot protection have separate lifetimes. Exhausting
-  // one lease's automatic force budget must not disable another lease or make
-  // a transiently incomplete response erase otherwise consistent results.
-  return shouldForce;
 }
 
 type WaitForLoadResult =
@@ -164,8 +165,8 @@ function protectRecoverySnapshot(
   const nextResultSummaryRequestIds = new Set(
     nextData.resultSummaries.map((summary) => summary.requestId)
   );
-  const nextEvaluationIssueIds = new Set(
-    nextData.evaluationIssues.map((issue) => issue.id)
+  const nextLatestIssueCountRequestIds = new Set(
+    nextData.latestIssueCounts.map((statistics) => statistics.requestId)
   );
   const nextScoreResultKeys = new Set(
     nextData.scoreResults.map(
@@ -204,8 +205,8 @@ function protectRecoverySnapshot(
       lease.baselineResultSummaries.every((summary) =>
         nextResultSummaryRequestIds.has(summary.requestId)
       ) &&
-      lease.baselineEvaluationIssues.every((issue) =>
-        nextEvaluationIssueIds.has(issue.id)
+      lease.baselineLatestIssueCounts.every((statistics) =>
+        nextLatestIssueCountRequestIds.has(statistics.requestId)
       ) &&
       lease.baselineScoreResults.every((scoreResult) =>
         nextScoreResultKeys.has(`${scoreResult.id}:${scoreResult.evaluationRequestId}`)
@@ -255,20 +256,28 @@ export function useDashboardData({
   const [dashboardError, setDashboardError] = useState("");
   const isBootstrappedRef = useRef(false);
   const dashboardDataRef = useRef<DashboardViewModel | null>(null);
-  const activeLoadPromiseRef = useRef<Promise<DashboardViewModel | null> | null>(null);
-  const activeLoadAbortControllerRef = useRef<AbortController | null>(null);
-  const activeLoadIsBackgroundRef = useRef(false);
+  const dashboardSnapshotSignatureRef = useRef<string | null>(null);
+  const activeLoadRef = useRef<ActiveDashboardLoad | null>(null);
   const directoryRecoveryRef = useRef<DirectoryRecovery | null>(null);
+  // Confirmed POST/status responses remain visible while the overview catches up.
+  const [trackedRequests, setTrackedRequests] = useState<Record<number, EvaluationRequestModel>>({});
+  const trackEvaluationRequest = useCallback((request: EvaluationRequestModel) => {
+    setTrackedRequests((current) => {
+      const previous = current[request.id];
+      if (previous && (!requestHasNotRolledBack(previous, request) ||
+        JSON.stringify(previous) === JSON.stringify(request))) return current;
+      return { ...current, [request.id]: request };
+    });
+  }, []);
 
   const beginDirectoryRecovery = useCallback((): DirectoryRecoveryToken => {
     const token = Symbol("directory-recovery");
     const lease: DirectoryRecoveryLease = {
       token,
-      autoForceLoadsRemaining: MAX_AUTO_FORCE_RECOVERY_LOADS,
       baselineOrganizations: dashboardDataRef.current?.organizations ?? [],
       baselineEvaluationRequests: dashboardDataRef.current?.evaluationRequests ?? [],
       baselineResultSummaries: dashboardDataRef.current?.resultSummaries ?? [],
-      baselineEvaluationIssues: dashboardDataRef.current?.evaluationIssues ?? [],
+      baselineLatestIssueCounts: dashboardDataRef.current?.latestIssueCounts ?? [],
       baselineScoreResults: dashboardDataRef.current?.scoreResults ?? [],
       incompleteSnapshotCount: 0,
       protectionActive: true
@@ -283,8 +292,8 @@ export function useDashboardData({
       };
     }
 
-    if (activeLoadIsBackgroundRef.current) {
-      activeLoadAbortControllerRef.current?.abort();
+    if (activeLoadRef.current?.isBackground) {
+      activeLoadRef.current.controller.abort();
     }
     return token;
   }, []);
@@ -303,106 +312,163 @@ export function useDashboardData({
 
   const loadDashboard = useCallback<LoadDashboard>(
     async ({
+      background = false,
       awaitInFlight = false,
       refreshAfterInFlight = false,
       showLoading = false,
       clearOnError = false,
-      forceDirectoryRefresh = false,
       signal
     } = {}) => {
-      // A Strict Mode remount starts a new bootstrap load while the first
-      // effect's request is still aborting. Bootstrap and mutation refreshes
-      // must wait for that promise and then issue a request with their own
-      // live signal instead of inheriting the cancelled work.
-      if (refreshAfterInFlight || showLoading) {
-        while (activeLoadPromiseRef.current) {
-          // A background poll has no user-visible owner and may be stalled by
-          // the network. A mutation refresh takes priority and replaces it.
-          if (refreshAfterInFlight && activeLoadIsBackgroundRef.current) {
-            activeLoadAbortControllerRef.current?.abort();
-          }
-          const activePromise = activeLoadPromiseRef.current;
+      if (signal?.aborted) {
+        return null;
+      }
+
+      let inheritedLoading = false;
+      // A manual or mutation refresh must not queue forever behind a stalled
+      // bootstrap/poll. Detach it immediately; the load id below prevents a
+      // late continuation from painting stale data or clearing newer state.
+      if (refreshAfterInFlight && activeLoadRef.current) {
+        const supersededLoad = activeLoadRef.current;
+        inheritedLoading = supersededLoad.managesLoading;
+        activeLoadRef.current = null;
+        supersededLoad.controller.abort();
+        supersededLoad.cleanup();
+      } else if (showLoading) {
+        // Strict Mode remounts the bootstrap effect after aborting its first
+        // request. Wait for that owned request to settle before starting the
+        // live replacement so development mode does not duplicate GETs.
+        while (activeLoadRef.current) {
+          const activePromise = activeLoadRef.current.promise;
           const waited = await waitForLoadOrAbort(activePromise, signal);
           if (waited.aborted) {
             return null;
           }
         }
-      } else if (activeLoadPromiseRef.current) {
+      } else if (activeLoadRef.current) {
         if (!awaitInFlight) {
           return null;
         }
 
-        const waited = await waitForLoadOrAbort(activeLoadPromiseRef.current, signal);
+        const waited = await waitForLoadOrAbort(activeLoadRef.current.promise, signal);
         return waited.aborted ? null : waited.value;
       }
 
       const loadAbortController = new AbortController();
+      const loadId = Symbol("dashboard-overview-load");
+      const managesLoading = showLoading || inheritedLoading;
+      let didTimeout = false;
+      let didCancel = false;
       const forwardExternalAbort = () => {
-        loadAbortController.abort();
+        loadAbortController.abort(signal?.reason);
       };
-      if (signal?.aborted) {
-        loadAbortController.abort();
-      } else {
-        signal?.addEventListener("abort", forwardExternalAbort, { once: true });
-      }
+      signal?.addEventListener("abort", forwardExternalAbort, { once: true });
+      const timeoutId = window.setTimeout(() => {
+        didTimeout = true;
+        loadAbortController.abort(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE);
+      }, DASHBOARD_OVERVIEW_TIMEOUT_MS);
+      let resourcesReleased = false;
+      const cleanupLoadResources = () => {
+        if (resourcesReleased) {
+          return;
+        }
+        resourcesReleased = true;
+        window.clearTimeout(timeoutId);
+        signal?.removeEventListener("abort", forwardExternalAbort);
+      };
+      const isCurrentLoad = () => activeLoadRef.current?.id === loadId;
 
       let loadPromise!: Promise<DashboardViewModel | null>;
       loadPromise = (async (): Promise<DashboardViewModel | null> => {
-        let didAbort = false;
-
         if (showLoading) {
           setIsDashboardLoading(true);
         }
 
         try {
-          const nextData = await fetchDashboardViewModel(
-            loadAbortController.signal,
-            forceDirectoryRefresh || shouldForceRecoveryDirectory(directoryRecoveryRef.current)
-          );
+          const nextData = await fetchDashboardViewModel(loadAbortController.signal);
+          if (!isCurrentLoad()) {
+            return nextData;
+          }
           const visibleData = protectRecoverySnapshot(
             nextData,
             directoryRecoveryRef.current
           );
-          dashboardDataRef.current = visibleData;
-          setDashboardData(visibleData);
+          const previousData = dashboardDataRef.current;
+          setTrackedRequests((current) => {
+            const remaining = Object.fromEntries(Object.entries(current).filter(([, tracked]) => {
+              const targetVisible = visibleData.organizations.some((organization) =>
+                organization.evaluationTargets.some((target) => target.id === tracked.evaluationTargetId));
+              const targetRemoved = !targetVisible && previousData?.organizations.some((organization) =>
+                organization.evaluationTargets.some((target) => target.id === tracked.evaluationTargetId));
+              if (targetRemoved && !visibleData.evaluationRequests.some((request) => request.id === tracked.id)) return false;
+              return !visibleData.evaluationRequests.some((request) =>
+                request.id === tracked.id && requestHasNotRolledBack(tracked, request)
+              ) || !targetVisible;
+            }));
+            return Object.keys(remaining).length === Object.keys(current).length ? current : remaining;
+          });
+          const nextSignature = createDashboardSnapshotSignature(visibleData);
+          if (dashboardSnapshotSignatureRef.current !== nextSignature) {
+            dashboardSnapshotSignatureRef.current = nextSignature;
+            dashboardDataRef.current = visibleData;
+            setDashboardData(visibleData);
+          }
           setDashboardError("");
-          return visibleData;
+          return dashboardDataRef.current ?? visibleData;
         } catch (error) {
-          if (isAbortError(error)) {
-            didAbort = true;
+          if (didTimeout) {
+            if (isCurrentLoad()) {
+              setDashboardError(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE);
+              if (clearOnError) {
+                dashboardDataRef.current = null;
+                dashboardSnapshotSignatureRef.current = null;
+                setDashboardData(null);
+              }
+            }
             return null;
           }
 
-          setDashboardError(getApiErrorMessage(error, "대시보드 데이터를 가져오지 못했습니다."));
-          if (clearOnError) {
-            dashboardDataRef.current = null;
-            setDashboardData(null);
+          if (isAbortError(error)) {
+            didCancel = true;
+            return null;
+          }
+
+          if (isCurrentLoad()) {
+            setDashboardError(getApiErrorMessage(error, "대시보드 데이터를 가져오지 못했습니다."));
+            if (clearOnError) {
+              dashboardDataRef.current = null;
+              dashboardSnapshotSignatureRef.current = null;
+              setDashboardData(null);
+            }
           }
           return null;
         } finally {
-          signal?.removeEventListener("abort", forwardExternalAbort);
-          if (activeLoadPromiseRef.current === loadPromise) {
-            activeLoadPromiseRef.current = null;
-            activeLoadAbortControllerRef.current = null;
-            activeLoadIsBackgroundRef.current = false;
-          }
+          cleanupLoadResources();
+          if (isCurrentLoad()) {
+            activeLoadRef.current = null;
 
-          // Strict Mode remount aborts the first showLoading fetch. Polling
-          // (showLoading=false) must still be able to clear the boot overlay.
-          if (!didAbort && !isBootstrappedRef.current) {
-            isBootstrappedRef.current = true;
-            onBootstrapComplete?.();
-          }
+            // A successful/error/timeout replacement refresh can finish a
+            // bootstrap it superseded. Caller/unmount aborts remain silent.
+            const completesBootstrap = !didCancel && !isBootstrappedRef.current;
+            if (completesBootstrap) {
+              isBootstrappedRef.current = true;
+              onBootstrapComplete?.();
+            }
 
-          if (showLoading) {
-            setIsDashboardLoading(false);
+            if (managesLoading || completesBootstrap) {
+              setIsDashboardLoading(false);
+            }
           }
         }
       })();
 
-      activeLoadPromiseRef.current = loadPromise;
-      activeLoadAbortControllerRef.current = loadAbortController;
-      activeLoadIsBackgroundRef.current = !refreshAfterInFlight && !showLoading;
+      activeLoadRef.current = {
+        cleanup: cleanupLoadResources,
+        controller: loadAbortController,
+        id: loadId,
+        isBackground: background || (!refreshAfterInFlight && !showLoading),
+        managesLoading,
+        promise: loadPromise
+      };
       return loadPromise;
     },
     [onBootstrapComplete]
@@ -412,24 +478,144 @@ export function useDashboardData({
     const controller = new AbortController();
     void loadDashboard({ showLoading: true, clearOnError: true, signal: controller.signal });
 
-    const intervalId = window.setInterval(() => {
-      void loadDashboard();
-    }, 5000);
-
     return () => {
       controller.abort();
-      activeLoadAbortControllerRef.current?.abort();
-      window.clearInterval(intervalId);
+      const activeLoad = activeLoadRef.current;
+      activeLoadRef.current = null;
+      activeLoad?.controller.abort();
+      activeLoad?.cleanup();
     };
   }, [loadDashboard]);
 
+  const visibleDashboardData = useMemo(() => {
+    if (!dashboardData && Object.keys(trackedRequests).length === 0) return null;
+    const base = dashboardData ?? { organizations: [], evaluationRequests: [], resultSummaries: [], latestIssueCounts: [], scoreResults: [] };
+    const requests = new Map<number, EvaluationRequestModel>(base.evaluationRequests.map((request) => [request.id, request]));
+    for (const tracked of Object.values(trackedRequests)) {
+      const existing = requests.get(tracked.id);
+      if (!existing || requestHasNotRolledBack(existing, tracked)) requests.set(tracked.id, tracked);
+    }
+    return { ...base, evaluationRequests: [...requests.values()] };
+  }, [dashboardData, trackedRequests]);
+  // Keep retrying an overview that has not yet acknowledged a terminal response.
+  const activeRequestKey = [...new Set([
+    ...(dashboardData?.evaluationRequests.filter((request) =>
+      request.status !== "COMPLETED" && request.status !== "FAILED").map((request) => request.id) ?? []),
+    ...Object.values(trackedRequests).map((request) => request.id)
+  ])].sort((a, b) => a - b).join(",");
+  const activeEvaluationRequestIds = useMemo(() =>
+    activeRequestKey ? activeRequestKey.split(",").map(Number) : [], [activeRequestKey]);
+
+  useEffect(() => {
+    if (activeEvaluationRequestIds.length === 0) {
+      return;
+    }
+
+    const lifecycleController = new AbortController();
+    let statusPollInFlight = false;
+
+    const refreshOverview = async () => {
+      await loadDashboard({
+        background: true,
+        refreshAfterInFlight: true,
+        signal: lifecycleController.signal
+      });
+    };
+
+    const pollActiveRequestStatuses = async () => {
+      if (
+        statusPollInFlight ||
+        lifecycleController.signal.aborted ||
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+
+      statusPollInFlight = true;
+      const statusController = new AbortController();
+      let didTimeout = false;
+      const forwardLifecycleAbort = () => {
+        statusController.abort(lifecycleController.signal.reason);
+      };
+      lifecycleController.signal.addEventListener("abort", forwardLifecycleAbort, { once: true });
+      const timeoutId = window.setTimeout(() => {
+        didTimeout = true;
+        statusController.abort();
+      }, DASHBOARD_STATUS_POLL_TIMEOUT_MS);
+      let statusResourcesReleased = false;
+      const releaseStatusResources = () => {
+        if (statusResourcesReleased) {
+          return;
+        }
+        statusResourcesReleased = true;
+        window.clearTimeout(timeoutId);
+        lifecycleController.signal.removeEventListener("abort", forwardLifecycleAbort);
+      };
+
+      try {
+        const outcomes = await Promise.allSettled(
+          activeEvaluationRequestIds.map((requestId) =>
+            fetchEvaluationRequest(requestId, statusController.signal)
+          )
+        );
+        releaseStatusResources();
+        if (lifecycleController.signal.aborted) return;
+        const requests = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
+        for (const request of requests) trackEvaluationRequest(request);
+        if (
+          outcomes.some((outcome) => outcome.status === "rejected") ||
+          requests.some(
+            (request) => request.status === "COMPLETED" || request.status === "FAILED"
+          ) ||
+          // An accepted page may not be in the first overview yet. Retry its
+          // directory entry while it is queued so the recent tab can appear.
+          requests.some((request) =>
+            !dashboardDataRef.current?.organizations.some((organization) =>
+              organization.evaluationTargets.some((target) => target.id === request.evaluationTargetId))
+          )
+        ) {
+          await refreshOverview();
+        }
+      } catch (error) {
+        statusController.abort();
+        releaseStatusResources();
+        if (!lifecycleController.signal.aborted && (didTimeout || !isAbortError(error))) {
+          // A missing/malformed/stalled status response may mean the request was
+          // replaced or removed. Fall back to the authoritative snapshot once;
+          // normal successful polls never pay for this full response.
+          await refreshOverview();
+        }
+      } finally {
+        releaseStatusResources();
+        statusPollInFlight = false;
+      }
+    };
+
+    const intervalId = window.setInterval(
+      () => void pollActiveRequestStatuses(),
+      DASHBOARD_STATUS_POLL_INTERVAL_MS
+    );
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void pollActiveRequestStatuses();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      lifecycleController.abort();
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeEvaluationRequestIds, loadDashboard, trackEvaluationRequest]);
+
   return {
-    dashboardData,
+    dashboardData: visibleDashboardData,
+    trackEvaluationRequest,
     dashboardError,
     beginDirectoryRecovery,
     endDirectoryRecovery,
     isDashboardLoading,
-    loadDashboard,
-    setDashboardError
+    loadDashboard
   };
 }

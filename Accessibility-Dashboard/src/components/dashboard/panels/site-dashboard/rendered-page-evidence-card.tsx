@@ -1,122 +1,367 @@
-import {
-  Code2,
-  Eye,
-  EyeOff,
-  MonitorOff,
-  RefreshCw
-} from "lucide-react";
+import { MonitorOff, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
-import { getEvaluationArtifactContentUrl } from "@/services/backend-api";
-import type { EvaluationArtifact } from "@/types/accessibility-domain";
+import type {
+  EvaluationCaptureMetadata,
+  LiveReportSession
+} from "@/types/accessibility-domain";
 
-import { formatDateTime } from "../../shared/utils";
+import { formatIssueCodeLabel } from "./constants";
+import {
+  getEvidenceFrameIdentity,
+  getReplaySourceWidth,
+  resolveEvidenceSource,
+  shouldAwaitLiveDocumentHealthAfterFrameLoad,
+  type EvidenceFrameKind
+} from "./evidence-source";
+import {
+  consumeLiveReportAutomaticRecovery,
+  createLiveReportAutomaticRecoveryState
+} from "./live-report-recovery";
+import {
+  advancePageEvidenceLoadingPhase,
+  getPageEvidenceLoadingProgress,
+  type PageEvidenceLoadingPhase
+} from "./page-evidence-loading-progress";
+import {
+  createLiveReportChallenge,
+  createLiveReportConnectMessage,
+  createLiveReportPortCommand,
+  getLiveReportConnectTargetOrigin,
+  parseLiveReportBridgeAvailableMessage,
+  parseLiveReportSessionExhaustedEvent,
+  parseLiveReportPortMessage
+} from "./live-report-protocol";
 import {
   DASHBOARD_REPLAY_SOURCE,
+  REPLAY_VIEW_SCALE_MAX,
+  REPLAY_VIEW_SCALE_MIN,
+  REPLAY_VISUAL_WIDTH_MAX,
+  isMeaningfulLiveDocumentHealth,
+  isValidReplayViewportMetrics,
   parsePageReplayMessage,
   toPageReplayIssue,
-  type DashboardToPageReplayMessage
+  type DashboardToPageReplayMessage,
+  type PageReplayToDashboardMessage,
+  type ReplayViewportMetrics
 } from "./page-replay-protocol";
-import { hasUsableIssueLocator } from "./issue-locator";
-import type { RecentIssueRow } from "./types";
-import type { EvaluationArtifactLoadState } from "./use-evaluation-artifact";
+import type { LocatorIssueState, LocatorReport, RecentIssueRow } from "./types";
+import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
-type EvidenceView = "page" | "code";
 type ReplayConnectionState = "loading" | "ready" | "error";
 
+type LiveReportPortConnection = {
+  challenge: string;
+  documentToken: string | null;
+  nextInboundSequence: number;
+  nextOutboundSequence: number;
+  port: MessagePort;
+  sessionId: string;
+  viewerOrigin: string;
+};
+
 type RenderedPageEvidenceCardProps = {
-  artifact: EvaluationArtifact | null;
+  captureMetadata: EvaluationCaptureMetadata | null;
   errorMessage: string | null;
-  loadState: EvaluationArtifactLoadState;
+  evaluationRequestId: number | null;
+  liveSession: LiveReportSession | null;
+  liveSessionLoadState: LiveReportSessionLoadState;
   onRetry: () => void;
+  onRetryLiveSession: () => void;
+  onLocatorReportChange: (report: LocatorReport) => void;
   onSelectIssue: (issueId: number | null) => void;
+  previewRuntimeUrl?: string;
   rows: RecentIssueRow[];
   selectedIssueId: number | null;
+  selectedIssueFocusRequestId: number;
   targetName: string;
 };
 
-const REPLAY_READY_TIMEOUT_MS = 8_000;
+// The backend allows a single upstream fetch to take up to 10 seconds. Start this
+// watchdog only after the iframe has actually loaded and leave enough time for
+// client-side hydration plus a visible document-health sample.
+const REPLAY_READY_TIMEOUT_MS = 15_000;
+// Once the iframe load event fires, the injected bridge is already part of the
+// document. A short ACK deadline catches JSON/error documents without making
+// the user wait for the longer document-health watchdog.
+const LIVE_REPORT_BRIDGE_ACK_TIMEOUT_MS = 4_000;
+// The live proxy can legitimately spend up to roughly 50 seconds following the
+// allowed redirect chain before the final document and its subresources finish.
+// Keep this deadline above that server-side worst case so slow, valid sites get
+// a fair chance to finish before the live-only error state is shown.
+const REPLAY_FRAME_LOAD_TIMEOUT_MS = 120_000;
+// Match the live viewer's bounded INIT_ISSUES input. Overflow remains in the
+// unavailable list rather than waiting for statuses the viewer cannot send.
+const LIVE_REPORT_ISSUE_LIMIT = 5_000;
 
-function EmptyEvidenceState({
-  loadState,
-  onRetry
+type PageEvidenceLoadingBarStyle = CSSProperties & {
+  "--site-page-evidence-loading-progress": number;
+};
+
+function PageEvidenceLoadingBar({
+  frameKind,
+  label,
+  phase
 }: {
-  loadState: "idle" | "empty";
-  onRetry: () => void;
+  frameKind: Exclude<EvidenceFrameKind, null>;
+  label: string;
+  phase: PageEvidenceLoadingPhase;
 }) {
+  const progress = getPageEvidenceLoadingProgress(phase, frameKind);
+  const style: PageEvidenceLoadingBarStyle = {
+    "--site-page-evidence-loading-progress": progress.value
+  };
+
+  return (
+    <span
+      aria-label="페이지 검사 화면 준비 진행률"
+      aria-valuemax={progress.totalSteps}
+      aria-valuemin={0}
+      aria-valuenow={progress.completedSteps}
+      aria-valuetext={`${label} (${progress.completedSteps}/${progress.totalSteps}단계)`}
+      className="site-page-evidence-loading-bar"
+      data-loading-phase={phase}
+      data-loading-progress={`${progress.completedSteps}/${progress.totalSteps}`}
+      role="progressbar"
+      style={style}
+    />
+  );
+}
+
+function getPageEvidenceLoadingMessage({
+  frameKind,
+  phase
+}: {
+  frameKind: Exclude<EvidenceFrameKind, null>;
+  phase: PageEvidenceLoadingPhase;
+}): string {
+  switch (phase) {
+    case "request-started":
+      return frameKind === "live"
+        ? "동적 검사 화면을 준비하는 중입니다"
+        : "제품 미리보기를 준비하는 중입니다";
+    case "source-ready":
+      return "페이지 문서를 불러오는 중입니다";
+    case "frame-loaded":
+      return frameKind === "live"
+        ? "동적 페이지에 연결하는 중입니다"
+        : "제품 미리보기를 초기화하는 중입니다";
+    case "bridge-connected":
+      return "페이지 연결을 확인하는 중입니다";
+    case "document-ready":
+      return "페이지 내용을 확인하는 중입니다";
+    case "complete":
+      return "페이지 검사 화면 준비를 마쳤습니다";
+  }
+}
+
+function EmptyEvidenceState() {
   return (
     <div className="site-page-evidence-empty" role="status">
       <MonitorOff aria-hidden="true" size={26} strokeWidth={1.8} />
       <div>
         <p className="site-page-evidence-empty-title">
-          {loadState === "idle" ? "아직 표시할 재현 페이지가 없어요" : "이 스캔에는 재현 페이지가 없어요"}
+          아직 표시할 동적 페이지가 없어요
         </p>
         <p className="site-page-evidence-empty-description">
-          {loadState === "idle"
-            ? "검사가 완료되면 분석한 페이지와 문제 요소를 여기에서 직접 확인할 수 있어요."
-            : "DOM 재현 정보가 포함된 새 스캔을 실행하면 문제 요소를 페이지에서 확인할 수 있어요."}
+          검사가 완료되면 현재 페이지와 문제 요소를 여기에서 직접 확인할 수 있어요.
         </p>
-        {loadState === "empty" && (
-          <button type="button" className="site-page-evidence-retry" onClick={onRetry}>
-            <RefreshCw aria-hidden="true" size={15} />
-            다시 확인
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 export function RenderedPageEvidenceCard({
-  artifact,
+  captureMetadata,
   errorMessage,
-  loadState,
+  evaluationRequestId,
+  liveSession,
+  liveSessionLoadState,
   onRetry,
+  onRetryLiveSession,
+  onLocatorReportChange,
   onSelectIssue,
+  previewRuntimeUrl,
   rows,
   selectedIssueId,
+  selectedIssueFocusRequestId,
   targetName
 }: RenderedPageEvidenceCardProps) {
-  const [activeView, setActiveView] = useState<EvidenceView>("page");
   const [frameRevision, setFrameRevision] = useState(0);
+  const [failedLiveSessionId, setFailedLiveSessionId] = useState<string | null>(null);
   const [fallbackIssueId, setFallbackIssueId] = useState<number | null>(null);
-  const [markersVisible, setMarkersVisible] = useState(true);
   const [replayConnectionState, setReplayConnectionState] = useState<ReplayConnectionState>("loading");
+  const [replayLoadingPhase, setReplayLoadingPhase] = useState<PageEvidenceLoadingPhase>(
+    "request-started"
+  );
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const [severityFilter, setSeverityFilter] = useState<RecentIssueRow["severity"]["key"] | "ALL">("ALL");
+  const [locatorStates, setLocatorStates] = useState<Map<number, LocatorIssueState>>(() => new Map());
+  const [replayViewportMetrics, setReplayViewportMetrics] = useState<ReplayViewportMetrics>({
+    scale: 1,
+    visualWidth: 0
+  });
+  const previewRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const activeFrameKindRef = useRef<EvidenceFrameKind>(null);
+  const evaluationRequestIdRef = useRef(evaluationRequestId);
+  const liveReportPortRef = useRef<LiveReportPortConnection | null>(null);
+  const liveSessionRef = useRef<LiveReportSession | null>(liveSession);
+  const retryLiveReportSessionRef = useRef(onRetryLiveSession);
+  const liveReportBridgeConnectorRef = useRef<(viewerOrigin?: string) => void>(() => {});
+  const replayMessageHandlerRef = useRef<(message: PageReplayToDashboardMessage) => void>(() => {});
   const activeDocumentTokenRef = useRef<string | null>(null);
   const pendingDocumentTokenRef = useRef<string | null>(null);
+  const confirmedLiveDocumentTokenRef = useRef<string | null>(null);
   const readyAwaitingFrameLoadRef = useRef<string | null>(null);
   const retiredDocumentTokensRef = useRef(new Set<string>());
   const frameLoadObservedRef = useRef(false);
+  const replayFrameLoadTimeoutRef = useRef<number | null>(null);
+  const replayFrameLoadWatchdogEpochRef = useRef(0);
   const replayReadyTimeoutRef = useRef<number | null>(null);
   const replayReadyWatchdogEpochRef = useRef(0);
   const initializedReplayRef = useRef<{
     documentToken: string;
     issuesSignature: string;
   } | null>(null);
+  const sentReplayViewportRef = useRef<{
+    documentToken: string;
+    scale: number;
+    visualWidth: number;
+  } | null>(null);
   const replayOriginSelectionRef = useRef<{ issueId: number | null } | null>(null);
   const selectedIssueStateRef = useRef(selectedIssueId);
-  selectedIssueStateRef.current = selectedIssueId;
-
-  const visibleRows = useMemo(
-    () =>
-      severityFilter === "ALL"
-        ? rows
-        : rows.filter((row) => row.severity.key === severityFilter),
-    [rows, severityFilter]
+  const selectedIssueFocusRequestIdRef = useRef(0);
+  const automaticLiveRecoveryRef = useRef(
+    createLiveReportAutomaticRecoveryState(evaluationRequestId)
   );
-  const replayIssues = useMemo(() => visibleRows.map(toPageReplayIssue), [visibleRows]);
+
+  const replayIssues = useMemo(() => rows.map(toPageReplayIssue), [rows]);
   // Polling replaces row arrays even when their wire payload is unchanged. Reinitializing the
   // replay for an identity-only change destroys marker DOM, keyboard focus, and its tooltip link.
   const replayIssuesSignature = useMemo(() => JSON.stringify(replayIssues), [replayIssues]);
+  const replayIssueIds = useMemo(
+    () => new Set(replayIssues.map((issue) => issue.id)),
+    [replayIssues]
+  );
   const fallbackIssue = replayIssues.find((issue) => issue.id === fallbackIssueId) ?? null;
-  const selectedRow = visibleRows.find(({ issue }) => issue.id === selectedIssueId) ?? null;
-  const selectedVisibleIssueId = replayIssues.some((issue) => issue.id === selectedIssueId)
+  const selectedVisibleIssueId = selectedIssueId !== null && replayIssueIds.has(selectedIssueId)
     ? selectedIssueId
     : null;
-  const contentUrl = artifact ? getEvaluationArtifactContentUrl(artifact.contentUrl) : null;
+  const {
+    frameKind: activeFrameKind,
+    loadState: effectiveLoadState
+  } = resolveEvidenceSource({
+    hasLiveSession: liveSession !== null,
+    hasPreviewRuntime: previewRuntimeUrl !== undefined,
+    liveSessionFailed: liveSession !== null && failedLiveSessionId === liveSession.sessionId,
+    liveSessionLoadState
+  });
+  const locatorReport = useMemo<LocatorReport>(() => {
+    const connected = effectiveLoadState === "ready" && replayConnectionState === "ready";
+    const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : replayIssues.length;
+    const issueStates: Record<number, LocatorIssueState> = {};
+    const unavailableIssueIds: number[] = [];
+    const recoverableHiddenIssueIds: number[] = [];
+    if (connected) replayIssues.forEach((issue, index) => {
+      const state: LocatorIssueState | undefined = index >= issueLimit
+        ? { status: "UNAVAILABLE", reason: "ISSUE_LIMIT_EXCEEDED" }
+        : locatorStates.get(issue.id);
+      if (!state) return;
+      issueStates[issue.id] = state;
+      if (state.status === "HIDDEN_STATE" && state.recoverable === true) {
+        recoverableHiddenIssueIds.push(issue.id);
+      } else if (state.status === "UNAVAILABLE" || state.status === "HIDDEN_STATE") {
+        unavailableIssueIds.push(issue.id);
+      }
+    });
+    return {
+      requestId: evaluationRequestId,
+      issueIdsSignature: replayIssues.map((issue) => issue.id).join(","),
+      state: effectiveLoadState === "error" ||
+        (effectiveLoadState === "ready" && replayConnectionState === "error")
+        ? "error"
+        : connected && replayIssues.every((issue, index) =>
+            index >= issueLimit || locatorStates.has(issue.id))
+          ? "ready"
+          : "loading",
+      unavailableIssueIds,
+      recoverableHiddenIssueIds,
+      issueStates
+    };
+  }, [effectiveLoadState, replayConnectionState, evaluationRequestId, replayIssues, activeFrameKind,
+    locatorStates]);
+  const unavailableLocatorCount = locatorReport.unavailableIssueIds.length;
+  const recoverableHiddenLocatorCount = locatorReport.recoverableHiddenIssueIds.length;
+
+  useLayoutEffect(() => {
+    onLocatorReportChange(locatorReport);
+  }, [onLocatorReportChange, locatorReport]);
+
+  const frameRuntimeUrl = activeFrameKind === "live"
+    ? liveSession?.runtimeUrl ?? null
+    : activeFrameKind === "preview"
+      ? previewRuntimeUrl ?? null
+      : null;
+  const frameIdentity = getEvidenceFrameIdentity({
+    frameKind: activeFrameKind,
+    liveSessionId: liveSession?.sessionId ?? null,
+    previewRuntimeUrl: previewRuntimeUrl ?? null
+  });
+  const loadingFrameKind = activeFrameKind ?? "live";
+  const replayLoadingMessage = getPageEvidenceLoadingMessage({
+    frameKind: loadingFrameKind,
+    phase: replayLoadingPhase
+  });
+  const showsReplayLoadingOverlay = replayConnectionState === "loading"
+    || (replayConnectionState === "ready" && replayLoadingPhase !== "complete");
+  const replaySourceWidth = getReplaySourceWidth(captureMetadata, activeFrameKind);
+  const replayScale = replayViewportMetrics.scale;
+  const replayFrameStyle = activeFrameKind !== null && captureMetadata && replayScale < 0.999
+    ? {
+        width: `${replaySourceWidth}px`,
+        height: `${100 / replayScale}%`,
+        transform: `scale(${replayScale})`,
+        transformOrigin: "top left"
+      }
+    : undefined;
+
+  useLayoutEffect(() => {
+    activeFrameKindRef.current = activeFrameKind;
+  }, [activeFrameKind]);
+
+  useLayoutEffect(() => {
+    evaluationRequestIdRef.current = evaluationRequestId;
+    liveSessionRef.current = liveSession;
+    retryLiveReportSessionRef.current = onRetryLiveSession;
+    liveReportBridgeConnectorRef.current = connectLiveReportBridge;
+  });
+
+  useLayoutEffect(() => {
+    selectedIssueStateRef.current = selectedIssueId;
+  }, [selectedIssueId]);
+
+  useLayoutEffect(() => {
+    if (automaticLiveRecoveryRef.current.requestId !== evaluationRequestId) {
+      automaticLiveRecoveryRef.current = createLiveReportAutomaticRecoveryState(
+        evaluationRequestId
+      );
+    }
+  }, [evaluationRequestId]);
+
+  function advanceReplayLoadingPhase(nextPhase: PageEvidenceLoadingPhase) {
+    setReplayLoadingPhase((currentPhase) =>
+      advancePageEvidenceLoadingPhase(currentPhase, nextPhase)
+    );
+  }
+
+  function clearReplayFrameLoadTimeout() {
+    replayFrameLoadWatchdogEpochRef.current += 1;
+    if (replayFrameLoadTimeoutRef.current !== null) {
+      window.clearTimeout(replayFrameLoadTimeoutRef.current);
+      replayFrameLoadTimeoutRef.current = null;
+    }
+  }
 
   function clearReplayReadyTimeout() {
     replayReadyWatchdogEpochRef.current += 1;
@@ -124,6 +369,80 @@ export function RenderedPageEvidenceCard({
       window.clearTimeout(replayReadyTimeoutRef.current);
       replayReadyTimeoutRef.current = null;
     }
+  }
+
+  function closeLiveReportPort() {
+    const connection = liveReportPortRef.current;
+    if (!connection) {
+      return;
+    }
+    liveReportPortRef.current = null;
+    connection.port.onmessage = null;
+    connection.port.onmessageerror = null;
+    connection.port.close();
+  }
+
+  function failLiveReportConnection(sessionId: string) {
+    if (liveReportPortRef.current?.sessionId === sessionId) {
+      closeLiveReportPort();
+    }
+    clearReplayFrameLoadTimeout();
+    clearReplayReadyTimeout();
+    setFallbackIssueId(null);
+    if (
+      activeFrameKindRef.current === "live" &&
+      liveSessionRef.current?.sessionId === sessionId
+    ) {
+      const currentRequestId = evaluationRequestIdRef.current;
+      const recovery = consumeLiveReportAutomaticRecovery(
+        automaticLiveRecoveryRef.current,
+        currentRequestId
+      );
+      automaticLiveRecoveryRef.current = recovery.nextState;
+      setFailedLiveSessionId(sessionId);
+      setReplayLoadingPhase("request-started");
+      setReplayConnectionState("loading");
+      if (recovery.shouldRetry) {
+        retryLiveReportSessionRef.current();
+      }
+    }
+  }
+
+  function armReplayFrameLoadTimeout() {
+    clearReplayFrameLoadTimeout();
+    const watchdogEpoch = replayFrameLoadWatchdogEpochRef.current;
+    replayFrameLoadTimeoutRef.current = window.setTimeout(() => {
+      if (replayFrameLoadWatchdogEpochRef.current !== watchdogEpoch) {
+        return;
+      }
+      replayFrameLoadTimeoutRef.current = null;
+      setFallbackIssueId(null);
+      const activeSession = liveSessionRef.current;
+      if (activeFrameKindRef.current === "live" && activeSession !== null) {
+        failLiveReportConnection(activeSession.sessionId);
+      } else {
+        setReplayConnectionState("error");
+      }
+    }, REPLAY_FRAME_LOAD_TIMEOUT_MS);
+  }
+
+  function armLiveReportBridgeAckTimeout(sessionId: string) {
+    clearReplayReadyTimeout();
+    const watchdogEpoch = replayReadyWatchdogEpochRef.current;
+    replayReadyTimeoutRef.current = window.setTimeout(() => {
+      if (replayReadyWatchdogEpochRef.current !== watchdogEpoch) {
+        return;
+      }
+      replayReadyTimeoutRef.current = null;
+      const connection = liveReportPortRef.current;
+      if (
+        activeFrameKindRef.current === "live" &&
+        liveSessionRef.current?.sessionId === sessionId &&
+        (connection?.sessionId !== sessionId || connection.documentToken === null)
+      ) {
+        failLiveReportConnection(sessionId);
+      }
+    }, LIVE_REPORT_BRIDGE_ACK_TIMEOUT_MS);
   }
 
   function armReplayReadyTimeout() {
@@ -135,7 +454,12 @@ export function RenderedPageEvidenceCard({
       }
       replayReadyTimeoutRef.current = null;
       setFallbackIssueId(null);
-      setReplayConnectionState((current) => (current === "ready" ? current : "error"));
+      const activeSession = liveSessionRef.current;
+      if (activeFrameKindRef.current === "live" && activeSession !== null) {
+        failLiveReportConnection(activeSession.sessionId);
+      } else {
+        setReplayConnectionState((current) => (current === "ready" ? current : "error"));
+      }
     }, REPLAY_READY_TIMEOUT_MS);
   }
 
@@ -159,9 +483,11 @@ export function RenderedPageEvidenceCard({
     retireDocumentToken(pendingDocumentTokenRef.current);
     activeDocumentTokenRef.current = null;
     pendingDocumentTokenRef.current = null;
+    confirmedLiveDocumentTokenRef.current = null;
     readyAwaitingFrameLoadRef.current = null;
     frameLoadObservedRef.current = false;
     initializedReplayRef.current = null;
+    sentReplayViewportRef.current = null;
     replayOriginSelectionRef.current = null;
     if (resetRetiredTokens) {
       retiredDocumentTokensRef.current.clear();
@@ -169,7 +495,120 @@ export function RenderedPageEvidenceCard({
   }
 
   function postToReplay(message: DashboardToPageReplayMessage) {
-    iframeRef.current?.contentWindow?.postMessage(message, "*");
+    if (activeFrameKindRef.current === "live" && liveSession !== null) {
+      const connection = liveReportPortRef.current;
+      if (
+        !connection ||
+        connection.sessionId !== liveSession.sessionId ||
+        connection.documentToken === null
+      ) {
+        return;
+      }
+      const sequence = connection.nextOutboundSequence;
+      connection.nextOutboundSequence += 1;
+      try {
+        connection.port.postMessage(createLiveReportPortCommand(message, {
+          session: liveSession,
+          challenge: connection.challenge,
+          documentToken: connection.documentToken,
+          sequence
+        }));
+      } catch {
+        failLiveReportConnection(liveSession.sessionId);
+      }
+      return;
+    }
+
+    const frameWindow = iframeRef.current?.contentWindow;
+    if (!frameWindow) {
+      return;
+    }
+    frameWindow.postMessage(message, "*");
+  }
+
+  function connectLiveReportBridge(viewerOrigin?: string) {
+    const frameWindow = iframeRef.current?.contentWindow;
+    const session = liveSession;
+    if (!frameWindow || !session || activeFrameKindRef.current !== "live") {
+      return;
+    }
+
+    let targetOrigin: string;
+    try {
+      targetOrigin = getLiveReportConnectTargetOrigin(session, viewerOrigin);
+    } catch {
+      failLiveReportConnection(session.sessionId);
+      return;
+    }
+
+    closeLiveReportPort();
+
+    let challenge: string;
+    try {
+      challenge = createLiveReportChallenge();
+    } catch {
+      failLiveReportConnection(session.sessionId);
+      return;
+    }
+
+    let channel: MessageChannel;
+    try {
+      channel = new MessageChannel();
+    } catch {
+      failLiveReportConnection(session.sessionId);
+      return;
+    }
+    const connection: LiveReportPortConnection = {
+      challenge,
+      documentToken: null,
+      nextInboundSequence: 1,
+      nextOutboundSequence: 1,
+      port: channel.port1,
+      sessionId: session.sessionId,
+      viewerOrigin: targetOrigin
+    };
+    liveReportPortRef.current = connection;
+
+    channel.port1.onmessage = (event: MessageEvent<unknown>) => {
+      if (liveReportPortRef.current !== connection) {
+        return;
+      }
+
+      const message = parseLiveReportPortMessage(event.data, {
+        session,
+        challenge,
+        expectedSequence: connection.nextInboundSequence,
+        expectedDocumentToken: connection.documentToken
+      });
+      if (!message) {
+        failLiveReportConnection(session.sessionId);
+        return;
+      }
+
+      connection.nextInboundSequence += 1;
+      if (message.type === "ACK") {
+        connection.documentToken = message.documentToken;
+        advanceReplayLoadingPhase("bridge-connected");
+        armReplayReadyTimeout();
+        requestReplayDocumentState();
+        return;
+      }
+
+      replayMessageHandlerRef.current(message.payload);
+    };
+    channel.port1.onmessageerror = () => failLiveReportConnection(session.sessionId);
+    channel.port1.start();
+    armLiveReportBridgeAckTimeout(session.sessionId);
+
+    try {
+      frameWindow.postMessage(
+        createLiveReportConnectMessage(session, challenge),
+        targetOrigin,
+        [channel.port2]
+      );
+    } catch {
+      failLiveReportConnection(session.sessionId);
+    }
   }
 
   function requestReplayDocumentState() {
@@ -179,23 +618,59 @@ export function RenderedPageEvidenceCard({
     });
   }
 
-  function sendInitialIssues() {
+  function sendReplayViewScale() {
     const documentToken = activeDocumentTokenRef.current;
-    const initializedReplay = initializedReplayRef.current;
     if (
-      documentToken === null ||
-      (initializedReplay?.documentToken === documentToken &&
-        initializedReplay.issuesSignature === replayIssuesSignature)
+      documentToken === null
+      || !isValidReplayViewportMetrics(replayViewportMetrics)
+    ) {
+      return;
+    }
+
+    const previous = sentReplayViewportRef.current;
+    if (
+      previous?.documentToken === documentToken
+      && Math.abs(previous.scale - replayViewportMetrics.scale) < 0.001
+      && Math.abs(previous.visualWidth - replayViewportMetrics.visualWidth) < 0.5
     ) {
       return;
     }
 
     postToReplay({
       source: DASHBOARD_REPLAY_SOURCE,
+      type: "SET_VIEW_SCALE",
+      documentToken,
+      scale: replayViewportMetrics.scale,
+      visualWidth: replayViewportMetrics.visualWidth
+    });
+    sentReplayViewportRef.current = {
+      documentToken,
+      scale: replayViewportMetrics.scale,
+      visualWidth: replayViewportMetrics.visualWidth
+    };
+  }
+
+  function sendInitialIssues() {
+    const documentToken = activeDocumentTokenRef.current;
+    const initializedReplay = initializedReplayRef.current;
+    if (
+      documentToken === null ||
+      !isValidReplayViewportMetrics(replayViewportMetrics) ||
+      (initializedReplay?.documentToken === documentToken &&
+        initializedReplay.issuesSignature === replayIssuesSignature)
+    ) {
+      return;
+    }
+
+    // The replay must learn the outer iframe transform before it creates marker
+    // DOM so the first painted frame uses screen-sized overlays.
+    sendReplayViewScale();
+    postToReplay({
+      source: DASHBOARD_REPLAY_SOURCE,
       type: "INIT_ISSUES",
       issues: replayIssues,
       selectedIssueId: selectedVisibleIssueId,
-      markersVisible
+      markersVisible: true
     });
     initializedReplayRef.current = {
       documentToken,
@@ -204,201 +679,378 @@ export function RenderedPageEvidenceCard({
   }
 
   useEffect(() => {
-    setFrameRevision(0);
-  }, [artifact?.contentUrl, artifact?.id]);
+    setFailedLiveSessionId(null);
+  }, [liveSession?.sessionId]);
 
   useLayoutEffect(() => {
+    const preview = previewRef.current;
+    const sourceWidth = replaySourceWidth;
+    if (effectiveLoadState !== "ready" || !preview) {
+      setReplayViewportMetrics({
+        scale: 1,
+        visualWidth: preview?.clientWidth ?? 0
+      });
+      return;
+    }
+
+    const updateReplayScale = () => {
+      const availableWidth = preview.clientWidth;
+      if (availableWidth <= 0) {
+        return;
+      }
+      const nextScale = sourceWidth > 0
+        ? Math.max(
+            REPLAY_VIEW_SCALE_MIN,
+            Math.min(REPLAY_VIEW_SCALE_MAX, availableWidth / sourceWidth)
+          )
+        : 1;
+      const nextVisualWidth = Math.min(REPLAY_VISUAL_WIDTH_MAX, availableWidth);
+      setReplayViewportMetrics((currentMetrics) => {
+        if (
+          Math.abs(currentMetrics.scale - nextScale) < 0.001
+          && Math.abs(currentMetrics.visualWidth - nextVisualWidth) < 0.5
+        ) {
+          return currentMetrics;
+        }
+        return {
+          scale: nextScale,
+          visualWidth: nextVisualWidth
+        };
+      });
+    };
+
+    updateReplayScale();
+    const resizeObserver = new ResizeObserver(updateReplayScale);
+    resizeObserver.observe(preview);
+    return () => resizeObserver.disconnect();
+  }, [effectiveLoadState, frameIdentity, replaySourceWidth]);
+
+  useLayoutEffect(() => {
+    clearReplayFrameLoadTimeout();
     clearReplayReadyTimeout();
+    closeLiveReportPort();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     setFallbackIssueId(null);
+    setLocatorStates(new Map());
+    setReplayLoadingPhase(
+      effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null
+        ? "source-ready"
+        : "request-started"
+    );
     setReplayConnectionState("loading");
 
-    if (loadState === "ready" && artifact && activeView === "page") {
-      armReplayReadyTimeout();
+    if (effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null) {
+      armReplayFrameLoadTimeout();
     }
 
     return () => {
+      clearReplayFrameLoadTimeout();
       clearReplayReadyTimeout();
+      closeLiveReportPort();
       invalidateReplayDocumentSession();
     };
-  }, [activeView, artifact?.contentUrl, artifact?.id, frameRevision, loadState]);
+  }, [effectiveLoadState, frameIdentity, frameRevision, frameRuntimeUrl]);
 
   useEffect(() => {
     setFallbackIssueId(null);
   }, [frameRevision]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setFallbackIssueId(null);
+    setLocatorStates(new Map());
   }, [replayIssuesSignature]);
 
   useEffect(() => {
-    if (activeView !== "page") {
-      clearReplayReadyTimeout();
-    }
-  }, [activeView]);
-
-  useEffect(() => {
-    if (
-      loadState !== "ready" ||
-      activeView !== "page" ||
-      !markersVisible ||
-      replayConnectionState !== "ready"
-    ) {
+    if (effectiveLoadState !== "ready" || replayConnectionState !== "ready") {
       setFallbackIssueId(null);
     }
-  }, [activeView, loadState, markersVisible, replayConnectionState]);
+  }, [effectiveLoadState, replayConnectionState]);
 
   useEffect(() => {
-    return () => clearReplayReadyTimeout();
+    return () => {
+      clearReplayFrameLoadTimeout();
+      clearReplayReadyTimeout();
+      closeLiveReportPort();
+    };
   }, []);
+
+  function handleReplayProtocolMessage(message: PageReplayToDashboardMessage) {
+    if (message.type === "DOCUMENT_LOADING") {
+      if (
+        retiredDocumentTokensRef.current.has(message.documentToken) ||
+        pendingDocumentTokenRef.current === message.documentToken ||
+        activeDocumentTokenRef.current === message.documentToken
+      ) {
+        return;
+      }
+
+      const replacesKnownDocument =
+        activeDocumentTokenRef.current !== null || pendingDocumentTokenRef.current !== null;
+      retireDocumentToken(activeDocumentTokenRef.current);
+      retireDocumentToken(pendingDocumentTokenRef.current);
+      activeDocumentTokenRef.current = null;
+      pendingDocumentTokenRef.current = message.documentToken;
+      confirmedLiveDocumentTokenRef.current = null;
+      readyAwaitingFrameLoadRef.current = null;
+      frameLoadObservedRef.current = false;
+      initializedReplayRef.current = null;
+      replayOriginSelectionRef.current = null;
+      setFallbackIssueId(null);
+      setLocatorStates(new Map());
+      if (replacesKnownDocument) {
+        setReplayLoadingPhase("source-ready");
+      } else {
+        advanceReplayLoadingPhase("source-ready");
+      }
+      setReplayConnectionState("loading");
+      clearReplayReadyTimeout();
+      armReplayFrameLoadTimeout();
+      return;
+    }
+
+    if (message.type === "DOCUMENT_UNLOADING") {
+      if (
+        message.documentToken !== activeDocumentTokenRef.current &&
+        message.documentToken !== pendingDocumentTokenRef.current
+      ) {
+        return;
+      }
+
+      retireDocumentToken(message.documentToken);
+      activeDocumentTokenRef.current = null;
+      pendingDocumentTokenRef.current = null;
+      confirmedLiveDocumentTokenRef.current = null;
+      readyAwaitingFrameLoadRef.current = null;
+      frameLoadObservedRef.current = false;
+      initializedReplayRef.current = null;
+      replayOriginSelectionRef.current = null;
+      setFallbackIssueId(null);
+      setLocatorStates(new Map());
+      setReplayLoadingPhase("source-ready");
+      setReplayConnectionState("loading");
+      clearReplayReadyTimeout();
+      armReplayFrameLoadTimeout();
+      if (activeFrameKindRef.current === "live") {
+        closeLiveReportPort();
+      }
+      return;
+    }
+
+    if (message.type === "READY") {
+      if (
+        retiredDocumentTokensRef.current.has(message.documentToken) ||
+        activeDocumentTokenRef.current === message.documentToken ||
+        (pendingDocumentTokenRef.current !== null &&
+          pendingDocumentTokenRef.current !== message.documentToken)
+      ) {
+        return;
+      }
+
+      activeDocumentTokenRef.current = message.documentToken;
+      pendingDocumentTokenRef.current = null;
+      // A trusted bridge READY proves that the document executed successfully.
+      // The iframe load event may still be waiting on slow subresources, so it
+      // must no longer be allowed to trip the coarse frame-load watchdog.
+      clearReplayFrameLoadTimeout();
+      readyAwaitingFrameLoadRef.current = frameLoadObservedRef.current
+        ? null
+        : message.documentToken;
+      replayOriginSelectionRef.current = null;
+      advanceReplayLoadingPhase("document-ready");
+      if (activeFrameKindRef.current === "live") {
+        // A live bridge can initialize even when the proxied page has not painted any
+        // meaningful content. Keep the loading shield in place until the bridge reports
+        // actual visible DOM, and give late client rendering a fresh health window.
+        setReplayConnectionState("loading");
+        armReplayReadyTimeout();
+      } else {
+        clearReplayReadyTimeout();
+        advanceReplayLoadingPhase("complete");
+        setReplayConnectionState("ready");
+        setReplayReadyEpoch((current) => current + 1);
+      }
+      return;
+    }
+
+    if (message.type === "DOCUMENT_HEALTH") {
+      if (
+        activeFrameKindRef.current !== "live" ||
+        message.documentToken !== activeDocumentTokenRef.current ||
+        !isMeaningfulLiveDocumentHealth(message)
+      ) {
+        return;
+      }
+
+      // A late iframe load may have armed a new watchdog after this document was
+      // already confirmed. Every valid health replay must cancel that watchdog,
+      // including duplicate reports for the active document token.
+      clearReplayReadyTimeout();
+      if (confirmedLiveDocumentTokenRef.current === message.documentToken) {
+        return;
+      }
+      confirmedLiveDocumentTokenRef.current = message.documentToken;
+      advanceReplayLoadingPhase("complete");
+      setReplayConnectionState("ready");
+      setReplayReadyEpoch((current) => current + 1);
+      return;
+    }
+
+    if (message.documentToken !== activeDocumentTokenRef.current) {
+      return;
+    }
+
+    if (message.type === "ISSUE_SELECTED") {
+      if (
+        (message.issueId === null || replayIssueIds.has(message.issueId)) &&
+        message.issueId !== selectedIssueStateRef.current
+      ) {
+        selectedIssueStateRef.current = message.issueId;
+        replayOriginSelectionRef.current = { issueId: message.issueId };
+        onSelectIssue(message.issueId);
+      }
+      return;
+    }
+
+    if (message.type === "ISSUE_DETAIL_FALLBACK") {
+      if (message.issueId === null) {
+        setFallbackIssueId(null);
+        return;
+      }
+
+      if (
+        effectiveLoadState === "ready" &&
+        replayConnectionState === "ready" &&
+        replayIssueIds.has(message.issueId)
+      ) {
+        setFallbackIssueId(message.issueId);
+      }
+      return;
+    }
+
+    if (message.type === "LOCATOR_STATUS") {
+      if (!replayIssueIds.has(message.issueId)) {
+        return;
+      }
+
+      setLocatorStates((current) => {
+        const next: LocatorIssueState = {
+          status: message.status,
+          reason: message.reason,
+          recoverable: message.recoverable
+        };
+        const previous = current.get(message.issueId);
+        if (previous?.status === next.status && previous.reason === next.reason &&
+            previous.recoverable === next.recoverable) return current;
+        return new Map(current).set(message.issueId, next);
+      });
+    }
+  }
+
+  useLayoutEffect(() => {
+    replayMessageHandlerRef.current = handleReplayProtocolMessage;
+  });
 
   useLayoutEffect(() => {
     function handleReplayMessage(event: MessageEvent<unknown>) {
       const iframe = iframeRef.current;
-      if (!iframe || event.source !== iframe.contentWindow || event.origin !== "null") {
+      if (
+        !iframe ||
+        event.source !== iframe.contentWindow
+      ) {
+        return;
+      }
+
+      if (activeFrameKindRef.current === "live") {
+        const session = liveSessionRef.current;
+        if (!session) {
+          return;
+        }
+        if (
+          parseLiveReportSessionExhaustedEvent(event.data, session, event.origin) !== null
+        ) {
+          failLiveReportConnection(session.sessionId);
+          return;
+        }
+        const available = parseLiveReportBridgeAvailableMessage(event.data, session.sessionId);
+        let targetOrigin: string;
+        try {
+          targetOrigin = getLiveReportConnectTargetOrigin(session, event.origin);
+        } catch {
+          return;
+        }
+        if (!available) {
+          return;
+        }
+        const connection = liveReportPortRef.current;
+        if (
+          connection?.sessionId === session.sessionId &&
+          connection.viewerOrigin === targetOrigin &&
+          (connection.documentToken === null || connection.documentToken === available.documentToken)
+        ) {
+          return;
+        }
+        liveReportBridgeConnectorRef.current(targetOrigin);
+        return;
+      }
+
+      if (activeFrameKindRef.current !== "preview") {
+        return;
+      }
+
+      if (event.origin !== "null") {
         return;
       }
 
       const message = parsePageReplayMessage(event.data);
-      if (!message) {
-        return;
+      if (message) {
+        replayMessageHandlerRef.current(message);
       }
-
-      if (message.type === "DOCUMENT_LOADING") {
-        if (
-          retiredDocumentTokensRef.current.has(message.documentToken) ||
-          pendingDocumentTokenRef.current === message.documentToken ||
-          activeDocumentTokenRef.current === message.documentToken
-        ) {
-          return;
-        }
-
-        retireDocumentToken(activeDocumentTokenRef.current);
-        retireDocumentToken(pendingDocumentTokenRef.current);
-        activeDocumentTokenRef.current = null;
-        pendingDocumentTokenRef.current = message.documentToken;
-        readyAwaitingFrameLoadRef.current = null;
-        frameLoadObservedRef.current = false;
-        initializedReplayRef.current = null;
-        replayOriginSelectionRef.current = null;
-        setFallbackIssueId(null);
-        setReplayConnectionState("loading");
-        armReplayReadyTimeout();
-        return;
-      }
-
-      if (message.type === "DOCUMENT_UNLOADING") {
-        if (
-          message.documentToken !== activeDocumentTokenRef.current &&
-          message.documentToken !== pendingDocumentTokenRef.current
-        ) {
-          return;
-        }
-
-        retireDocumentToken(message.documentToken);
-        activeDocumentTokenRef.current = null;
-        pendingDocumentTokenRef.current = null;
-        readyAwaitingFrameLoadRef.current = null;
-        frameLoadObservedRef.current = false;
-        initializedReplayRef.current = null;
-        replayOriginSelectionRef.current = null;
-        setFallbackIssueId(null);
-        setReplayConnectionState("loading");
-        armReplayReadyTimeout();
-        return;
-      }
-
-      if (message.type === "READY") {
-        if (
-          retiredDocumentTokensRef.current.has(message.documentToken) ||
-          activeDocumentTokenRef.current === message.documentToken ||
-          pendingDocumentTokenRef.current !== message.documentToken
-        ) {
-          return;
-        }
-
-        clearReplayReadyTimeout();
-        activeDocumentTokenRef.current = message.documentToken;
-        pendingDocumentTokenRef.current = null;
-        readyAwaitingFrameLoadRef.current = frameLoadObservedRef.current
-          ? null
-          : message.documentToken;
-        replayOriginSelectionRef.current = null;
-        setReplayConnectionState("ready");
-        setReplayReadyEpoch((current) => current + 1);
-        return;
-      }
-
-      if (message.documentToken !== activeDocumentTokenRef.current) {
-        return;
-      }
-
-      if (message.type === "ISSUE_SELECTED") {
-        if (
-          (message.issueId === null || replayIssues.some((issue) => issue.id === message.issueId)) &&
-          message.issueId !== selectedIssueStateRef.current
-        ) {
-          selectedIssueStateRef.current = message.issueId;
-          replayOriginSelectionRef.current = { issueId: message.issueId };
-          onSelectIssue(message.issueId);
-        }
-        return;
-      }
-
-      if (message.type === "ISSUE_DETAIL_FALLBACK") {
-        if (message.issueId === null) {
-          setFallbackIssueId(null);
-          return;
-        }
-
-        if (
-          loadState === "ready" &&
-          activeView === "page" &&
-          markersVisible &&
-          replayConnectionState === "ready" &&
-          replayIssues.some((issue) => issue.id === message.issueId)
-        ) {
-          setFallbackIssueId(message.issueId);
-        }
-        return;
-      }
-
-      if (message.type === "LOCATOR_STATUS") {
-        return;
-      }
-
     }
 
     window.addEventListener("message", handleReplayMessage);
     return () => window.removeEventListener("message", handleReplayMessage);
+  }, []);
+
+  useEffect(() => {
+    if (replayConnectionState !== "ready") {
+      return;
+    }
+
+    sendReplayViewScale();
   }, [
-    activeView,
-    loadState,
-    markersVisible,
-    onSelectIssue,
     replayConnectionState,
-    replayIssues,
-    rows,
-    selectedIssueId,
-    selectedVisibleIssueId
+    replayReadyEpoch,
+    replayViewportMetrics.scale,
+    replayViewportMetrics.visualWidth
   ]);
 
   useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
+    if (replayConnectionState !== "ready") {
       return;
     }
 
     sendInitialIssues();
-  }, [activeView, replayConnectionState, replayIssuesSignature, replayReadyEpoch]);
+  }, [
+    replayConnectionState,
+    replayIssuesSignature,
+    replayReadyEpoch,
+    replayViewportMetrics.scale,
+    replayViewportMetrics.visualWidth
+  ]);
 
-  useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
+  // Consume the iframe selection in its commit, before another message can replace
+  // its origin marker while a passive effect is still waiting to run.
+  useLayoutEffect(() => {
+    if (replayConnectionState !== "ready") {
       return;
     }
 
+    const explicitlyRequested =
+      selectedIssueFocusRequestIdRef.current !== selectedIssueFocusRequestId;
+    selectedIssueFocusRequestIdRef.current = selectedIssueFocusRequestId;
     const replayOriginSelection = replayOriginSelectionRef.current;
     replayOriginSelectionRef.current = null;
-    if (replayOriginSelection?.issueId === selectedVisibleIssueId) {
+    if (!explicitlyRequested && replayOriginSelection?.issueId === selectedVisibleIssueId) {
       return;
     }
 
@@ -407,21 +1059,44 @@ export function RenderedPageEvidenceCard({
       type: "FOCUS_ISSUE",
       issueId: selectedVisibleIssueId
     });
-  }, [activeView, replayConnectionState, selectedVisibleIssueId]);
+  }, [replayConnectionState, selectedIssueFocusRequestId, selectedVisibleIssueId]);
 
-  useEffect(() => {
-    if (replayConnectionState !== "ready" || activeView !== "page") {
+  function handleFrameLoad() {
+    clearReplayFrameLoadTimeout();
+    advanceReplayLoadingPhase("frame-loaded");
+    if (activeFrameKindRef.current === "live") {
+      frameLoadObservedRef.current = true;
+      const activeSession = liveSessionRef.current;
+      const existingConnection = liveReportPortRef.current;
+      if (
+        activeSession !== null &&
+        existingConnection?.sessionId === activeSession.sessionId
+      ) {
+        if (existingConnection.documentToken !== null) {
+          if (!shouldAwaitLiveDocumentHealthAfterFrameLoad({
+            confirmedDocumentToken: confirmedLiveDocumentTokenRef.current,
+            documentToken: existingConnection.documentToken
+          })) {
+            clearReplayReadyTimeout();
+            return;
+          }
+          armReplayReadyTimeout();
+          requestReplayDocumentState();
+        } else {
+          armLiveReportBridgeAckTimeout(activeSession.sessionId);
+        }
+        return;
+      }
+      clearReplayReadyTimeout();
+      closeLiveReportPort();
+      invalidateReplayDocumentSession();
+      setFallbackIssueId(null);
+      setLocatorStates(new Map());
+      setReplayConnectionState("loading");
+      connectLiveReportBridge();
       return;
     }
 
-    postToReplay({
-      source: DASHBOARD_REPLAY_SOURCE,
-      type: "SET_MARKERS_VISIBLE",
-      markersVisible
-    });
-  }, [activeView, markersVisible, replayConnectionState]);
-
-  function handleFrameLoad() {
     frameLoadObservedRef.current = true;
 
     if (
@@ -429,11 +1104,13 @@ export function RenderedPageEvidenceCard({
       readyAwaitingFrameLoadRef.current === activeDocumentTokenRef.current
     ) {
       readyAwaitingFrameLoadRef.current = null;
+      armReplayReadyTimeout();
       requestReplayDocumentState();
       return;
     }
 
     if (pendingDocumentTokenRef.current !== null) {
+      armReplayReadyTimeout();
       requestReplayDocumentState();
       return;
     }
@@ -442,139 +1119,42 @@ export function RenderedPageEvidenceCard({
     invalidateReplayDocumentSession();
     frameLoadObservedRef.current = true;
     setFallbackIssueId(null);
+    setLocatorStates(new Map());
     setReplayConnectionState("loading");
     armReplayReadyTimeout();
     requestReplayDocumentState();
   }
 
-  function handleSeverityChange(nextFilter: typeof severityFilter) {
-    setFallbackIssueId(null);
-    setSeverityFilter(nextFilter);
-
-    const nextVisibleRows =
-      nextFilter === "ALL"
-        ? rows
-        : rows.filter((row) => row.severity.key === nextFilter);
-    const currentSelectedIssueId = selectedIssueStateRef.current;
-
-    if (
-      currentSelectedIssueId !== null &&
-      nextVisibleRows.some((row) => row.issue.id === currentSelectedIssueId)
-    ) {
-      return;
-    }
-
-    // Returning to ALL must not silently resurrect a selection the user already cleared.
-    if (nextFilter === "ALL" && currentSelectedIssueId === null) {
-      return;
-    }
-
-    const nextIssue =
-      nextVisibleRows.find((row) => hasUsableIssueLocator(row.issue)) ??
-      nextVisibleRows[0] ??
-      null;
-    const nextIssueId = nextIssue?.issue.id ?? null;
-
-    if (nextIssueId !== currentSelectedIssueId) {
-      // Close the window in which a replay message can race the parent state update.
-      selectedIssueStateRef.current = nextIssueId;
-      onSelectIssue(nextIssueId);
-    }
-  }
-
-  function showPageView() {
-    if (activeView !== "page") {
-      setReplayConnectionState("loading");
-      setActiveView("page");
-    }
-  }
-
   return (
     <article aria-labelledby="site-page-evidence-heading" className="dashboard-card site-page-evidence-card">
-      <header className="site-page-evidence-header">
-        <div>
-          <h2 id="site-page-evidence-heading">페이지 검사 화면</h2>
-          <p>
-            {artifact
-              ? `${formatDateTime(artifact.capturedAt)} 스캔 페이지 재현`
-              : "문제가 발견된 요소를 재현된 페이지에서 직접 확인합니다"}
-          </p>
-        </div>
-
-        <div className="site-page-evidence-toolbar" aria-label="페이지 검사 화면 도구">
-          <div className="site-page-evidence-view-switch" aria-label="보기 방식">
-            <button type="button" aria-pressed={activeView === "page"} onClick={showPageView}>
-              <Eye aria-hidden="true" size={15} />
-              페이지
-            </button>
-            <button
-              type="button"
-              aria-pressed={activeView === "code"}
-              onClick={() => {
-                setFallbackIssueId(null);
-                setActiveView("code");
-              }}
-            >
-              <Code2 aria-hidden="true" size={15} />
-              코드
-            </button>
-          </div>
-
-          {loadState === "ready" && activeView === "page" && (
-            <>
-              <label className="site-page-evidence-filter">
-                <span>심각도</span>
-                <select
-                  value={severityFilter}
-                  onChange={(event) => handleSeverityChange(event.target.value as typeof severityFilter)}
-                >
-                  <option value="ALL">전체</option>
-                  <option value="CRITICAL">심각</option>
-                  <option value="HIGH">높음</option>
-                  <option value="MEDIUM">보통</option>
-                  <option value="LOW">낮음</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                className="site-page-evidence-marker-toggle"
-                aria-pressed={markersVisible}
-                onClick={() =>
-                  setMarkersVisible((current) => {
-                    if (current) {
-                      setFallbackIssueId(null);
-                    }
-                    return !current;
-                  })
-                }
-              >
-                {markersVisible ? <EyeOff aria-hidden="true" size={15} /> : <Eye aria-hidden="true" size={15} />}
-                {markersVisible ? "마커 숨기기" : "마커 표시"}
-              </button>
-
-            </>
-          )}
-        </div>
-      </header>
+      {/* 제목은 화면에서 숨기고 접근 가능한 이름으로만 남긴다 */}
+      <h2 id="site-page-evidence-heading" className="sr-only">페이지 검사 화면</h2>
 
       <div className="site-page-evidence-body">
-        {loadState === "loading" && (
+        {effectiveLoadState === "loading" && (
           <div className="site-page-evidence-loading" role="status" aria-live="polite">
-            <span className="site-page-evidence-loading-bar" />
-            <span>페이지 재현 화면을 불러오는 중입니다</span>
+            <PageEvidenceLoadingBar
+              frameKind={loadingFrameKind}
+              label={replayLoadingMessage}
+              phase={replayLoadingPhase}
+            />
+            <span>{replayLoadingMessage}</span>
           </div>
         )}
 
-        {(loadState === "idle" || loadState === "empty") && (
-          <EmptyEvidenceState loadState={loadState} onRetry={onRetry} />
+        {effectiveLoadState === "idle" && (
+          <EmptyEvidenceState />
         )}
 
-        {loadState === "error" && (
+        {effectiveLoadState === "error" && (
           <div className="site-page-evidence-empty" role="alert">
             <MonitorOff aria-hidden="true" size={26} strokeWidth={1.8} />
             <div>
-              <p className="site-page-evidence-empty-title">페이지 재현 화면을 불러오지 못했어요</p>
-              <p className="site-page-evidence-empty-description">{errorMessage}</p>
+              <p className="site-page-evidence-empty-title">현재 동적 페이지를 열지 못했어요</p>
+              <p className="site-page-evidence-empty-description">
+                {errorMessage ??
+                  "원본 사이트에 연결할 수 없습니다. 잠시 후 동적 화면을 다시 시도해 주세요."}
+              </p>
               <button type="button" className="site-page-evidence-retry" onClick={onRetry}>
                 <RefreshCw aria-hidden="true" size={15} />
                 다시 시도
@@ -583,49 +1163,83 @@ export function RenderedPageEvidenceCard({
           </div>
         )}
 
-        {loadState === "ready" && artifact && activeView === "page" && (
+        {effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null && (
           <div className="site-page-evidence-grid">
             <div className="site-page-evidence-replay-column">
               <div
+                ref={previewRef}
                 className="site-page-evidence-preview"
                 role="region"
-                aria-label={`${targetName} 접근성 검사 페이지 재현 화면`}
-                aria-busy={replayConnectionState === "loading"}
+                aria-label={`${targetName} 접근성 검사 ${activeFrameKind === "live" ? "동적" : "제품 미리보기"} 화면`}
+                aria-busy={showsReplayLoadingOverlay}
                 data-connection-state={replayConnectionState}
+                data-loading-phase={replayLoadingPhase}
+                data-unavailable-locator-count={unavailableLocatorCount}
+                data-hidden-state-locator-count={recoverableHiddenLocatorCount}
+                data-focus-request-id={selectedIssueFocusRequestId}
               >
                 <iframe
-                  key={`${artifact.id}:${frameRevision}`}
+                  key={`${frameIdentity ?? "none"}:${frameRevision}`}
                   ref={iframeRef}
                   className="site-page-evidence-replay-frame"
-                  src={contentUrl ?? undefined}
-                  title={`${targetName} 접근성 검사 페이지 재현`}
-                  sandbox="allow-scripts"
+                  data-replay-scale={replayScale.toFixed(4)}
+                  data-replay-visual-width={replayViewportMetrics.visualWidth.toFixed(2)}
+                  data-report-mode={activeFrameKind}
+                  src={frameRuntimeUrl}
+                  style={replayFrameStyle}
+                  title={`${targetName} 접근성 검사 페이지 ${activeFrameKind === "live" ? "동적 보기" : "제품 미리보기"}`}
+                  sandbox={activeFrameKind === "live"
+                    ? "allow-scripts allow-same-origin allow-forms"
+                    : "allow-scripts"}
                   referrerPolicy="no-referrer"
-                  loading="lazy"
+                  loading={activeFrameKind === "live" ? "eager" : "lazy"}
                   onLoad={handleFrameLoad}
                   onError={() => {
+                    clearReplayFrameLoadTimeout();
                     clearReplayReadyTimeout();
-                    setReplayConnectionState("error");
+                    if (activeFrameKindRef.current === "live" && liveSession !== null) {
+                      failLiveReportConnection(liveSession.sessionId);
+                    } else {
+                      setReplayConnectionState("error");
+                    }
                   }}
                 />
 
-                {replayConnectionState === "loading" && (
+                {showsReplayLoadingOverlay && (
                   <div className="site-page-evidence-replay-overlay" role="status" aria-live="polite">
-                    <span className="site-page-evidence-loading-bar" />
-                    <span>재현 페이지와 연결하는 중입니다</span>
+                    <PageEvidenceLoadingBar
+                      frameKind={loadingFrameKind}
+                      label={replayLoadingMessage}
+                      phase={replayLoadingPhase}
+                    />
+                    <span>{replayLoadingMessage}</span>
                   </div>
                 )}
 
                 {replayConnectionState === "error" && (
                   <div className="site-page-evidence-replay-overlay" role="alert">
                     <MonitorOff aria-hidden="true" size={24} />
-                    <span>재현 페이지와 연결하지 못했어요</span>
+                    <span>{activeFrameKind === "live" ? "동적 페이지와 연결하지 못했어요" : "제품 미리보기를 불러오지 못했어요"}</span>
                     <button
                       type="button"
                       onClick={() => {
+                        setReplayLoadingPhase(
+                          activeFrameKindRef.current === "live"
+                            ? "request-started"
+                            : "source-ready"
+                        );
                         setReplayConnectionState("loading");
                         clearReplayReadyTimeout();
-                        setFrameRevision((current) => current + 1);
+                        if (activeFrameKindRef.current === "live") {
+                          // A live session can have exhausted its bounded request
+                          // or byte budget. Retrying the same URL can never heal
+                          // that state, so ask the owner to create a fresh session.
+                          automaticLiveRecoveryRef.current =
+                            createLiveReportAutomaticRecoveryState(evaluationRequestId);
+                          onRetryLiveSession();
+                        } else {
+                          setFrameRevision((current) => current + 1);
+                        }
                       }}
                     >
                       화면 다시 불러오기
@@ -633,19 +1247,6 @@ export function RenderedPageEvidenceCard({
                   </div>
                 )}
               </div>
-
-              {replayConnectionState !== "ready" && (
-                <div className="site-page-evidence-replay-feedback">
-                  <p
-                    className="site-page-evidence-connection"
-                    data-state={replayConnectionState}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {replayConnectionState === "error" ? "재현 페이지 연결 끊김" : "재현 페이지 연결 중"}
-                  </p>
-                </div>
-              )}
 
               {replayConnectionState === "ready" && fallbackIssue && (
                 <div
@@ -661,7 +1262,7 @@ export function RenderedPageEvidenceCard({
                       {fallbackIssue.severityLabel}
                     </span>
                     <span className="site-page-evidence-fallback-detail__tag">
-                      {fallbackIssue.code ? `KWCAG ${fallbackIssue.code}` : "KWCAG"}
+                      {formatIssueCodeLabel(fallbackIssue.code) || "KWCAG"}
                     </span>
                   </div>
                   <p className="site-page-evidence-fallback-detail__title">{fallbackIssue.title}</p>
@@ -675,29 +1276,6 @@ export function RenderedPageEvidenceCard({
               )}
             </div>
 
-          </div>
-        )}
-
-        {loadState === "ready" && artifact && activeView === "code" && (
-          <div className="site-page-evidence-code-view">
-            <div className="site-page-evidence-code-heading">
-              <Code2 aria-hidden="true" size={17} />
-              <h3>관련 코드</h3>
-            </div>
-            {selectedRow ? (
-              <>
-                <p>{selectedRow.issue.issueTitle}</p>
-                <pre tabIndex={0} aria-label={`${selectedRow.issue.issueTitle} 관련 코드`}>
-                  <code>
-                    {selectedRow.issue.locator?.htmlSnippet ||
-                      selectedRow.issue.locationPath ||
-                      "이 스캔에는 관련 코드 조각이 저장되지 않았습니다."}
-                  </code>
-                </pre>
-              </>
-            ) : (
-              <p className="site-page-evidence-code-empty">페이지 보기에서 이슈를 먼저 선택하세요.</p>
-            )}
           </div>
         )}
       </div>

@@ -22,21 +22,61 @@ spring:
         format_sql: true
     show-sql: true
 
-  servlet:
-    multipart:
-      max-file-size: 20MB
-      max-request-size: 21MB
-
   sql:
     init:
-      # schema.sql must run before Hibernate so legacy H2 enum constraints are
-      # widened without requiring a manual database edit.
+      # schema.sql must run before Hibernate so legacy replay-file columns can
+      # be relaxed without dropping historical capture metadata.
       mode: always
 
 accessibility:
-  artifacts:
-    directory: ./data/artifacts
-    max-file-size-bytes: 20971520
+  live-report:
+    # The proof-of-concept keeps only short-lived, in-memory public-page sessions.
+    # Production must point this at a dedicated wildcard DNS/TLS zone. Keeping
+    # the session capability in the host lets SPA location paths remain intact.
+    viewer-base-url: ${LIVE_REPORT_VIEWER_BASE_URL:http://localhost:9090}
+    # The broker remains on the ordinary backend origin and is never inferred
+    # from the request Host header.
+    gateway-base-url: ${LIVE_REPORT_GATEWAY_BASE_URL:http://localhost:9090}
+    dashboard-base-url: ${LIVE_REPORT_DASHBOARD_BASE_URL:http://localhost:5173}
+    session-ttl-seconds: 300
+    max-sessions: 64
+    max-origins-per-session: 64
+    connect-timeout-seconds: 3
+    request-timeout-seconds: 10
+    max-redirects: 4
+    # Dynamic public pages often hydrate through small same-origin JSON or
+    # form-encoded POST requests. Keep those anonymous requests bounded well
+    # below the normal server upload limit.
+    max-request-body-bytes: 262144
+    max-response-bytes: 5242880
+    # Large photos and fonts get a separate bounded allowance. Executable
+    # document types remain subject to max-response-bytes above.
+    max-opaque-response-bytes: 16777216
+    # Bounds proxy URL amplification and the injected runtime bridge separately
+    # from the upstream response limit.
+    max-rewritten-response-bytes: 16777216
+    # Modern portal pages can legitimately load several hundred split chunks,
+    # images and fonts. The byte and concurrency budgets remain the primary
+    # guardrails, while this count avoids truncating otherwise healthy pages.
+    max-requests-per-session: 1024
+    max-bytes-per-session: 268435456
+    # HTTP/2-era pages commonly fan out fonts, chunks and responsive images in
+    # one burst. Keep a per-session ceiling, but do not reject a normal browser
+    # waterfall before its first render has settled.
+    max-concurrent-requests-per-session: 24
+    # Match the upstream response timeout so a queued image is not rejected
+    # before one of the active requests has had a chance to complete or time out.
+    concurrent-request-wait-millis: 10000
+    # Anonymous upstream state is isolated per live session and tightly bounded.
+    max-cookies-per-session: 64
+    max-cookie-bytes: 4096
+    max-cookie-bytes-per-session: 32768
+  ai:
+    python-executable: ${AI_PYTHON_EXECUTABLE:}
+    # run_all.py: analyzers max 720s + result ingestion max 70s + overhead.
+    process-timeout-seconds: ${AI_PROCESS_TIMEOUT_SECONDS:900}
 
 server:
   port: 9090
+  compression:
+    enabled: true

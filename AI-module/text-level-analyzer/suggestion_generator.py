@@ -64,6 +64,8 @@ load_dotenv()
 
 import time
 
+from text_standard_mapper import classify_text_block
+
 
 # ─────────────────────────────────────────
 # 0. 설정
@@ -112,7 +114,8 @@ OFFLINE_MODE = not bool(OPENAI_API_KEY)
 #     type      : 문제 유형 (sentence_length, hard_vocab_ratio 등)
 #     issue     : 구체적 문제 설명 + 측정 수치
 #     guide     : 수정 방법 가이드 + 예시
-#     kwcag_ref : 관련 KWCAG 항목 참조
+#     wcag_ref  : 원본 WCAG 항목
+#     kwcag_items: canonical mapping.js로 변환한 KWCAG 2.2 항목 목록
 #     priority  : 우선순위 (high/medium/low)
 
 def generate_rule_based_suggestion(block):
@@ -158,7 +161,7 @@ def generate_rule_based_suggestion(block):
                 'issue': f'평균 문장 길이가 {avg_len:.1f}어절로 기준(25어절)을 초과합니다.',
                 'guide': '한 문장에 하나의 정보만 담도록 분리하세요. '
                          '접속사(~하고, ~하며, ~하여)로 이어진 문장을 마침표로 나누면 됩니다.',
-                'kwcag_ref': '3.1.1 읽기 쉬운 콘텐츠',
+                'wcag_ref': '3.1.5 읽기 수준',
                 'priority': 'high',
             })
 
@@ -189,7 +192,7 @@ def generate_rule_based_suggestion(block):
                 'guide': '고급 어휘나 전문 용어를 쉬운 단어로 바꾸세요. '
                          '예: "이행" → "지키기", "제반 사항" → "모든 내용", '
                          '"의거하여" → "따라서", "시행" → "실시/시작"',
-                'kwcag_ref': '3.1.1 읽기 쉬운 콘텐츠',
+                'wcag_ref': '3.1.5 읽기 수준',
                 'priority': 'medium',
             })
 
@@ -211,7 +214,7 @@ def generate_rule_based_suggestion(block):
                 'guide': '위치 참조 대신 구체적 이름을 사용하세요. '
                          '예: "위의 버튼을 클릭하세요" → "\'제출\' 버튼을 클릭하세요", '
                          '"해당 메뉴" → "\'민원 신청\' 메뉴"',
-                'kwcag_ref': '1.3.3 감각적 특성에 의존하지 않는 콘텐츠',
+                'wcag_ref': '1.3.3 감각적 특성',
                 'priority': 'high',
             })
 
@@ -234,7 +237,7 @@ def generate_rule_based_suggestion(block):
                     'issue': f'링크 텍스트가 {len(text)}글자로 기준(30글자)을 초과합니다.',
                     'guide': '링크 텍스트는 목적지를 간결하게 설명해야 합니다. '
                              '부가 설명은 링크 밖에 두고, 링크 자체는 핵심만 담으세요.',
-                    'kwcag_ref': '2.4.4 링크 목적 식별',
+                    'wcag_ref': '2.4.4 링크 목적',
                     'priority': 'low',
                 })
             elif category == 'button':
@@ -243,7 +246,7 @@ def generate_rule_based_suggestion(block):
                     'issue': f'버튼 텍스트가 {len(text)}글자로 기준(20글자)을 초과합니다.',
                     'guide': '버튼 텍스트는 동작을 명확하게 2~4단어로 표현하세요. '
                              '예: "신청서 작성 및 제출하기" → "신청하기"',
-                    'kwcag_ref': '2.4.4 링크 목적 식별',
+                    'wcag_ref': '2.4.4 링크 목적',
                     'priority': 'medium',
                 })
             elif category == 'form_guide':
@@ -254,7 +257,7 @@ def generate_rule_based_suggestion(block):
                     'issue': f'안내 문구가 {len(text)}글자로 기준(50글자)을 초과합니다.',
                     'guide': 'placeholder나 aria-label은 간결해야 합니다. '
                              '자세한 설명은 별도 안내 텍스트로 분리하세요.',
-                    'kwcag_ref': '3.3.2 레이블 또는 설명 제공',
+                    'wcag_ref': '3.3.2 레이블 또는 설명',
                     'priority': 'low',
                 })
             elif category == 'label':
@@ -263,7 +266,7 @@ def generate_rule_based_suggestion(block):
                     'issue': f'레이블 텍스트가 {len(text)}글자로 기준(40글자)을 초과합니다.',
                     'guide': '레이블은 입력 필드의 목적을 간결하게 설명해야 합니다. '
                              '부가 설명은 별도 안내 텍스트로 분리하세요.',
-                    'kwcag_ref': '3.3.2 레이블 또는 설명 제공',
+                    'wcag_ref': '3.3.2 레이블 또는 설명',
                     'priority': 'low',
                 })
             elif category == 'heading':
@@ -272,7 +275,7 @@ def generate_rule_based_suggestion(block):
                     'issue': f'제목 텍스트가 {len(text)}글자로 기준(60글자)을 초과합니다.',
                     'guide': '제목은 섹션 내용을 간결하게 요약해야 합니다. '
                              '60글자 이내로 핵심만 남기세요.',
-                    'kwcag_ref': '2.4.6 제목과 레이블',
+                    'wcag_ref': '2.4.6 제목과 레이블',
                     'priority': 'low',
                 })
             else:
@@ -281,7 +284,7 @@ def generate_rule_based_suggestion(block):
                     'type': 'text_length',
                     'issue': f'{category} 텍스트가 길이 기준을 초과합니다.',
                     'guide': '핵심 내용만 남기고 부가 설명은 분리하세요.',
-                    'kwcag_ref': '3.1.1 읽기 쉬운 콘텐츠',
+                    'wcag_ref': '3.1.5 읽기 수준',
                     'priority': 'low',
                 })
 
@@ -521,32 +524,32 @@ def call_openai_api(prompt):
 #   code_before   : 위반 상태의 HTML 코드 예시 (before)
 #   code_after    : 수정된 HTML 코드 예시 (after)
 #   color_suggestion: (color-contrast 전용) 추천 색상 조합
-#   kwcag_ref     : 대응하는 KWCAG 항목 번호 + 이름
+#   wcag_ref      : axe-core가 사용하는 원본 WCAG 항목 번호 + 이름
 RULE_BASED_GUIDES = {
     'image-alt': {
         'guide': '이미지에 대체 텍스트(alt 속성)를 추가하세요.',
         'code_before': '<img src="photo.jpg">',
         'code_after': '<img src="photo.jpg" alt="시청 전경 사진">',
-        'kwcag_ref': '1.1.1 적절한 대체 텍스트 제공',
+        'wcag_ref': '1.1.1 대체 텍스트',
     },
     'color-contrast': {
         'guide': '텍스트와 배경의 명암비를 4.5:1 이상으로 조정하세요.',
         # 명암비 위반은 "어떤 색으로 바꾸세요"라는 색상 조합 추천이 더 실용적
         # code_before/after 대신 color_suggestion 필드로 제공
         'color_suggestion': '밝은 배경(#FFFFFF)에는 #595959 이상의 어두운 글자색을 사용하세요.',
-        'kwcag_ref': '1.4.3 명도 대비',
+        'wcag_ref': '1.4.3 명도 대비',
     },
     'heading-order': {
         'guide': '제목 태그(h1~h6)를 순서대로 사용하세요. h1 다음에 h3가 오면 안 됩니다.',
         'code_before': '<h1>제목</h1>\n<h3>소제목</h3>',
         'code_after': '<h1>제목</h1>\n<h2>소제목</h2>',
-        'kwcag_ref': '1.3.1 정보와 관계',
+        'wcag_ref': '1.3.2 의미 있는 순서',
     },
     'label': {
         'guide': '입력 필드에 연결된 label을 추가하세요.',
         'code_before': '<input type="text" id="name">',
         'code_after': '<label for="name">이름</label>\n<input type="text" id="name">',
-        'kwcag_ref': '1.3.1 정보와 관계',
+        'wcag_ref': '3.3.2 레이블 또는 설명',
     },
     'button-name': {
         'guide': '버튼에 접근 가능한 이름을 추가하세요.',
@@ -554,14 +557,14 @@ RULE_BASED_GUIDES = {
         # → aria-label로 버튼의 목적을 명시해야 함
         'code_before': '<button><img src="search.png"></button>',
         'code_after': '<button aria-label="검색"><img src="search.png"></button>',
-        'kwcag_ref': '4.1.2 이름, 역할, 값',
+        'wcag_ref': '4.1.2 이름, 역할, 값',
     },
     'link-name': {
         'guide': '링크에 명확한 텍스트를 제공하세요.',
         # "여기"나 "클릭"은 스크린리더 사용자가 링크 목록에서 맥락 없이 들을 때 이해 불가
         'code_before': '<a href="/apply">여기</a>를 클릭하세요',
         'code_after': '<a href="/apply">민원 신청 페이지로 이동</a>',
-        'kwcag_ref': '2.4.4 링크 목적 식별',
+        'wcag_ref': '2.4.4 링크 목적',
     },
     'html-has-lang': {
         'guide': 'HTML 태그에 언어 속성을 추가하세요.',
@@ -569,7 +572,7 @@ RULE_BASED_GUIDES = {
         # 한국어 공공 사이트는 lang="ko" 필수
         'code_before': '<html>',
         'code_after': '<html lang="ko">',
-        'kwcag_ref': '3.1.1 페이지 언어 표시',
+        'wcag_ref': '3.1.1 페이지 언어',
     },
 }
 
@@ -618,7 +621,8 @@ def generate_suggestions(input_path, output_path=None):
           { "type": "hard_vocab_ratio",
             "issue": "쉬운 단어 비율이 33.3%로...",
             "guide": "고급 어휘나 전문 용어를 쉬운 단어로...",
-            "kwcag_ref": "3.1.1 ...",
+            "wcag_ref": {"id": "3.1.5", "name": "읽기 수준", "standard": "WCAG", "version": "2.2"},
+            "kwcag_items": [],
             "priority": "medium" }
         ],
         "llm_revision": {
@@ -652,6 +656,9 @@ def generate_suggestions(input_path, output_path=None):
         print()
 
     for i, block in enumerate(results):
+        # Rebuild standards metadata when this script is run against an older
+        # difficulty result that predates the canonical mapping bridge.
+        block['standard_issues'] = classify_text_block(block)
         # needs_suggestion: difficulty_engine.py에서 "이 블록은 수정 제안이 필요하다"고 표시한 것
         # False인 블록은 기준 이하로 무난한 텍스트 → 빈 값만 세팅하고 건너뜀
         if not block.get('needs_suggestion', False):
@@ -663,6 +670,14 @@ def generate_suggestions(input_path, output_path=None):
         # API 키나 네트워크 상태와 무관하게 항상 동작하는 기본 가이드
         # 플래그 유형별로 수정 방향을 담은 제안 dict 리스트를 반환
         rule_suggestions = generate_rule_based_suggestion(block)
+        standard_issues_by_type = {
+            item['type']: item for item in block['standard_issues']
+        }
+        for suggestion in rule_suggestions:
+            standard_issue = standard_issues_by_type.get(suggestion.get('type'))
+            if standard_issue:
+                suggestion['wcag_ref'] = standard_issue['wcag']
+                suggestion['kwcag_items'] = standard_issue['kwcag_items']
         block['suggestions'] = rule_suggestions
         suggestion_total += len(rule_suggestions)
 

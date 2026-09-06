@@ -2,7 +2,7 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useId } from "react";
 
-import type { ThemeMode } from "@/components/ui/toggle-theme";
+import type { ThemeMode } from "@/types/theme";
 
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 
@@ -30,13 +30,11 @@ const themeOptions: Array<{
 
 export function AccountSettingsModal({
   isOpen,
-  isDarkMode,
   themeMode,
   onThemeModeChange,
   onClose
 }: {
   isOpen: boolean;
-  isDarkMode: boolean;
   themeMode: ThemeMode;
   onThemeModeChange: (value: ThemeMode) => void;
   onClose: () => void;
@@ -53,7 +51,7 @@ export function AccountSettingsModal({
   }
 
   return createPortal(
-    <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
+    <div className="dashboard-modal-layer">
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <article
         ref={dialogRef}
@@ -61,21 +59,15 @@ export function AccountSettingsModal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative z-10 w-full max-w-2xl overflow-hidden rounded-[18px] border outline-none ${
-          isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
-        }`}
+        className="dashboard-modal-surface dashboard-modal-surface--split w-full max-w-2xl"
       >
         <div className="flex min-h-[20rem] flex-col sm:flex-row">
           <aside
-            className={`shrink-0 border-b px-3 py-5 sm:w-44 sm:border-b-0 sm:border-r ${
-              isDarkMode ? "border-[#3a3a3c] bg-[#18181a]" : "border-[#e5e5ea] bg-[#f5f5f7]"
-            }`}
+            className="dashboard-modal-settings-nav shrink-0 border-b px-3 py-6 sm:w-44 sm:border-b-0 sm:border-r"
           >
             <h3
               id={titleId}
-              className={`px-2 text-lg font-semibold tracking-[-0.015em] ${
-                isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-              }`}
+              className="dashboard-modal-title px-2"
             >
               설정
             </h3>
@@ -84,11 +76,7 @@ export function AccountSettingsModal({
               <button
                 type="button"
                 aria-current="page"
-                className={`flex h-9 w-full items-center rounded-lg px-2.5 text-left text-sm font-medium ${
-                  isDarkMode
-                    ? "bg-[#2c2c2e] text-[#f5f5f7]"
-                    : "bg-[#e5e5ea] text-[#1d1d1f]"
-                }`}
+                className="dashboard-modal-settings-selected flex h-9 w-full items-center rounded-lg px-2.5 text-left text-sm font-medium"
               >
                 <span>일반</span>
               </button>
@@ -96,25 +84,21 @@ export function AccountSettingsModal({
           </aside>
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <section className="flex-1 p-5 sm:p-6" aria-labelledby={themeGroupId}>
+            <section className="flex-1 p-6" aria-labelledby={themeGroupId}>
               <h4
                 id={themeGroupId}
-                className={`text-base font-semibold tracking-[-0.015em] ${
-                  isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-                }`}
+                className="text-base font-semibold text-foreground"
               >
                 테마
               </h4>
-              <p className={`mt-1 text-xs ${isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"}`}>
+              <p className="dashboard-modal-description mt-1">
                 화면에 적용할 색상 모드를 선택하세요.
               </p>
 
               <div
                 role="radiogroup"
                 aria-labelledby={themeGroupId}
-                className={`mt-4 grid w-full max-w-[17.5rem] grid-cols-3 gap-0.5 rounded-lg p-0.5 ${
-                  isDarkMode ? "bg-[#2c2c2e]" : "bg-[#e5e5ea]"
-                }`}
+                className="dashboard-modal-theme-group mt-4 grid w-full max-w-[17.5rem] grid-cols-3 gap-0.5 rounded-lg p-0.5"
               >
                   {themeOptions.map(({ value, label, Icon }) => {
                     const selected = themeMode === value;
@@ -124,15 +108,8 @@ export function AccountSettingsModal({
                       <label
                         key={value}
                         htmlFor={optionId}
-                        className={`relative flex h-7 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 text-[0.6875rem] font-medium leading-none transition-colors focus-within:outline focus-within:outline-1 focus-within:outline-offset-0 ${
-                          selected
-                            ? isDarkMode
-                              ? "bg-[#f5f5f7] text-[#1d1d1f] focus-within:outline-white"
-                              : "bg-[#1d1d1f] text-white focus-within:outline-[#1d1d1f]"
-                            : isDarkMode
-                              ? "text-[#d1d1d6] hover:bg-[#3a3a3c] focus-within:outline-white"
-                              : "text-[#3a3a3c] hover:bg-[#d2d2d7] focus-within:outline-[#1d1d1f]"
-                        }`}
+                        data-selected={selected}
+                        className="dashboard-modal-theme-option relative flex cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 text-[0.6875rem] font-medium leading-none"
                       >
                         <input
                           id={optionId}
@@ -152,15 +129,11 @@ export function AccountSettingsModal({
               </div>
             </section>
 
-            <div className="flex items-center justify-end px-5 py-4 sm:px-6">
+            <div className="flex items-center justify-end px-6 pb-6">
               <button
                 type="button"
                 onClick={onClose}
-                className={`inline-flex h-7 items-center justify-center rounded-lg px-5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/60 ${
-                  isDarkMode
-                    ? "bg-[#2c2c2e] text-[#f5f5f7] hover:bg-[#3a3a3c]"
-                    : "bg-[#e5e5ea] text-[#1d1d1f] hover:bg-[#d2d2d7]"
-                }`}
+                className="dashboard-modal-button"
               >
                 닫기
               </button>

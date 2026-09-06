@@ -11,7 +11,12 @@ const { AxeBuilder } = require('@axe-core/playwright');
 const { chromium } = require('playwright');
 const { convert } = require('../adapter');
 const { score } = require('../scorer');
-const { run, siblingOutputPath, toApiFormat } = require('../run');
+const {
+  run,
+  siblingOutputPath,
+  toApiFormat,
+  withoutUrlFragment,
+} = require('../run');
 const {
   buildDomReplayArtifactMetadata,
   buildPathSteps,
@@ -79,6 +84,32 @@ test('serializes capturedAt for the backend LocalDateTime contract', () => {
   assert.equal(timestamp.endsWith('Z'), false);
 });
 
+test('capture metadata stores a fragment-free live-report URL without capture mode', async () => {
+  const page = {
+    url: () => 'https://example.test/final#results',
+    evaluate: async () => ({
+      viewportWidthCssPx: 1280,
+      viewportHeightCssPx: 720,
+      deviceScaleFactor: 1,
+      pageWidthCssPx: 1280,
+      pageHeightCssPx: 1440,
+    }),
+  };
+  const metadata = await buildDomReplayArtifactMetadata(page, {
+    requestedUrl: 'https://example.test/start',
+  });
+
+  assert.equal(metadata.finalUrl, 'https://example.test/final');
+  assert.equal(Object.hasOwn(metadata, 'captureMode'), false);
+});
+
+test('normalizes the analyzed document URL before rule metadata is generated', () => {
+  assert.equal(
+    withoutUrlFragment('https://example.test/final?mode=a#results'),
+    'https://example.test/final?mode=a',
+  );
+});
+
 test('preserves typed locator through adapter and API conversion', () => {
   const locator = {
     kind: 'DOM_RECT',
@@ -122,7 +153,7 @@ test('preserves typed locator through adapter and API conversion', () => {
   assert.deepEqual(apiNode.locator, locator);
 });
 
-test('serializes DOM replay and resolves axe DOM_RECT from the same paused state', async () => {
+test('serializes the internal DOM snapshot and resolves DOM_RECT from one paused state', async () => {
   const browser = await chromium.launch({ headless: true });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-browser-test-'));
 
@@ -273,9 +304,7 @@ test('serializes DOM replay and resolves axe DOM_RECT from the same paused state
     assert.equal(shadowLocator.x, 420);
     assert.equal(shadowLocator.y, 500);
     assert.equal(shadowLocator.visible, true);
-    assert.equal(metadata.captureMode, 'DOM_REPLAY');
     assert.deepEqual(Object.keys(metadata).sort(), [
-      'captureMode',
       'capturedAt',
       'deviceScaleFactor',
       'finalUrl',
@@ -415,7 +444,7 @@ test('falls back to nonblank initial HTML after a cross-origin bot challenge wit
              src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==">
         <script>setTimeout(() => {
           location.href = 'http://localhost:${port}/challenge?atn=Selenium';
-        }, 25);</script>
+        }, 0);</script>
       </body></html>`);
   });
   await new Promise((resolve, reject) => {
@@ -449,7 +478,6 @@ test('falls back to nonblank initial HTML after a cross-origin bot challenge wit
       replayHtml,
       /data-accessibility-replay-source="INITIAL_RESPONSE_STATIC"/,
     );
-    assert.equal(artifact.captureMode, 'DOM_REPLAY');
     assert.equal(artifact.requestedUrl, initialUrl);
     assert.equal(artifact.finalUrl, initialUrl);
     assert.equal(result.meta.replaySource, 'INITIAL_RESPONSE_STATIC');

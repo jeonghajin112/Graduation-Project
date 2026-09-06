@@ -23,6 +23,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	implementation 'org.apache.httpcomponents.client5:httpclient5'
 	implementation 'org.jsoup:jsoup:1.22.2'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'com.h2database:h2'
@@ -37,4 +38,12 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+tasks.register('exportLiveReportBrowserFixture', JavaExec) {
+	group = 'verification'
+	description = 'Exports the real rewritten live-report HTML used by the frontend browser regression.'
+	dependsOn testClasses
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.accessibility.platform.livereport.LiveReportBrowserFixtureExporterTest'
 }

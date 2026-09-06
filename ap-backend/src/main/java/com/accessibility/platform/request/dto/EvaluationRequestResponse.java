@@ -12,6 +12,7 @@ public record EvaluationRequestResponse(
     String faviconUrl,
     EvaluationRequestStatus status,
     String requestNote,
+    boolean quickAnalysis,
     LocalDateTime requestedAt,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
@@ -24,6 +25,7 @@ public record EvaluationRequestResponse(
             request.getEvaluationTarget().getFaviconUrl(),
             request.getStatus(),
             request.getRequestNote(),
+            request.isQuickAnalysis(),
             request.getRequestedAt(),
             request.getCreatedAt(),
             request.getUpdatedAt()

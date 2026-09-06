@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium } from "playwright";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:5174";
+const baseUrl = resolveTestBaseUrl();
 const registryKey = "uni-access.quick-analysis-results.v2";
 const artifactsDir = path.resolve("artifacts");
 const browser = await chromium.launch({ headless: true });
 const observations = [];
+await mkdir(artifactsDir, { recursive: true });
 
 async function verifyViewport({ height, name, width }) {
   const context = await browser.newContext({ viewport: { width, height } });

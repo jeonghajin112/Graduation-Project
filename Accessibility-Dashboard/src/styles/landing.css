@@ -39,9 +39,20 @@
   --ua-hairline-strong: rgba(29, 29, 31, 0.18);
   --ua-hairline-ink: rgba(245, 245, 247, 0.16);
 
+  /* ---- elevation ----
+     Two shadow steps only. Resting surfaces stay flat; raised surfaces get a
+     tight contact shadow plus one soft ambient layer so cards read as paper
+     rather than as floating glass. */
+  --ua-shadow-raise:
+    0 1px 2px rgba(29, 29, 31, 0.05),
+    0 8px 24px -12px rgba(29, 29, 31, 0.12);
+  --ua-shadow-lift:
+    0 1px 2px rgba(29, 29, 31, 0.06),
+    0 18px 44px -20px rgba(29, 29, 31, 0.2);
+
   /* ---- type ---- */
   --ua-font: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
-  --ua-display: clamp(2.25rem, 11.2vw, 3.5rem);
+  --ua-display: clamp(1.875rem, 8.4vw, 2.75rem);
   /* Leading matched to the reference measurement: 96px display on 100px, and
      48px section titles on 52px. */
   --ua-display-leading: 1.04;
@@ -52,6 +63,8 @@
   --ua-lead: clamp(1.0625rem, 4.4vw, 1.3125rem);
   --ua-body: 1.0625rem;
   --ua-meta: 0.875rem;
+  /* Small tracked label used by the hero eyebrow and section kickers. */
+  --ua-eyebrow: 0.78125rem;
 
   /* ---- layout ---- */
   --ua-gutter: clamp(1.5rem, 6vw, 5.625rem);
@@ -59,7 +72,6 @@
   --ua-title-measure: 945px;
   --ua-header-height: 3.5rem;
   --ua-section-pad: 7rem;
-  --ua-stack: 1.5rem;
 
   /* ---- shape ---- */
   --ua-radius-card: 1.25rem;
@@ -84,20 +96,20 @@
 
 @media (min-width: 768px) {
   .uni-landing {
-    --ua-display: clamp(4.5rem, 9.5vw, 5rem);
+    --ua-display: clamp(3.25rem, 6.8vw, 3.75rem);
     --ua-title: clamp(2.25rem, 4.6vw, 2.75rem);
     --ua-name: 1.5rem;
     --ua-card-title: 1.375rem;
     --ua-lead: 1.5rem;
     --ua-section-pad: 7.5rem;
     --ua-header-height: 3.5rem;
-    --ua-stack: 1.75rem;
+    --ua-eyebrow: 0.8125rem;
   }
 }
 
 @media (min-width: 1200px) {
   .uni-landing {
-    --ua-display: clamp(5rem, 6.5vw, 8.5rem);
+    --ua-display: clamp(3.5rem, 4.4vw, 5.25rem);
     --ua-title: clamp(2.75rem, 3.45vw, 4.5rem);
     --ua-name: clamp(1.75rem, 1.15vw, 2.5rem);
     --ua-card-title: clamp(1.5rem, 1.15vw, 2.25rem);
@@ -105,7 +117,7 @@
     --ua-section-pad: 9rem;
     --ua-radius-card: 1.5rem;
     --ua-radius-panel: 1.75rem;
-    --ua-stack: 2rem;
+    --ua-eyebrow: clamp(0.8125rem, 0.62vw, 1rem);
   }
 }
 
@@ -123,7 +135,6 @@
     --ua-title-measure: 1170px;
     --ua-section-pad: 11rem;
     --ua-header-height: 4.25rem;
-    --ua-stack: 2.5rem;
   }
 }
 
@@ -133,8 +144,7 @@
     --ua-title-measure: 1440px;
     --ua-section-pad: 13rem;
     --ua-header-height: 5rem;
-    --ua-stack: 3rem;
-    --ua-display: clamp(8.5rem, 4vw, 9.5rem);
+    --ua-display: clamp(5.25rem, 2.8vw, 6rem);
     --ua-title: clamp(4.5rem, 2.3vw, 5.5rem);
   }
 }
@@ -211,25 +221,13 @@
   border-radius: 4px;
 }
 
-.ua-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
 [data-container="true"] {
   width: min(calc(100% - 2 * var(--ua-gutter)), var(--ua-container));
   margin-inline: auto;
 }
 
 .ua-skip-link {
-  position: fixed;
+  position: absolute;
   z-index: 60;
   inset-block-start: 0.75rem;
   inset-inline-start: 0.75rem;
@@ -242,12 +240,20 @@
   color: var(--ua-white);
   font-size: var(--ua-meta);
   font-weight: 600;
-  transform: translateY(-400%);
-  transition: transform 180ms ease;
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .ua-skip-link:focus-visible {
-  transform: translateY(0);
+  position: fixed;
+  clip-path: none;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------------ */
@@ -310,10 +316,6 @@
   letter-spacing: 0;
 }
 
-.ua-criterion--lg {
-  font-size: calc(var(--ua-meta) * 1.28);
-}
-
 .ua-criterion--onInk {
   color: var(--ua-on-ink-muted);
 }
@@ -343,11 +345,23 @@
   font-size: var(--ua-body);
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 180ms ease, transform 180ms ease;
+  /* The arrow is the only moving part on hover, so the button reads as a
+     direction rather than as a generic bouncing pill. */
+  box-shadow: 0 1px 2px rgba(0, 61, 122, 0.24), 0 10px 24px -14px rgba(0, 113, 227, 0.7);
+  transition: background-color 180ms ease, box-shadow 220ms ease, transform 180ms ease;
 }
 
 .ua-action:hover {
   background: var(--ua-primary-hover);
+  box-shadow: 0 1px 2px rgba(0, 61, 122, 0.26), 0 16px 32px -14px rgba(0, 113, 227, 0.78);
+}
+
+.ua-action svg {
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.ua-action:hover svg {
+  transform: translateX(3px);
 }
 
 .ua-action:active {
@@ -391,7 +405,7 @@
   z-index: 40;
   inset-block-start: 0;
   border-block-end: 1px solid var(--ua-hairline);
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.82);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
@@ -419,6 +433,7 @@
 
 .ua-header__nav a {
   display: inline-flex;
+  position: relative;
   min-height: 44px;
   align-items: center;
   padding-inline: 0.5rem;
@@ -430,6 +445,24 @@
 
 .ua-header__nav a:hover {
   color: var(--ua-ink);
+}
+
+/* A hairline that grows from the centre marks the hovered link without
+   shifting the row height. */
+.ua-header__nav a::after {
+  position: absolute;
+  inset-block-end: 0.5rem;
+  inset-inline: 0.5rem;
+  block-size: 1.5px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleX(0);
+  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  content: "";
+}
+
+.ua-header__nav a:hover::after {
+  transform: scaleX(1);
 }
 
 .ua-header__actions {
@@ -488,17 +521,13 @@
   max-inline-size: min(100%, var(--ua-title-measure));
 }
 
-.ua-hero__name {
-  font-size: var(--ua-name);
-  font-weight: 600;
-  letter-spacing: -0.004em;
-}
-
 .ua-hero__headline {
-  margin-block-start: 0.375rem;
   font-size: var(--ua-display);
   line-height: var(--ua-display-leading);
-  letter-spacing: -0.026em;
+  /* Tighter tracking is what makes a large Korean display line read as
+     typeset rather than as default browser output. */
+  letter-spacing: -0.032em;
+  text-wrap: balance;
 }
 
 .ua-hero__headline > span {
@@ -507,11 +536,14 @@
 
 .ua-hero__subcopy {
   margin-block-start: clamp(1rem, 2vh, 1.5rem);
-  max-inline-size: 24em;
+  /* Two lines at desktop: 21em pushed it to three, 24em ran wider than the
+     display line. 27em holds a balanced two-line block under the headline. */
+  max-inline-size: 32em;
   color: var(--ua-ink-soft);
-  font-size: var(--ua-lead);
-  line-height: 1.38;
-  letter-spacing: -0.016em;
+  font-size: clamp(0.9375rem, 1.15vw, 1.125rem);
+  line-height: 1.5;
+  letter-spacing: -0.014em;
+  text-wrap: balance;
 }
 
 .ua-hero__action {
@@ -522,397 +554,46 @@
   inline-size: 100%;
 }
 
-.ua-hero__caption {
-  margin-block-start: 0.875rem;
-  margin-inline: auto;
-  max-inline-size: 48em;
-  color: var(--ua-ink-muted);
-  font-size: var(--ua-meta);
-  line-height: 1.5;
-}
-
 /* ------------------------------------------------------------------ */
-/* Hero stage — page layers, scan beam, brackets, signal, result       */
+/* Hero stage — local, read-only product demo                          */
 /* ------------------------------------------------------------------ */
 
 .ua-stage {
-  /* Single container context: every internal size is a fraction of the stage
-     width, so the whole illustration scales as one unit from 320px to 4K. */
-  container-type: inline-size;
   inline-size: 100%;
+  max-inline-size: min(88rem, 100%);
   margin-inline: auto;
-}
-
-@media (min-width: 1024px) {
-  /* Width is capped by available viewport height so the hero still reads as
-     roughly one screen, while 2560/3840 grow the composition rather than
-     leaving it stranded in the middle of the canvas. */
-  .ua-stage {
-    max-inline-size: min(100%, calc(42svh * 2.35));
-  }
-}
-
-.ua-stage__scene {
-  position: relative;
-  display: grid;
-  gap: 4cqw;
-  grid-template-columns: 1fr;
+  scroll-margin-block-start: calc(var(--ua-header-height) + 0.75rem);
   text-align: start;
 }
 
-@media (min-width: 768px) {
-  .ua-stage__scene {
-    grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
-    align-items: center;
-  }
-}
-
-.ua-stage__ghost {
-  position: absolute;
-  display: none;
-  border-radius: calc(var(--ua-radius-card) * 0.9);
-  border: 1px solid var(--ua-hairline);
-  background: rgba(255, 255, 255, 0.55);
-}
-
-@media (min-width: 768px) {
-  .ua-stage__ghost {
-    display: block;
-  }
-
-  .ua-stage__ghost--far {
-    inset: 6% 44% 14% 5%;
-    opacity: 0.5;
-  }
-
-  .ua-stage__ghost--near {
-    inset: 3% 40% 9% 2.5%;
-    opacity: 0.75;
-  }
-}
-
-.ua-stage__page {
-  position: relative;
-  z-index: 1;
+.ua-stage__surface {
+  aspect-ratio: 16 / 9;
   overflow: hidden;
-  border-radius: var(--ua-radius-card);
   border: 1px solid var(--ua-hairline-strong);
-  background: var(--ua-white);
-  box-shadow: 0 2cqw 5cqw rgba(29, 29, 31, 0.08);
-}
-
-.ua-stage__chrome {
-  display: flex;
-  align-items: center;
-  gap: 2cqw;
-  padding: 1.7cqw 2.4cqw;
-  border-block-end: 1px solid var(--ua-hairline);
-  background: var(--ua-fog);
-}
-
-.ua-stage__dots {
-  display: inline-flex;
-  gap: 0.7cqw;
-}
-
-.ua-stage__dots i {
-  inline-size: 1.1cqw;
-  block-size: 1.1cqw;
-  border-radius: 50%;
-  background: rgba(29, 29, 31, 0.18);
-}
-
-.ua-stage__address {
-  color: var(--ua-ink-muted);
-  font-size: max(0.5625rem, 1.25cqw);
-  letter-spacing: 0;
-}
-
-.ua-stage__canvas {
-  display: grid;
-  gap: 2.6cqw;
-  padding: 2.8cqw;
-}
-
-.ua-stage__nav {
-  display: flex;
-  align-items: center;
-  gap: 1.6cqw;
-}
-
-.ua-stage__nav-mark {
-  inline-size: 7cqw;
-  block-size: 1.5cqw;
-  border-radius: var(--ua-radius-pill);
-  background: rgba(29, 29, 31, 0.5);
-}
-
-.ua-stage__nav span:not(.ua-stage__nav-mark) {
-  inline-size: 4.4cqw;
-  block-size: 1.1cqw;
-  border-radius: var(--ua-radius-pill);
-  background: rgba(29, 29, 31, 0.14);
-}
-
-.ua-stage__row {
-  display: grid;
-  gap: 2.6cqw;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  align-items: start;
-}
-
-.ua-stage__copy {
-  display: grid;
-  gap: 1.5cqw;
-}
-
-.ua-stage__bar {
-  display: block;
-  border-radius: 0.5cqw;
-  background: rgba(29, 29, 31, 0.12);
-}
-
-.ua-stage__bar--eyebrow {
-  inline-size: 34%;
-  block-size: 1.1cqw;
-  background: rgba(0, 113, 227, 0.35);
-}
-
-.ua-stage__bar--title {
-  block-size: 2.4cqw;
-  background: rgba(29, 29, 31, 0.34);
-}
-
-.ua-stage__bar--text {
-  block-size: 1.3cqw;
-}
-
-.ua-stage__bar--short {
-  inline-size: 62%;
-}
-
-.ua-stage__media {
-  position: relative;
-}
-
-.ua-stage__media {
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  aspect-ratio: 4 / 3;
-  border-radius: 1cqw;
-  background: var(--ua-fog);
-}
-
-.ua-stage__media-art {
-  display: flex;
-  align-items: flex-end;
-  gap: 1.4cqw;
-}
-
-.ua-stage__media-art i {
-  display: block;
-  inline-size: 3.4cqw;
-  border-radius: 0.5cqw;
-  background: rgba(29, 29, 31, 0.16);
-}
-
-.ua-stage__media-art i:first-child {
-  block-size: 7cqw;
-}
-
-.ua-stage__media-art i:last-child {
-  block-size: 4.4cqw;
-}
-
-.ua-stage__link-slot {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 1.4cqw;
-  align-self: start;
-  margin-block-start: 1cqw;
-  padding: 1cqw 1.4cqw;
-}
-
-.ua-stage__faint-link {
-  /* The schematic marks the finding with a badge instead of rendering
-     unreadable text, so the landing itself never ships failing contrast. */
-  color: var(--ua-ink-soft);
-  font-size: max(0.6875rem, 1.35cqw);
-  font-weight: 500;
-  text-decoration: underline dashed var(--ua-flag);
-  text-underline-offset: 0.25em;
-  white-space: nowrap;
-}
-
-.ua-stage__marker {
-  position: absolute;
-  z-index: 3;
-  /* Sits inside its target so the panel's rounded clip never cuts the badge. */
-  inset-block-start: 1cqw;
-  inset-inline-end: 1cqw;
-  padding: 0.45cqw 1.1cqw;
-  border-radius: var(--ua-radius-pill);
-  background: var(--ua-primary);
-  color: var(--ua-on-primary);
-  font-size: max(0.5625rem, 1.2cqw);
-  font-weight: 600;
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
-.ua-stage__marker--inline {
-  position: static;
-  inset: auto;
-}
-
-.ua-stage__bracket-slot {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: block;
-}
-
-/* The beam lives in its own clipping track so its travel never enlarges the
-   page panel's scroll box. */
-.ua-stage__beam-track {
-  position: absolute;
-  z-index: 4;
-  inset: 0;
-  display: block;
-  overflow: hidden;
-  pointer-events: none;
-  border-radius: inherit;
-}
-
-.ua-stage__beam {
-  position: absolute;
-  inset-inline: 0;
-  inset-block-start: 0;
-  block-size: 26%;
-  background: linear-gradient(
-    to bottom,
-    rgba(0, 113, 227, 0) 0%,
-    rgba(0, 113, 227, 0.16) 62%,
-    rgba(0, 113, 227, 0.5) 96%,
-    rgba(0, 113, 227, 0.9) 100%
-  );
-  /* Resting state: parked above the page and invisible. Two sweeps run on
-     mount and then the element returns here — no perpetual animation. */
-  transform: translateY(-100%);
-  opacity: 0;
-}
-
-.ua-stage[data-beam="sweep"] .ua-stage__beam {
-  animation: ua-scan 1600ms cubic-bezier(0.4, 0, 0.2, 1) 2;
-}
-
-@keyframes ua-scan {
-  from {
-    transform: translateY(-100%);
-    opacity: 0;
-  }
-  12% {
-    opacity: 1;
-  }
-  88% {
-    opacity: 1;
-  }
-  to {
-    transform: translateY(400%);
-    opacity: 0;
-  }
-}
-
-.ua-stage__signals {
-  position: absolute;
-  display: none;
-  z-index: 0;
-  inset-block: 22%;
-  inset-inline-start: 58%;
-  inline-size: 12%;
-  block-size: 56%;
-  overflow: visible;
-}
-
-.ua-stage__signals path {
-  fill: none;
-  stroke: rgba(0, 113, 227, 0.45);
-  stroke-width: 1.4;
-  stroke-dasharray: 4 5;
-}
-
-@media (min-width: 768px) {
-  .ua-stage__signals {
-    display: block;
-  }
-}
-
-.ua-stage__result {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 2.2cqw;
-  align-content: start;
-  padding: 3cqw;
   border-radius: var(--ua-radius-card);
-  border: 1px solid var(--ua-hairline-strong);
-  background: var(--ua-white);
-  box-shadow: 0 1.6cqw 4cqw rgba(29, 29, 31, 0.07);
+  background: var(--dashboard-shell-bg, #f5f5f7);
+  box-shadow: var(--ua-shadow-lift);
+  overscroll-behavior: contain;
 }
 
-.ua-stage__result-kicker {
-  color: var(--ua-ink-muted);
-  font-size: max(0.6875rem, 1.35cqw);
-  font-weight: 600;
+.ua-stage__frame {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  background: var(--dashboard-shell-bg, #f5f5f7);
+  color-scheme: light;
 }
 
-.ua-stage__result-list {
-  display: grid;
-  gap: 2cqw;
+/* The stage is narrower than the outer viewport because of the landing
+   gutters. Give the embedded dashboard a portrait-like viewport whenever
+   that inner width crosses the dashboard's 768px responsive breakpoint. */
+@media (max-width: 880px) {
+  .ua-stage__surface {
+    aspect-ratio: auto;
+    block-size: 42rem;
+  }
 }
-
-.ua-stage__result-list li {
-  display: grid;
-  gap: 0.5cqw;
-  padding-block-end: 2cqw;
-  border-block-end: 1px solid var(--ua-hairline);
-}
-
-.ua-stage__result-list li:last-child {
-  padding-block-end: 0;
-  border-block-end: 0;
-}
-
-.ua-stage__result-criterion {
-  color: var(--ua-ink-soft);
-  font-size: max(0.6875rem, 1.3cqw);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-}
-
-.ua-stage__result-list strong {
-  font-size: max(0.875rem, 1.9cqw);
-  font-weight: 600;
-  line-height: 1.3;
-}
-
-.ua-stage__result-list code {
-  color: var(--ua-ink-soft);
-  font-size: max(0.6875rem, 1.3cqw);
-}
-
-.ua-stage__result-state {
-  display: flex;
-  align-items: center;
-  gap: 0.9cqw;
-  color: var(--ua-flag);
-  font-size: max(0.6875rem, 1.35cqw);
-  font-weight: 600;
-}
-
 /* ------------------------------------------------------------------ */
 /* Focus bracket                                                      */
 /* ------------------------------------------------------------------ */
@@ -1050,7 +731,18 @@
   grid-template-rows: auto auto 1fr auto;
   padding: clamp(1.5rem, 2.2vw, 2.25rem);
   border-radius: var(--ua-radius-card);
-  background: var(--ua-fog);
+  /* On the white highlight section the fog fill alone left the cards edgeless.
+     A hairline plus a resting shadow gives each card a defined boundary. */
+  border: 1px solid var(--ua-hairline);
+  background: var(--ua-white);
+  box-shadow: var(--ua-shadow-raise);
+  transition: box-shadow 260ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.ua-highlight:hover .ua-highlight__body {
+  transform: translateY(-3px);
+  box-shadow: var(--ua-shadow-lift);
 }
 
 .ua-highlight__kicker {
@@ -1081,6 +773,8 @@
 .ua-highlight__evidence span {
   color: var(--ua-ink-muted);
   font-size: var(--ua-meta);
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .ua-highlight__evidence strong {
@@ -1367,8 +1061,10 @@
 
 .ua-score__weights dt {
   color: var(--ua-ink-muted);
-  font-size: var(--ua-meta);
+  font-size: var(--ua-eyebrow);
   font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .ua-score__weights dd {
@@ -1377,10 +1073,12 @@
 }
 
 .ua-score__weights strong {
-  font-size: calc(var(--ua-title) * 0.6);
+  /* The weight figure is the one number readers compare across the three
+     modules, so it carries the largest type in the block. */
+  font-size: calc(var(--ua-title) * 0.68);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.022em;
+  letter-spacing: -0.028em;
   line-height: 1.05;
 }
 
@@ -1417,22 +1115,24 @@
   align-items: center;
   padding-inline: 1.125rem;
   border-radius: var(--ua-radius-pill);
-  background: rgba(29, 29, 31, 0.06);
+  background: rgba(29, 29, 31, 0.05);
   color: var(--ua-ink-soft);
-  font-size: var(--ua-body);
+  font-size: var(--ua-meta);
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 180ms ease, color 180ms ease;
+  letter-spacing: -0.006em;
+  transition: background-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
 }
 
 .ua-tab:hover {
-  background: rgba(29, 29, 31, 0.11);
+  background: rgba(29, 29, 31, 0.1);
   color: var(--ua-ink);
 }
 
 .ua-tab[aria-selected="true"] {
   background: var(--ua-ink);
   color: var(--ua-white);
+  box-shadow: var(--ua-shadow-raise);
 }
 
 .ua-closer__viewer {
@@ -2104,11 +1804,31 @@
     scroll-behavior: auto;
   }
 
-  .ua-stage__beam-track {
-    display: none;
-  }
-
   .ua-skip-link {
     transition: none;
+  }
+
+  /* The wildcard above only zeroes durations, so hover transforms would still
+     jump instantly. Hold the resting position instead. */
+  .ua-highlight:hover .ua-highlight__body,
+  .ua-action:hover svg {
+    transform: none;
+  }
+
+  .ua-header__nav a:hover::after {
+    transform: scaleX(1);
+  }
+}
+
+@media (min-width: 3200px) {
+  .ua-hero__inner {
+    max-inline-size: min(118rem, calc(100% - 2 * var(--ua-gutter)));
+    width: min(118rem, calc(100% - 2 * var(--ua-gutter)));
+  }
+
+  .ua-hero__media,
+  .ua-stage {
+    max-inline-size: none;
+    inline-size: 100%;
   }
 }

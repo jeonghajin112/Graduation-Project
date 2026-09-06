@@ -6,9 +6,7 @@ export type DashboardSidebarSelection =
   | { kind: "recentPage"; id: number };
 
 export type DashboardRouteKind =
-  | "dashboard"
   | "analyze"
-  | "reports"
   | "project"
   | "projectPage"
   | "recentPage"
@@ -33,26 +31,6 @@ function parsePositiveInteger(segment: string | undefined): number | null {
 
 export function parseDashboardRoute(pathname: string): ParsedDashboardRoute {
   const segments = pathname.split("/").filter(Boolean);
-
-  if (segments[0] === "dashboard") {
-    return {
-      kind: "dashboard",
-      menu: "dashboard",
-      selectedOrganizationModelId: null,
-      selectedEvaluationTargetModelId: null,
-      sidebarSelection: null
-    };
-  }
-
-  if (segments[0] === "reports") {
-    return {
-      kind: "reports",
-      menu: "reports",
-      selectedOrganizationModelId: null,
-      selectedEvaluationTargetModelId: null,
-      sidebarSelection: null
-    };
-  }
 
   if (segments[0] === "projects") {
     const projectId = parsePositiveInteger(segments[1]);

@@ -43,11 +43,30 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 
+AI_MODULE_DIR = Path(__file__).resolve().parents[1]
+if str(AI_MODULE_DIR) not in sys.path:
+    sys.path.insert(0, str(AI_MODULE_DIR))
+
+from standard_mapping import kwcag_items_for_wcag
+
+
 # ── 같은 폴더의 모듈 임포트 ──────────────────────────────────────────────────
 # cv_runner.py, vision_ocr.py, contrast_analyzer.py가 같은 cv/ 폴더에 있음
 
 from vision_ocr import run_ocr
 from contrast_analyzer import ContrastAnalyzer
+
+
+def cv_contrast_kwcag_item() -> Dict[str, str]:
+    items = kwcag_items_for_wcag("1.4.3")
+    if len(items) != 1:
+        raise RuntimeError("WCAG 1.4.3 must map to exactly one KWCAG 2.2 item")
+    return {
+        **items[0],
+        "description": "텍스트와 배경 간의 명도 대비는 4.5:1 이상이어야 한다",
+        "level": "AA",
+        "wcag_ref": "1.4.3",
+    }
 
 
 class CVRunner:
@@ -216,7 +235,7 @@ class CVRunner:
         [포맷 설계 원칙]
         - snake_case 통일: run.js의 toApiFormat()과 동일한 네이밍 규칙
         - 요약(summary)과 상세(violations) 분리: 대시보드 렌더링 편의
-        - KWCAG 항목 번호 포함: 5.3.3 콘텐츠의 명도 대비
+        - KWCAG 항목 번호 포함: 5.4.3 텍스트 콘텐츠의 명도 대비
         """
         summary = contrast_result["summary"]
         
@@ -230,15 +249,9 @@ class CVRunner:
             
             # ── KWCAG 매핑 ──
             # 이 CV 모듈이 검사하는 KWCAG 항목 정보.
-            # 규칙 기반 모듈의 mapping.js와 같은 역할이지만,
-            # CV 모듈은 5.3.3 한 항목만 검사하므로 여기에 직접 기술함.
-            "kwcag_item": {
-                "id": "5.3.3",
-                "name": "콘텐츠의 명도 대비",
-                "description": "텍스트와 배경 간의 명도 대비는 4.5:1 이상이어야 한다",
-                "level": "AA",
-                "wcag_ref": "1.4.3",               # ← 대응하는 WCAG 항목 번호
-            },
+            # 규칙 기반 모듈의 mapping.js를 공통 브릿지로 조회하여
+            # WCAG 1.4.3에 대응하는 KWCAG 항목을 가져온다.
+            "kwcag_item": cv_contrast_kwcag_item(),
             
             # ── 점수 요약 ──
             # run_all.py가 이 값을 읽어서 총점 계산에 사용함.
@@ -309,13 +322,7 @@ class CVRunner:
             "analyzed_at": datetime.now().isoformat(),
             "elapsed_seconds": 0,
             "ocr_backend": ocr_result.get("backend", "unknown"),
-            "kwcag_item": {
-                "id": "5.3.3",
-                "name": "콘텐츠의 명도 대비",
-                "description": "텍스트와 배경 간의 명도 대비는 4.5:1 이상이어야 한다",
-                "level": "AA",
-                "wcag_ref": "1.4.3",
-            },
+            "kwcag_item": cv_contrast_kwcag_item(),
             "summary": {
                 "total_texts_analyzed": 0,
                 "pass_count": 0,

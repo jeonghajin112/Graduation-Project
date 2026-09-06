@@ -1,22 +1,13 @@
-/**
- * Regression check: the analysis polling loop must stop when the panel that
- * started it unmounts.
- *
- * The quick-analyze panel polls `GET /api/requests/{id}` every 1.5s for up to
- * 120 attempts. Before the AbortSignal wiring, a client-side route change left
- * that loop running for the remaining attempts. This script keeps the request
- * permanently PENDING, navigates away mid-analysis, and asserts that no further
- * polls reach the network.
- *
- * Usage: BASE_URL=http://127.0.0.1:41901 node scripts/verify-analysis-polling-cancel.mjs
- */
+/** Dashboard-owned status polling survives page navigation and stops when the dashboard unmounts. */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.BASE_URL ?? "http://127.0.0.1:41901";
+const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-07-28T10:00:00.000Z";
-const POLL_INTERVAL_MS = 1500;
-const QUIET_WINDOW_MS = 6000;
+const POLL_INTERVAL_MS = 150;
+const QUIET_WINDOW_MS = 700;
 
 const organization = {
   id: 1,
@@ -70,9 +61,22 @@ const observed = { polls: 0, unknownPaths: new Set() };
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
+  await page.addInitScript(() => {
+    const interval = window.setInterval.bind(window);
+    window.setInterval = (fn, ms, ...args) => interval(fn, ms === 5000 ? 150 : ms, ...args);
+  });
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
+
+    if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
+      await fulfillJson(route, createDashboardOverview({
+        organizations: [organization],
+        evaluationTargets: [target],
+        evaluationRequests: []
+      }));
+      return;
+    }
 
     if (pathname === POLL_PATH) {
       observed.polls += 1;
@@ -94,7 +98,7 @@ try {
       observed.unknownPaths.add(`${request.method()} ${pathname}`);
     }
 
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    await fulfillJson(route, body);
   });
 
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
@@ -104,7 +108,7 @@ try {
   await page.getByRole("button", { name: "분석 시작" }).click();
 
   // Let the loop run for a few cycles so we know polling is genuinely active.
-  await page.waitForFunction(() => document.body.innerText.includes("페이지를 분석하고 있습니다"));
+  await page.locator("#quick-analyze-url").waitFor();
   const deadline = Date.now() + POLL_INTERVAL_MS * 6;
   while (observed.polls < 3 && Date.now() < deadline) {
     await page.waitForTimeout(200);
@@ -128,11 +132,12 @@ try {
   const pollsAfterNavigation = observed.polls;
   const leakedPolls = pollsAfterNavigation - pollsAtNavigation;
 
-  assert.equal(
-    leakedPolls,
-    0,
-    `polling continued after unmount: ${leakedPolls} extra request(s) to ${POLL_PATH} in ${QUIET_WINDOW_MS}ms`
-  );
+  assert.ok(leakedPolls > 0, "dashboard must keep polling after the form unmounts");
+  await page.goto(baseUrl + "/", { waitUntil: "networkidle" });
+  const pollsAtDashboardUnmount = observed.polls;
+  await page.waitForTimeout(QUIET_WINDOW_MS);
+  assert.equal(observed.polls, pollsAtDashboardUnmount, "leaving the dashboard must cancel its polling");
+  assert.deepEqual([...observed.unknownPaths], []);
 
   console.log(
     JSON.stringify(

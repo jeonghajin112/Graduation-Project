@@ -1,22 +1,37 @@
 import { useEffect, useState } from "react";
 
-import type { ThemeMode } from "@/components/ui/toggle-theme";
+import type { ThemeMode } from "@/types/theme";
 
-export function useDashboardTheme() {
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof window === "undefined") {
-      return "system";
-    }
+const THEME_STORAGE_KEY = "bridge-theme";
 
-    const savedTheme = window.localStorage.getItem("bridge-theme");
-    if (savedTheme === "dark") {
-      return "dark";
-    }
-    if (savedTheme === "light") {
-      return "light";
-    }
+function readStoredTheme(): ThemeMode {
+  if (typeof window === "undefined") {
     return "system";
-  });
+  }
+
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "dark" || savedTheme === "light") {
+      return savedTheme;
+    }
+  } catch {
+    // Storage can be unavailable in hardened/private browser contexts. The
+    // in-memory preference remains usable for the current dashboard session.
+  }
+
+  return "system";
+}
+
+export function useDashboardTheme({
+  initialMode,
+  persist = true
+}: {
+  initialMode?: ThemeMode;
+  persist?: boolean;
+} = {}) {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() =>
+    initialMode ?? (persist ? readStoredTheme() : "system")
+  );
   const [prefersDark, setPrefersDark] = useState(() => {
     if (typeof window === "undefined") {
       return false;
@@ -28,11 +43,23 @@ export function useDashboardTheme() {
   const isDarkMode = themeMode === "dark" || (themeMode === "system" && prefersDark);
 
   useEffect(() => {
-    window.localStorage.setItem("bridge-theme", themeMode);
-  }, [themeMode]);
+    if (!persist) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {
+      // Applying the selected theme must not depend on persistent storage.
+    }
+  }, [persist, themeMode]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDarkMode);
+    const rootElement = document.documentElement;
+    rootElement.classList.toggle("dark", isDarkMode);
+
+    return () => {
+      rootElement.classList.remove("dark");
+    };
   }, [isDarkMode]);
 
   useEffect(() => {

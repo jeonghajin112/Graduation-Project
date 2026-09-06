@@ -1,83 +1,49 @@
-import { CheckCircle2, Circle, Loader2, XCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { throwIfAborted, wait } from "@/services/async-cancellation";
-import { fetchEvaluationRequest, getApiErrorMessage, isAbortError } from "@/services/backend-api";
+import { throwIfAborted } from "@/services/async-cancellation";
+import { getApiErrorMessage, isAbortError } from "@/services/backend-api";
 import {
+  SITE_NAME_MAX_LENGTH,
+  SITE_URL_MAX_LENGTH,
   clearSiteCreateRecovery,
-  readSiteCreateRecovery,
-  writeSiteCreateRecovery
+  isValidEvaluationTargetAccessUrl,
+  readSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
 import type { PersistedSiteCreateAttempt } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
 import type {
   CreateEvaluationTargetInput as CreateEvaluationTargetModelInput,
-  EvaluationStatus,
+  EvaluationRequestModel,
   OrganizationModel
 } from "@/types/accessibility-domain";
 
-import { useCancellationScope } from "../shared/use-cancellation-scope";
+import { EVALUATION_REQUEST_FAILED_MESSAGE } from "../shared/evaluation-request-status";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
+import { useMutationOperation } from "../shared/use-mutation-operation";
 
-const ANALYSIS_POLL_INTERVAL_MS = 1500;
-const ANALYSIS_POLL_ATTEMPTS = 120;
-const ANALYSIS_NETWORK_TIMEOUT_MS = 15_000;
-const ANALYSIS_NETWORK_TIMEOUT_MESSAGE = "서버 응답 대기 시간이 초과되었습니다.";
+
 const SITE_RECOVERY_PERSISTENCE_MESSAGE =
-  "브라우저에 안전한 복구 정보를 저장하지 못했습니다. 저장 공간 또는 브라우저 설정을 확인해 주세요.";
+  "브라우저에 이전 작업 상태를 저장하지 못해 요청을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
 const SITE_RECOVERY_BLOCKED_MESSAGE =
-  "이전 버전, 다른 서버 또는 손상된 페이지 생성 복구 정보가 남아 있어 새 요청을 잠갔습니다. 서버 상태를 확인한 뒤 복구 정보를 삭제해 주세요.";
+  "확인할 수 없는 이전 페이지 작업이 남아 있어 중복 요청을 막았습니다. 이미 페이지가 추가되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
 const SITE_RECOVERY_STALE_MESSAGE =
-  "24시간이 지난 복구 정보입니다. 서버 상태를 먼저 확인한 뒤 목록만 다시 확인하거나 복구 정보를 삭제할 수 있습니다.";
+  "오래된 페이지 작업 정보가 남아 있습니다. 목록에서 완료 여부를 확인한 뒤 이전 작업 정보를 삭제할 수 있습니다.";
 const SITE_RECOVERY_CONFLICT_MESSAGE =
-  "다른 프로젝트의 완료 여부를 확인하지 못한 페이지 작업이 남아 있어 새 요청을 잠갔습니다. 기존 프로젝트에서 복구를 이어가거나, 24시간이 지난 뒤 복구 정보를 삭제하거나, 로그아웃해 주세요.";
+  "다른 프로젝트에서 완료 여부를 확인하지 못한 페이지 작업이 남아 있어 새 요청을 시작하지 않았습니다. 해당 프로젝트에서 작업을 이어가거나 로그아웃한 뒤 다시 시도해 주세요.";
 const TARGET_RECOVERY_MESSAGE =
-  "이전 페이지 생성 결과를 목록에서 다시 확인합니다. 중복 방지를 위해 생성 요청은 다시 보내지 않습니다.";
-const REQUEST_RECOVERY_MESSAGE =
-  "이전 분석 요청 결과를 목록에서 다시 확인합니다. 중복 방지를 위해 분석 요청은 다시 보내지 않습니다.";
+  "이전 페이지 등록 결과를 확인하고 있습니다. 중복 등록을 막기 위해 새 요청은 보내지 않습니다.";
+const REQUEST_READY_MESSAGE =
+  "페이지 등록이 완료되었습니다. 준비가 되면 분석을 시작해 주세요.";
+const REQUEST_RECONCILING_MESSAGE =
+  "이전 분석 요청이 시작되었는지 확인이 필요합니다. 중복 분석을 막기 위해 새 요청은 보내지 않습니다.";
+const REQUEST_STATUS_RECOVERY_MESSAGE =
+  "기존 분석 요청의 상태를 다시 확인할 수 있습니다. 새 분석 요청은 보내지 않습니다.";
 
-async function runWithAnalysisNetworkDeadline<T>(
-  operation: (signal: AbortSignal) => Promise<T>,
-  callerSignal: AbortSignal
-): Promise<T> {
-  throwIfAborted(callerSignal);
-  const controller = new AbortController();
-  let didTimeout = false;
-  const forwardCallerAbort = () => controller.abort();
-  callerSignal.addEventListener("abort", forwardCallerAbort, { once: true });
-  const timeoutId = window.setTimeout(() => {
-    didTimeout = true;
-    controller.abort();
-  }, ANALYSIS_NETWORK_TIMEOUT_MS);
 
-  try {
-    const value = await operation(controller.signal);
-    throwIfAborted(callerSignal);
-    if (didTimeout) {
-      throw new Error(ANALYSIS_NETWORK_TIMEOUT_MESSAGE);
-    }
-    return value;
-  } catch (error) {
-    throwIfAborted(callerSignal);
-    if (didTimeout) {
-      throw new Error(ANALYSIS_NETWORK_TIMEOUT_MESSAGE);
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-    callerSignal.removeEventListener("abort", forwardCallerAbort);
-  }
-}
 
-type AnalysisProgressPhase = "idle" | "creating" | "requesting" | "queued" | "running" | "saving" | "completed" | "failed";
-
-type AnalysisProgress = {
-  phase: AnalysisProgressPhase;
-  requestId: number | null;
-  status: EvaluationStatus | string | null;
-  message: string;
-};
+type AnalysisRecoveryPhase = "ready" | "paused" | "failed" | null;
 
 type AnalysisResumePoint =
   | { kind: "create" }
@@ -85,13 +51,6 @@ type AnalysisResumePoint =
   | { kind: "poll"; targetId: number; requestId: number };
 
 const initialResumePoint: AnalysisResumePoint = { kind: "create" };
-
-const emptyProgress: AnalysisProgress = {
-  phase: "idle",
-  requestId: null,
-  status: null,
-  message: ""
-};
 
 function resumePointFromPersistedAttempt(
   attempt: PersistedSiteCreateAttempt
@@ -124,105 +83,31 @@ function resumePointFromPersistedAttempt(
   };
 }
 
-function progressFromPersistedAttempt(
+function recoveryPhaseFromPersistedAttempt(
   attempt: PersistedSiteCreateAttempt
-): AnalysisProgress {
+): AnalysisRecoveryPhase {
   if (attempt.phase === "target-reconciling") {
-    return emptyProgress;
+    return null;
   }
-  if (attempt.phase === "poll") {
-    return {
-      phase: "failed",
-      requestId: attempt.requestId,
-      status: null,
-      message: "기존 분석 요청의 상태 확인을 이어서 진행할 수 있습니다."
-    };
+  if (attempt.phase === "request-ready") {
+    return attempt.previousFailedRequestId === null ? "ready" : "failed";
   }
-  return {
-    phase: "failed",
-    requestId: null,
-    status: null,
-    message: REQUEST_RECOVERY_MESSAGE
-  };
+  return "paused";
 }
 
-const progressSteps = [
-  { key: "creating", label: "페이지 등록", description: "프로젝트에 분석 대상을 추가합니다." },
-  { key: "requesting", label: "분석 요청", description: "백엔드에 분석 작업을 생성합니다." },
-  { key: "running", label: "분석 엔진 실행", description: "규칙, 텍스트 난이도, CV 분석을 실행합니다." },
-  { key: "saving", label: "결과 저장", description: "분석 결과와 점수를 반영합니다." },
-  { key: "completed", label: "완료", description: "대시보드에 최신 결과를 표시합니다." }
-] as const;
-
-function isFinalRequestStatus(status: string | null) {
-  return status === "COMPLETED" || status === "FAILED";
-}
-
-function phaseFromRequestStatus(status: EvaluationStatus | string): AnalysisProgressPhase {
-  if (status === "PENDING") {
-    return "queued";
+function messageFromPersistedAttempt(attempt: PersistedSiteCreateAttempt): string {
+  if (attempt.phase === "target-reconciling") {
+    return TARGET_RECOVERY_MESSAGE;
   }
-
-  if (status === "COMPLETED") {
-    return "saving";
+  if (attempt.phase === "request-ready") {
+    return attempt.previousFailedRequestId === null
+      ? REQUEST_READY_MESSAGE
+      : EVALUATION_REQUEST_FAILED_MESSAGE;
   }
-
-  if (status === "FAILED") {
-    return "failed";
+  if (attempt.phase === "request-reconciling") {
+    return REQUEST_RECONCILING_MESSAGE;
   }
-
-  return "running";
-}
-
-function messageFromRequestStatus(status: EvaluationStatus | string): string {
-  if (status === "PENDING") {
-    return "분석 요청이 대기열에 등록되었습니다.";
-  }
-
-  if (status === "COMPLETED") {
-    return "분석이 완료되어 결과를 저장하고 있습니다.";
-  }
-
-  if (status === "FAILED") {
-    return "분석 엔진이 실패했습니다. 대상 사이트 접속 차단 또는 리다이렉트가 원인일 수 있습니다.";
-  }
-
-  return "분석 엔진이 접근성 검사를 수행하고 있습니다.";
-}
-
-function getActiveStepIndex(progress: AnalysisProgress, resumePoint: AnalysisResumePoint) {
-  const { phase } = progress;
-  if (phase === "idle") {
-    return -1;
-  }
-
-  if (phase === "failed") {
-    if (resumePoint.kind === "create") {
-      return 0;
-    }
-    if (resumePoint.kind === "request") {
-      return 1;
-    }
-    return progress.status === "COMPLETED" ? 3 : 2;
-  }
-
-  if (phase === "creating") {
-    return 0;
-  }
-
-  if (phase === "requesting" || phase === "queued") {
-    return 1;
-  }
-
-  if (phase === "running") {
-    return 2;
-  }
-
-  if (phase === "saving") {
-    return 3;
-  }
-
-  return 4;
+  return REQUEST_STATUS_RECOVERY_MESSAGE;
 }
 
 export function SiteCreateModal({
@@ -231,7 +116,7 @@ export function SiteCreateModal({
   project,
   onCreateEvaluationTargetModel,
   onRequestEvaluationTargetAnalysis,
-  onAnalysisComplete,
+  onAnalysisAccepted,
   onClose
 }: {
   isOpen: boolean;
@@ -246,30 +131,40 @@ export function SiteCreateModal({
     signal?: AbortSignal,
     previousFailedRequestId?: number
   ) => Promise<number>;
-  onAnalysisComplete?: (signal?: AbortSignal) => Promise<unknown>;
+  onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
   onClose: () => void;
 }) {
   const [siteName, setSiteName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [isSubmittingSite, setIsSubmittingSite] = useState(false);
   const [siteCreateError, setSiteCreateError] = useState("");
-  const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress>(emptyProgress);
+  const [recoveryPhase, setRecoveryPhase] = useState<AnalysisRecoveryPhase>(null);
   const [resumePoint, setResumePoint] = useState<AnalysisResumePoint>(initialResumePoint);
   const [isRecoveryBlocked, setIsRecoveryBlocked] = useState(false);
   const [canDiscardRecovery, setCanDiscardRecovery] = useState(false);
-  const { beginScope, cancelScope } = useCancellationScope();
-  const autoCloseTimeoutRef = useRef<number | null>(null);
-  const submissionLockRef = useRef(false);
-  const activeOperationIdRef = useRef<symbol | null>(null);
+  const {
+    beginMutationOperation,
+    cancelMutationOperation,
+    finishMutationOperation,
+    isMutationOperationCurrent,
+    isMutationOperationLocked
+  } = useMutationOperation();
   const recoveryRawValueRef = useRef<string | null>(null);
   const discardLockRef = useRef(false);
-  const isMountedRef = useRef(false);
+  const scrollRegionRef = useRef<HTMLDivElement | null>(null);
   const dialogRef = useDialogAccessibility({
     isOpen,
     onClose,
     closeDisabled: isSubmittingSite
   });
-  const hasAnalysisProgress = analysisProgress.phase !== "idle";
+  const isAnalysisNotice =
+    recoveryPhase === "ready" || recoveryPhase === "paused";
+
+  useLayoutEffect(() => {
+    if (isOpen && siteCreateError.length > 0) {
+      scrollRegionRef.current?.scrollTo({ top: 0 });
+    }
+  }, [isOpen, siteCreateError]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -282,7 +177,7 @@ export function SiteCreateModal({
       setIsRecoveryBlocked(true);
       setCanDiscardRecovery(recovery.rawValue !== null);
       setResumePoint(initialResumePoint);
-      setAnalysisProgress(emptyProgress);
+      setRecoveryPhase(null);
       setSiteName("");
       setBaseUrl("");
       setSiteCreateError(SITE_RECOVERY_BLOCKED_MESSAGE);
@@ -297,13 +192,11 @@ export function SiteCreateModal({
       setSiteName(recovery.attempt.name);
       setBaseUrl(recovery.attempt.accessUrl);
       setResumePoint(restoredResumePoint);
-      setAnalysisProgress(progressFromPersistedAttempt(recovery.attempt));
+      setRecoveryPhase(recoveryPhaseFromPersistedAttempt(recovery.attempt));
       setSiteCreateError(
         recovery.isStale
           ? SITE_RECOVERY_STALE_MESSAGE
-          : recovery.attempt.phase === "target-reconciling"
-            ? TARGET_RECOVERY_MESSAGE
-            : REQUEST_RECOVERY_MESSAGE
+          : messageFromPersistedAttempt(recovery.attempt)
       );
       return;
     }
@@ -313,7 +206,7 @@ export function SiteCreateModal({
       setIsRecoveryBlocked(true);
       setCanDiscardRecovery(recovery.isStale);
       setResumePoint(initialResumePoint);
-      setAnalysisProgress(emptyProgress);
+      setRecoveryPhase(null);
       setSiteName("");
       setBaseUrl("");
       setSiteCreateError(
@@ -326,7 +219,7 @@ export function SiteCreateModal({
     setIsRecoveryBlocked(false);
     setCanDiscardRecovery(false);
     setResumePoint(initialResumePoint);
-    setAnalysisProgress(emptyProgress);
+    setRecoveryPhase(null);
     setSiteName("");
     setBaseUrl("");
     setSiteCreateError("");
@@ -334,46 +227,23 @@ export function SiteCreateModal({
 
   useEffect(() => {
     if (!isOpen) {
-      // Closing the modal must stop the analysis polling loop as well, otherwise
-      // it keeps hitting the backend until the 120 attempts run out.
-      cancelScope();
-      activeOperationIdRef.current = null;
-      submissionLockRef.current = false;
+      // Cancel only this form's submission/recovery. The dashboard owns accepted jobs.
+      cancelMutationOperation();
       discardLockRef.current = false;
-      if (autoCloseTimeoutRef.current !== null) {
-        window.clearTimeout(autoCloseTimeoutRef.current);
-        autoCloseTimeoutRef.current = null;
-      }
       setIsSubmittingSite(false);
       if (resumePoint.kind === "create") {
         setSiteName("");
         setBaseUrl("");
         setSiteCreateError("");
-        setAnalysisProgress(emptyProgress);
+        setRecoveryPhase(null);
       }
     }
-  }, [cancelScope, isOpen, resumePoint.kind]);
-
-  useEffect(
-    () => {
-      isMountedRef.current = true;
-      return () => {
-        isMountedRef.current = false;
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (autoCloseTimeoutRef.current !== null) {
-          window.clearTimeout(autoCloseTimeoutRef.current);
-          autoCloseTimeoutRef.current = null;
-        }
-      };
-    },
-    []
-  );
+  }, [cancelMutationOperation, isOpen, resumePoint.kind]);
 
   const handleDiscardRecovery = () => {
     if (
       discardLockRef.current ||
-      submissionLockRef.current ||
+      isMutationOperationLocked() ||
       (!isRecoveryBlocked && !canDiscardRecovery)
     ) {
       return;
@@ -385,7 +255,7 @@ export function SiteCreateModal({
     }
     if (
       !window.confirm(
-        "서버에 페이지 또는 분석 요청이 생성되었는지 확인하셨나요? 복구 정보를 삭제하면 같은 요청을 다시 보낼 수 있습니다."
+        "페이지나 분석이 이미 시작되지 않았는지 목록에서 확인하셨나요? 이전 작업 정보를 삭제하면 같은 요청이 다시 전송될 수 있습니다."
       )
     ) {
       return;
@@ -402,7 +272,7 @@ export function SiteCreateModal({
     setIsRecoveryBlocked(false);
     setCanDiscardRecovery(false);
     setResumePoint(initialResumePoint);
-    setAnalysisProgress(emptyProgress);
+    setRecoveryPhase(null);
     setSiteName("");
     setBaseUrl("");
     setSiteCreateError("");
@@ -410,7 +280,7 @@ export function SiteCreateModal({
   };
 
   const handleAddSite = async () => {
-    if (submissionLockRef.current) {
+    if (isMutationOperationLocked()) {
       return;
     }
     if (isRecoveryBlocked) {
@@ -425,30 +295,31 @@ export function SiteCreateModal({
       setSiteCreateError("페이지 이름과 주소를 입력해주세요.");
       return;
     }
+    if (resumePoint.kind === "create" && name.length > SITE_NAME_MAX_LENGTH) {
+      setSiteCreateError(`페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.`);
+      return;
+    }
+    if (resumePoint.kind === "create" && !isValidEvaluationTargetAccessUrl(accessUrl)) {
+      setSiteCreateError("올바른 페이지 주소를 입력해주세요. 예: https://example.com");
+      return;
+    }
 
-    submissionLockRef.current = true;
-    const operationId = Symbol("site-create-operation");
-    activeOperationIdRef.current = operationId;
-    const isActiveOperation = () =>
-      isMountedRef.current && activeOperationIdRef.current === operationId;
-    let keepLockedUntilAutoClose = false;
+    const operation = beginMutationOperation("site-create-operation");
+    if (operation === null) {
+      return;
+    }
+    const isActiveOperation = () => isMutationOperationCurrent(operation);
+
 
     // Aborts when the modal closes or unmounts.
-    const signal = beginScope();
+    const { signal } = operation;
 
     setIsSubmittingSite(true);
     setSiteCreateError("");
-    setAnalysisProgress({
-      phase: resumePoint.kind === "create" ? "creating" : "requesting",
-      requestId: null,
-      status: null,
-      message:
-        resumePoint.kind === "create"
-          ? "페이지를 프로젝트에 추가하고 있습니다."
-          : "등록된 페이지의 분석을 다시 시작하고 있습니다."
-    });
+    setRecoveryPhase(null);
 
     let nextResumePoint = resumePoint;
+
 
     try {
       let targetId: number;
@@ -474,19 +345,7 @@ export function SiteCreateModal({
       let requestId: number;
       if (nextResumePoint.kind === "poll") {
         requestId = nextResumePoint.requestId;
-        setAnalysisProgress({
-          phase: "running",
-          requestId,
-          status: analysisProgress.status,
-          message: "기존 분석 요청의 상태를 다시 확인하고 있습니다."
-        });
       } else {
-        setAnalysisProgress({
-          phase: "requesting",
-          requestId: null,
-          status: "PENDING",
-          message: "등록된 페이지에 분석 요청을 생성하고 있습니다."
-        });
         requestId = await onRequestEvaluationTargetAnalysis(
           targetId,
           signal,
@@ -500,90 +359,15 @@ export function SiteCreateModal({
         throwIfAborted(signal);
         nextResumePoint = { kind: "poll", targetId, requestId };
         setResumePoint(nextResumePoint);
-        setAnalysisProgress({
-          phase: "requesting",
-          requestId,
-          status: "PENDING",
-          message: "분석 요청을 생성했습니다."
-        });
       }
 
-      let finalStatus: string | null = null;
-      for (let attempt = 0; attempt < ANALYSIS_POLL_ATTEMPTS; attempt += 1) {
-        if (attempt > 0) {
-          await wait(ANALYSIS_POLL_INTERVAL_MS, signal);
-        }
-
-        const request = await runWithAnalysisNetworkDeadline(
-          (requestSignal) => fetchEvaluationRequest(requestId, requestSignal),
-          signal
-        );
-        if (!isActiveOperation()) {
-          return;
-        }
-        throwIfAborted(signal);
-        finalStatus = request.status;
-        setAnalysisProgress({
-          phase: phaseFromRequestStatus(request.status),
-          requestId,
-          status: request.status,
-          message: messageFromRequestStatus(request.status)
-        });
-
-        if (isFinalRequestStatus(request.status)) {
-          break;
-        }
-      }
-
-      if (finalStatus === "FAILED") {
-        nextResumePoint = {
-          kind: "request",
-          targetId,
-          previousFailedRequestId: requestId
-        };
-        setResumePoint(nextResumePoint);
-        const recovery = readSiteCreateRecovery();
-        if (
-          recovery.kind !== "valid" ||
-          recovery.attempt.phase !== "poll" ||
-          recovery.attempt.targetId !== targetId ||
-          recovery.attempt.requestId !== requestId ||
-          writeSiteCreateRecovery(
-            {
-              ...recovery.attempt,
-              phase: "request-ready",
-              targetId,
-              previousFailedRequestId: requestId
-            },
-            recovery.rawValue
-          ) === null
-        ) {
-          throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        }
-        throw new Error("분석 엔진 실행에 실패했습니다. 대상 사이트가 자동 브라우저 접속을 차단했거나 다른 페이지로 이동했을 수 있습니다.");
-      }
-
-      if (!isFinalRequestStatus(finalStatus)) {
-        throw new Error("분석 상태 확인 시간이 초과되었습니다.");
-      }
-
-      setAnalysisProgress({
-        phase: "saving",
-        requestId,
-        status: "COMPLETED",
-        message: "최신 결과를 대시보드에 반영하고 있습니다."
-      });
-      if (onAnalysisComplete) {
-        await runWithAnalysisNetworkDeadline(
-          (requestSignal) => onAnalysisComplete(requestSignal),
-          signal
-        );
-      }
-
-      if (!isActiveOperation()) {
-        return;
-      }
-      throwIfAborted(signal);
+      onAnalysisAccepted({
+        id: requestId,
+        evaluationTargetId: targetId,
+        status: "PENDING",
+        requestedAt: new Date().toISOString(),
+        updatedAt: ""
+      }, accessUrl);
 
       const completedRecovery = readSiteCreateRecovery();
       if (
@@ -594,32 +378,15 @@ export function SiteCreateModal({
             completedRecovery.attempt.requestId !== requestId ||
             !clearSiteCreateRecovery(completedRecovery.rawValue)))
       ) {
-        throw new Error(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
 
-      setAnalysisProgress({
-        phase: "completed",
-        requestId,
-        status: "COMPLETED",
-        message: "분석이 완료되었습니다."
-      });
+      setRecoveryPhase(null);
       setResumePoint(initialResumePoint);
       setSiteName("");
       setBaseUrl("");
 
-      keepLockedUntilAutoClose = true;
-      autoCloseTimeoutRef.current = window.setTimeout(() => {
-        autoCloseTimeoutRef.current = null;
-        if (activeOperationIdRef.current !== operationId) {
-          return;
-        }
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
-          setIsSubmittingSite(false);
-        }
-        onClose();
-      }, 900);
+      onClose();
     } catch (error) {
       if (isAbortError(error) || !isActiveOperation()) {
         return;
@@ -634,21 +401,38 @@ export function SiteCreateModal({
       );
       setSiteCreateError(message);
       if (nextResumePoint.kind === "create") {
-        setAnalysisProgress(emptyProgress);
+        const unresolvedRecovery = readSiteCreateRecovery();
+        if (
+          unresolvedRecovery.kind === "valid" &&
+          unresolvedRecovery.attempt.projectId === project.id
+        ) {
+          recoveryRawValueRef.current = unresolvedRecovery.rawValue;
+          setCanDiscardRecovery(true);
+        }
+        setRecoveryPhase(null);
       } else {
-        setAnalysisProgress((current) => ({
-          ...current,
-          phase: "failed",
-          message
-        }));
+        const persistedRecovery = readSiteCreateRecovery();
+        const persistedAttempt =
+          persistedRecovery.kind === "valid" &&
+          persistedRecovery.attempt.projectId === project.id
+            ? persistedRecovery.attempt
+            : null;
+        const nextRecoveryPhase: AnalysisRecoveryPhase = persistedAttempt?.phase === "request-reconciling" ||
+              persistedAttempt?.phase === "poll" ||
+              nextResumePoint.kind === "poll"
+            ? "paused"
+            : persistedAttempt?.phase === "request-ready" &&
+                persistedAttempt.previousFailedRequestId === null
+              ? "ready"
+              : "failed";
+        setRecoveryPhase(nextRecoveryPhase);
       }
     } finally {
-      if (!keepLockedUntilAutoClose && activeOperationIdRef.current === operationId) {
-        activeOperationIdRef.current = null;
-        submissionLockRef.current = false;
-        if (isMountedRef.current) {
-          setIsSubmittingSite(false);
-        }
+      // The request-recovery hook binds its in-memory directory lease to this
+      // operation scope. Ending the scope releases that lease while the
+      // persisted checkpoint remains available for a deliberate retry.
+      if (finishMutationOperation(operation)) {
+        setIsSubmittingSite(false);
       }
     }
   };
@@ -658,9 +442,10 @@ export function SiteCreateModal({
   }
 
   return (
-    <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-6">
+    <div className="dashboard-modal-layer">
       <div
         className="absolute inset-0"
+        aria-hidden="true"
         onClick={() => {
           if (!isSubmittingSite) {
             onClose();
@@ -674,110 +459,91 @@ export function SiteCreateModal({
         aria-modal="true"
         aria-labelledby="site-create-title"
         tabIndex={-1}
-        className={`relative z-10 max-h-[calc(100dvh-3rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-[18px] border p-6 ${
-          isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
-        }`}
+        className="dashboard-modal-surface dashboard-modal-surface--split w-full max-w-md"
       >
-        <div className="mb-4">
+        <header className="shrink-0 px-6 pb-4 pt-6">
           <h2
             id="site-create-title"
-            className={`text-lg font-semibold tracking-[-0.015em] ${
-              isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-            }`}
+            className="dashboard-modal-title"
           >
             페이지 추가
           </h2>
-        </div>
+        </header>
 
-        {siteCreateError.length > 0 && (
-          <div
-            className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
-              isDarkMode
-                ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
-                : "border-rose-200 bg-rose-50 text-rose-700"
-            }`}
-          >
-            {resumePoint.kind === "create" ? "페이지 추가 실패" : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
-          </div>
-        )}
+        <div
+          ref={scrollRegionRef}
+          data-site-create-scroll-region
+          role="region"
+          aria-label="페이지 추가 내용"
+          tabIndex={0}
+          className="site-create-modal-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-py-1.5 px-6 pb-1.5"
+        >
+          {siteCreateError.length > 0 && (
+            <div
+              role="alert"
+              className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
+                isAnalysisNotice
+                  ? isDarkMode
+                    ? "border-[#5b4a1f] bg-[#2a2519] text-[#ffd60a]"
+                    : "border-amber-200 bg-amber-50 text-amber-800"
+                  : isDarkMode
+                    ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
+                    : "border-rose-200 bg-rose-50 text-rose-700"
+              }`}
+            >
+              {resumePoint.kind === "create"
+                ? "페이지 추가 실패"
+                : recoveryPhase === "ready"
+                  ? "페이지 등록 완료 · 분석 시작 전"
+                  : recoveryPhase === "paused"
+                  ? "페이지 등록 완료 · 상태 확인 필요"
+                  : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
+            </div>
+          )}
 
-        {hasAnalysisProgress ? (
-          <AnalysisProgressPanel progress={analysisProgress} resumePoint={resumePoint} isDarkMode={isDarkMode} />
-        ) : (
           <div className="grid gap-3.5">
             <label className="block">
-              <span
-                className={`mb-1.5 block text-xs font-semibold ${
-                  isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
-                }`}
-              >
-                페이지 이름
-              </span>
+              <span className="dashboard-modal-label">페이지 이름</span>
               <Input
                 value={siteName}
                 onChange={(event) => setSiteName(event.target.value)}
-                disabled={isRecoveryBlocked}
-                maxLength={100}
+                disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
+                maxLength={SITE_NAME_MAX_LENGTH}
                 placeholder="페이지 이름 입력"
-                className={
-                  isDarkMode
-                    ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
-                    : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
-                }
+                className="dashboard-modal-input"
               />
             </label>
 
             <label className="block">
-              <span
-                className={`mb-1.5 block text-xs font-semibold ${
-                  isDarkMode ? "text-[#d1d1d6]" : "text-[#3a3a3c]"
-                }`}
-              >
-                페이지 주소
-              </span>
+              <span className="dashboard-modal-label">페이지 주소</span>
               <Input
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
-                disabled={isRecoveryBlocked}
-                maxLength={2048}
+                disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
+                maxLength={SITE_URL_MAX_LENGTH}
                 placeholder="https://example.com"
-                className={
-                  isDarkMode
-                    ? "border-[#3a3a3c] bg-[#242426] text-[#f5f5f7] placeholder:text-[#8e8e93] focus-visible:border-white focus-visible:ring-0"
-                    : "border-[#d2d2d7] bg-white text-[#1d1d1f] placeholder:text-[#86868b] focus-visible:border-[#1d1d1f] focus-visible:ring-0"
-                }
+                className="dashboard-modal-input"
               />
             </label>
           </div>
-        )}
+        </div>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
-          {hasAnalysisProgress ? (
-            <p className={`text-xs font-medium ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
-              {isSubmittingSite
-                ? "분석 중에는 창을 닫을 수 없습니다."
-                : resumePoint.kind === "create"
-                  ? "입력 내용을 유지한 채 다시 시도할 수 있습니다."
-                  : "페이지는 등록되어 있으며 분석 단계만 다시 시도합니다."}
-            </p>
-          ) : (
-            <span />
-          )}
-          <div className="flex items-center justify-end gap-2">
+        <div
+          data-site-create-footer
+          className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-3.5 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span />
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
             {(isRecoveryBlocked || canDiscardRecovery) && (
               <Button
                 type="button"
-                variant="secondary"
+                variant="destructive"
                 size="sm"
                 disabled={isSubmittingSite || !canDiscardRecovery}
                 onClick={handleDiscardRecovery}
-                className={
-                  isDarkMode
-                    ? "h-7 bg-[#3a2024] px-3 text-xs text-[#ff9aa8] hover:bg-[#4a272d]"
-                    : "h-7 bg-rose-50 px-3 text-xs text-rose-700 hover:bg-rose-100"
-                }
+                className="dashboard-modal-button dashboard-modal-button--danger"
               >
-                복구 정보 삭제
+                이전 작업 정보 삭제
               </Button>
             )}
             <Button
@@ -786,141 +552,36 @@ export function SiteCreateModal({
               size="sm"
               disabled={isSubmittingSite}
               onClick={onClose}
-              className={
-                isDarkMode
-                  ? "h-7 bg-[#2c2c2e] px-5 text-xs text-[#f5f5f7] hover:bg-[#3a3a3c]"
-                  : "h-7 bg-[#e5e5ea] px-5 text-xs text-[#1d1d1f] hover:bg-[#d2d2d7]"
-              }
+              className="dashboard-modal-button"
             >
-              {hasAnalysisProgress && analysisProgress.phase !== "failed"
-                ? "자동 닫힘"
-                : analysisProgress.phase === "failed" && resumePoint.kind !== "create"
-                  ? "닫기"
-                  : "취소"}
+              {resumePoint.kind !== "create" ? "닫기" : "취소"}
             </Button>
 
-            {!hasAnalysisProgress && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={isSubmittingSite || isRecoveryBlocked}
-                onClick={() => {
-                  void handleAddSite();
-                }}
-                className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
-              >
-                분석 시작
-              </Button>
-            )}
-
-            {analysisProgress.phase === "failed" && (
-              <Button
-                type="button"
-                size="sm"
-                disabled={isSubmittingSite || isRecoveryBlocked}
-                onClick={() => {
-                  void handleAddSite();
-                }}
-                className="h-7 bg-[#0071e3] px-5 text-xs font-semibold text-white hover:bg-[#0066cc]"
-              >
-                {resumePoint.kind === "create"
-                  ? "다시 시도"
-                  : resumePoint.kind === "request"
-                    ? "분석 요청 다시 시도"
-                    : "상태 확인 다시 시도"}
-              </Button>
-            )}
+            <Button
+              type="button"
+              size="sm"
+              disabled={isSubmittingSite || isRecoveryBlocked}
+              aria-busy={isSubmittingSite}
+              onClick={() => {
+                void handleAddSite();
+              }}
+              className="dashboard-modal-button dashboard-modal-button--primary"
+            >
+              {isSubmittingSite
+                ? "요청 중…"
+                : recoveryPhase === null || recoveryPhase === "ready"
+                  ? "분석 시작"
+                  : recoveryPhase === "paused" && resumePoint.kind === "request"
+                    ? "분석 시작 여부 확인"
+                    : resumePoint.kind === "create"
+                      ? "다시 시도"
+                      : resumePoint.kind === "request"
+                        ? "분석 요청 다시 시도"
+                        : "상태 확인 다시 시도"}
+            </Button>
           </div>
         </div>
       </article>
     </div>
-  );
-}
-
-function AnalysisProgressPanel({
-  progress,
-  resumePoint,
-  isDarkMode
-}: {
-  progress: AnalysisProgress;
-  resumePoint: AnalysisResumePoint;
-  isDarkMode: boolean;
-}) {
-  const activeStepIndex = getActiveStepIndex(progress, resumePoint);
-
-  return (
-    <section
-      aria-live="polite"
-      className={`rounded-xl border px-4 py-4 ${
-        isDarkMode ? "border-[#3a3a3c] bg-[#242426]" : "border-[#d2d2d7] bg-[#f5f5f7]"
-      }`}
-    >
-      <div className="flex min-w-0 items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className={`text-sm font-semibold ${isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"}`}>
-            {progress.phase === "failed" ? "분석을 완료하지 못했습니다" : "분석 진행 중"}
-          </p>
-          <p className={`mt-1 text-xs ${isDarkMode ? "text-[#a1a1a6]" : "text-[#68686d]"}`}>{progress.message}</p>
-        </div>
-        {progress.requestId !== null && (
-          <span
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-              isDarkMode ? "bg-[#2c2c2e] text-[#d1d1d6]" : "bg-white text-[#68686d]"
-            }`}
-          >
-            요청 #{progress.requestId}
-          </span>
-        )}
-      </div>
-
-      <ol className="mt-5 grid gap-3">
-        {progressSteps.map((step, index) => {
-          const isCompleted = progress.phase === "completed" || index < activeStepIndex;
-          const isActive = index === activeStepIndex && progress.phase !== "completed" && progress.phase !== "failed";
-          const isFailed = progress.phase === "failed" && index === activeStepIndex;
-
-          return (
-            <li
-              key={step.key}
-              className={`flex items-start gap-3 rounded-lg px-3 py-3 ${
-                isDarkMode ? "bg-[#1c1c1e]" : "bg-white"
-              }`}
-            >
-              <span
-                className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                  isCompleted
-                    ? "bg-emerald-50 text-emerald-600"
-                    : isFailed
-                      ? "bg-rose-50 text-rose-600"
-                      : isActive
-                        ? "bg-[#0071e3]/15 text-[#2997ff]"
-                        : isDarkMode
-                          ? "bg-[#2c2c2e] text-[#636366]"
-                          : "bg-[#e5e5ea] text-[#8e8e93]"
-                }`}
-              >
-                {isCompleted ? (
-                  <CheckCircle2 size={16} />
-                ) : isFailed ? (
-                  <XCircle size={16} />
-                ) : isActive ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Circle size={14} />
-                )}
-              </span>
-              <span className="min-w-0">
-                <span className={`block text-sm font-semibold ${isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"}`}>
-                  {step.label}
-                </span>
-                <span className={`mt-0.5 block text-xs leading-5 ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
-                  {step.description}
-                </span>
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
   );
 }

@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 
 import { lenses, criterionChain, storyExample, type HighlightVisual, type Lens } from "./landing-content";
 import { SWAP_DURATION, useLandingReducedMotion } from "./landing-motion";
@@ -24,134 +24,6 @@ export function FocusBracket({ tone = "accent" }: { tone?: "accent" | "quiet" })
       <i />
       <i />
     </span>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Hero stage — page layers, scan beam, brackets, signal flow, result  */
-/* ------------------------------------------------------------------ */
-
-const HERO_FINDINGS = [
-  { criterion: "KWCAG 5.1.1", label: "대체 텍스트 없음", detail: 'alt=""' },
-  { criterion: "KWCAG 5.4.3", label: "명도 대비 부족", detail: "2.6 : 1" },
-] as const;
-
-export function ScanStage() {
-  const reduce = useLandingReducedMotion();
-  /* The sweep runs twice and then stops: no perpetual animation. */
-  const beamState = reduce ? "static" : "sweep";
-
-  return (
-    <div className="ua-stage" data-beam={beamState}>
-      <div className="ua-stage__scene">
-        <span className="ua-stage__ghost ua-stage__ghost--far" aria-hidden="true" />
-        <span className="ua-stage__ghost ua-stage__ghost--near" aria-hidden="true" />
-
-        <div className="ua-stage__page">
-          <div className="ua-stage__chrome" aria-hidden="true">
-            <span className="ua-stage__dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span className="ua-stage__address">example.ac.kr</span>
-          </div>
-
-          <div className="ua-stage__canvas">
-            <div className="ua-stage__nav" aria-hidden="true">
-              <span className="ua-stage__nav-mark" />
-              <span />
-              <span />
-              <span />
-            </div>
-
-            {/* Both findings sit in one row so the whole schematic reads inside a
-                single screen and both signal paths reach the result panel. */}
-            <div className="ua-stage__row">
-              <div className="ua-stage__copy">
-                <span className="ua-stage__bar ua-stage__bar--eyebrow" aria-hidden="true" />
-                <span className="ua-stage__bar ua-stage__bar--title" aria-hidden="true" />
-                <span className="ua-stage__bar ua-stage__bar--title ua-stage__bar--short" aria-hidden="true" />
-                <span className="ua-stage__bar ua-stage__bar--text" aria-hidden="true" />
-
-                <span className="ua-stage__link-slot" data-flagged="true">
-                  <span className="ua-stage__faint-link" aria-hidden="true">
-                    자세히 보기
-                  </span>
-                  <motion.span
-                    className="ua-stage__marker ua-stage__marker--inline"
-                    aria-hidden="true"
-                    initial={reduce ? false : { opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: reduce ? 0 : 0.24, delay: reduce ? 0 : 1.15 }}
-                  >
-                    2.6 : 1
-                  </motion.span>
-                  <motion.span
-                    className="ua-stage__bracket-slot"
-                    initial={reduce ? false : { opacity: 0, scale: 1.04 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: reduce ? 0 : 0.24, delay: reduce ? 0 : 1.07 }}
-                  >
-                    <FocusBracket />
-                  </motion.span>
-                </span>
-              </div>
-
-              <div className="ua-stage__media" data-flagged="true">
-                <span className="ua-stage__media-art" aria-hidden="true">
-                  <i />
-                  <i />
-                </span>
-                <motion.span
-                  className="ua-stage__marker"
-                  aria-hidden="true"
-                  initial={reduce ? false : { opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: reduce ? 0 : 0.24, delay: reduce ? 0 : 0.7 }}
-                >
-                  alt=&quot;&quot;
-                </motion.span>
-                <motion.span
-                  className="ua-stage__bracket-slot"
-                  initial={reduce ? false : { opacity: 0, scale: 1.04 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: reduce ? 0 : 0.24, delay: reduce ? 0 : 0.62 }}
-                >
-                  <FocusBracket />
-                </motion.span>
-              </div>
-            </div>
-          </div>
-
-          <span className="ua-stage__beam-track" aria-hidden="true">
-            <span className="ua-stage__beam" />
-          </span>
-        </div>
-
-        <svg className="ua-stage__signals" viewBox="0 0 120 200" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0 54 C 58 54, 62 78, 120 78" />
-          <path d="M0 150 C 58 150, 62 122, 120 122" />
-        </svg>
-
-        <div className="ua-stage__result">
-          <p className="ua-stage__result-kicker">예시 분석 결과</p>
-          <ul className="ua-stage__result-list">
-            {HERO_FINDINGS.map((finding) => (
-              <li key={finding.criterion}>
-                <span className="ua-stage__result-criterion">{finding.criterion}</span>
-                <strong>{finding.label}</strong>
-                <code>{finding.detail}</code>
-              </li>
-            ))}
-          </ul>
-          <p className="ua-stage__result-state">
-            <span className="ua-dot" aria-hidden="true" />
-            {storyExample.reviewState}
-          </p>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -222,7 +94,7 @@ export function LensResult({ lens }: { lens: Lens }) {
   return (
     <div className="ua-lens-result" aria-live="polite" aria-atomic="true">
       <AnimatePresence mode="wait" initial={false}>
-        <motion.div
+        <m.div
           key={lens.id}
           initial={reduce ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -248,7 +120,7 @@ export function LensResult({ lens }: { lens: Lens }) {
               </dd>
             </div>
           </dl>
-        </motion.div>
+        </m.div>
       </AnimatePresence>
     </div>
   );

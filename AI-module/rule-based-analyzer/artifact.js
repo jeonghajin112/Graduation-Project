@@ -526,9 +526,14 @@ function localDateTimeIso(date = new Date()) {
 async function buildDomReplayArtifactMetadata(page, options) {
   const { requestedUrl, finalUrl = page.url() } = options;
   const metrics = await measurePage(page);
+  const liveFinalUrl = new URL(finalUrl);
+  // The live-report gateway does not accept fragments. They identify a
+  // client-side position, not a different document, so retain the analyzed
+  // resource identity while storing a launchable URL.
+  liveFinalUrl.hash = '';
   return {
     requestedUrl,
-    finalUrl,
+    finalUrl: liveFinalUrl.href,
     // Backend contract uses Java LocalDateTime rather than an offset-aware
     // timestamp, so serialize the scanner's local wall time without a trailing Z.
     capturedAt: localDateTimeIso(),
@@ -537,13 +542,12 @@ async function buildDomReplayArtifactMetadata(page, options) {
     deviceScaleFactor: metrics.deviceScaleFactor,
     pageWidthCssPx: metrics.pageWidthCssPx,
     pageHeightCssPx: metrics.pageHeightCssPx,
-    captureMode: 'DOM_REPLAY',
   };
 }
 
 /**
- * Serialize a static DOM replay from either the current rendered document or
- * retained response HTML. Executable content is removed from the stored copy;
+ * Serialize an internal DOM snapshot from either the current rendered document
+ * or retained response HTML. Executable content is removed from the local copy;
  * the page used for axe analysis is not mutated by this function.
  */
 async function serializeDomReplayHtml(page, options = {}) {

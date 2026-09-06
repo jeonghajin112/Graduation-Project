@@ -13,7 +13,8 @@ public record IssueLocatorResponse(
         Double height,
         String coordinateSpace,
         Boolean visible,
-        String htmlSnippet
+        String htmlSnippet,
+        IssueLocatorCarouselContextResponse carouselContext
 ) {
     public static IssueLocatorResponse from(IssueLocator locator) {
         if (locator == null) {
@@ -28,7 +29,8 @@ public record IssueLocatorResponse(
                 locator.height(),
                 locator.coordinateSpace(),
                 locator.visible(),
-                locator.htmlSnippet()
+                locator.htmlSnippet(),
+                IssueLocatorCarouselContextResponse.from(locator.carouselContext())
         );
     }
 }

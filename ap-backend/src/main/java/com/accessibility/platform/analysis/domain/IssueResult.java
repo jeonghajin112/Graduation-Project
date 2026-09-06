@@ -11,7 +11,13 @@ import java.util.List;
 
 @Getter
 @Entity
-@Table(name = "issue_result")
+@Table(
+        name = "issue_result",
+        indexes = @Index(
+                name = "idx_issue_result_analysis_severity_code",
+                columnList = "analysis_result_id,severity,issue_code"
+        )
+)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class IssueResult extends BaseTimeEntity {
 
@@ -62,6 +68,15 @@ public class IssueResult extends BaseTimeEntity {
     @Lob
     private String locatorHtmlSnippet;
 
+    @Column(name = "locator_carousel_id")
+    private Integer locatorCarouselId;
+
+    @Column(name = "locator_carousel_slide_index")
+    private Integer locatorCarouselSlideIndex;
+
+    @Column(name = "locator_carousel_slide_count")
+    private Integer locatorCarouselSlideCount;
+
     public IssueResult(AnalysisResult analysisResult, String issueCode, String issueTitle, Severity severity, String locationPath, String message) {
         this.analysisResult = analysisResult;
         this.issueCode = issueCode;
@@ -86,9 +101,22 @@ public class IssueResult extends BaseTimeEntity {
         this.locatorCoordinateSpace = locator.coordinateSpace();
         this.locatorVisible = locator.visible();
         this.locatorHtmlSnippet = locator.htmlSnippet();
+        IssueLocatorCarouselContext carouselContext = locator.carouselContext();
+        this.locatorCarouselId = carouselContext == null ? null : carouselContext.carouselId();
+        this.locatorCarouselSlideIndex = carouselContext == null ? null : carouselContext.slideIndex();
+        this.locatorCarouselSlideCount = carouselContext == null ? null : carouselContext.slideCount();
+    }
+
+    public void reclassify(String issueCode, String issueTitle) {
+        if (issueCode == null || issueCode.isBlank() || issueTitle == null || issueTitle.isBlank()) {
+            throw new IllegalArgumentException("Issue classification must include a code and title");
+        }
+        this.issueCode = issueCode;
+        this.issueTitle = issueTitle;
     }
 
     public IssueLocator getLocator() {
+        IssueLocatorCarouselContext carouselContext = getCarouselContext();
         boolean hasLocator = locatorKind != null
                 || (locatorPathSteps != null && !locatorPathSteps.isEmpty())
                 || locatorX != null
@@ -97,7 +125,8 @@ public class IssueResult extends BaseTimeEntity {
                 || locatorHeight != null
                 || locatorCoordinateSpace != null
                 || locatorVisible != null
-                || locatorHtmlSnippet != null;
+                || locatorHtmlSnippet != null
+                || carouselContext != null;
         if (!hasLocator) {
             return null;
         }
@@ -110,7 +139,26 @@ public class IssueResult extends BaseTimeEntity {
                 locatorHeight,
                 locatorCoordinateSpace,
                 locatorVisible,
-                locatorHtmlSnippet
+                locatorHtmlSnippet,
+                carouselContext
+        );
+    }
+
+    private IssueLocatorCarouselContext getCarouselContext() {
+        if (locatorCarouselId == null
+                || locatorCarouselSlideIndex == null
+                || locatorCarouselSlideCount == null
+                || !IssueLocatorCarouselContext.isValid(
+                        locatorCarouselId,
+                        locatorCarouselSlideIndex,
+                        locatorCarouselSlideCount
+                )) {
+            return null;
+        }
+        return new IssueLocatorCarouselContext(
+                locatorCarouselId,
+                locatorCarouselSlideIndex,
+                locatorCarouselSlideCount
         );
     }
 }

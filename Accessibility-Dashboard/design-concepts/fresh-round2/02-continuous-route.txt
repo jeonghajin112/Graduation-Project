@@ -1,9 +1,0 @@
-Use case: ui-mockup.
-Asset type: second-round non-shipping refinement of a Korean web accessibility landing-page direction.
-Reference role: Image 1 defines the winning “signal manifesto” ism: carbon-black paper, warm-white Korean type, sulfur-yellow signal accent, asymmetric full-bleed stage, crisp geometry. Preserve the visual identity.
-Desired result: Refine only the information-flow grammar by replacing disconnected numbered annotations with one continuous sulfur-yellow route that visibly connects the hero to the next section.
-Change only: Draw one 2px sulfur route beginning near the CTA, turning through three distinct focus points in the full-width stage, and continuing past the fold into a vertically structured “발견한다 → 이해한다 → 이어간다” sequence. Use small circles and right-angle turns, no map rainbow and no separate cards.
-Preserve exactly: carbon #10110F background, warm white #F2F0E8 type, sulfur #D8F04A only accent, headline around 64-68px equivalent and weight 600, generous black negative space, sharp rules, paper grain, sparse top navigation, one primary CTA.
-Text (verbatim): Brand “UNI ACCESS”. Korean headline exactly “접근성은 점수가 아니라, 고칠 수 있는 일이어야 합니다.” CTA exactly “대시보드 열기”. Optional route labels exactly “발견한다”, “이해한다”, “이어간다”. No other readable text.
-Composition/framing: 1536x1024 landscape full-page view, straight-on, no device. CTA visible above fold, connected route and next section visible at bottom.
-Do not add or remove: No URL field, fake dashboard, fake numbers, gradients, glow, rounded cards, three-column features, icons, photos, extra CTA, logos, or watermarks.

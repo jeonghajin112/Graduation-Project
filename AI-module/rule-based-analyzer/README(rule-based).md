@@ -11,7 +11,7 @@ Playwright로 웹페이지를 렌더링하고, axe-core로 접근성을 검사�
 rule-based-analyzer/
 ├── run.js        진입점. URL을 받아 전체 파이프라인을 실행
 ├── carousel-audit.js  숨은 캐러셀 슬라이드 상태를 제한적으로 순회해 axe 결과 병합
-├── artifact.js   DOM replay 직렬화와 typed locator 생성
+├── artifact.js   내부 분석용 DOM snapshot 직렬화와 typed locator 생성
 ├── adapter.js    axe-core 결과(WCAG 기준) → KWCAG 2.2 33개 항목으로 변환
 ├── mapping.js    KWCAG ↔ WCAG ↔ axe-core 규칙 ID 매핑 테이블
 └── scorer.js     KWCAG 변환 결과 → 100점 감점제 점수 산출
@@ -35,8 +35,8 @@ node run.js https://www.mohw.go.kr result.json
 |---|---|
 | `result.json` | 규칙기반모듈 최종 결과(내부 형식) (디버깅용, camelCase) |
 | `result_api.json` | result.json을 백엔드 스펙 형식으로 변환한 결과 (run_all.py가 읽어서 통합에 사용) |
-| `result.html` | 스크립트를 제거한 UTF-8 DOM replay (문장난이도·대시보드 입력용) |
-| `result_artifact.json` | 요청/최종 URL, 뷰포트·문서 크기, `DOM_REPLAY` 메타데이터 |
+| `result.html` | 스크립트를 제거한 UTF-8 DOM snapshot (문장난이도 내부 입력용, 외부 미전송) |
+| `result_artifact.json` | 최종 평가 JSON에 포함할 요청/최종 URL, 뷰포트·문서 크기 메타데이터 |
 
 > 실제 서비스에서는 `run_all.py`가 이 파일을 호출하여 결과를 `output/` 폴더에 저장한다.  
 > 단독 실행 시에는 `rule-based-analyzer/` 폴더 안에 결과 파일이 생성된다.
@@ -57,8 +57,8 @@ node run.js https://www.mohw.go.kr result.json
     │       │  100점 감점제 점수 산출
     │       ↓
     ├─ result.json / result_api.json 저장
-    ├─ result.html 저장 → text_extractor.py + 대시보드 DOM replay 입력
-    └─ result_artifact.json 저장 → replay 크기/URL 메타데이터
+    ├─ result.html 저장 → text_extractor.py 내부 입력
+    └─ result_artifact.json 저장 → result_final.json의 capture_metadata로 통합
 ```
 
 ---
@@ -72,7 +72,7 @@ node run.js https://www.mohw.go.kr result.json
 1. Playwright로 헤드리스 Chrome을 띄워 페이지 렌더링
 2. axe-core 실행 (기준 상태 + 제한된 캐러셀 슬라이드 상태, WCAG 2.0/2.1/2.2 A/AA)
 3. typed locator(`pathSteps` + 문서 CSS 좌표) 해석
-4. 같은 일시정지 DOM에서 정적 replay HTML과 `DOM_REPLAY` 메타데이터 저장
+4. 같은 일시정지 DOM에서 내부 분석용 HTML과 캡처 메타데이터 저장
 5. `adapter.convert()` 호출 → KWCAG 변환
 6. `scorer.score()` 호출 → 점수 산출
 7. `toApiFormat()` 호출 → snake_case 변환 후 JSON 저장
@@ -80,7 +80,9 @@ node run.js https://www.mohw.go.kr result.json
 **Playwright는 run.js 한 곳에서만 실행**  
 규칙 기반 모듈과 AI 모듈이 각자 브라우저를 띄우면 리소스가 낭비되고, 렌더링 시점이 달라 데이터 일관성이 깨진다. run.js에서 axe와 locator가 본 동일한 일시정지 DOM을 정적 HTML로 저장하고, 다른 모듈은 그 파일을 소비한다. 영구 PNG 산출물은 생성하지 않으며 locator 좌표도 스크린샷 경계로 자르지 않는다. `run_all.py`가 `--cv-screenshot`을 지정한 경우에만 같은 렌더를 OS 임시 PNG로 만들어 CV 입력에 사용하며, 오케스트레이터가 성공·실패와 무관하게 즉시 삭제한다.
 
-초기 2xx 문서가 대기 중 교차 출처 STCLab/CAPTCHA/자동화 챌린지로 이동하면,
+초기 2xx 문서가 대기 중 교차 출처 STCLab/CAPTCHA/자동화 챌린지로 이동하거나,
+같은 URL에서 BotManager의 `#bm-wait-background`와 `#loading-overlay`가 실제 표시되고
+그 밖의 본문이 보이지 않는 대기 화면으로 바뀌면,
 최초 main-response HTML이 유효할 때에만 script·inline handler·meta refresh를 제거한
 정적 복제본을 분석한다. 콘솔과 HTML의
 `data-accessibility-replay-source="INITIAL_RESPONSE_STATIC"`로 이 사실을 표시하며,
@@ -114,10 +116,9 @@ ID(1-based), 논리 슬라이드 index(0-based), clone을 제외한 논리 슬�
          data-ua-audit-slide-count="5">...</section>
 ```
 
-숨은 이슈의 `locator.pathSteps`는 해당 후손 노드를 가리킨다. replay bridge는 이
-path를 해석한 뒤 가장 가까운 위 annotation을 읽어 필요한 슬라이드를 연다.
-분석기 내부 JSON의 `locator.carouselContext`는 같은 값을 진단용으로도 보존하지만,
-백엔드 DTO 계약에는 의존하지 않는다.
+숨은 이슈의 `locator.pathSteps`는 해당 후손 노드를 가리킨다. 분석기 내부 JSON의
+`locator.carouselContext`는 같은 캐러셀 ID와 슬라이드 위치를 보존한다.
+`result.html`의 annotation은 로컬 분석·회귀 진단용이며 백엔드에 업로드하지 않는다.
 
 브라우저 회귀 테스트는 다음 명령으로 실행한다.
 
@@ -240,7 +241,7 @@ axe-core는 KWCAG 33개 항목 중 규칙 기반으로 자동 검사 가능한 �
 | 모듈 | 담당 항목 예시 |
 |---|---|
 | 규칙기반 (이 모듈) | 대체 텍스트, 명도 대비, heading 구조, 레이블 등 |
-| AI 분석 (text-level-analyzer) | 명확한 지시사항 제공 (5.3.3) — 텍스트 난이도 |
+| AI 분석 (text-level-analyzer) | 명확한 지시사항(5.3.3), 링크 텍스트(6.4.3), 레이블(7.3.2), 제목(6.4.2), WCAG 3.1.5 읽기 수준 |
 | CV 분석 (cv-analyzer) | 이미지 내 텍스트 명암비, 콘텐츠 간 구분 |
 | 수동 검토 | 키보드 사용 보장, 깜빡임 제한, 포인터 입력 등 |
 

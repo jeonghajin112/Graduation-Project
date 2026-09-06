@@ -4,8 +4,9 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { chromium } from "playwright";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const baseUrl = process.env.SIDEBAR_TEST_BASE_URL ?? "http://localhost:5173";
+const baseUrl = resolveTestBaseUrl("SIDEBAR_TEST_BASE_URL");
 const projectId = Number(process.env.SIDEBAR_TEST_PROJECT_ID ?? "1");
 const pageId = Number(process.env.SIDEBAR_TEST_PAGE_ID ?? "33");
 const projectName = process.env.SIDEBAR_TEST_PROJECT_NAME ?? "AI Module Imported";

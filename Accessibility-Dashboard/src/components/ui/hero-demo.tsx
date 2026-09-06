@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { HeroSection } from '@/components/ui/hero-section-1';
+import { LandingPage } from "@/components/landing/landing-page";
 
 export function HeroDemo() {
   const navigate = useNavigate();
-  return <HeroSection onLoginClick={() => navigate('/analyze', { replace: true })} />;
+  return <LandingPage onEnterApp={() => navigate("/analyze", { replace: true })} />;
 }

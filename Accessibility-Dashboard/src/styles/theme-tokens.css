@@ -1,9 +1,7 @@
 @layer base {
   .bridge-dashboard {
-    /* Stage 1: Coral action → semantic action; danger → v2 danger. Names preserved. */
+    /* Stage 1: Coral action → semantic action. */
     --dashboard-accent: var(--primary, #0071e3);
-    --dashboard-accent-hover: #0066cc;
-    --dashboard-danger: var(--destructive, #d70015);
     /* Control radius (8px) — selected sidebar rows must not use pill / 9999px */
     --dashboard-sidebar-item-radius: 0.5rem;
     --dashboard-sidebar-item-active-border: transparent;
@@ -39,7 +37,6 @@
     --dashboard-text-muted: var(--muted-foreground, #6e6e73);
     --dashboard-text-secondary: var(--muted-foreground, #6e6e73);
     --dashboard-drawer-bg: rgba(255, 255, 255, 0.995);
-    --dashboard-drawer-shadow: 0 28px 76px rgba(31, 27, 24, 0.13);
     --dashboard-header-shadow: 0 14px 28px rgba(17, 17, 17, 0.14);
     /* Tree-navigation selection: quiet neutral surface; blue is reserved for icons/focus. */
     --dashboard-sidebar-active-bg: #e5e5ea;
@@ -49,24 +46,12 @@
     --dashboard-sidebar-hover-text: #4b4b4f;
     --dashboard-sidebar-item-hover-bg: #e5e5ea;
     --dashboard-sidebar-item-hover-border: transparent;
-    --dashboard-menu-trigger-bg: rgba(255, 255, 255, 0.8);
-    --dashboard-menu-trigger-text: #0f172a;
-    --dashboard-date-day-bg: transparent;
-    --dashboard-date-day-border: rgba(31, 27, 24, 0.13);
-    --dashboard-date-separator: rgba(31, 27, 24, 0.12);
-    --recent-scan-card-bg: var(--card, #ffffff);
-    --recent-scan-card-border: transparent;
-    --recent-scan-pager-dot-bg: #9ca3af;
-    --recent-scan-pager-dot-hover-bg: #6b7280;
     --project-table-head-bg: #f5f5f7;
     --project-table-row-hover-bg: #f5f5f7;
     --report-search-popover-bg: var(--popover, #ffffff);
-    --report-search-option-text: #64748b;
-    --report-search-option-hover-bg: #f8fafc;
-    --report-search-option-hover-text: #475569;
-    --site-score-line-color: #111111;
+    --site-score-line-color: var(--dashboard-accent);
     --site-score-grid-color: #d8dee8;
-    /* Page detail local extension. Values follow DESIGN.md semantic statuses.
+    /* Page detail local extension. Values follow docs/design-system.md semantic statuses.
        Kept scoped to the dashboard (no new global token API). */
     --site-issue-bar-color: #c2410c;
     --site-chart-cursor-color: #6e6e73;
@@ -77,7 +62,6 @@
     --site-glass-blur: 22px;
     --site-glass-shadow: 0 18px 44px rgba(31, 27, 24, 0.1);
     --site-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-    --site-hairline: transparent;
     /* Structural dividers stay visible even though box borders are removed. */
     --site-divider: rgba(60, 60, 67, 0.18);
     --site-row-surface: rgba(120, 120, 128, 0.07);
@@ -111,7 +95,6 @@
     --dashboard-text-muted: var(--muted-foreground, #a1a1a6);
     --dashboard-text-secondary: var(--muted-foreground, #a1a1a6);
     --dashboard-drawer-bg: var(--card, #1c1c1e);
-    --dashboard-drawer-shadow: 0 28px 76px rgba(0, 0, 0, 0.5);
     --dashboard-header-shadow: 0 14px 28px rgba(0, 0, 0, 0.4);
     /* Reference tree: dark selected row, white ink, blue icons. */
     --dashboard-sidebar-active-bg: rgba(255, 255, 255, 0.055);
@@ -120,22 +103,10 @@
     --dashboard-sidebar-hover-text: #f5f5f7;
     --dashboard-sidebar-item-hover-bg: rgba(255, 255, 255, 0.04);
     --dashboard-sidebar-item-hover-border: transparent;
-    --dashboard-menu-trigger-bg: #1f1f1f;
-    --dashboard-menu-trigger-text: #ffffff;
-    --dashboard-date-day-bg: rgba(255, 255, 255, 0.045);
-    --dashboard-date-day-border: rgba(255, 255, 255, 0.1);
-    --dashboard-date-separator: rgba(255, 255, 255, 0.14);
-    --recent-scan-card-bg: var(--card, #1c1c1e);
-    --recent-scan-card-border: #222222;
-    --recent-scan-pager-dot-bg: #4b5563;
-    --recent-scan-pager-dot-hover-bg: #6b7280;
     --project-table-head-bg: #242426;
     --project-table-row-hover-bg: #242426;
     --report-search-popover-bg: var(--popover, #1c1c1e);
-    --report-search-option-text: #b3b3b3;
-    --report-search-option-hover-bg: #141414;
-    --report-search-option-hover-text: #e5e7eb;
-    --site-score-line-color: #f8fafc;
+    --site-score-line-color: var(--dashboard-accent);
     --site-score-grid-color: rgba(255, 255, 255, 0.14);
     /* Dark severity/chart ink lifted for AA on off-black surfaces. */
     --site-issue-bar-color: #ffb340;
@@ -145,7 +116,6 @@
     --site-glass-blur: 22px;
     --site-glass-shadow: 0 20px 48px rgba(0, 0, 0, 0.38);
     --site-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    --site-hairline: transparent;
     --site-divider: rgba(255, 255, 255, 0.14);
     --site-row-surface: rgba(255, 255, 255, 0.07);
     --site-inset-surface: rgba(255, 255, 255, 0.11);

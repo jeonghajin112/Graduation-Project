@@ -14,8 +14,8 @@
  *   [이 파일] ─ 규칙 기반 모듈 (axe-core + KWCAG 매핑 + 점수화)
  *             ├─ 출력 1: result.json          (디버깅용, 내부 형식)
  *             ├─ 출력 2: result_api.json      (백엔드 전송용, API 스펙 형식)
- *             ├─ 출력 3: result.html          (정적 DOM replay)
- *             └─ 출력 4: result_artifact.json (DOM replay 메타데이터)
+ *             ├─ 출력 3: result.html          (내부 텍스트 분석용 DOM snapshot)
+ *             └─ 출력 4: result_artifact.json (캡처 메타데이터)
  *                          │
  *                          ▼
  *                   text_extractor.py → difficulty_engine.py → suggestion_generator.py
@@ -29,7 +29,7 @@
  *   URL 입력
  *     → Playwright로 헤드리스 브라우저 실행 및 페이지 로딩
  *     → axe-core 실행 (WCAG 2.0/2.1/2.2 규칙 기반 검사)
- *     → 동일한 일시정지 DOM의 script-free replay HTML/메타데이터 저장
+ *     → 동일한 일시정지 DOM의 내부 분석 snapshot/캡처 메타데이터 생성
  *     → adapter.convert() : axe 결과를 KWCAG 33개 항목 기준으로 재분류
  *     → scorer.score()    : 100점 감점 방식으로 점수 산출
  *     → toApiFormat()     : 백엔드 API 스펙(snake_case)으로 변환
@@ -63,7 +63,7 @@ const fs = require('fs');
 const path = require('path');
 
 const MAX_INITIAL_RESPONSE_HTML_BYTES = 10 * 1024 * 1024;
-const INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS = 10000;
+const INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS = 60000;
 
 function siblingOutputPath(outputPath, suffix) {
   const parsed = path.parse(outputPath);
@@ -78,7 +78,19 @@ function urlOrigin(value) {
   }
 }
 
-function challengeSignals({ url = '', title = '', text = '', html = '' }) {
+function withoutUrlFragment(value) {
+  const parsed = new URL(value);
+  parsed.hash = '';
+  return parsed.href;
+}
+
+function challengeSignals({
+  url = '',
+  title = '',
+  text = '',
+  html = '',
+  botManagerWait = {},
+}) {
   let decodedUrl = url;
   try {
     decodedUrl = decodeURIComponent(url);
@@ -105,6 +117,20 @@ function challengeSignals({ url = '', title = '', text = '', html = '' }) {
   for (const [name, pattern] of documentPatterns) {
     if (pattern.test(documentText)) signals.push(name);
   }
+
+  // STCLab BotManager can replace the page body in-place without changing the
+  // URL. Require its exact marker pair, a visible loading overlay, and no
+  // visible page content outside that shell. Generic or dormant loading UI is
+  // therefore not treated as a challenge.
+  const hasBotManagerWaitBackground = /\bid\s*=\s*["']bm-wait-background["']/i.test(html);
+  const hasLoadingOverlay = /\bid\s*=\s*["']loading-overlay["']/i.test(html);
+  const hasMarkerPair = botManagerWait.markerPair
+    || (hasBotManagerWaitBackground && hasLoadingOverlay);
+  if (hasMarkerPair
+      && botManagerWait.loadingOverlayVisible
+      && botManagerWait.shellOnly) {
+    signals.push('BOT_MANAGER_WAIT_OVERLAY');
+  }
   return [...new Set(signals)];
 }
 
@@ -115,19 +141,70 @@ async function detectCrossOriginBotChallenge(page, initialUrl) {
   const crossOrigin = Boolean(
     initialOrigin && currentOrigin && initialOrigin !== currentOrigin,
   );
-  if (!crossOrigin) {
-    return { detected: false, currentUrl, signals: [] };
-  }
-
   const state = await page.evaluate(() => ({
     title: document.title || '',
     text: (document.body?.innerText || '').slice(0, 20000),
     html: (document.documentElement?.outerHTML || '').slice(0, 30000),
+    botManagerWait: (() => {
+      const waitBackground = document.getElementById('bm-wait-background');
+      const loadingOverlay = document.getElementById('loading-overlay');
+      if (!waitBackground || !loadingOverlay || !document.body) {
+        return {
+          markerPair: false,
+          loadingOverlayVisible: false,
+          shellOnly: false,
+        };
+      }
+
+      const isVisible = element => {
+        if (!element.isConnected
+            || element.hidden
+            || element.getAttribute('aria-hidden') === 'true') {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none'
+            || style.visibility === 'hidden'
+            || style.visibility === 'collapse'
+            || Number(style.opacity) === 0) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+
+      const challengeRoots = [waitBackground, loadingOverlay];
+      const belongsToChallenge = element => challengeRoots.some(
+        root => root === element || root.contains(element) || element.contains(root),
+      );
+      const hasVisibleTextOutside = [...document.body.querySelectorAll('*')].some(element => {
+        if (belongsToChallenge(element) || !isVisible(element)) return false;
+        return [...element.childNodes].some(node => (
+          node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim())
+        ));
+      });
+      const meaningfulSelector = [
+        'a[href]', 'button', 'input', 'select', 'textarea',
+        'img[src]', 'svg', 'canvas', 'video', 'audio',
+        'main', 'nav', 'article', 'header', 'footer', 'form',
+      ].join(',');
+      const hasVisibleElementOutside = [...document.body.querySelectorAll(meaningfulSelector)]
+        .some(element => !belongsToChallenge(element) && isVisible(element));
+
+      return {
+        markerPair: true,
+        loadingOverlayVisible: isVisible(loadingOverlay),
+        shellOnly: !hasVisibleTextOutside && !hasVisibleElementOutside,
+      };
+    })(),
   })).catch(() => ({ title: '', text: '', html: '' }));
   const signals = challengeSignals({ url: currentUrl, ...state });
   const strongSignals = new Set(['AUTOMATION_REASON', 'STCLAB', 'CAPTCHA', 'WEBDRIVER']);
+  const sameDocumentChallenge = signals.includes('BOT_MANAGER_WAIT_OVERLAY');
   return {
-    detected: signals.some(signal => strongSignals.has(signal)) || signals.length >= 2,
+    detected: sameDocumentChallenge || (crossOrigin && (
+      signals.some(signal => strongSignals.has(signal)) || signals.length >= 2
+    )),
     currentUrl,
     signals,
   };
@@ -144,65 +221,68 @@ function usableInitialHtml(snapshot) {
   );
 }
 
-function captureInitialMainResponse(page) {
-  let snapshotPromise = null;
-  const onResponse = response => {
-    if (snapshotPromise) return;
+async function captureInitialMainResponse(page) {
+  let snapshot = null;
+  let firstHtmlResponseClaimed = false;
+  const onRoute = async route => {
+    const request = route.request();
+    if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) {
+      await route.continue();
+      return;
+    }
+
+    let response;
     try {
-      const request = response.request();
+      // Preserve the response before it reaches the page. A response listener
+      // can lose response.body() when page JavaScript redirects within a few
+      // milliseconds, which would make challenge fallback nondeterministic.
+      response = await route.fetch({
+        maxRedirects: 0,
+        timeout: INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS,
+      });
       const contentType = response.headers()['content-type'] || '';
-      if (!request.isNavigationRequest()
-          || request.frame() !== page.mainFrame()
-          || response.status() < 200
-          || response.status() >= 300
-          || !/(?:text\/html|application\/xhtml\+xml)/i.test(contentType)) {
-        return;
-      }
-      // Begin consuming the body as soon as response headers arrive. Waiting
-      // until page.goto() settles can lose the body when client JS immediately
-      // replaces the main document with a challenge page.
-      snapshotPromise = response.body()
-        .then(body => {
-          if (body.length > MAX_INITIAL_RESPONSE_HTML_BYTES) {
-            return null;
-          }
-          const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] || 'utf-8';
+      const isUsableHtmlResponse = !firstHtmlResponseClaimed
+        && response.status() >= 200
+        && response.status() < 300
+        && /(?:text\/html|application\/xhtml\+xml)/i.test(contentType);
+      let body;
+      if (isUsableHtmlResponse) {
+        firstHtmlResponseClaimed = true;
+        body = await response.body();
+        if (body.length <= MAX_INITIAL_RESPONSE_HTML_BYTES) {
+          const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1]
+            || 'utf-8';
           let html;
           try {
             html = new TextDecoder(charset).decode(body);
           } catch {
             html = body.toString('utf8');
           }
-          return {
+          snapshot = {
             url: response.url(),
             status: response.status(),
             contentType,
             html,
           };
-        })
-        .catch(() => null);
+        }
+      }
+      await route.fulfill(body ? { response, body } : { response });
     } catch {
-      // Ignore non-standard/closing responses and retain the first valid one.
+      // If interception itself fails, let the browser continue normally. The
+      // scan can still use the rendered DOM, but no unsafe fallback is made.
+      await route.continue().catch(() => {});
+    } finally {
+      await response?.dispose().catch(() => {});
     }
   };
-  page.on('response', onResponse);
+  await page.route('**/*', onRoute);
 
   return {
     async value() {
-      if (!snapshotPromise) return null;
-      return new Promise(resolve => {
-        const timer = setTimeout(
-          () => resolve(null),
-          INITIAL_RESPONSE_CAPTURE_TIMEOUT_MS,
-        );
-        snapshotPromise.then(value => {
-          clearTimeout(timer);
-          resolve(value);
-        });
-      });
+      return snapshot;
     },
-    stop() {
-      page.off('response', onResponse);
+    async stop() {
+      await page.unroute('**/*', onRoute);
     },
   };
 }
@@ -462,9 +542,9 @@ async function sendToBackend(requestId, apiData) {
  * ─────────────────────────────────────────────────────────────────────────
  * - 전체 흐름
     1. 브라우저 실행 & 페이지 로드
-    2. 교차 출처 bot challenge 여부 판정 및 제한적 정적 fallback
+    2. bot challenge/동일 문서 BotManager 대기 화면 판정 및 제한적 정적 fallback
     3. axe-core 접근성 검사 + typed locator 해석
-    4. 동일 DOM의 정적 replay HTML/메타데이터 저장
+    4. 동일 DOM의 내부 분석 snapshot/캡처 메타데이터 생성
     5. 어댑터 변환 및 점수 산출
     6. API 형태/로컬 JSON 저장
     7. 콘솔 요약 출력
@@ -525,38 +605,38 @@ async function run(url, outputPath, options = {}) {
     //   → 이후 고정 settle 구간에서 CSR(Vue/React 등) 초기 변경을 추가 관찰
     // timeout: 60000 (60초) — 공공 사이트 일부가 로딩이 느려 넉넉히 잡음
     let initialSnapshot = null;
-    const initialResponseCapture = captureInitialMainResponse(page);
+    const initialResponseCapture = await captureInitialMainResponse(page);
     try {
       await page.goto(url, { waitUntil: 'load', timeout: 60000 });
     } catch { }
     initialSnapshot = await initialResponseCapture.value();
-    initialResponseCapture.stop();
+    await initialResponseCapture.stop();
     await page.waitForTimeout(settleMs);
     
     await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
 
-    let analysisFinalUrl = page.url();
+    let analysisFinalUrl = withoutUrlFragment(page.url());
     let replaySourceMode = 'RENDERED_DOM';
     if (initialSnapshot) {
       const challenge = await detectCrossOriginBotChallenge(page, initialSnapshot.url);
       if (challenge.detected && usableInitialHtml(initialSnapshot)) {
-        console.log('   [정적 fallback] 교차 출처 봇/보안 챌린지 이동을 감지했습니다.');
+        console.log('   [정적 fallback] 봇/보안 대기 화면을 감지했습니다.');
         console.log(`   [정적 fallback] ${challenge.signals.join(', ')}: ${challenge.currentUrl}`);
         console.log('   [정적 fallback] 최초 2xx HTML을 스크립트 없이 재현하여 정적 DOM만 분석합니다.');
         console.log('   [정적 fallback] CAPTCHA를 우회하거나 webdriver 값을 위장하지 않습니다.');
         await loadStaticInitialResponseFallback(page, initialSnapshot);
-        analysisFinalUrl = initialSnapshot.url;
+        analysisFinalUrl = withoutUrlFragment(initialSnapshot.url);
         replaySourceMode = 'INITIAL_RESPONSE_STATIC';
       } else if (challenge.detected) {
         throw new Error(
-          '교차 출처 봇/보안 챌린지를 감지했지만 사용할 수 있는 최초 2xx HTML을 보존하지 못했습니다.',
+          '봇/보안 대기 화면을 감지했지만 사용할 수 있는 최초 2xx HTML을 보존하지 못했습니다.',
         );
       }
     }
     await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 
-    // Freeze CSS/Web Animations before both axe and replay serialization so the
-    // reported element rectangles describe the stored DOM state.
+    // Freeze CSS/Web Animations before both axe and snapshot serialization so
+    // the reported element rectangles describe the analyzed DOM state.
     await pauseDocumentAnimations(page);
 
     // ── 3) axe-core 실행 ──
@@ -580,15 +660,15 @@ async function run(url, outputPath, options = {}) {
     let htmlOutput;
     let artifactOutput;
     try {
-      // Save a UTF-8 static replay from the same paused DOM consumed by axe and
-      // the locator resolver. Scripts are removed from the stored copy so a
-      // later replay cannot rerun the target application's automation checks.
+      // Create a UTF-8 internal snapshot from the same paused DOM consumed by
+      // axe and the locator resolver. Scripts are removed because this local
+      // intermediate file is used only by the text analyzer and diagnostics.
       const renderedHtml = await serializeDomReplayHtml(page, {
         sourceMode: replaySourceMode,
       });
       htmlOutput = siblingOutputPath(output, '.html');
       fs.writeFileSync(htmlOutput, renderedHtml, 'utf-8');
-      console.log(`4. DOM replay HTML 저장: ${htmlOutput}`);
+      console.log(`4. 내부 분석 DOM snapshot 생성: ${htmlOutput}`);
 
       const artifactMetadata = await buildDomReplayArtifactMetadata(page, {
         requestedUrl: url,
@@ -600,12 +680,12 @@ async function run(url, outputPath, options = {}) {
       // Re-resolve after serialization. Coordinates describe the analyzed DOM
       // and are no longer clipped to a screenshot/tile boundary.
       await revalidateAxeLocators(page, axeResults);
-      console.log(`5. DOM replay 메타데이터 저장: ${artifactOutput}`);
+      console.log(`5. 캡처 메타데이터 생성: ${artifactOutput}`);
 
       if (cvScreenshotPath) {
         try {
           // This raster exists only as an inter-module CV input in the OS temp
-          // directory. It is never metadata, replay evidence, or an upload part.
+          // directory. It is never persisted evidence or part of ingestion.
           const cvImage = await page.screenshot({
             type: 'png',
             fullPage: true,
@@ -630,7 +710,6 @@ async function run(url, outputPath, options = {}) {
     //   에서 의미가 전달된다. adapter.js의 mapping.js가 이 매핑을 담당.
     console.log('6. KWCAG 매핑 변환 중...');
     const kwcagResult = convert(axeResults);
-    kwcagResult.meta.captureMode = 'DOM_REPLAY';
     kwcagResult.meta.replaySource = replaySourceMode;
     kwcagResult.meta.carouselAudit = axeResults.carouselAudit;
 
@@ -738,8 +817,8 @@ async function run(url, outputPath, options = {}) {
     console.log('');
     console.log(`결과 저장: ${path.resolve(output)}`);
     console.log(`API 형태: ${path.resolve(apiOutput)}`);
-    console.log(`DOM replay HTML: ${path.resolve(htmlOutput)}`);
-    console.log(`DOM replay 메타데이터: ${path.resolve(artifactOutput)}`);
+    console.log(`내부 분석 DOM snapshot: ${path.resolve(htmlOutput)}`);
+    console.log(`캡처 메타데이터: ${path.resolve(artifactOutput)}`);
     console.log('─'.repeat(50));
 
     return kwcagResult;
@@ -787,4 +866,5 @@ module.exports = {
   siblingOutputPath,
   toApiFormat,
   usableInitialHtml,
+  withoutUrlFragment,
 };

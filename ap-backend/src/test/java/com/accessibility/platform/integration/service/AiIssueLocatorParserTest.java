@@ -30,7 +30,12 @@ class AiIssueLocatorParserTest {
                     "height": 32,
                     "coordinateSpace": "DOCUMENT_CSS_PX",
                     "visible": false,
-                    "htmlSnippet": "<button class=save>Save</button>"
+                    "htmlSnippet": "<button class=save>Save</button>",
+                    "carouselContext": {
+                      "carouselId": 2,
+                      "slideIndex": 1,
+                      "slideCount": 4
+                    }
                   }
                 }
                 """);
@@ -44,6 +49,10 @@ class AiIssueLocatorParserTest {
         assertThat(locator.x()).isEqualTo(12.5);
         assertThat(locator.visible()).isFalse();
         assertThat(locator.htmlSnippet()).contains("button class");
+        assertThat(locator.carouselContext()).isNotNull();
+        assertThat(locator.carouselContext().carouselId()).isEqualTo(2);
+        assertThat(locator.carouselContext().slideIndex()).isEqualTo(1);
+        assertThat(locator.carouselContext().slideCount()).isEqualTo(4);
     }
 
     @Test
@@ -64,6 +73,35 @@ class AiIssueLocatorParserTest {
         );
         assertThat(locator.htmlSnippet()).isEqualTo("<img class=hero>");
         assertThat(locator.coordinateSpace()).isNull();
+        assertThat(locator.carouselContext()).isNull();
+    }
+
+    @Test
+    void ignoresMalformedCarouselContextWithoutDroppingTheLocator() throws Exception {
+        for (String malformedContext : java.util.List.of(
+                "{\"carouselId\":0,\"slideIndex\":0,\"slideCount\":2}",
+                "{\"carouselId\":1,\"slideIndex\":2,\"slideCount\":2}",
+                "{\"carouselId\":1,\"slideIndex\":0.5,\"slideCount\":2}",
+                "{\"carouselId\":\"1\",\"slideIndex\":0,\"slideCount\":2}",
+                "{\"carouselId\":1,\"slideIndex\":0,\"slideCount\":10001}",
+                "{\"carouselId\":1,\"slideIndex\":0,\"slideCount\":2147483648}"
+        )) {
+            JsonNode node = objectMapper.readTree("""
+                    {
+                      "selector": "button.save",
+                      "locator": {
+                        "pathSteps": [{"context":"document","selector":"button.save"}],
+                        "carouselContext": %s
+                      }
+                    }
+                    """.formatted(malformedContext));
+
+            IssueLocator locator = parser.fromRuleNode(node);
+
+            assertThat(locator).isNotNull();
+            assertThat(locator.pathSteps()).hasSize(1);
+            assertThat(locator.carouselContext()).isNull();
+        }
     }
 
     @Test
@@ -79,5 +117,6 @@ class AiIssueLocatorParserTest {
         assertThat(locator.visible()).isTrue();
         assertThat(locator.x()).isEqualTo(100.0);
         assertThat(locator.height()).isEqualTo(24.0);
+        assertThat(locator.carouselContext()).isNull();
     }
 }
