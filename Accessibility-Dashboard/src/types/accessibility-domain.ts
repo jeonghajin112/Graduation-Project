@@ -1,11 +1,5 @@
 export type MenuType = "analyze" | "projects";
 
-export type ApiResponse<T> = {
-  success: boolean;
-  data: T;
-  message: string | null;
-};
-
 export type RequestStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
 export type EvaluationStatus = RequestStatus | "RUNNING";
 export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR";

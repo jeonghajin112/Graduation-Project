@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import React, { createContext, useContext } from "react";
+import type React from "react";
 
 export interface SidebarItem {
   label: string;
@@ -9,64 +9,7 @@ export interface SidebarItem {
   active?: boolean;
 }
 
-interface SidebarContextProps {
-  open: boolean;
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  animate: boolean;
-}
-
-const SidebarContext = createContext<SidebarContextProps | undefined>(undefined);
-
-export function useSidebar() {
-  const context = useContext(SidebarContext);
-  if (!context) {
-    throw new Error("useSidebar must be used within a SidebarProvider");
-  }
-  return context;
-}
-
-export function SidebarProvider({
-  children,
-  open: openProp = true,
-  setOpen: setOpenProp,
-  animate = false
-}: {
-  children: React.ReactNode;
-  open?: boolean;
-  setOpen?: React.Dispatch<React.SetStateAction<boolean>>;
-  animate?: boolean;
-}) {
-  // Permanent sidebar: always treated as open. setOpen is a no-op unless a
-  // controlled setter is provided (kept for API compatibility).
-  const open = openProp;
-  const setOpen = setOpenProp ?? (() => undefined);
-
-  return <SidebarContext.Provider value={{ open, setOpen, animate }}>{children}</SidebarContext.Provider>;
-}
-
-export function Sidebar({
-  children,
-  open = true,
-  setOpen,
-  animate = false
-}: {
-  children: React.ReactNode;
-  open?: boolean;
-  setOpen?: React.Dispatch<React.SetStateAction<boolean>>;
-  animate?: boolean;
-}) {
-  return (
-    <SidebarProvider open={open} setOpen={setOpen} animate={animate}>
-      {children}
-    </SidebarProvider>
-  );
-}
-
-export function SidebarBody(props: React.ComponentProps<"aside">) {
-  return <DesktopSidebar {...props} />;
-}
-
-export function DesktopSidebar({
+export function SidebarBody({
   className,
   children,
   ...props
@@ -82,18 +25,6 @@ export function DesktopSidebar({
     >
       {children}
     </aside>
-  );
-}
-
-/** @deprecated Mobile overlay removed — permanent sidebar is shared across breakpoints. */
-export function MobileSidebar({
-  className,
-  children
-}: React.ComponentProps<"div">) {
-  return (
-    <div className={cn("dashboard-drawer flex w-full flex-col p-4", className)}>
-      {children}
-    </div>
   );
 }
 
