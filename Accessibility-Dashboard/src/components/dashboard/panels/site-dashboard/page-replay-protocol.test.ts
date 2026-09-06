@@ -105,6 +105,43 @@ describe("replay locator adaptation", () => {
   });
 });
 
+describe("replay document and issue messages", () => {
+  it.each(["DOCUMENT_LOADING", "DOCUMENT_UNLOADING", "READY"] as const)(
+    "accepts %s only with an exact, bounded document identity",
+    (type) => {
+      const message = { source: PAGE_REPLAY_SOURCE, type, documentToken: "doc_501" };
+      expect(parsePageReplayMessage(message)).toEqual(message);
+
+      for (const overrides of [
+        { documentToken: undefined },
+        { documentToken: "" },
+        { documentToken: "bad token" },
+        { documentToken: "a".repeat(129) },
+        { source: DASHBOARD_REPLAY_SOURCE },
+        { unexpected: true }
+      ]) {
+        expect(parsePageReplayMessage({ ...message, ...overrides })).toBeNull();
+      }
+    }
+  );
+
+  it.each(["ISSUE_SELECTED", "ISSUE_DETAIL_FALLBACK"] as const)(
+    "accepts %s as an id or explicit clear, never viewer-supplied content",
+    (type) => {
+      const message = { source: PAGE_REPLAY_SOURCE, type, documentToken: "doc_501", issueId: 42 };
+      expect(parsePageReplayMessage(message)).toEqual(message);
+      expect(parsePageReplayMessage({ ...message, issueId: null })).toEqual({ ...message, issueId: null });
+
+      for (const issueId of [undefined, "42", 0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+        expect(parsePageReplayMessage({ ...message, issueId })).toBeNull();
+      }
+      expect(parsePageReplayMessage({ ...message, documentToken: undefined })).toBeNull();
+      expect(parsePageReplayMessage({ ...message, documentToken: "bad token" })).toBeNull();
+      expect(parsePageReplayMessage({ ...message, title: "Untrusted viewer content" })).toBeNull();
+    }
+  );
+});
+
 describe("replay locator status messages", () => {
   it("accepts legacy and render-aware locator status contracts", () => {
     expect(parsePageReplayMessage({

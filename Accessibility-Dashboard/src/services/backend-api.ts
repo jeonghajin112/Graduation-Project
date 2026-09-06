@@ -43,6 +43,7 @@ type ApiRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type ApiRequestOptions = {
   method?: ApiRequestMethod;
   body?: unknown;
+  headers?: Record<string, string>;
   cache?: RequestCache;
   signal?: AbortSignal;
   optionalStatuses?: number[];
@@ -305,10 +306,11 @@ function parseSuccessfulResponse<T>({
 async function apiRequest<T>(
   path: string,
   parser: ApiResponseParser<T>,
-  { method = "GET", body, cache, signal, optionalStatuses = [] }: ApiRequestOptions = {}
+  { method = "GET", body, headers: extraHeaders, cache, signal, optionalStatuses = [] }: ApiRequestOptions = {}
 ): Promise<T> {
   const headers: HeadersInit = {
-    Accept: "application/json"
+    Accept: "application/json",
+    ...extraHeaders
   };
   const requestInit: RequestInit = {
     cache,
@@ -478,6 +480,7 @@ function buildOrganizationsFromApi(
       return {
         id: organization.id,
         name: organization.name,
+        systemManaged: organization.systemManaged,
         description: organization.description ?? "",
         status: latestOrganizationRequest?.status ?? organization.status,
         updatedAt: latestOrganizationRequest?.updatedAt ?? organization.updatedAt,
@@ -650,13 +653,16 @@ export async function createOrganizationModel(
   input: {
     name: string;
     description: string;
+    attemptId: string;
   },
   signal?: AbortSignal
 ): Promise<Organization> {
   const created = await apiRequest("/organizations", parseOrganizationResponse, {
     method: "POST",
+    headers: { "Idempotency-Key": input.attemptId },
     body: {
-      ...input,
+      name: input.name,
+      description: input.description,
       type: "ETC"
     },
     signal

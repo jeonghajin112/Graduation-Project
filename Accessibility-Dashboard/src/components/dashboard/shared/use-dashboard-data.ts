@@ -6,9 +6,10 @@ import {
   getApiErrorMessage,
   isAbortError
 } from "@/services/backend-api";
-import type { DashboardViewModel } from "@/types/accessibility-domain";
+import type { DashboardViewModel, EvaluationRequestModel } from "@/types/accessibility-domain";
 
 type LoadDashboardOptions = {
+  background?: boolean;
   awaitInFlight?: boolean;
   refreshAfterInFlight?: boolean;
   showLoading?: boolean;
@@ -258,6 +259,16 @@ export function useDashboardData({
   const dashboardSnapshotSignatureRef = useRef<string | null>(null);
   const activeLoadRef = useRef<ActiveDashboardLoad | null>(null);
   const directoryRecoveryRef = useRef<DirectoryRecovery | null>(null);
+  // Confirmed POST/status responses remain visible while the overview catches up.
+  const [trackedRequests, setTrackedRequests] = useState<Record<number, EvaluationRequestModel>>({});
+  const trackEvaluationRequest = useCallback((request: EvaluationRequestModel) => {
+    setTrackedRequests((current) => {
+      const previous = current[request.id];
+      if (previous && (!requestHasNotRolledBack(previous, request) ||
+        JSON.stringify(previous) === JSON.stringify(request))) return current;
+      return { ...current, [request.id]: request };
+    });
+  }, []);
 
   const beginDirectoryRecovery = useCallback((): DirectoryRecoveryToken => {
     const token = Symbol("directory-recovery");
@@ -301,6 +312,7 @@ export function useDashboardData({
 
   const loadDashboard = useCallback<LoadDashboard>(
     async ({
+      background = false,
       awaitInFlight = false,
       refreshAfterInFlight = false,
       showLoading = false,
@@ -380,6 +392,20 @@ export function useDashboardData({
             nextData,
             directoryRecoveryRef.current
           );
+          const previousData = dashboardDataRef.current;
+          setTrackedRequests((current) => {
+            const remaining = Object.fromEntries(Object.entries(current).filter(([, tracked]) => {
+              const targetVisible = visibleData.organizations.some((organization) =>
+                organization.evaluationTargets.some((target) => target.id === tracked.evaluationTargetId));
+              const targetRemoved = !targetVisible && previousData?.organizations.some((organization) =>
+                organization.evaluationTargets.some((target) => target.id === tracked.evaluationTargetId));
+              if (targetRemoved && !visibleData.evaluationRequests.some((request) => request.id === tracked.id)) return false;
+              return !visibleData.evaluationRequests.some((request) =>
+                request.id === tracked.id && requestHasNotRolledBack(tracked, request)
+              ) || !targetVisible;
+            }));
+            return Object.keys(remaining).length === Object.keys(current).length ? current : remaining;
+          });
           const nextSignature = createDashboardSnapshotSignature(visibleData);
           if (dashboardSnapshotSignatureRef.current !== nextSignature) {
             dashboardSnapshotSignatureRef.current = nextSignature;
@@ -439,7 +465,7 @@ export function useDashboardData({
         cleanup: cleanupLoadResources,
         controller: loadAbortController,
         id: loadId,
-        isBackground: !refreshAfterInFlight && !showLoading,
+        isBackground: background || (!refreshAfterInFlight && !showLoading),
         managesLoading,
         promise: loadPromise
       };
@@ -461,13 +487,24 @@ export function useDashboardData({
     };
   }, [loadDashboard]);
 
-  const activeEvaluationRequestIds = useMemo(
-    () =>
-      dashboardData?.evaluationRequests
-        .filter((request) => request.status !== "COMPLETED" && request.status !== "FAILED")
-        .map((request) => request.id) ?? [],
-    [dashboardData?.evaluationRequests]
-  );
+  const visibleDashboardData = useMemo(() => {
+    if (!dashboardData && Object.keys(trackedRequests).length === 0) return null;
+    const base = dashboardData ?? { organizations: [], evaluationRequests: [], resultSummaries: [], latestIssueCounts: [], scoreResults: [] };
+    const requests = new Map<number, EvaluationRequestModel>(base.evaluationRequests.map((request) => [request.id, request]));
+    for (const tracked of Object.values(trackedRequests)) {
+      const existing = requests.get(tracked.id);
+      if (!existing || requestHasNotRolledBack(existing, tracked)) requests.set(tracked.id, tracked);
+    }
+    return { ...base, evaluationRequests: [...requests.values()] };
+  }, [dashboardData, trackedRequests]);
+  // Keep retrying an overview that has not yet acknowledged a terminal response.
+  const activeRequestKey = [...new Set([
+    ...(dashboardData?.evaluationRequests.filter((request) =>
+      request.status !== "COMPLETED" && request.status !== "FAILED").map((request) => request.id) ?? []),
+    ...Object.values(trackedRequests).map((request) => request.id)
+  ])].sort((a, b) => a - b).join(",");
+  const activeEvaluationRequestIds = useMemo(() =>
+    activeRequestKey ? activeRequestKey.split(",").map(Number) : [], [activeRequestKey]);
 
   useEffect(() => {
     if (activeEvaluationRequestIds.length === 0) {
@@ -479,6 +516,7 @@ export function useDashboardData({
 
     const refreshOverview = async () => {
       await loadDashboard({
+        background: true,
         refreshAfterInFlight: true,
         signal: lifecycleController.signal
       });
@@ -515,15 +553,25 @@ export function useDashboardData({
       };
 
       try {
-        const requests = await Promise.all(
+        const outcomes = await Promise.allSettled(
           activeEvaluationRequestIds.map((requestId) =>
             fetchEvaluationRequest(requestId, statusController.signal)
           )
         );
         releaseStatusResources();
+        if (lifecycleController.signal.aborted) return;
+        const requests = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
+        for (const request of requests) trackEvaluationRequest(request);
         if (
+          outcomes.some((outcome) => outcome.status === "rejected") ||
           requests.some(
             (request) => request.status === "COMPLETED" || request.status === "FAILED"
+          ) ||
+          // An accepted page may not be in the first overview yet. Retry its
+          // directory entry while it is queued so the recent tab can appear.
+          requests.some((request) =>
+            !dashboardDataRef.current?.organizations.some((organization) =>
+              organization.evaluationTargets.some((target) => target.id === request.evaluationTargetId))
           )
         ) {
           await refreshOverview();
@@ -559,10 +607,11 @@ export function useDashboardData({
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeEvaluationRequestIds, loadDashboard]);
+  }, [activeEvaluationRequestIds, loadDashboard, trackEvaluationRequest]);
 
   return {
-    dashboardData,
+    dashboardData: visibleDashboardData,
+    trackEvaluationRequest,
     dashboardError,
     beginDirectoryRecovery,
     endDirectoryRecovery,

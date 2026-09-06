@@ -12,8 +12,8 @@ import com.accessibility.platform.target.domain.EvaluationTarget;
 import com.accessibility.platform.target.service.EvaluationTargetService;
 import com.accessibility.platform.request.dto.EvaluateUrlRequest;
 import com.accessibility.platform.organization.domain.Organization;
-import com.accessibility.platform.organization.domain.OrganizationType;
-import com.accessibility.platform.organization.repository.OrganizationRepository;
+import com.accessibility.platform.organization.service.ImportedOrganizationService;
+import com.accessibility.platform.organization.domain.OrganizationStatus;
 import com.accessibility.platform.target.domain.TargetType;
 import com.accessibility.platform.target.domain.TargetStatus;
 import com.accessibility.platform.target.repository.EvaluationTargetRepository;
@@ -34,7 +34,7 @@ public class EvaluationRequestService {
     private final EvaluationRequestRepository evaluationRequestRepository;
     private final EvaluationTargetService evaluationTargetService;
     private final EvaluationTargetRepository evaluationTargetRepository;
-    private final OrganizationRepository organizationRepository;
+    private final ImportedOrganizationService importedOrganizationService;
     private final AiEvaluationRunnerService aiEvaluationRunnerService;
     private final FaviconService faviconService;
 
@@ -55,6 +55,7 @@ public class EvaluationRequestService {
         String url = request.url();
         Optional<EvaluationTarget> existingTarget = evaluationTargetRepository.findAllByAccessUrlOrderByIdDesc(url).stream()
                 .filter(candidate -> candidate.getStatus() != TargetStatus.DELETED)
+                .filter(candidate -> candidate.getOrganization().getStatus() == OrganizationStatus.ACTIVE)
                 .findFirst();
 
         EvaluationTarget target;
@@ -62,13 +63,7 @@ public class EvaluationRequestService {
             target = existingTarget.get();
             enrichFaviconIfMissing(target);
         } else {
-            Organization organization = organizationRepository.findByName("AI Module Imported")
-                    .orElseGet(() -> organizationRepository.save(new Organization(
-                            "AI Module Imported",
-                            OrganizationType.ETC,
-                            null,
-                            "AI-module imported evaluation results"
-                    )));
+            Organization organization = importedOrganizationService.getOrCreate();
 
             target = evaluationTargetRepository.save(new EvaluationTarget(
                     organization,
@@ -80,7 +75,7 @@ public class EvaluationRequestService {
             ));
         }
 
-        EvaluationRequest evaluationRequest = new EvaluationRequest(target, "Web UI initiated request");
+        EvaluationRequest evaluationRequest = new EvaluationRequest(target, EvaluationRequest.QUICK_ANALYSIS_NOTE);
         EvaluationRequest savedRequest = evaluationRequestRepository.save(evaluationRequest);
 
         // Run the Python analysis asynchronously in the background

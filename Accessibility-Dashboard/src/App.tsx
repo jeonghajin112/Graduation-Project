@@ -62,26 +62,26 @@ function AppErrorFallback({
   const isChunkError = isLazyChunkLoadError(error);
 
   return (
-    <main className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-50 px-4">
+    <main className="dashboard-modal-layer">
       <section
         role="alert"
         aria-labelledby="app-error-title"
-        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-xl"
+        className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
       >
-        <h1 id="app-error-title" className="text-xl font-bold text-slate-900">
+        <h1 id="app-error-title" className="dashboard-modal-title">
           앱 화면을 표시할 수 없습니다
         </h1>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="dashboard-modal-description mt-2">
           {isChunkError
             ? "필요한 화면 파일을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해 주세요."
             : "예기치 않은 문제가 발생했습니다. 다시 시도하거나 페이지를 새로고침해 주세요."}
         </p>
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="dashboard-modal-actions">
           {!isChunkError ? (
             <button
               type="button"
               onClick={resetErrorBoundary}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              className="dashboard-modal-button"
             >
               다시 시도
             </button>
@@ -89,7 +89,7 @@ function AppErrorFallback({
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+            className="dashboard-modal-button dashboard-modal-button--primary"
           >
             페이지 새로고침
           </button>

@@ -90,11 +90,9 @@ export function AnalysisTrendPanel({
 
   return (
     <aside className="site-page-evidence-trend-panel" aria-labelledby="site-analysis-trend-heading">
-      <div className="site-page-evidence-trend-heading">
+      <div className="site-rail-card__heading">
         <h3 id="site-analysis-trend-heading">최근 분석 추이</h3>
-        <p>최근 완료된 분석의 점수와 문제 수</p>
       </div>
-
       {latest ? (
         <div className="site-page-evidence-trend-metrics" aria-label="최근 분석 요약">
           <div>

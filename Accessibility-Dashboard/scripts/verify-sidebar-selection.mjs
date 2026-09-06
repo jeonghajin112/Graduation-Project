@@ -67,6 +67,19 @@ assert.deepEqual(
   [{ projectId: 11, pageId: 101 }]
 );
 assert.deepEqual(parseQuickAnalysisRegistry("{broken"), []);
+const serverRecent = buildRecentAnalyzedPages({
+  organizations,
+  quickAnalysisResults: [{ projectId: 11, pageId: 101, timestamp: 3000 }],
+  evaluationRequests: [
+    { id: 1, evaluationTargetId: 101, quickAnalysis: true, status: "PENDING", requestedAt: "2026-09-06T00:00:00Z" },
+    { id: 2, evaluationTargetId: 101, quickAnalysis: true, status: "FAILED", requestedAt: "2026-09-06T00:01:00Z" },
+    { id: 3, evaluationTargetId: 102, quickAnalysis: false, status: "COMPLETED", requestedAt: "2026-09-06T00:02:00Z" },
+    { id: 4, evaluationTargetId: 201, quickAnalysis: true, status: "IN_PROGRESS", requestedAt: "2026-09-06T00:03:00Z" },
+    { id: 5, evaluationTargetId: 999, quickAnalysis: true, status: "COMPLETED", requestedAt: "2026-09-06T00:04:00Z" }
+  ]
+});
+assert.deepEqual(serverRecent.map(page => page.pageId), [201, 101],
+  "server receipts include pending/failed jobs, deduplicate rescans and exclude deleted targets and project-only analyses");
 assert.deepEqual(
   parseQuickAnalysisRegistry(
     JSON.stringify({

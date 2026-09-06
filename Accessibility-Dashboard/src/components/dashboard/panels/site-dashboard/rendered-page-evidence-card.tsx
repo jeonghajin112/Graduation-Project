@@ -46,7 +46,7 @@ import {
   type PageReplayToDashboardMessage,
   type ReplayViewportMetrics
 } from "./page-replay-protocol";
-import type { RecentIssueRow } from "./types";
+import type { LocatorIssueState, LocatorReport, RecentIssueRow } from "./types";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
 type ReplayConnectionState = "loading" | "ready" | "error";
@@ -69,9 +69,8 @@ type RenderedPageEvidenceCardProps = {
   liveSessionLoadState: LiveReportSessionLoadState;
   onRetry: () => void;
   onRetryLiveSession: () => void;
-  onRecoverableHiddenLocatorIssueIdsChange: (issueIds: number[]) => void;
+  onLocatorReportChange: (report: LocatorReport) => void;
   onSelectIssue: (issueId: number | null) => void;
-  onUnavailableLocatorIssueIdsChange: (issueIds: number[]) => void;
   previewRuntimeUrl?: string;
   rows: RecentIssueRow[];
   selectedIssueId: number | null;
@@ -92,20 +91,9 @@ const LIVE_REPORT_BRIDGE_ACK_TIMEOUT_MS = 4_000;
 // Keep this deadline above that server-side worst case so slow, valid sites get
 // a fair chance to finish before the live-only error state is shown.
 const REPLAY_FRAME_LOAD_TIMEOUT_MS = 120_000;
-
-function updateIssueIdMembership(
-  current: Set<number>,
-  issueId: number,
-  included: boolean
-): Set<number> {
-  if (current.has(issueId) === included) {
-    return current;
-  }
-  const next = new Set(current);
-  if (included) next.add(issueId);
-  else next.delete(issueId);
-  return next;
-}
+// Match the live viewer's bounded INIT_ISSUES input. Overflow remains in the
+// unavailable list rather than waiting for statuses the viewer cannot send.
+const LIVE_REPORT_ISSUE_LIMIT = 5_000;
 
 type PageEvidenceLoadingBarStyle = CSSProperties & {
   "--site-page-evidence-loading-progress": number;
@@ -192,9 +180,8 @@ export function RenderedPageEvidenceCard({
   liveSessionLoadState,
   onRetry,
   onRetryLiveSession,
-  onRecoverableHiddenLocatorIssueIdsChange,
+  onLocatorReportChange,
   onSelectIssue,
-  onUnavailableLocatorIssueIdsChange,
   previewRuntimeUrl,
   rows,
   selectedIssueId,
@@ -209,12 +196,7 @@ export function RenderedPageEvidenceCard({
     "request-started"
   );
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const [unavailableLocatorIssueIds, setUnavailableLocatorIssueIds] = useState<Set<number>>(
-    () => new Set()
-  );
-  const [recoverableHiddenLocatorIssueIds, setRecoverableHiddenLocatorIssueIds] = useState<Set<number>>(
-    () => new Set()
-  );
+  const [locatorStates, setLocatorStates] = useState<Map<number, LocatorIssueState>>(() => new Map());
   const [replayViewportMetrics, setReplayViewportMetrics] = useState<ReplayViewportMetrics>({
     scale: 1,
     visualWidth: 0
@@ -266,14 +248,6 @@ export function RenderedPageEvidenceCard({
   const selectedVisibleIssueId = selectedIssueId !== null && replayIssueIds.has(selectedIssueId)
     ? selectedIssueId
     : null;
-  const unavailableLocatorCount = replayIssues.reduce(
-    (count, issue) => count + Number(unavailableLocatorIssueIds.has(issue.id)),
-    0
-  );
-  const recoverableHiddenLocatorCount = replayIssues.reduce(
-    (count, issue) => count + Number(recoverableHiddenLocatorIssueIds.has(issue.id)),
-    0
-  );
   const {
     frameKind: activeFrameKind,
     loadState: effectiveLoadState
@@ -283,32 +257,46 @@ export function RenderedPageEvidenceCard({
     liveSessionFailed: liveSession !== null && failedLiveSessionId === liveSession.sessionId,
     liveSessionLoadState
   });
-  const reportedUnavailableLocatorIssueIds = useMemo(
-    () =>
-      effectiveLoadState === "ready" && replayConnectionState === "ready"
-        ? replayIssues
-            .filter((issue) => unavailableLocatorIssueIds.has(issue.id))
-            .map((issue) => issue.id)
-        : [],
-    [effectiveLoadState, replayConnectionState, replayIssues, unavailableLocatorIssueIds]
-  );
-  const reportedRecoverableHiddenLocatorIssueIds = useMemo(
-    () =>
-      effectiveLoadState === "ready" && replayConnectionState === "ready"
-        ? replayIssues
-            .filter((issue) => recoverableHiddenLocatorIssueIds.has(issue.id))
-            .map((issue) => issue.id)
-        : [],
-    [effectiveLoadState, recoverableHiddenLocatorIssueIds, replayConnectionState, replayIssues]
-  );
+  const locatorReport = useMemo<LocatorReport>(() => {
+    const connected = effectiveLoadState === "ready" && replayConnectionState === "ready";
+    const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : replayIssues.length;
+    const issueStates: Record<number, LocatorIssueState> = {};
+    const unavailableIssueIds: number[] = [];
+    const recoverableHiddenIssueIds: number[] = [];
+    if (connected) replayIssues.forEach((issue, index) => {
+      const state: LocatorIssueState | undefined = index >= issueLimit
+        ? { status: "UNAVAILABLE", reason: "ISSUE_LIMIT_EXCEEDED" }
+        : locatorStates.get(issue.id);
+      if (!state) return;
+      issueStates[issue.id] = state;
+      if (state.status === "HIDDEN_STATE" && state.recoverable === true) {
+        recoverableHiddenIssueIds.push(issue.id);
+      } else if (state.status === "UNAVAILABLE" || state.status === "HIDDEN_STATE") {
+        unavailableIssueIds.push(issue.id);
+      }
+    });
+    return {
+      requestId: evaluationRequestId,
+      issueIdsSignature: replayIssues.map((issue) => issue.id).join(","),
+      state: effectiveLoadState === "error" ||
+        (effectiveLoadState === "ready" && replayConnectionState === "error")
+        ? "error"
+        : connected && replayIssues.every((issue, index) =>
+            index >= issueLimit || locatorStates.has(issue.id))
+          ? "ready"
+          : "loading",
+      unavailableIssueIds,
+      recoverableHiddenIssueIds,
+      issueStates
+    };
+  }, [effectiveLoadState, replayConnectionState, evaluationRequestId, replayIssues, activeFrameKind,
+    locatorStates]);
+  const unavailableLocatorCount = locatorReport.unavailableIssueIds.length;
+  const recoverableHiddenLocatorCount = locatorReport.recoverableHiddenIssueIds.length;
 
-  useEffect(() => {
-    onUnavailableLocatorIssueIdsChange(reportedUnavailableLocatorIssueIds);
-  }, [onUnavailableLocatorIssueIdsChange, reportedUnavailableLocatorIssueIds]);
-
-  useEffect(() => {
-    onRecoverableHiddenLocatorIssueIdsChange(reportedRecoverableHiddenLocatorIssueIds);
-  }, [onRecoverableHiddenLocatorIssueIdsChange, reportedRecoverableHiddenLocatorIssueIds]);
+  useLayoutEffect(() => {
+    onLocatorReportChange(locatorReport);
+  }, [onLocatorReportChange, locatorReport]);
 
   const frameRuntimeUrl = activeFrameKind === "live"
     ? liveSession?.runtimeUrl ?? null
@@ -743,8 +731,7 @@ export function RenderedPageEvidenceCard({
     closeLiveReportPort();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     setFallbackIssueId(null);
-    setUnavailableLocatorIssueIds(new Set());
-    setRecoverableHiddenLocatorIssueIds(new Set());
+    setLocatorStates(new Map());
     setReplayLoadingPhase(
       effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null
         ? "source-ready"
@@ -768,10 +755,9 @@ export function RenderedPageEvidenceCard({
     setFallbackIssueId(null);
   }, [frameRevision]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setFallbackIssueId(null);
-    setUnavailableLocatorIssueIds(new Set());
-    setRecoverableHiddenLocatorIssueIds(new Set());
+    setLocatorStates(new Map());
   }, [replayIssuesSignature]);
 
   useEffect(() => {
@@ -810,8 +796,7 @@ export function RenderedPageEvidenceCard({
       initializedReplayRef.current = null;
       replayOriginSelectionRef.current = null;
       setFallbackIssueId(null);
-      setUnavailableLocatorIssueIds(new Set());
-      setRecoverableHiddenLocatorIssueIds(new Set());
+      setLocatorStates(new Map());
       if (replacesKnownDocument) {
         setReplayLoadingPhase("source-ready");
       } else {
@@ -840,8 +825,7 @@ export function RenderedPageEvidenceCard({
       initializedReplayRef.current = null;
       replayOriginSelectionRef.current = null;
       setFallbackIssueId(null);
-      setUnavailableLocatorIssueIds(new Set());
-      setRecoverableHiddenLocatorIssueIds(new Set());
+      setLocatorStates(new Map());
       setReplayLoadingPhase("source-ready");
       setReplayConnectionState("loading");
       clearReplayReadyTimeout();
@@ -948,15 +932,17 @@ export function RenderedPageEvidenceCard({
         return;
       }
 
-      const isRecoverableHidden =
-        message.status === "HIDDEN_STATE" && message.recoverable === true;
-      const isUnavailable =
-        message.status === "UNAVAILABLE" ||
-        (message.status === "HIDDEN_STATE" && !isRecoverableHidden);
-      setUnavailableLocatorIssueIds((current) =>
-        updateIssueIdMembership(current, message.issueId, isUnavailable));
-      setRecoverableHiddenLocatorIssueIds((current) =>
-        updateIssueIdMembership(current, message.issueId, isRecoverableHidden));
+      setLocatorStates((current) => {
+        const next: LocatorIssueState = {
+          status: message.status,
+          reason: message.reason,
+          recoverable: message.recoverable
+        };
+        const previous = current.get(message.issueId);
+        if (previous?.status === next.status && previous.reason === next.reason &&
+            previous.recoverable === next.recoverable) return current;
+        return new Map(current).set(message.issueId, next);
+      });
     }
   }
 
@@ -1103,8 +1089,7 @@ export function RenderedPageEvidenceCard({
       closeLiveReportPort();
       invalidateReplayDocumentSession();
       setFallbackIssueId(null);
-      setUnavailableLocatorIssueIds(new Set());
-      setRecoverableHiddenLocatorIssueIds(new Set());
+      setLocatorStates(new Map());
       setReplayConnectionState("loading");
       connectLiveReportBridge();
       return;
@@ -1132,6 +1117,7 @@ export function RenderedPageEvidenceCard({
     invalidateReplayDocumentSession();
     frameLoadObservedRef.current = true;
     setFallbackIssueId(null);
+    setLocatorStates(new Map());
     setReplayConnectionState("loading");
     armReplayReadyTimeout();
     requestReplayDocumentState();
@@ -1139,13 +1125,8 @@ export function RenderedPageEvidenceCard({
 
   return (
     <article aria-labelledby="site-page-evidence-heading" className="dashboard-card site-page-evidence-card">
-      <header className="site-page-evidence-header">
-        <div>
-          <h2 id="site-page-evidence-heading">페이지 검사 화면</h2>
-          <p>문제가 발견된 요소를 현재 동적 페이지에서 직접 확인합니다</p>
-        </div>
-
-      </header>
+      {/* 제목은 화면에서 숨기고 접근 가능한 이름으로만 남긴다 */}
+      <h2 id="site-page-evidence-heading" className="sr-only">페이지 검사 화면</h2>
 
       <div className="site-page-evidence-body">
         {effectiveLoadState === "loading" && (

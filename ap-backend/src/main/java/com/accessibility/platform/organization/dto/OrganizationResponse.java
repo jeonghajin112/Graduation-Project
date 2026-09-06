@@ -12,6 +12,7 @@ public record OrganizationResponse(
     OrganizationType type,
     String homepageUrl,
     String description,
+    boolean systemManaged,
     OrganizationStatus status,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
@@ -23,6 +24,7 @@ public record OrganizationResponse(
             organization.getType(),
             organization.getHomepageUrl(),
             organization.getDescription(),
+            organization.isSystemManaged(),
             organization.getStatus(),
             organization.getCreatedAt(),
             organization.getUpdatedAt()

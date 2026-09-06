@@ -669,7 +669,7 @@ export function OrganizationModelDetailPanel({
       </div>
       {!readOnly && deletingEvaluationTargetModel
         ? createPortal(
-            <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
+            <div className="dashboard-modal-layer">
               <div
                 className="absolute inset-0"
                 onClick={() => {
@@ -685,42 +685,34 @@ export function OrganizationModelDetailPanel({
                 aria-labelledby="site-delete-title"
                 aria-describedby="site-delete-description"
                 tabIndex={-1}
-                className={`relative z-10 w-full max-w-md rounded-[18px] border p-6 ${
-                  isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
-                }`}
+                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
               >
                 <h3
                   id="site-delete-title"
-                  className={`text-lg font-semibold tracking-[-0.015em] ${
-                    isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-                  }`}
+                  className="dashboard-modal-title"
                 >
                   페이지 제거
                 </h3>
                 <p
                   id="site-delete-description"
-                  className={`mt-3 text-sm leading-6 ${isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"}`}
+                  className="dashboard-modal-description mt-3"
                 >
-                  <span className={isDarkMode ? "font-semibold text-[#f5f5f7]" : "font-semibold text-[#1d1d1f]"}>
+                  <span className="font-semibold text-foreground">
                     {deletingEvaluationTargetModel.name}
                   </span>
                   {" "}페이지를 제거하시겠습니까?
                 </p>
 
                 {deleteEvaluationTargetError.length > 0 && (
-                  <PanelMessage label={`페이지 제거 실패: ${deleteEvaluationTargetError}`} isError />
+                  <PanelMessage className="dashboard-modal-message" label={`페이지 제거 실패: ${deleteEvaluationTargetError}`} isError />
                 )}
 
-                <div className="mt-6 flex items-center justify-end gap-2">
+                <div className="dashboard-modal-actions">
                   <button
                     type="button"
                     disabled={isDeletingEvaluationTarget}
                     onClick={closeDeleteEvaluationTargetModel}
-                    className={`inline-flex h-7 items-center rounded-md px-5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                      isDarkMode
-                        ? "bg-[#2c2c2e] text-[#f5f5f7] hover:bg-[#3a3a3c] focus-visible:ring-white/30"
-                        : "bg-[#e5e5ea] text-[#1d1d1f] hover:bg-[#d2d2d7] focus-visible:ring-[#1d1d1f]/20"
-                    }`}
+                    className="dashboard-modal-button"
                   >
                     취소
                   </button>
@@ -732,7 +724,7 @@ export function OrganizationModelDetailPanel({
                     onClick={() => {
                       void handleConfirmDeleteEvaluationTargetModel();
                     }}
-                    className="h-7 rounded-md px-5 text-xs font-semibold"
+                    className="dashboard-modal-button dashboard-modal-button--danger"
                   >
                     {isDeletingEvaluationTarget ? "제거 중..." : "제거"}
                   </Button>

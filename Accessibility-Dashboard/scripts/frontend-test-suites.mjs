@@ -14,6 +14,9 @@ const infrastructure = nodeTest("verify-test-infrastructure.mjs");
 const accessibility = viteTest("verify-accessibility-p0.mjs");
 const dashboardBootAccessibility = viteTest("verify-dashboard-boot-accessibility.mjs");
 const pollingCancel = viteTest("verify-analysis-polling-cancel.mjs");
+const quickAnalysisProgress = viteTest("verify-quick-analysis-progress.mjs");
+const quickAnalysisPlacement = viteTest("verify-quick-analysis-placement.mjs");
+const siteAnalysisProgress = viteTest("verify-site-analysis-progress.mjs");
 const dashboardStatusPolling = viteTest("verify-dashboard-status-polling.mjs");
 const apiResponseValidation = viteTest("verify-api-response-validation.mjs");
 const dashboardRequestBudget = viteTest("verify-dashboard-request-budget.mjs");
@@ -46,13 +49,18 @@ const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
 });
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
+const modalAppearance = viteTest("verify-modal-appearance.mjs");
 
 const ci = [
   infrastructure,
   accessibility,
+  modalAppearance,
   landingDesign,
   dashboardBootAccessibility,
   pollingCancel,
+  quickAnalysisProgress,
+  quickAnalysisPlacement,
+  siteAnalysisProgress,
   dashboardStatusPolling,
   apiResponseValidation,
   dashboardRequestBudget,
@@ -96,51 +104,3 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
     viteTest("verify-sidebar-disclosure.mjs", { needsBackend: true })
   ]
 });
-
-export const FRONTEND_TEST_MIGRATIONS = Object.freeze([
-  {
-    file: "verify-organization-create-frontend-guards.mjs",
-    status: "retired",
-    replacements: [
-      "verify-directory-recovery-leases.mjs",
-      "verify-organization-create-post-timeout.mjs",
-      "verify-organization-create-refresh-retry.mjs",
-      "verify-organization-create-reload-recovery.mjs",
-      "verify-dashboard-mutation-refresh.mjs"
-    ],
-    reason: "The aggregate-overview tests now include the nested directory recovery lease regression."
-  },
-  {
-    file: "verify-partial-result-isolation.mjs",
-    status: "retired",
-    replacements: [
-      "verify-dashboard-request-budget.mjs",
-      "verify-api-response-validation.mjs",
-      "verify-page-evidence.mjs"
-    ],
-    reason: "The removed per-request directory/result cache made the legacy endpoint and clock-expiry contract obsolete."
-  },
-  {
-    file: "verify-rescan-result-retention.mjs",
-    status: "retired",
-    replacements: ["verify-dashboard-request-budget.mjs"],
-    reason: "The rescan action was removed; latest-completed-result selection is covered at the aggregate overview boundary."
-  },
-  {
-    file: "verify-site-create-guards.mjs",
-    status: "retired",
-    replacements: [
-      "verify-site-create-accessibility-guards.mjs",
-      "verify-site-create-request-retry.mjs",
-      "verify-mutation-submit-guards.mjs",
-      "verify-dashboard-mutation-refresh.mjs"
-    ],
-    reason: "Current aggregate fixtures cover request recovery, mobile overflow, and storage-failure guards."
-  },
-  {
-    file: "verify-site-detail-design.mjs",
-    status: "retired",
-    replacements: ["verify-page-evidence.mjs"],
-    reason: "Its replay-only layout assertions contradict the current page-detail cards and header."
-  }
-]);

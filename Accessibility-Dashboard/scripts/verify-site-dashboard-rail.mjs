@@ -93,7 +93,6 @@ async function readResponsiveRailMetrics(page) {
     const evidence = document.querySelector(".site-page-evidence-grid-item");
     const card = document.querySelector(".site-page-information");
     const heading = document.querySelector(".site-rail-card__heading h3");
-    const body = document.querySelector(".site-page-evidence-trend-heading p");
     const caption = document.querySelector(".site-page-information__title a");
     const metric = document.querySelector(".site-page-evidence-trend-metrics strong");
     const chart = document.querySelector(".site-page-evidence-trend-chart");
@@ -103,7 +102,6 @@ async function readResponsiveRailMetrics(page) {
         || !(evidence instanceof HTMLElement)
         || !(card instanceof HTMLElement)
         || !(heading instanceof HTMLElement)
-        || !(body instanceof HTMLElement)
         || !(caption instanceof HTMLElement)
         || !(metric instanceof HTMLElement)
         || !(chart instanceof HTMLElement)
@@ -128,7 +126,6 @@ async function readResponsiveRailMetrics(page) {
       cardPaddingInline: Number.parseFloat(cardStyle.paddingLeft)
         + Number.parseFloat(cardStyle.paddingRight),
       headingFontSize: Number.parseFloat(getComputedStyle(heading).fontSize),
-      bodyFontSize: Number.parseFloat(getComputedStyle(body).fontSize),
       captionFontSize: Number.parseFloat(getComputedStyle(caption).fontSize),
       metricFontSize: Number.parseFloat(getComputedStyle(metric).fontSize),
       chartHeight: chart.getBoundingClientRect().height,
@@ -467,16 +464,19 @@ try {
     "the latest analysis time must appear once in page information"
   );
   const railCardOrder = await page.locator(".site-dashboard-rail > *").evaluateAll((cards) =>
-    cards.map((card) => card.textContent?.trim() ?? "")
+    cards.map((card) => card.getAttribute("aria-label") ?? card.textContent?.trim() ?? "")
   );
   assert.ok(railCardOrder[0]?.includes("페이지 정보"), "page information must lead the rail");
   assert.ok(railCardOrder[1]?.includes("최근 분석 추이"), "analysis trend must follow page information");
+  const trendCard = page.getByRole("complementary", { name: "최근 분석 추이", exact: true });
+  assert.equal(await trendCard.getByRole("heading", { name: "최근 분석 추이", level: 3, exact: true }).isVisible(), true);
+  assert.equal(await trendCard.getByText("최근 완료된 분석의 점수와 문제 수", { exact: true }).count(), 0);
   assert.ok(railCardOrder[2]?.includes("심각도 분포"), "severity distribution must follow the trend");
 
   // Severity counts must match the issue list exactly.
   const severityCounts = await page.locator(".site-rail-severity__row").evaluateAll((rows) =>
     rows.map((row) => ({
-      label: row.querySelector(".site-rail-severity__name")?.textContent?.trim(),
+      label: row.getAttribute("aria-label")?.replace(/\s*[0-9,]+건$/, "").trim(),
       count: Number(row.getAttribute("aria-label")?.replace(/[^0-9]/g, ""))
     }))
   );
@@ -496,21 +496,27 @@ try {
     "the redundant severity composition subtitle must not render"
   );
   assert.equal(
-    await severityCard.getByText("발견된 문제를 심각도별로 보여줍니다.", { exact: true }).count(),
-    1,
-    "the severity card must retain a concise count-free explanation"
+    (await severityCard.locator(".site-rail-severity__total").textContent())?.replace(/\s+/g, " ").trim(),
+    "6건",
+    "the severity card must show the total next to its heading"
   );
-  assert.ok(
-    !(await severityCard.textContent())?.includes("%"),
-    "the vertical severity chart must show counts without percentage labels"
+  assert.deepEqual(
+    await severityCard.locator(".site-rail-severity__percent").allTextContents(),
+    ["17%", "33%", "33%", "17%"],
+    "the legend must show each severity's share as a percentage"
+  );
+  assert.deepEqual(
+    await severityCard.locator(".site-rail-severity__legend .site-rail-severity__name").allTextContents(),
+    ["심각", "높음", "중간", "낮음"],
+    "the legend must name every severity without counts"
   );
   const severityFillColors = await page.locator(".site-rail-severity__fill").evaluateAll((fills) =>
     fills.map((fill) => getComputedStyle(fill).backgroundColor)
   );
   assert.equal(
     new Set(severityFillColors).size,
-    1,
-    "all severity bars must use the single dashboard key color"
+    4,
+    "each stacked segment must carry its own severity color"
   );
   assert.equal(
     await page.locator(".site-rail-severity__count").count(),
@@ -528,37 +534,26 @@ try {
   await focusedSeverityTooltip.waitFor({ state: "visible", timeout: 1_000 });
   assert.equal(await focusedSeverityTooltip.textContent(), "높음 · 2건");
   const severityGeometry = await page
-    .locator(".site-rail-severity__row")
+    .locator(".site-rail-severity__track")
     .first()
-    .evaluate((row) => {
-      const track = row.querySelector(".site-rail-severity__track");
-      const fill = row.querySelector(".site-rail-severity__fill");
-      if (!(track instanceof HTMLElement) || !(fill instanceof HTMLElement)) {
-        return null;
-      }
-
+    .evaluate((track) => {
+      const fills = [...track.querySelectorAll(".site-rail-severity__fill")];
       const trackRect = track.getBoundingClientRect();
-      const fillRect = fill.getBoundingClientRect();
       return {
         trackWidth: trackRect.width,
         trackHeight: trackRect.height,
-        fillWidth: fillRect.width,
-        trackBackground: getComputedStyle(track).backgroundColor
+        fillWidthSum: fills.reduce((sum, fill) => sum + fill.getBoundingClientRect().width, 0),
+        segmentCount: fills.length
       };
     });
   assert.ok(severityGeometry, "the severity chart geometry must be measurable");
   assert.ok(
-    severityGeometry.trackHeight > severityGeometry.trackWidth,
-    "severity tracks must be vertical"
+    severityGeometry.trackWidth > severityGeometry.trackHeight * 8,
+    "the severity bar must be one horizontal stacked track"
   );
   assert.ok(
-    Math.abs(severityGeometry.fillWidth - severityGeometry.trackWidth) < 1,
-    "severity fills must occupy the vertical track width"
-  );
-  assert.equal(
-    severityGeometry.trackBackground,
-    "rgba(0, 0, 0, 0)",
-    "vertical severity tracks must not render an empty gray rail"
+    Math.abs(severityGeometry.fillWidthSum + (severityGeometry.segmentCount - 1) * 2 - severityGeometry.trackWidth) < 2,
+    "stacked segments must fill the whole track width"
   );
 
   // The rail must sit beside the replay card and must not overflow it.
@@ -601,7 +596,7 @@ try {
 
   // Accessible names must survive: each remaining card is a labelled section.
   const headingCount = await page.locator(".site-rail-card__heading h3").count();
-  assert.equal(headingCount, 2, "each remaining detail card exposes a heading");
+  assert.equal(headingCount, 4, "each detail card, including the trend and empty unavailable cards, exposes a heading");
 
   // The page URL is actionable and keeps a keyboard-visible focus ring.
   const pageInformationLink = pageInformationCard.locator(".site-page-information__title a");
@@ -695,10 +690,6 @@ try {
     "4K supporting text must not remain at the compact desktop size: " + JSON.stringify(fourKRail)
   );
   assert.ok(
-    fourKRail.bodyFontSize >= 14.5,
-    "4K explanatory text must scale with its card: " + JSON.stringify(fourKRail)
-  );
-  assert.ok(
     fourKRail.metricFontSize >= 31,
     "4K headline metrics must keep their visual hierarchy: " + JSON.stringify(fourKRail)
   );
@@ -707,7 +698,7 @@ try {
     "the trend chart must scale with the wider 4K rail card: " + JSON.stringify(fourKRail)
   );
   assert.ok(
-    fourKRail.severityTrackWidth >= 20 && fourKRail.severityTrackHeight >= 136,
+    fourKRail.severityTrackWidth >= 240 && fourKRail.severityTrackHeight >= 12,
     "the 4K severity chart must scale with the larger card: " + JSON.stringify(fourKRail)
   );
   await page.screenshot({ path: path.join(outDir, "rail-4k.png"), fullPage: false });

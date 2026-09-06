@@ -188,29 +188,9 @@ async function verifyLeaseRelease(browser, statusOutcome) {
     const siteDialog = page.getByRole("dialog", { name: "페이지 추가", exact: true });
     await siteDialog.getByRole("button", { name: "분석 시작", exact: true }).click();
 
-    if (statusOutcome === "FAILED") {
-      await siteDialog
-        .getByRole("alert")
-        .filter({ hasText: "페이지 등록 완료 · 분석 실패" })
-        .waitFor();
-    } else {
-      await siteDialog
-        .getByRole("alert")
-        .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" })
-        .waitFor();
-    }
-
-    const persistedCheckpoint = await page.evaluate((key) => {
-      const rawValue = sessionStorage.getItem(key);
-      return rawValue === null ? null : JSON.parse(rawValue);
-    }, recoveryStorageKey);
-    assert.ok(persistedCheckpoint, "status errors must keep a retry checkpoint");
-    assert.equal(
-      persistedCheckpoint.phase,
-      statusOutcome === "FAILED" ? "request-ready" : "poll"
-    );
-    await siteDialog.getByRole("button", { name: "닫기", exact: true }).click();
     await siteDialog.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), recoveryStorageKey), null,
+      "confirmed receipts must release the form checkpoint before background status reads");
 
     await page.getByRole("button", { name: `${target.name} 제거`, exact: true }).click();
     const deleteDialog = page.getByRole("dialog", { name: "페이지 제거", exact: true });
@@ -223,18 +203,14 @@ async function verifyLeaseRelease(browser, statusOutcome) {
       statusOutcome === "FAILED" ? 1 : 2,
       "an ambiguous POST must reconcile by GET without sending another request"
     );
-    assert.equal(observed.requestStatusGets, 1);
+    assert.equal(observed.requestStatusGets, 0, "handoff does not await status");
     assert.equal(observed.targetDeletePatches, 1);
     assert.equal(
       observed.incompleteOverviewGets,
       1,
       "the first incomplete authoritative overview must be accepted after lease release"
     );
-    assert.notEqual(
-      await page.evaluate((key) => sessionStorage.getItem(key), recoveryStorageKey),
-      null,
-      "releasing the in-memory lease must not discard the persisted retry checkpoint"
-    );
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), recoveryStorageKey), null);
     assert.deepEqual(observed.unknownRequests, []);
     return observed;
   } finally {
@@ -454,32 +430,18 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
     }
 
     releaseReconcileRequest();
-    await siteDialog
-      .getByRole("alert")
-      .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" })
-      .waitFor();
+    await siteDialog.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), recoveryStorageKey), null);
 
-    const persistedCheckpoint = await page.evaluate((key) => {
-      const rawValue = sessionStorage.getItem(key);
-      return rawValue === null ? null : JSON.parse(rawValue);
-    }, recoveryStorageKey);
-    assert.equal(persistedCheckpoint?.phase, "poll");
-
-    // The modal remains open. Its completed operation must have released the
-    // in-memory lease, so the next authoritative refresh accepts the deletion.
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    // Receipt handoff releases the lease; the next snapshot may accept deletion.
     await page.waitForURL("**/analyze", { timeout: 10_000 });
 
     assert.equal(observed.requestPosts, 1);
     assert.equal(observed.requestListGets, 2);
-    assert.equal(observed.requestStatusGets, 1);
-    assert.equal(observed.backgroundStatusGets, 2);
+    assert.equal(observed.requestStatusGets, 0, "receipt handoff does not await status");
+    assert.equal(observed.backgroundStatusGets, 1);
     assert.equal(observed.incompleteOverviewGets, 2);
-    assert.notEqual(
-      await page.evaluate((key) => sessionStorage.getItem(key), recoveryStorageKey),
-      null,
-      "operation cleanup must keep the persisted duplicate-POST checkpoint"
-    );
+    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), recoveryStorageKey), null);
     assert.deepEqual(observed.unknownRequests, []);
     return observed;
   } finally {

@@ -1,8 +1,8 @@
 /**
  * Verifies the scroll-world landing across desktop and mobile breakpoints.
  * The suite uses reduced motion for the viewport matrix so visual checks do
- * not download or decode the 1080p demo clips, then runs one focused motion
- * check to prove that the desktop clip path still initializes.
+ * not download or decode the demo clips, then checks desktop scene navigation
+ * and sequentially decodes the refreshed clips at each delivered resolution.
  *
  * Usage: npm run verify:landing-design
  */
@@ -16,6 +16,12 @@ const outDir = process.env.OUT_DIR ?? "artifacts/design-migration/landing";
 mkdirSync(outDir, { recursive: true });
 
 const CONTROL_MIN_HEIGHT_PX = 44;
+const refreshedScenes = [
+  { id: "input", index: 1, scrollVh: 2.25 },
+  { id: "analyze", index: 2, scrollVh: 3.6 },
+  { id: "report", index: 3, scrollVh: 5.15 },
+  { id: "overview", index: 4, scrollVh: 6.75 }
+];
 const viewports = [
   { width: 3840, height: 2160 },
   { width: 2560, height: 1440 },
@@ -68,7 +74,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
       const rect = element.getBoundingClientRect();
       return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
     };
-    const controls = [...document.querySelectorAll(".sw-brand,.sw-topcta,.sw-nav__item,.sw-route__dot")]
+    const controls = [...document.querySelectorAll(".sw-brand,.sw-topcta,.sw-nav__item,.sw-route__dot,.sw-hint")]
       .filter(isVisible)
       .map((element) => ({
         label: element.textContent?.trim() || element.getAttribute("aria-label") || element.className,
@@ -86,8 +92,6 @@ async function verifyReducedMotionViewport(browser, viewport) {
     const topCta = document.querySelector(".sw-topcta");
     const titleStyle = title ? getComputedStyle(title) : null;
     const rootStyle = root ? getComputedStyle(root) : null;
-    const routeStyle = route ? getComputedStyle(route) : null;
-    const routeFillStyle = route ? getComputedStyle(route, "::after") : null;
     const topbarRect = topbar?.getBoundingClientRect();
     const rect = (element) => {
       const bounds = element?.getBoundingClientRect();
@@ -103,16 +107,11 @@ async function verifyReducedMotionViewport(browser, viewport) {
       copyCount: document.querySelectorAll(".sw-copy").length,
       activeCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="false"]:not([inert])').length,
       inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
-      routeCount: document.querySelectorAll(".sw-route__dot").length,
-      routeLabelCount: document.querySelectorAll(".sw-route__label").length,
-      routeMarkerCount: document.querySelectorAll(".sw-route__dot i").length,
+      routeVisible: Boolean(route && isVisible(route)),
       horizontalProgressCount: document.querySelectorAll(".sw-scrollbar").length,
-      routeProgress: Number.parseFloat(routeStyle?.getPropertyValue("--sw-route-progress") || "0"),
-      routeGaugeWidth: Number.parseFloat(routeFillStyle?.width || "0"),
-      routeGaugeFillColor: routeFillStyle?.backgroundColor,
-      routeGaugeOriginY: Number.parseFloat(routeFillStyle?.transformOrigin?.split(/\s+/)[1] || "0"),
       sectionNumberCount: document.querySelectorAll(".sw-copy__num").length,
       hintCount: document.querySelectorAll(".sw-hint").length,
+      hintText: document.querySelector(".sw-hint")?.textContent,
       particleCount: document.querySelectorAll(".sw-pt").length,
       videoCount: document.querySelectorAll("video").length,
       posterReady: [...document.querySelectorAll(".sw-scene__still")].every((image) => image.complete && image.naturalWidth > 0),
@@ -147,16 +146,11 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(facts.copyCount, 5, `${label}: expected five narrative scenes`);
   assert.equal(facts.activeCopyCount, 1, `${label}: exactly one scene copy must be active`);
   assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy escaped inert state`);
-  assert.equal(facts.routeCount, 5, `${label}: expected five route controls`);
-  assert.equal(facts.routeLabelCount, 0, `${label}: route text labels must stay hidden`);
-  assert.equal(facts.routeMarkerCount, 0, `${label}: circular route markers must stay removed`);
+  assert.equal(facts.routeVisible, false, `${label}: side progress bar must stay hidden`);
   assert.equal(facts.horizontalProgressCount, 0, `${label}: obsolete top progress bar is still rendered`);
-  assert.ok(Math.abs(facts.routeProgress) <= 0.002, `${label}: vertical gauge must start empty`);
-  assert.ok(facts.routeGaugeWidth >= 2.5, `${label}: vertical gauge is too thin to perceive`);
-  assert.notEqual(facts.routeGaugeFillColor, "rgba(0, 0, 0, 0)", `${label}: vertical gauge fill is transparent`);
-  assert.ok(facts.routeGaugeOriginY <= 0.5, `${label}: vertical gauge must fill from the top`);
   assert.equal(facts.sectionNumberCount, 0, `${label}: decorative section counters must stay removed`);
-  assert.equal(facts.hintCount, 0, `${label}: scroll instruction cue must stay removed`);
+  assert.equal(facts.hintCount, 1, `${label}: opening must show one scroll instruction cue`);
+  assert.equal(facts.hintText, "SCROLL DOWN", `${label}: scroll instruction text is incorrect`);
   assert.equal(facts.particleCount, 0, `${label}: studio layout must not render particles`);
   assert.equal(facts.videoCount, 0, `${label}: reduced motion must not create videos`);
   assert.deepEqual(videoRequests, [], `${label}: reduced motion unexpectedly requested video media`);
@@ -197,13 +191,11 @@ async function verifyReducedMotionViewport(browser, viewport) {
     assert.ok(facts.copyWidth >= 840 && facts.copyWidth <= 900, `${label}: 4K copy measure is out of bounds`);
     assert.ok(facts.topCtaHeight >= 68, `${label}: 4K primary action did not scale`);
     assert.ok(facts.wordmarkFontSize >= 25, `${label}: 4K wordmark did not scale`);
-    assert.ok(facts.routeGaugeWidth >= 5.5, `${label}: 4K route gauge did not scale`);
   } else if (viewport.width >= 2500 && viewport.height >= 1200) {
     assert.ok(facts.titleFontSize >= 68 && facts.titleFontSize <= 80, `${label}: QHD title scale is out of bounds`);
     assert.ok(facts.copyWidth >= 600 && facts.copyWidth <= 660, `${label}: QHD copy measure is out of bounds`);
     assert.ok(facts.topCtaHeight >= 50, `${label}: QHD primary action did not scale`);
     assert.ok(facts.wordmarkFontSize >= 21, `${label}: QHD wordmark did not scale`);
-    assert.ok(facts.routeGaugeWidth >= 3.5, `${label}: QHD route gauge did not scale`);
   } else {
     assert.ok(
       facts.titleFontSize >= 30 && facts.titleFontSize <= 58,
@@ -223,7 +215,6 @@ async function verifyReducedMotionViewport(browser, viewport) {
   }
 
   if ([390, 1440, 2545, 3840].includes(viewport.width)) {
-    const progressSamples = [];
     for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
       await page.evaluate((targetFraction) => {
         const maxScroll = document.documentElement.scrollHeight - innerHeight;
@@ -231,44 +222,12 @@ async function verifyReducedMotionViewport(browser, viewport) {
       }, fraction);
       await settle(page);
       await page.waitForFunction((targetFraction) => {
-        const route = document.querySelector(".sw-route");
-        if (!route) return false;
         const maxScroll = document.documentElement.scrollHeight - innerHeight;
         const actualFraction = maxScroll > 0 ? scrollY / maxScroll : 0;
-        const value = Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress"));
-        const transform = getComputedStyle(route, "::after").transform;
-        const renderedScale = transform === "none" ? 1 : new DOMMatrixReadOnly(transform).m22;
-        return Number.isFinite(value)
-          && Math.abs(actualFraction - targetFraction) <= 0.002
-          && Math.abs(value - targetFraction) <= 0.015
-          && Math.abs(renderedScale - value) <= 0.02;
+        return Math.abs(actualFraction - targetFraction) <= 0.002;
       }, fraction);
-      progressSamples.push(await page.evaluate(() => {
-        const route = document.querySelector(".sw-route");
-        if (!route) return null;
-        const routeStyle = getComputedStyle(route);
-        const fillStyle = getComputedStyle(route, "::after");
-        const transform = fillStyle.transform;
-        return {
-          expected: scrollY / (document.documentElement.scrollHeight - innerHeight),
-          value: Number.parseFloat(routeStyle.getPropertyValue("--sw-route-progress")),
-          renderedScale: transform === "none" ? 1 : new DOMMatrixReadOnly(transform).m22,
-          current: route.querySelector('.sw-route__dot[aria-current="step"]')?.getAttribute("aria-label")
-        };
-      }));
+      assert.equal(await page.locator(".sw-route").isVisible(), false, `${label}: side bar reappeared while scrolling`);
     }
-    progressSamples.forEach((sample, index) => {
-      assert.ok(sample, `${label}: vertical gauge disappeared during scrolling`);
-      assert.ok(sample.value >= 0 && sample.value <= 1, `${label}: gauge value escaped its range at sample ${index}`);
-      assert.ok(Math.abs(sample.value - sample.expected) <= 0.015, `${label}: gauge value drifted at sample ${index}`);
-      assert.ok(Math.abs(sample.renderedScale - sample.value) <= 0.02, `${label}: rendered gauge fill drifted at sample ${index}`);
-      if (index > 0) {
-        assert.ok(sample.value > progressSamples[index - 1].value + 0.03, `${label}: gauge did not advance at sample ${index}`);
-      }
-    });
-    assert.ok(progressSamples[0]?.value <= 0.002, `${label}: gauge did not begin empty`);
-    assert.ok(progressSamples.at(-1)?.value >= 0.998, `${label}: gauge did not finish full`);
-    assert.equal(progressSamples.at(-1)?.current, "5. 프로젝트", `${label}: final gauge state did not select the last scene`);
     await page.evaluate(() => window.scrollTo(0, 0));
     await settle(page);
   }
@@ -294,7 +253,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(focus.offset, "3px", `${label}: CTA focus separation must be 3px`);
   assert.notEqual(focus.style, "none", `${label}: CTA focus outline is missing`);
 
-  await page.getByRole("button", { name: "4. 라이브 리포트", exact: true }).click();
+  // The report scene spans 4.3–6 viewport heights; inspect its settled midpoint.
+  await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "문제가 있는 자리를 그대로"
   );
@@ -311,7 +271,6 @@ async function verifyReducedMotionViewport(browser, viewport) {
       rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1
     );
     return {
-      current: document.querySelector('.sw-route__dot[aria-current="step"]')?.getAttribute("aria-label"),
       title: document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent,
       inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
       cardElementFound: Boolean(media),
@@ -321,7 +280,6 @@ async function verifyReducedMotionViewport(browser, viewport) {
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
   });
-  assert.equal(report.current, "4. 라이브 리포트", `${label}: report route state did not update`);
   assert.equal(report.title, "문제가 있는 자리를 그대로", `${label}: report copy did not activate`);
   assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
   assert.equal(report.cardElementFound, true, `${label}: report card surface is missing`);
@@ -342,7 +300,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   );
   assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
 
-  await page.getByRole("button", { name: "5. 프로젝트", exact: true }).click();
+  await page.evaluate(() => window.scrollTo(0, innerHeight * 6.75));
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
   );
@@ -397,8 +355,121 @@ async function verifyDesktopMotionPath(browser) {
   await page.waitForFunction(() => document.querySelectorAll("video").length === 1, null, { timeout: 15_000 });
   assert.equal(await page.locator("video").count(), 1, "initial desktop view must load only the opening clip");
   assert.deepEqual(videoRequests, ["/landing/scroll-world/vid/opening-1080.mp4"]);
+
+  const scenes = [];
+  for (const scene of refreshedScenes) {
+    await page.evaluate((scrollVh) => window.scrollTo(0, innerHeight * scrollVh), scene.scrollVh);
+    await page.locator(`#sw-section-${scene.id}[aria-hidden="false"]:not([inert])`).waitFor();
+    await page.waitForFunction((index) => {
+      const element = document.querySelectorAll(".sw-scene")[index];
+      const video = element?.querySelector("video");
+      return element?.classList.contains("has-clip") && video && !video.seeking &&
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime > 0;
+    }, scene.index, { timeout: 15_000 });
+    await settle(page);
+
+    const facts = await page.evaluate(({ id, index }) => {
+      const element = document.querySelectorAll(".sw-scene")[index];
+      const video = element.querySelector("video");
+      const copy = document.getElementById(`sw-section-${id}`);
+      const rect = video.getBoundingClientRect();
+      const copyRect = copy.getBoundingClientRect();
+      return {
+        id,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        duration: video.duration,
+        currentTime: video.currentTime,
+        cardWidth: rect.width,
+        cardRadius: Number.parseFloat(getComputedStyle(video).borderTopLeftRadius),
+        visible: Number.parseFloat(getComputedStyle(element).opacity) > 0.99,
+        withinViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+        overlapsCopy: rect.left < copyRect.right - 1 && rect.right > copyRect.left + 1 &&
+          rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1,
+        activeCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="false"]:not([inert])').length,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+      };
+    }, scene);
+    assert.ok(videoRequests.includes(`/landing/scroll-world/vid/${scene.id}-1080.mp4`), `${scene.id}: desktop did not request its refreshed clip`);
+    assert.deepEqual([facts.width, facts.height], [1920, 1080], `${scene.id}: desktop clip resolution changed`);
+    assert.ok(Number.isFinite(facts.duration) && facts.duration > 0, `${scene.id}: clip duration is invalid`);
+    assert.equal(facts.visible, true, `${scene.id}: decoded scene is not visible`);
+    assert.equal(facts.activeCopyCount, 1, `${scene.id}: scene navigation must activate exactly one copy`);
+    assert.equal(facts.withinViewport, true, `${scene.id}: video card exceeds the viewport`);
+    assert.equal(facts.overlapsCopy, false, `${scene.id}: video card overlaps its copy`);
+    assert.ok(Math.abs(facts.cardWidth - 1440 * 0.54) < 1, `${scene.id}: video lost its desktop card width`);
+    assert.ok(facts.cardRadius >= 20, `${scene.id}: video lost its rounded card framing`);
+    assert.equal(facts.overflow, 0, `${scene.id}: video introduced horizontal overflow`);
+    scenes.push(facts);
+  }
   assert.deepEqual(pageErrors, [], "desktop motion path raised a page error");
   await context.close();
+  return scenes;
+}
+
+async function verifyRefreshedMediaVariants(browser) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const results = [];
+  try {
+    // One decoder at a time keeps the 4K checks bounded on CI machines.
+    for (const variant of [
+      { suffix: "-1080", width: 1920, height: 1080 },
+      { suffix: "-1440", width: 2560, height: 1440 },
+      { suffix: "", width: 3840, height: 2160 }
+    ]) {
+      for (const scene of refreshedScenes) {
+        const path = `/landing/scroll-world/vid/${scene.id}${variant.suffix}.mp4`;
+        const facts = await page.evaluate(async (src) => {
+          const video = document.createElement("video");
+          video.muted = true;
+          video.preload = "auto";
+          video.width = 320;
+          document.body.appendChild(video);
+          let timer;
+          let targetTime;
+          try {
+            return await new Promise((resolve, reject) => {
+              timer = setTimeout(() => reject(new Error(`${src}: metadata/seek timed out`)), 15_000);
+              video.addEventListener("error", () => reject(new Error(`${src}: media error ${video.error?.code}: ${video.error?.message}`)), { once: true });
+              video.addEventListener("loadedmetadata", () => {
+                if (!Number.isFinite(video.duration) || video.duration <= 0) {
+                  reject(new Error(`${src}: invalid duration ${video.duration}`));
+                  return;
+                }
+                targetTime = video.duration * 0.75;
+                video.currentTime = targetTime;
+              }, { once: true });
+              video.addEventListener("seeked", () => resolve({
+                width: video.videoWidth,
+                height: video.videoHeight,
+                duration: video.duration,
+                targetTime,
+                currentTime: video.currentTime,
+                decodedData: video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+              }), { once: true });
+              video.src = src;
+              video.load();
+            });
+          } finally {
+            clearTimeout(timer);
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+            video.remove();
+          }
+        }, new URL(path, baseUrl).href);
+        assert.deepEqual([facts.width, facts.height], [variant.width, variant.height], `${path}: delivered resolution does not match its tier`);
+        assert.ok(Number.isFinite(facts.duration) && facts.duration > 0, `${path}: clip duration is invalid`);
+        assert.equal(facts.decodedData, true, `${path}: seeking did not decode a frame`);
+        assert.ok(Math.abs(facts.currentTime - facts.targetTime) < 0.1, `${path}: seek did not reach the requested frame`);
+        results.push({ path, ...facts });
+      }
+    }
+  } finally {
+    await context.close();
+  }
+  return results;
 }
 
 async function verifyMobileHeightOnlyResize(browser) {
@@ -415,17 +486,71 @@ async function verifyMobileHeightOnlyResize(browser) {
   await settle(page);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await page.waitForFunction(() => {
-    const route = document.querySelector(".sw-route");
-    const value = Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress"));
-    return value >= 0.998;
+    const maxScroll = document.documentElement.scrollHeight - innerHeight;
+    const activeTitle = document.querySelector('.sw-copy[aria-hidden="false"] .sw-copy__title');
+    return Math.abs(scrollY - maxScroll) <= 1 && activeTitle?.textContent === "접근성을 한 화면에서";
   });
-  const progress = await page.locator(".sw-route").evaluate((route) => ({
-    value: Number.parseFloat(getComputedStyle(route).getPropertyValue("--sw-route-progress")),
-    current: route.querySelector('[aria-current="step"]')?.getAttribute("aria-label")
-  }));
-  assert.ok(progress.value >= 0.998, "mobile height-only resize left the vertical gauge incomplete");
-  assert.equal(progress.current, "5. 프로젝트", "mobile height-only resize lost the final scene state");
+  assert.equal(await page.locator(".sw-route").isVisible(), false, "mobile resize must not restore the side bar");
+  assert.equal(
+    await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__title').textContent(),
+    "접근성을 한 화면에서",
+    "mobile height-only resize lost the final scene state"
+  );
   await context.close();
+}
+
+async function verifyScrollControl(browser) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const reducedMotion = viewport.width < 860 ? "reduce" : "no-preference";
+    const context = await browser.newContext({ viewport, reducedMotion });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+      await page.locator('[data-scroll-world-ready="true"]').waitFor();
+      const down = page.getByRole("button", { name: "SCROLL DOWN: 아래로 스크롤", exact: true });
+      const animation = await down.locator("svg").evaluate((arrow) => getComputedStyle(arrow).animationName);
+      assert.equal(animation === "none", reducedMotion === "reduce", "scroll arrow must respect reduced motion");
+      await down.click();
+      await page.waitForFunction(() => Math.abs(scrollY - innerHeight * 0.8) < 2);
+
+      for (const fraction of [0, 0.5, 0.95, 1]) {
+        await page.evaluate((value) => window.scrollTo({
+          top: (document.documentElement.scrollHeight - innerHeight) * value, behavior: "instant"
+        }), fraction);
+        const label = fraction === 1 ? "TOP: 맨 위로 이동" : "SCROLL DOWN: 아래로 스크롤";
+        const control = page.getByRole("button", { name: label, exact: true });
+        await control.waitFor();
+        const facts = await control.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const arrow = element.querySelector("i").getBoundingClientRect();
+          const text = element.querySelector("span").getBoundingClientRect();
+          return {
+            fixed: getComputedStyle(element).position === "fixed",
+            centered: Math.abs(rect.x + rect.width / 2 - innerWidth / 2) < 1,
+            bottom: rect.bottom <= innerHeight && rect.top >= innerHeight - 110,
+            onTop: element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)),
+            arrowAboveText: arrow.bottom <= text.top
+          };
+        });
+        assert.ok(Object.values(facts).every(Boolean), `${viewport.width}: scroll control is obscured or misplaced at ${fraction}: ${JSON.stringify(facts)}`);
+        if (fraction === 0 || fraction === 1) {
+          await page.screenshot({ path: `${outDir}/scroll-control-${viewport.width}-${fraction === 1 ? "bottom" : "opening"}.png` });
+        }
+      }
+      const top = page.getByRole("button", { name: "TOP: 맨 위로 이동", exact: true });
+      if (viewport.width >= 860) {
+        await top.focus();
+        await top.press("Enter");
+      } else {
+        await top.click();
+      }
+      await page.waitForFunction(() => scrollY < 1);
+      await down.waitFor();
+      assert.equal(await down.textContent(), "SCROLL DOWN", "returning to the top must restore the down label");
+    } finally {
+      await context.close();
+    }
+  }
 }
 
 async function verifyProductPreviewAccountMenu(browser) {
@@ -466,9 +591,12 @@ try {
     results.push(await verifyReducedMotionViewport(browser, viewport));
   }
   await verifyMobileHeightOnlyResize(browser);
-  await verifyDesktopMotionPath(browser);
+  await verifyScrollControl(browser);
+  const scenes = await verifyDesktopMotionPath(browser);
+  const variants = await verifyRefreshedMediaVariants(browser);
   await verifyProductPreviewAccountMenu(browser);
   writeFileSync(`${outDir}/landing-design-summary.json`, JSON.stringify(results, null, 2));
+  writeFileSync(`${outDir}/landing-media-summary.json`, JSON.stringify({ scenes, variants }, null, 2));
   console.log("Landing scroll-world visual checks passed.");
 } finally {
   await browser.close();

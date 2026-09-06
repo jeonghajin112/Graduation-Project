@@ -51,7 +51,7 @@
     --report-search-popover-bg: var(--popover, #ffffff);
     --site-score-line-color: var(--dashboard-accent);
     --site-score-grid-color: #d8dee8;
-    /* Page detail local extension. Values follow DESIGN.md semantic statuses.
+    /* Page detail local extension. Values follow docs/design-system.md semantic statuses.
        Kept scoped to the dashboard (no new global token API). */
     --site-issue-bar-color: #c2410c;
     --site-chart-cursor-color: #6e6e73;

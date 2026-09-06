@@ -1,5 +1,5 @@
 /* 분석 엔진 소개 + 분석 과정 섹션 — 스크롤 필름(fixed 레이어) 아래에 놓이는 일반 섹션.
-   z-index 45: 필름의 stage(10)·copy(20)·hint(30)·route(40) 위, topbar(50) 아래. */
+   z-index 45: 필름의 stage(10)·copy(20)·route(40) 위, topbar(50)·hint(60) 아래. */
 .ua-engine {
   position: relative;
   z-index: 45;
@@ -129,12 +129,7 @@
 }
 
 /* ── 분석 과정: 어두운 무대 위의 단계 레일 ───────────────────────────────── */
-.ua-engine__stage { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; gap: clamp(24px, 3vw, 36px); padding: clamp(36px, 4.5vw, 56px) clamp(24px, 3.5vw, 48px) clamp(32px, 4vw, 48px); border-radius: 28px; background: #111113; color: #ffffff; box-shadow: 0 30px 80px rgba(16,24,40,.18); }
-/* 은은한 파란 빛 + 점 격자 */
-.ua-engine__stage::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background:
-  radial-gradient(720px 340px at 18% -10%, rgba(0,113,227,.42), transparent 62%),
-  radial-gradient(620px 320px at 88% 110%, rgba(41,151,255,.22), transparent 62%); }
-.ua-engine__stage::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: radial-gradient(rgba(255,255,255,.09) 1px, transparent 1.2px); background-size: 22px 22px; -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.9), transparent 78%); mask-image: linear-gradient(180deg, rgba(0,0,0,.9), transparent 78%); }
+.ua-engine__stage { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; gap: clamp(24px, 3vw, 36px); padding: clamp(36px, 4.5vw, 56px) clamp(24px, 3.5vw, 48px) clamp(32px, 4vw, 48px); border-radius: 28px; background: #000000; color: #ffffff; box-shadow: 0 30px 80px rgba(16,24,40,.18); }
 .ua-engine__stage .ua-engine__eyebrow { color: #6bb6ff; }
 .ua-engine__stage .ua-engine__title { color: #ffffff; }
 /* 진행 트랙: 채워지는 빛 */

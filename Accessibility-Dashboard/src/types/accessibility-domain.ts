@@ -15,6 +15,7 @@ export type AnalyzerType = "RULE_BASED" | "AI_TEXT" | "CV_VISION";
 export type SeverityLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 
 export type Organization = {
+  systemManaged?: boolean;
   id: number;
   name: string;
   description: string;
@@ -34,6 +35,7 @@ export type EvaluationTarget = {
 };
 
 export type EvaluationRequest = {
+  quickAnalysis?: boolean;
   id: number;
   evaluationTargetId: number;
   status: RequestStatus;
@@ -68,6 +70,12 @@ export type IssueLocatorCarouselContext = {
 export type IssueLocator = {
   pathSteps: IssueLocatorPathStep[];
   carouselContext?: IssueLocatorCarouselContext | null;
+  htmlSnippet?: string | null;
+  x?: number | null;
+  y?: number | null;
+  width?: number | null;
+  height?: number | null;
+  coordinateSpace?: string | null;
 };
 
 export type EvaluationCaptureMetadata = {
@@ -150,6 +158,7 @@ export type EvaluationTargetModel = {
 };
 
 export type OrganizationModel = {
+  systemManaged?: boolean;
   id: number;
   name: string;
   description: string;

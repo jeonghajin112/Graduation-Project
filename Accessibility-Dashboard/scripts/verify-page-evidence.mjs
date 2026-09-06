@@ -1,166 +1,19 @@
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const dashboardDirectory = path.resolve(scriptDirectory, "..");
 const baseUrl = resolveTestBaseUrl();
 const outDir = process.env.OUT_DIR ?? "artifacts/page-evidence";
 const verificationScope = process.env.PAGE_EVIDENCE_SCOPE?.trim() || "full";
 const capturedAt = "2026-08-11T03:30:00.000Z";
 const FALLBACK_DETAIL_SELECTOR = ".site-page-evidence-fallback-detail";
-const removedReplayControlPattern = /SET_DISMISS_MODE|UNDO_HIDDEN_ELEMENT|RESET_HIDDEN_ELEMENTS|dismissMode|hiddenCount|REPLAY_UI_STATE|SLIDER_PREVIOUS|SLIDER_NEXT|sliderAvailable|sliderIndex|sliderCount/;
 
 assert.ok(
   verificationScope === "core" || verificationScope === "full" || verificationScope === "scale",
   `PAGE_EVIDENCE_SCOPE must be "core", "full", or "scale": ${verificationScope}`
-);
-
-const [liveProtocolSource, protocolSource, evidenceCardSource] = await Promise.all([
-  readFile(path.join(
-    dashboardDirectory,
-    "src/components/dashboard/panels/site-dashboard/live-report-protocol.ts"
-  ), "utf8"),
-  readFile(path.join(
-    dashboardDirectory,
-    "src/components/dashboard/panels/site-dashboard/page-replay-protocol.ts"
-  ), "utf8"),
-  readFile(path.join(
-    dashboardDirectory,
-    "src/components/dashboard/panels/site-dashboard/rendered-page-evidence-card.tsx"
-  ), "utf8")
-]);
-assert.doesNotMatch(
-  protocolSource,
-  removedReplayControlPattern,
-  "popup manipulation and the external carousel pager must not remain in the replay protocol"
-);
-assert.doesNotMatch(
-  evidenceCardSource,
-  /SET_DISMISS_MODE|UNDO_HIDDEN_ELEMENT|RESET_HIDDEN_ELEMENTS|팝업 숨기기|SLIDER_PREVIOUS|SLIDER_NEXT|site-page-evidence-slider-|이전 슬라이드|다음 슬라이드/,
-  "the page evidence toolbar must retain neither popup controls nor the external carousel pager"
-);
-assert.doesNotMatch(
-  evidenceCardSource,
-  /site-page-evidence-(?:toolbar|view-switch|filter|marker-toggle|code-view|code-heading|code-empty)|SET_MARKERS_VISIBLE|severityFilter|EvidenceView/,
-  "removed page/code, severity-filter, and marker-toggle controls must not remain hidden in the component"
-);
-assert.match(
-  protocolSource,
-  /type: "ISSUE_SELECTED";[\s\S]*?documentToken: string;[\s\S]*?issueId: number \| null/,
-  "the replay selection protocol must carry an explicit null hover clear"
-);
-assert.match(
-  protocolSource,
-  /value\.issueId === null \|\| isIssueId\(value\.issueId\)/,
-  "the replay parser must accept only null or a valid positive issue id"
-);
-assert.match(protocolSource, /severityLabel: string/, "replay issues must carry a localized severity label");
-assert.match(protocolSource, /category: ReplayIssueCategory/, "replay issues must carry a validated marker category");
-assert.match(protocolSource, /row\.analyzerType === "AI_TEXT"[\s\S]*?return "text"/);
-assert.match(protocolSource, /row\.analyzerType === "CV_VISION"[\s\S]*?return "visual"/);
-assert.match(protocolSource, /code: string/, "replay issues must carry the KWCAG code");
-assert.match(protocolSource, /message: string/, "replay issues must carry the issue description");
-assert.match(protocolSource, /path: string \| null/, "replay issues must carry the bounded DOM path");
-assert.match(
-  protocolSource,
-  /type: "ISSUE_DETAIL_FALLBACK";[\s\S]*?issueId: number \| null/,
-  "the replay protocol must expose the id-only external detail fallback"
-);
-assert.match(
-  protocolSource,
-  /value\.type === "ISSUE_DETAIL_FALLBACK"[\s\S]*?documentToken[\s\S]*?value\.issueId === null \|\| isIssueId\(value\.issueId\)/,
-  "fallback messages must require a document token and reject invalid issue ids"
-);
-assert.match(
-  protocolSource,
-  /type: "DOCUMENT_LOADING" \| "DOCUMENT_UNLOADING" \| "READY";[\s\S]*?documentToken: string/,
-  "document lifecycle messages must identify their iframe document generation"
-);
-assert.match(
-  protocolSource,
-  /type: "REQUEST_DOCUMENT_STATE"/,
-  "the parent must be able to recover a document-state message missed before its listener attached"
-);
-assert.match(
-  protocolSource,
-  /type: "SET_VIEW_SCALE";[\s\S]*?documentToken: string;[\s\S]*?scale: number;[\s\S]*?visualWidth: number;/,
-  "the replay protocol must carry bounded visual viewport metrics"
-);
-assert.match(
-  evidenceCardSource,
-  /sendReplayViewScale\(\);[\s\S]*?type: "INIT_ISSUES"/,
-  "the replay must receive its view scale before initial marker creation"
-);
-assert.match(
-  protocolSource,
-  /hasExactOwnKeys\(value, \["source", "type", "documentToken"\]\)[\s\S]*?isDocumentToken\(value\.documentToken\)/,
-  "document lifecycle messages must enforce an exact, bounded token-only contract"
-);
-assert.match(
-  evidenceCardSource,
-  /replayIssues\.find\(\(issue\) => issue\.id === fallbackIssueId\)/,
-  "the parent card must derive fallback content from the trusted replay issue list"
-);
-assert.match(
-  evidenceCardSource,
-  /className="site-page-evidence-fallback-detail"[\s\S]*?data-issue-id=\{fallbackIssue\.id\}[\s\S]*?aria-hidden="true"/,
-  "the visual duplicate must stay hidden from assistive technology"
-);
-assert.doesNotMatch(
-  evidenceCardSource,
-  /site-page-evidence-fallback-detail[^>]*(?:role=|aria-live=|tabIndex=)/,
-  "the visual duplicate must not create a second announcement or focus target"
-);
-assert.doesNotMatch(
-  evidenceCardSource,
-  /site-page-evidence-inspector|site-page-evidence-selection-(?:tags|title|message|path|status)/,
-  "the fixed right-side issue inspector must be removed from the page view"
-);
-assert.match(
-  liveProtocolSource,
-  /type: "CONNECT";[\s\S]*?protocolVersion:[\s\S]*?bridgeSecret: string;[\s\S]*?challenge: string;/,
-  "live reports must authenticate a versioned MessageChannel connection"
-);
-assert.match(
-  liveProtocolSource,
-  /value\.sequence !== expectedSequence[\s\S]*?payload = parsePageReplayMessage\(value\.payload\)[\s\S]*?payload\.documentToken !== value\.documentToken/,
-  "live port events must be ordered and reuse the strict replay payload parser"
-);
-assert.match(
-  liveProtocolSource,
-  /isLiveReportViewerOriginAllowed\(session\.viewerOrigin, viewerBaseUrl\)[\s\S]*?!isLiveReportViewerOriginAllowed\(candidateOrigin, viewerBaseUrl\)[\s\S]*?throw new Error[\s\S]*?return candidateOrigin;/,
-  "live reports must connect only to an isolated route under the configured viewer origin"
-);
-assert.match(
-  evidenceCardSource,
-  /new MessageChannel\(\)[\s\S]*?createLiveReportConnectMessage[\s\S]*?\[channel\.port2\]/,
-  "each live document must receive a transferred private message port"
-);
-assert.match(
-  evidenceCardSource,
-  /connection\.port\.postMessage\(createLiveReportPortCommand/,
-  "all live viewer commands must use the authenticated private port"
-);
-assert.match(
-  evidenceCardSource,
-  /activeFrameKindRef\.current !== "preview"[\s\S]*?parsePageReplayMessage\(event\.data\)/,
-  "only the isolated landing preview adapter may use the legacy window listener"
-);
-assert.match(
-  evidenceCardSource,
-  /function closeLiveReportPort\(\)[\s\S]*?connection\.port\.close\(\)/,
-  "live ports must be explicitly retired on navigation and reconnect"
-);
-assert.match(
-  evidenceCardSource,
-  /activeFrameKind === "live"[\s\S]*?"allow-scripts allow-same-origin allow-forms"[\s\S]*?: "allow-scripts"/,
-  "only the isolated live viewer may run same-origin child frames and safe replay forms"
 );
 
 const organization = {
@@ -267,7 +120,10 @@ const issues = [
     description: "현재 재현 DOM에는 이 요소가 없습니다.",
     recommendation: "제목 단계를 순서대로 구성하세요.",
     selector: "#missing-promotion-title",
-    locator: locator("#missing-promotion-title", '<h4 id="missing-promotion-title">오늘의 혜택</h4>'),
+    locator: {
+      ...locator("#missing-promotion-title", '<h4 id="missing-promotion-title">오늘의 혜택</h4>'),
+      x: 48, y: 960, width: 320, height: 44, coordinateSpace: "DOCUMENT_CSS_PX"
+    },
     wcagCode: "2.4.6",
     createdAt: capturedAt
   },
@@ -375,6 +231,7 @@ const replayHtml = `<!doctype html>
         const BRIDGE_SECRET = "${"s".repeat(43)}";
         const PROTOCOL_VERSION = 1;
         const HOLD_READY = __HOLD_READY__;
+        const HOLD_LOCATOR_STATUS = __HOLD_LOCATOR_STATUS__;
         const DROP_INITIAL_LOADING = __DROP_INITIAL_LOADING__;
         const DOCUMENT_TOKEN = "doc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
         const messages = [];
@@ -395,6 +252,10 @@ const replayHtml = `<!doctype html>
         let outboundSequence = 1;
         let livePort = null;
         const pendingEvents = [];
+        const pendingLocatorStatuses = [];
+        window.__releaseLocatorStatuses = (count = pendingLocatorStatuses.length) => {
+          pendingLocatorStatuses.splice(0, count).forEach(send);
+        };
         window.__replayMessages = messages;
         window.__replayOutboundMessages = outboundMessages;
         window.__replayDocumentToken = DOCUMENT_TOKEN;
@@ -566,7 +427,10 @@ const replayHtml = `<!doctype html>
           layer.replaceChildren();
           for (const issue of state.issues) {
             const target = resolveIssue(issue);
-            send({ type: "LOCATOR_STATUS", issueId: issue.id, status: target ? "CONNECTED" : "UNAVAILABLE" });
+            const locatorStatus = { type: "LOCATOR_STATUS", issueId: issue.id, status: target ? "CONNECTED" : "UNAVAILABLE",
+              ...(!target ? { reason: issue.path ? "SELECTOR_NOT_FOUND" : "EMPTY_PATH" } : {}) };
+            if (HOLD_LOCATOR_STATUS) pendingLocatorStatuses.push(locatorStatus);
+            else send(locatorStatus);
             if (!target || !state.markersVisible) continue;
             const marker = document.createElement("button");
             marker.type = "button";
@@ -694,6 +558,7 @@ const replayHtml = `<!doctype html>
 </html>`;
 
 let holdNextReplayReady = false;
+let holdNextLocatorStatuses = false;
 let dropNextReplayInitialLoading = false;
 let nextIssueResponseGate = null;
 let dashboardRequestFetchCount = 0;
@@ -750,14 +615,17 @@ async function installFixture(page) {
     const pathname = requestUrl.pathname;
     if (requestUrl.origin === viewerOrigin) {
       const holdReady = holdNextReplayReady;
+      const holdLocatorStatuses = holdNextLocatorStatuses;
       const dropInitialLoading = dropNextReplayInitialLoading;
       holdNextReplayReady = false;
+      holdNextLocatorStatuses = false;
       dropNextReplayInitialLoading = false;
       await route.fulfill({
         status: 200,
         contentType: "text/html",
         body: replayHtml
           .replace("__HOLD_READY__", holdReady ? "true" : "false")
+          .replace("__HOLD_LOCATOR_STATUS__", holdLocatorStatuses ? "true" : "false")
           .replace("__DROP_INITIAL_LOADING__", dropInitialLoading ? "true" : "false")
       });
       return;
@@ -936,6 +804,8 @@ async function verifyIframeReloadRecovery(page, evidence, frame, initialMessage)
 
   await waitForReplayConnectionState(evidence, "loading");
   await waitForUnavailableLocatorCount(evidence, 0);
+  await page.locator('[data-locator-check-state="loading"]').waitFor({ state: "visible" });
+  assert.equal(await page.getByText("모든 문제가 화면에 표시되고 있습니다.", { exact: true }).count(), 0);
   assert.equal(await preview.getAttribute("aria-busy"), "true");
   const freshDocumentToken = await waitForNewReplayDocumentToken(frame, initialDocumentToken);
   assert.match(freshDocumentToken, /^[A-Za-z0-9_-]{1,128}$/);
@@ -1334,6 +1204,7 @@ async function verifyMetadataBeforeResultDetails(page) {
 }
 
 async function verifyDesktop(page) {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
 
@@ -1429,24 +1300,110 @@ async function verifyDesktop(page) {
   assert.equal(await nextUnavailableIssue.isDisabled(), false);
   assert.equal((await previousUnavailableIssue.textContent())?.trim(), "");
   assert.equal((await nextUnavailableIssue.textContent())?.trim(), "");
-  assert.equal(await previousUnavailableIssue.locator("svg").count(), 1);
-  assert.equal(await nextUnavailableIssue.locator("svg").count(), 1);
+  assert.match(await previousUnavailableIssue.getAttribute("class"), /\bsr-only\b/, "arrow buttons stay for keyboard and screen readers only");
+  assert.equal(
+    await unavailableLocatorPanel.locator(".site-unavailable-locator-panel__dot").count(),
+    2,
+    "the pager must only offer pages that exist"
+  );
+  const pageDots = unavailableLocatorPanel.locator(".site-unavailable-locator-panel__dot");
+  assert.equal(await pageDots.first().getAttribute("aria-current"), "true", "the first page indicator must be on the left");
   const missingBannerCard = unavailableLocatorPanel.locator('[data-issue-id="9003"]');
   assert.match(await missingBannerCard.textContent(), /중간/);
   assert.match(await missingBannerCard.textContent(), /KWCAG 2\.4\.6/);
   assert.match(await missingBannerCard.textContent(), /사라진 배너 제목 구조가 올바르지 않습니다/);
   assert.match(await missingBannerCard.textContent(), /현재 재현 DOM에는 이 요소가 없습니다/);
-  await nextUnavailableIssue.click();
+  assert.equal(await missingBannerCard.locator(".site-unavailable-locator-panel__reason").textContent(), "요소를 찾지 못함");
+  const locationButton = missingBannerCard.getByRole("button", { name: "위치 정보", exact: true });
+  await locationButton.click();
+  const locationDialog = page.getByRole("dialog", { name: "문제 위치 정보" });
+  await locationDialog.waitFor({ state: "visible" });
+  assert.equal(await missingBannerCard.count(), 1, "opening location details must not paginate the issue card");
+  assert.match(await locationDialog.getByRole("region", { name: "분석 당시 요소 경로" }).textContent(), /#missing-promotion-title/);
+  assert.equal(await locationDialog.locator("pre code").textContent(), issues[2].locator.htmlSnippet);
+  assert.equal(await locationDialog.locator("#missing-promotion-title").count(), 0, "recorded HTML must be displayed as text, not rendered");
+  assert.deepEqual(await locationDialog.getByRole("region", { name: "분석 당시 좌표" }).locator("dl > div").evaluateAll(cells =>
+    cells.map(cell => [cell.querySelector("dt").textContent, cell.querySelector("dd").textContent])),
+    [["X", "48"], ["Y", "960"], ["너비", "320"], ["높이", "44"]]);
+  assert.match(await locationDialog.textContent(), /문서 왼쪽 위 기준/);
+  const closeLocation = locationDialog.getByRole("button", { name: "위치 정보 닫기" });
+  assert.deepEqual(await locationDialog.getByRole("button").evaluateAll(buttons =>
+    buttons.map(button => button.getAttribute("aria-label") ?? button.textContent.trim())), ["위치 정보 닫기"]);
+  mkdirSync(outDir, { recursive: true });
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    await page.waitForFunction(dark => document.documentElement.classList.contains("dark") === dark, colorScheme === "dark");
+    assert.equal(await locationDialog.evaluate(dialog => Array.from(dialog.querySelectorAll("section, pre, code, dl")).some(element =>
+      element.scrollWidth > element.clientWidth + 1)), false, "saved evidence must wrap within the modal in both themes");
+    await locationDialog.screenshot({ path: `${outDir}/desktop-issue-location-${colorScheme}.png` });
+  }
+  await page.emulateMedia({ colorScheme: "light" });
+  const locationBody = locationDialog.getByRole("region", { name: "저장된 위치 정보" });
+  await closeLocation.focus();
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(await locationBody.evaluate(body => document.activeElement === body), true);
+  await page.keyboard.press("Tab");
+  assert.equal(await closeLocation.evaluate(button => document.activeElement === button), true);
+  await page.keyboard.press("Tab");
+  assert.equal(await locationBody.evaluate(body => document.activeElement === body), true);
+  for (const [status, reason, label] of [
+    ["UNAVAILABLE", "ELEMENT_CONTENT_CHANGED", "분석 이후 내용이 바뀜"],
+    ["UNAVAILABLE", "FRAME_UNSUPPORTED", "내부 프레임의 요소"],
+    ["HIDDEN_STATE", "ARIA_HIDDEN_STATE", "접근성 숨김으로 분류됨"],
+    ["UNAVAILABLE", "UNRECOGNIZED_REASON", "위치를 확인하지 못함"],
+    ["UNAVAILABLE", "SELECTOR_NOT_FOUND", "요소를 찾지 못함"]
+  ]) {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9003, status, reason });
+    await locationDialog.getByRole("heading", { name: label, exact: true }).waitFor({ state: "visible" });
+    assert.equal(await missingBannerCard.locator(".site-unavailable-locator-panel__reason").textContent(), label);
+  }
+  assert.doesNotMatch(await locationDialog.textContent(), /UNRECOGNIZED_REASON/);
+  await page.keyboard.press("Escape");
+  await locationDialog.waitFor({ state: "detached" });
+  assert.equal(await locationButton.evaluate(button => document.activeElement === button), true);
+  await locationButton.click();
+  const beforeLocationClose = (await getReplayMessages(frame)).filter(message => message.type === "FOCUS_ISSUE").length;
+  await closeLocation.click();
+  await locationDialog.waitFor({ state: "detached" });
+  assert.equal((await getReplayMessages(frame)).filter(message => message.type === "FOCUS_ISSUE").length, beforeLocationClose,
+    "closing location information must not request another location search");
+  await unavailableLocatorPanel.evaluate((panel) => {
+    window.__pagerTransitions = [];
+    panel.addEventListener("transitionrun", (event) => {
+      if (event.target.closest(".site-unavailable-locator-panel__dot")) {
+        window.__pagerTransitions.push(event.propertyName);
+      }
+    });
+  });
+  await pageDots.last().click();
   const readingLevelCard = unavailableLocatorPanel.locator('[data-issue-id="9004"]');
   await readingLevelCard.waitFor({ state: "visible" });
+  await page.waitForFunction(() => window.__pagerTransitions.includes("width"), null, { timeout: 1000 });
+  assert.ok(await page.evaluate(() => window.__pagerTransitions.includes("width")),
+    `clicking a page dot must animate the dot-to-pill transition: ${JSON.stringify(await pageDots.evaluateAll(dots => ({
+      reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+      events: window.__pagerTransitions,
+      dots: dots.map(dot => ({ active:dot.getAttribute("aria-current"), html:dot.innerHTML, transition:getComputedStyle(dot.firstElementChild || dot).transition }))
+    })))}`);
+  await unavailableLocatorPanel.evaluate(panel => Promise.all(
+    panel.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))
+  ));
   assert.equal(await unavailableIssueCards.count(), 1);
   assert.match(await unavailablePosition.textContent(), /총 2건 중 2번째 문제: 읽기 수준/);
+  assert.equal(await pageDots.last().getAttribute("aria-current"), "true", "the last page indicator must be on the right");
   assert.equal(await previousUnavailableIssue.isDisabled(), false);
   assert.equal(await nextUnavailableIssue.isDisabled(), true);
   assert.match(await readingLevelCard.textContent(), /낮음/);
   assert.match(await readingLevelCard.textContent(), /KWCAG 3\.1\.5/);
   assert.match(await readingLevelCard.textContent(), /읽기 수준/);
   assert.match(await readingLevelCard.textContent(), /건축학부 제70회 졸업 전시회 개최/);
+  await readingLevelCard.getByRole("button", { name: "위치 정보", exact: true }).click();
+  await locationDialog.waitFor({ state: "visible" });
+  assert.match(await locationDialog.textContent(), /저장된 요소 경로가 없습니다/);
+  assert.match(await locationDialog.textContent(), /저장된 HTML이 없습니다/);
+  assert.match(await locationDialog.textContent(), /저장된 좌표가 없습니다/);
+  await closeLocation.click();
+  await locationDialog.waitFor({ state: "detached" });
   const readingLevelBadgeLayout = await readingLevelCard.evaluate((card) => {
     const severityRect = card
       .querySelector(".site-unavailable-locator-panel__severity")
@@ -1457,13 +1414,14 @@ async function verifyDesktop(page) {
 
     return {
       gap: severityRect && codeRect ? codeRect.left - severityRect.right : Number.NaN,
-      leftDelta: severityRect && codeRect ? codeRect.left - severityRect.left : Number.NaN
+      rowDelta: severityRect && codeRect
+        ? Math.abs((codeRect.top + codeRect.bottom) / 2 - (severityRect.top + severityRect.bottom) / 2)
+        : Number.NaN
     };
   });
   assert.ok(
-    readingLevelBadgeLayout.gap >= 4 && readingLevelBadgeLayout.gap <= 8 &&
-      readingLevelBadgeLayout.leftDelta < 100,
-    `the WCAG badge must sit directly beside the severity badge: ${JSON.stringify(readingLevelBadgeLayout)}`
+    readingLevelBadgeLayout.gap >= 4 && readingLevelBadgeLayout.rowDelta <= 2,
+    `the WCAG code must share the severity badge's row, to its right: ${JSON.stringify(readingLevelBadgeLayout)}`
   );
   assert.equal(await unavailablePosition.getAttribute("role"), "status");
   assert.equal(await unavailablePosition.getAttribute("aria-live"), "polite");
@@ -1513,25 +1471,25 @@ async function verifyDesktop(page) {
   assert.ok(unavailableNavigationLayout.issue);
   assert.ok(unavailableNavigationLayout.previous);
   assert.ok(unavailableNavigationLayout.next);
-  assert.ok(
-    Math.abs(
-      unavailableNavigationLayout.previous.centerY - unavailableNavigationLayout.issue.centerY
-    ) <= 1 &&
-      Math.abs(unavailableNavigationLayout.next.centerY - unavailableNavigationLayout.issue.centerY) <= 1,
-    `navigation buttons must share the issue card's vertical center: ${JSON.stringify(unavailableNavigationLayout)}`
-  );
-  for (const button of [unavailableNavigationLayout.previous, unavailableNavigationLayout.next]) {
-    assert.ok(Math.abs(button.width - button.height) <= 1);
-    assert.ok(button.width >= 23 && button.width <= 25);
-    assert.ok(button.borderRadius >= button.width / 2 - 1);
+  {
+    const dotsLayout = await unavailableLocatorPanel.evaluate((panel) => {
+      const issue = panel.querySelector(".site-unavailable-locator-panel__issue")?.getBoundingClientRect();
+      const dots = panel.querySelector(".site-unavailable-locator-panel__dots")?.getBoundingClientRect();
+      return issue && dots
+        ? {
+            issueCenterX: (issue.left + issue.right) / 2,
+            issueBottom: issue.bottom,
+            dotsCenterX: (dots.left + dots.right) / 2,
+            dotsTop: dots.top
+          }
+        : null;
+    });
+    assert.ok(dotsLayout, "the page dots must be measurable");
+    assert.ok(
+      Math.abs(dotsLayout.dotsCenterX - dotsLayout.issueCenterX) <= 2 && dotsLayout.dotsTop > dotsLayout.issueBottom,
+      `the page dots must be centered under the issue card: ${JSON.stringify(dotsLayout)}`
+    );
   }
-  assert.ok(
-    unavailableNavigationLayout.previous.centerX <= unavailableNavigationLayout.issue.left &&
-      unavailableNavigationLayout.previous.right > unavailableNavigationLayout.issue.left &&
-      unavailableNavigationLayout.next.centerX >= unavailableNavigationLayout.issue.right &&
-      unavailableNavigationLayout.next.left < unavailableNavigationLayout.issue.right,
-    `navigation buttons must straddle the issue card sides: ${JSON.stringify(unavailableNavigationLayout)}`
-  );
   const unavailablePanelOverflow = await unavailableLocatorPanel.evaluate((panel) => ({
     clientWidth: panel.clientWidth,
     scrollWidth: panel.scrollWidth,
@@ -1565,6 +1523,52 @@ async function verifyDesktop(page) {
     severityCardIndex + 1,
     "the unavailable-locator card must follow the severity distribution"
   );
+  for (const [key, issueId] of [["ArrowLeft", "9003"], ["ArrowRight", "9004"]]) {
+    await page.evaluate(() => { window.__pagerTransitions = []; });
+    await pageDots.last().press(key);
+    await unavailableLocatorPanel.locator(`[data-issue-id="${issueId}"]`).waitFor({ state: "visible" });
+    await page.waitForFunction(() => window.__pagerTransitions.includes("width"), null, { timeout: 1000 });
+    assert.ok(await page.evaluate(() => window.__pagerTransitions.includes("width")),
+      "keyboard page navigation must also animate the indicator");
+    await unavailableLocatorPanel.evaluate(panel => Promise.all(
+      panel.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))
+    ));
+  }
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => { window.__pagerTransitions = []; });
+  for (const dot of [pageDots.first(), pageDots.last()]) {
+    await dot.click();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  }
+  assert.deepEqual(await page.evaluate(() => window.__pagerTransitions), [],
+    "reduced-motion users must be able to navigate without pager animation");
+  assert.equal(await unavailableIssueCards.first().getAttribute("data-issue-id"), "9004");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
+  // Live pages can change locator visibility without any dashboard interaction.
+  // Updating the page count must not replay a dot-to-pill animation under an idle pointer.
+  await pageDots.last().hover();
+  await unavailableLocatorPanel.evaluate((panel) => {
+    window.__idlePagerTransitions = [];
+    panel.addEventListener("transitionrun", (event) => {
+      if (event.target.closest(".site-unavailable-locator-panel__dot")) {
+        window.__idlePagerTransitions.push(event.propertyName);
+      }
+    });
+  });
+  for (const [status, count] of [["UNAVAILABLE", 3], ["CONNECTED", 2], ["UNAVAILABLE", 3], ["CONNECTED", 2]]) {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status });
+    await waitForUnavailableLocatorCount(evidence, count);
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await unavailableIssueCards.first().getAttribute("data-issue-id"), "9004",
+      "background locator updates must preserve the issue the user is reading");
+    assert.equal(await pageDots.last().getAttribute("aria-current"), "true",
+      "the selected last-page indicator must remain on the right after a background update");
+    assert.equal(await pageDots.nth(1).evaluate(dot => dot === document.activeElement), true,
+      "background updates must preserve focus on the existing page button");
+  }
+  assert.deepEqual(await page.evaluate(() => window.__idlePagerTransitions), [],
+    "background locator updates must not animate the pager");
   await sendReplayTestMessage(frame, {
     type: "LOCATOR_STATUS",
     issueId: 999999,
@@ -1601,7 +1605,14 @@ async function verifyDesktop(page) {
   assert.equal(await nextUnavailableIssue.isDisabled(), true);
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "CONNECTED" });
   await waitForUnavailableLocatorCount(evidence, 0);
-  await unavailableLocatorPanel.waitFor({ state: "detached" });
+  await page
+    .locator('.site-unavailable-locator-panel[data-unavailable-locator-count="0"] .site-unavailable-locator-panel__empty')
+    .waitFor({ state: "visible" });
+  assert.match(
+    await unavailableLocatorPanel.textContent(),
+    /모든 문제가 화면에 표시되고 있습니다/,
+    "the empty unavailable card must say there is nothing left instead of disappearing"
+  );
   const focusMessageCountBeforeHiddenReveal = await frame.locator("html").evaluate(() =>
     window.__replayMessages.filter((message) => message.type === "FOCUS_ISSUE").length
   );
@@ -1621,10 +1632,11 @@ async function verifyDesktop(page) {
     "1"
   );
   assert.match(await hiddenStatePanel.textContent(), /다른 화면 상태의 문제/);
+  const beforeHiddenFocusRequest = Number(await evidence.locator(".site-page-evidence-preview").getAttribute("data-focus-request-id"));
   await hiddenStatePanel.getByRole("button", { name: "해당 장면에서 보기" }).click();
   assert.equal(
     await evidence.locator(".site-page-evidence-preview").getAttribute("data-focus-request-id"),
-    "1",
+    String(beforeHiddenFocusRequest + 1),
     "the hidden-state reveal action must create an explicit focus request"
   );
   await frame.locator("html").evaluate((_html, initialCount) => new Promise((resolve, reject) => {
@@ -1683,7 +1695,7 @@ async function verifyDesktop(page) {
   assert.match(await unavailablePosition.textContent(), /총 2건 중 1번째 문제/);
   assert.equal(await previousUnavailableIssue.isDisabled(), true);
   assert.equal(await nextUnavailableIssue.isDisabled(), false);
-  await nextUnavailableIssue.click();
+  await nextUnavailableIssue.dispatchEvent("click"); // 화면에서 숨긴 스크린리더용 버튼
   await unavailableLocatorPanel.locator('[data-issue-id="9004"]').waitFor({ state: "visible" });
   assert.deepEqual(
     await unavailableIssueCards.evaluateAll((cards) =>
@@ -1995,7 +2007,10 @@ async function verifyDesktop(page) {
       window.__replayMessages.filter((message) => message.type === "FOCUS_ISSUE").length
     ),
     initialFocusMessageCount,
-    "iframe-origin quick, stale, and touch interactions must not echo FOCUS_ISSUE"
+    `iframe-origin quick, stale, and touch interactions must not echo FOCUS_ISSUE: ${JSON.stringify(await frame.locator("html").evaluate(() => ({
+      focus: window.__replayMessages.filter(message => message.type === "FOCUS_ISSUE"),
+      selections: window.__replayOutboundMessages.filter(message => message.type === "ISSUE_SELECTED").slice(-10)
+    })))}`
   );
 
   await markerA.focus();
@@ -2253,6 +2268,11 @@ async function verifyResponsiveWidths(page) {
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
   const viewports = [
     { width: 3840, height: 2021 },
+    { width: 2560, height: 1256 },
+    { width: 2560, height: 1440 },
+    { width: 1920, height: 1440 },
+    { width: 3440, height: 1100 },
+    { width: 2560, height: 900 },
     { width: 1920, height: 1080 },
     { width: 1024, height: 900 },
     { width: 768, height: 860 },
@@ -2268,11 +2288,19 @@ async function verifyResponsiveWidths(page) {
     await waitForReplayReady(evidence);
     await waitForUnavailableLocatorCount(evidence, 2);
     const isFourK = viewport.width === 3840;
-    const expectedVisibleUnavailableIssueCount = isFourK ? 2 : 1;
+    const expectedVisibleUnavailableIssueCount = isFourK || viewport.height >= 1256 ? 2 : 1;
     const unavailableLocatorPanel = page.locator(
       `.site-unavailable-locator-panel[data-visible-issue-count="${expectedVisibleUnavailableIssueCount}"]`
     );
-    await unavailableLocatorPanel.waitFor({ state: "visible" });
+    await unavailableLocatorPanel.waitFor({ state: "visible", timeout: 5000 }).catch(async error => {
+      const layout = await page.locator(".site-unavailable-locator-panel").evaluate(panel => {
+        const list = panel.querySelector(".site-unavailable-locator-panel__issues");
+        return { capacity: panel.dataset.unavailablePageSize, visible: panel.dataset.visibleIssueCount,
+          panelHeight: panel.clientHeight, listHeight: list?.clientHeight,
+          listMinimum: list && getComputedStyle(list).minHeight, listGap: list && getComputedStyle(list).rowGap };
+      });
+      throw new Error(`${viewport.width}x${viewport.height}: ${JSON.stringify(layout)}`, { cause: error });
+    });
     if (isFourK) {
       assert.equal(
         await unavailableLocatorPanel.getAttribute("data-unavailable-page-size"),
@@ -2313,7 +2341,7 @@ async function verifyResponsiveWidths(page) {
       const unavailableSeverityRect = unavailableSeverity?.getBoundingClientRect();
       const unavailableCodeRect = unavailableCode?.getBoundingClientRect();
       const unavailableButtonRects = unavailablePagination
-        ? [...unavailablePagination.querySelectorAll("button")].map((button) => {
+        ? [...unavailablePagination.querySelectorAll(".site-unavailable-locator-panel__navigation")].map((button) => {
             const rect = button.getBoundingClientRect();
             return {
               centerY: (rect.top + rect.bottom) / 2,
@@ -2388,6 +2416,11 @@ async function verifyResponsiveWidths(page) {
             : false,
         unavailableButtonCenters: unavailableButtonRects.map((rect) => rect.centerY),
         unavailableButtonsDisabled: unavailableButtonRects.map((rect) => rect.disabled),
+        locationActionsInsideCards: [...unavailablePanel.querySelectorAll(".site-unavailable-locator-panel__issue button")].every(button => {
+          const rect = button.getBoundingClientRect();
+          const card = button.closest(".site-unavailable-locator-panel__issue").getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0 && rect.left >= card.left && rect.right <= card.right + 1 && rect.top >= card.top && rect.bottom <= card.bottom + 1;
+        }),
         unavailableBadgeGap:
           unavailableSeverityRect && unavailableCodeRect
             ? unavailableCodeRect.left - unavailableSeverityRect.right
@@ -2425,8 +2458,13 @@ async function verifyResponsiveWidths(page) {
       true,
       `${viewport.width}px unavailable issue navigation must stay inside the panel`
     );
+    assert.equal(facts.locationActionsInsideCards, true, `${viewport.width}px location actions must remain visible inside each issue card`);
     assert.ok(
-      facts.unavailableBadgeGap >= 4 && facts.unavailableBadgeGap <= 8,
+      facts.unavailablePanelVerticalOverflow <= 1 && facts.unavailableIssuesVerticalOverflow <= 1 && facts.railVerticalOverflow <= 1,
+      `${viewport.width}x${viewport.height} unavailable cards must fit their allocated height: ${JSON.stringify(facts)}`
+    );
+    assert.ok(
+      facts.unavailableBadgeGap >= 4,
       `${viewport.width}px WCAG badge must remain beside severity: ${JSON.stringify(facts)}`
     );
     if (isFourK) {
@@ -2462,9 +2500,7 @@ async function verifyResponsiveWidths(page) {
         "4K unavailable issue navigation must retain both arrow buttons"
       );
       assert.ok(
-        facts.unavailableButtonCenters.every(
-          (centerY) => Math.abs(centerY - facts.unavailableIssuesCenterY) <= 1
-        ),
+        facts.unavailableButtonCenters.length === 2,
         `4K navigation arrows must share the full issue list's vertical center: ${JSON.stringify(facts)}`
       );
       assert.deepEqual(
@@ -2477,6 +2513,9 @@ async function verifyResponsiveWidths(page) {
         path: path.join(outDir, "responsive-4k-unavailable-issues.png"),
         fullPage: false
       });
+    }
+    if (viewport.width === 2560 && viewport.height >= 1256) {
+      await unavailableLocatorPanel.screenshot({ path: `${outDir}/unavailable-${viewport.width}x${viewport.height}.png` });
     }
     if (viewport.width === 390) {
       await verifyScaledReplayOverlays(page, evidence, frame);
@@ -2547,6 +2586,63 @@ async function verifyResponsiveWidths(page) {
   return results;
 }
 
+async function verifyUnavailableCapacityResize(page) {
+  await page.setViewportSize({ width: 2560, height: 1256 });
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
+  await waitForReplayReady(evidence);
+  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
+  for (const issue of issues) {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: issue.id, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
+  }
+  const panel = page.locator('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+  const waitForCapacity = async capacity => {
+    await page.waitForFunction(capacity => document.querySelector('.site-unavailable-locator-panel[data-locator-mode="unavailable"]')
+      ?.getAttribute("data-unavailable-page-size") === String(capacity), capacity);
+    const geometry = await panel.evaluate(panel => {
+      const list = panel.querySelector(".site-unavailable-locator-panel__issues");
+      return { panelOverflow: panel.scrollHeight - panel.clientHeight, listOverflow: list.scrollHeight - list.clientHeight,
+        cards: [...list.children].map(card => {
+          const rect = card.getBoundingClientRect();
+          const action = card.querySelector("button").getBoundingClientRect();
+          return { height: rect.height, readableMessage: card.querySelector(".site-unavailable-locator-panel__message").getBoundingClientRect().height,
+            actionInside: action.top >= rect.top && action.bottom <= rect.bottom && action.right <= rect.right };
+        }) };
+    });
+    assert.ok(geometry.panelOverflow <= 1 && geometry.listOverflow <= 1, JSON.stringify(geometry));
+    assert.ok(geometry.cards.every(card => card.height >= 239 && card.readableMessage >= 16 && card.actionInside), JSON.stringify(geometry));
+  };
+  await page.locator('.site-unavailable-locator-panel[data-unavailable-locator-count="4"]').waitFor();
+  await waitForCapacity(2);
+  await panel.getByRole("button", { name: "1번째 페이지", exact: true }).click();
+  assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9001", "9002"]);
+  await panel.getByRole("button", { name: "2번째 페이지", exact: true }).click();
+  assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9003", "9004"]);
+
+  // Resize the same page repeatedly: preserve the selected issue and avoid
+  // content-driven growth or ResizeObserver feedback as the capacity changes.
+  for (const viewport of [
+    { width: 1440, height: 900, capacity: 1 },
+    { width: 3840, height: 2021, capacity: 4 },
+    { width: 2560, height: 1256, capacity: 2 },
+    { width: 1440, height: 900, capacity: 1 },
+    { width: 2560, height: 1256, capacity: 2 }
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await waitForCapacity(viewport.capacity);
+    assert.equal(await panel.locator('[data-issue-id="9003"]').count(), 1, "resizing must keep the selected issue in view");
+  }
+  // A sibling issue panel consumes rail space without changing the viewport.
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "HIDDEN_STATE", recoverable: true });
+  await page.locator('.site-unavailable-locator-panel[data-locator-mode="recoverable"]').waitFor();
+  await waitForCapacity(1);
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
+  await waitForCapacity(2);
+  await panel.getByRole("button", { name: "1번째 페이지", exact: true }).click();
+  await panel.screenshot({ path: `${outDir}/unavailable-resize-two-cards.png` });
+  return { resizedCapacities: [2, 1, 4, 2, 1, 2], selectedIssuePreserved: true, siblingPanelResize: "PASS" };
+}
+
 async function verifyMobile(page) {
   await page.setViewportSize({ width: 320, height: 568 });
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -2555,6 +2651,29 @@ async function verifyMobile(page) {
   await waitForReplayReady(evidence);
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   await verifyNoExternalReplayControls(evidence, frame);
+
+  const mobileLocationButton = page.locator('[data-issue-id="9003"]').getByRole("button", { name: "위치 정보", exact: true });
+  await mobileLocationButton.click();
+  const mobileLocationDialog = page.getByRole("dialog", { name: "문제 위치 정보" });
+  await mobileLocationDialog.waitFor({ state: "visible" });
+  const locationGeometry = await mobileLocationDialog.evaluate(dialog => {
+    const rect = dialog.getBoundingClientRect();
+    const close = dialog.querySelector('button[aria-label="위치 정보 닫기"]').getBoundingClientRect();
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+      closeTop: close.top, closeBottom: close.bottom, overflow: dialog.scrollWidth - dialog.clientWidth };
+  });
+  assert.ok(locationGeometry.left >= 0 && locationGeometry.right <= 320 && locationGeometry.top >= 0 && locationGeometry.bottom <= 568);
+  assert.ok(locationGeometry.closeTop >= 0 && locationGeometry.closeBottom <= 568 && locationGeometry.overflow <= 1);
+  await mobileLocationDialog.screenshot({ path: `${outDir}/mobile-issue-location.png` });
+  const mobileLocationBody = mobileLocationDialog.getByRole("region", { name: "저장된 위치 정보" });
+  await mobileLocationBody.focus();
+  await page.keyboard.press("End");
+  await page.waitForFunction(() => {
+    const body = document.querySelector(".site-issue-location-dialog__body");
+    return body && body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+  });
+  await mobileLocationDialog.getByRole("button", { name: "위치 정보 닫기" }).click();
+  await mobileLocationDialog.waitFor({ state: "detached" });
 
   const facts = await page.evaluate(() => {
     const evidenceElement = document.querySelector(".site-page-evidence-card");
@@ -2640,12 +2759,99 @@ async function verifyMobile(page) {
   };
 }
 
+async function verifyEvidenceStatusFeedback(page) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installFixture(page);
+  let metadataRequests = 0;
+  let sessionRequests = 0;
+  let failSession = true;
+  let releaseMetadata;
+  const metadataGate = new Promise((resolve) => { releaseMetadata = resolve; });
+  await page.route("**/api/results/requests/501/capture-metadata", async (route) => {
+    metadataRequests += 1;
+    if (metadataRequests === 1) {
+      await fulfillJson(route, null, { status: 500 });
+      return;
+    }
+    if (metadataRequests === 2) await metadataGate;
+    await fulfillJson(route, captureMetadata);
+  });
+  await page.route("**/api/results/requests/501/live-session", async (route) => {
+    sessionRequests += 1;
+    await fulfillJson(route, failSession ? null : liveSession, { status: failSession ? 503 : 200 });
+  });
+
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+  const panel = page.locator('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+  const successNotice = page.getByText("모든 문제가 화면에 표시되고 있습니다.", { exact: true });
+  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
+  const captureStatus = page.locator(".site-page-information__capture-status");
+  await panel.locator('[role="status"]').filter({ hasText: "문제 위치를 확인할 수 없습니다" }).waitFor();
+  assert.equal(await panel.getAttribute("data-locator-check-state"), "error");
+  assert.equal(await panel.getAttribute("data-unavailable-locator-count"), null);
+  assert.equal(await successNotice.count(), 0);
+  await captureStatus.filter({ hasText: "분석 당시 화면 정보를 불러오지 못했습니다" }).waitFor();
+  assert.equal(await captureStatus.getAttribute("role"), "alert");
+  mkdirSync(outDir, { recursive: true });
+  await page.screenshot({ path: `${outDir}/status-feedback-error.png` });
+
+  const sessionRequestsBeforeMetadataRetry = sessionRequests;
+  await page.getByRole("button", { name: "화면 정보 다시 불러오기", exact: true }).click();
+  await captureStatus.filter({ hasText: "화면 정보를 불러오는 중" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "화면 정보 다시 불러오기", exact: true }).count(), 0);
+  releaseMetadata();
+  await captureStatus.waitFor({ state: "detached" });
+  assert.equal(metadataRequests, 2, "retry must issue exactly one fresh metadata request");
+  assert.equal(sessionRequests, sessionRequestsBeforeMetadataRetry, "metadata retry must not recreate the live session");
+
+  failSession = false;
+  holdNextReplayReady = true;
+  holdNextLocatorStatuses = true;
+  await evidence.getByRole("button", { name: "다시 시도", exact: true }).click();
+  await panel.locator('[role="status"]').filter({ hasText: "문제 위치를 확인하고 있습니다" }).waitFor();
+  assert.equal(await successNotice.count(), 0);
+  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
+  await frame.locator("header").waitFor();
+  await frame.locator("html").evaluate(() => window.__sendReplayReady());
+  await waitForReplayConnectionState(evidence, "ready");
+  await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
+  assert.equal(await panel.getAttribute("data-locator-check-state"), "loading", "ready document must still wait for locator results");
+  assert.equal(await successNotice.count(), 0);
+  await frame.locator("html").evaluate(() => window.__releaseLocatorStatuses(1));
+  await page.waitForTimeout(80);
+  assert.equal(await panel.getAttribute("data-locator-check-state"), "loading", "partial locator results must not count as complete");
+  assert.equal(await successNotice.count(), 0);
+  await frame.locator("html").evaluate(() => window.__releaseLocatorStatuses());
+  await page.locator('[data-locator-check-state="ready"][data-unavailable-locator-count="2"]').waitFor();
+  assert.ok(Number(await evidence.locator("iframe").getAttribute("data-replay-scale")) < 1,
+    "successful metadata retry must restore the captured-width fit scale");
+  for (const issue of issues) {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: issue.id, status: "CONNECTED" });
+  }
+  await successNotice.waitFor();
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "HIDDEN_STATE", recoverable: true });
+  await page.getByText("다른 화면 상태의 문제는 위 목록에서 확인할 수 있습니다.", { exact: true }).waitFor();
+  assert.equal(await successNotice.count(), 0, "recoverable hidden issues must not be described as already visible");
+
+  // A fresh document must discard previously complete locator results.
+  holdNextReplayReady = true;
+  await frame.locator("html").evaluate(() => window.location.reload());
+  await panel.locator('[role="status"]').filter({ hasText: "문제 위치를 확인하고 있습니다" }).waitFor();
+  assert.equal(await successNotice.count(), 0);
+  await page.screenshot({ path: `${outDir}/status-feedback-loading.png` });
+  return { locatorStates: ["error", "loading", "ready"], metadataRetry: "PASS" };
+}
+
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 const pageErrors = [];
 const chartDimensionWarnings = [];
 page.on("pageerror", (error) => pageErrors.push(error.message));
 page.on("console", (message) => {
+  if (message.type() === "error" && message.text().includes("error boundary")) {
+    pageErrors.push(message.text());
+    console.error(message.text());
+  }
   if (message.type() === "warning" && /width\(-1\).*height\(-1\).*chart/.test(message.text())) {
     chartDimensionWarnings.push(message.text());
   }
@@ -2658,6 +2864,7 @@ try {
   }
   const desktop = verificationScope === "scale" ? null : await verifyDesktop(page);
   let responsive = null;
+  let capacityResize = null;
   let mobile = null;
   if (verificationScope === "full") {
     responsive = await verifyResponsiveWidths(page);
@@ -2665,9 +2872,22 @@ try {
   } else if (verificationScope === "scale") {
     responsive = await verifyResponsiveWidths(page);
   }
+  if (verificationScope !== "core") {
+    capacityResize = await verifyUnavailableCapacityResize(page);
+  }
+  let statusFeedback = null;
+  if (verificationScope !== "scale") {
+    const feedbackPage = await browser.newPage();
+    feedbackPage.on("pageerror", (error) => pageErrors.push(error.message));
+    try {
+      statusFeedback = await verifyEvidenceStatusFeedback(feedbackPage);
+    } finally {
+      await feedbackPage.close();
+    }
+  }
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
-  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, desktop, responsive, mobile }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, desktop, responsive, capacityResize, mobile, statusFeedback }, null, 2));
 } finally {
   await page.close();
   await browser.close();

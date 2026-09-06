@@ -50,6 +50,7 @@ const observed = {
   organizationGets: 0,
   organizationPosts: 0,
   postBody: null,
+  idempotencyKey: null,
   postMutationOrganizationGets: 0,
   successfulRecoveryGets: 0,
   unknownRequests: new Set()
@@ -88,6 +89,7 @@ try {
     if (method === "POST" && pathname === "/api/organizations") {
       observed.organizationPosts += 1;
       observed.postBody = JSON.parse(request.postData() ?? "null");
+      observed.idempotencyKey = request.headers()["idempotency-key"];
       organizations = [project];
       organizationCommitted = true;
       await fulfillJson(route, project, { status: 201 });
@@ -121,10 +123,11 @@ try {
   assert.equal(postResponse.status(), 201);
   await dialog.getByRole("alert").filter({ hasText: "프로젝트는 생성되었지만" }).waitFor();
   await dialog
-    .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+    .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
     .waitFor();
   assert.equal(new URL(page.url()).pathname, "/analyze");
   assert.equal(observed.organizationPosts, 1);
+  assert.match(observed.idempotencyKey ?? "", /^[0-9a-f-]{36}$/i);
   assert.equal(await dialog.getByRole("button", { name: "생성", exact: true }).count(), 0);
 
   // Closing the modal is not a rollback. Reopening it must keep the saved ID
@@ -146,7 +149,7 @@ try {
       request.method() === "GET" && new URL(request.url()).pathname === "/api/dashboard/overview"
   );
   await dialog
-    .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+    .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
     .click();
   await withTimeout(recoveryRequestPromise, 5_000, "organization recovery GET");
 

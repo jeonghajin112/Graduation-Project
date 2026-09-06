@@ -9,7 +9,7 @@ import {
   updateOrganizationModel
 } from "@/services/backend-api";
 import { parseDashboardRoute } from "@/services/dashboard-route";
-import { UserFacingError } from "@/services/user-facing-error";
+import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 
 import { useDashboardData } from "./use-dashboard-data";
 import { useDashboardTheme } from "./use-dashboard-theme";
@@ -18,8 +18,7 @@ import { useSiteCreateWorkflow } from "./use-site-create-workflow";
 import { formatDateTime } from "./utils";
 
 const APP_HOME_PATH = "/analyze";
-const QUICK_ANALYSIS_RESULT_REFRESH_MESSAGE =
-  "분석은 완료되었지만 결과 목록을 불러오지 못했습니다. 결과 다시 불러오기를 선택해 주세요.";
+
 
 export function useDashboardController({
   onBootstrapComplete
@@ -32,6 +31,7 @@ export function useDashboardController({
   const routeState = useMemo(() => parseDashboardRoute(location.pathname), [location.pathname]);
   const {
     beginDirectoryRecovery,
+    trackEvaluationRequest,
     dashboardData,
     dashboardError,
     endDirectoryRecovery,
@@ -111,6 +111,15 @@ export function useDashboardController({
     routeState.menu === "projects" &&
     selectedOrganizationModel !== null &&
     selectedEvaluationTargetModel === null;
+
+  useEffect(() => {
+    if (!selectedOrganizationModel?.systemManaged) return;
+    if (routeState.kind === "projectPage" && selectedEvaluationTargetModel) {
+      navigate(`/recent-pages/${selectedEvaluationTargetModel.id}`, { replace: true });
+    } else if (routeState.kind === "project") {
+      navigate(APP_HOME_PATH, { replace: true });
+    }
+  }, [navigate, routeState.kind, selectedOrganizationModel, selectedEvaluationTargetModel]);
   const isSiteDetailView =
     routeState.menu === "projects" &&
     selectedOrganizationModel !== null &&
@@ -304,28 +313,18 @@ export function useDashboardController({
       }),
     [loadDashboard]
   );
-  const refreshDashboardForSiteCreate = useCallback(
-    (signal?: AbortSignal) =>
-      loadDashboard({ refreshAfterInFlight: true, clearOnError: false, signal }),
-    [loadDashboard]
-  );
-  const handleQuickAnalyzeComplete = useCallback(
-    async ({ projectId, siteId }: { projectId: number; siteId: number }) => {
-      const refreshedData = await loadDashboard({
-        refreshAfterInFlight: true,
-        clearOnError: false
-      });
-      const resultIsVisible = refreshedData?.organizations.some(
-        (organization) =>
-          organization.id === projectId &&
-          organization.evaluationTargets.some((target) => target.id === siteId)
-      );
-      if (!resultIsVisible) {
-        throw new UserFacingError(QUICK_ANALYSIS_RESULT_REFRESH_MESSAGE);
-      }
-      navigate(`/recent-pages/${siteId}`);
+  const handleAnalysisAccepted = useCallback(
+    (request: EvaluationRequestModel) => {
+      trackEvaluationRequest(request);
+      void loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
     },
-    [loadDashboard, navigate]
+    [loadDashboard, trackEvaluationRequest]
+  );
+  const handleQuickAnalysisAccepted = useCallback(
+    (request: EvaluationRequestModel) => {
+      handleAnalysisAccepted({ ...request, quickAnalysis: true });
+    },
+    [handleAnalysisAccepted]
   );
   const organizations = dashboardData?.organizations ?? [];
   const selectedOrganizationModelId = selectedOrganizationModel?.id ?? null;
@@ -340,7 +339,8 @@ export function useDashboardController({
     goToProjectsRoot,
     goToRecentPage,
     goToSite,
-    handleQuickAnalyzeComplete,
+    handleAnalysisAccepted,
+    handleQuickAnalysisAccepted,
     handleCreateEvaluationTargetModel,
     handleRequestEvaluationTargetAnalysis,
     handleDeleteEvaluationTargetModel,
@@ -350,7 +350,7 @@ export function useDashboardController({
     handleDeleteOrganizationModel,
     handleUpdateOrganizationModel,
     headerTitle,
-    hasCreatedOrganization: organizationCreateForm.hasCreatedOrganization,
+    hasPendingOrganizationCreate: organizationCreateForm.hasPendingOrganizationCreate,
     isCreatingOrganizationModel: organizationCreateForm.isCreatingOrganizationModel,
     isOrganizationCreateRecoveryBlocked:
       organizationCreateForm.isOrganizationCreateRecoveryBlocked,
@@ -367,7 +367,6 @@ export function useDashboardController({
     organizations,
     projectCreateError: organizationCreateForm.projectCreateError,
     refreshDashboard,
-    refreshDashboardForSiteCreate,
     selectedEvaluationTargetModel,
     selectedOrganizationModel,
     selectedOrganizationModelId,

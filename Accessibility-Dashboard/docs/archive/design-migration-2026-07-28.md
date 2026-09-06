@@ -1,17 +1,21 @@
 # UNI ACCESS v2 Design Migration
 
+> 보관 문서 — 2026-07-28 디자인 마이그레이션의 계획·검증·롤백 기록입니다.
+> 현재 구현 규칙은 [디자인 시스템](../design-system.md)을 기준으로 하며, 이 문서의 파일 경로·줄 번호·검증 결과는 당시 상태를 나타냅니다.
+> 본문에 적힌 코드 경로는 `Accessibility-Dashboard` 루트를 기준으로 읽습니다.
+
 ## 범위와 상태
 
 - 기록일: 2026-07-28
 - 현재 실행: **Stage 0 문서화 완료 + Stage 1 기반 구현 완료**.
 - 이 작업 묶음의 구현 승인 상한: **Stage 0 + Stage 1**.
 - Stage 2–6은 순서와 경계만 계획하며 **구현하지 않는다**.
-- 정규 목표: [DESIGN.md](./DESIGN.md).
+- 당시 정규 목표: 루트 `DESIGN.md`(현재 [디자인 시스템](../design-system.md)으로 정리됨).
 - Git 저장소가 유효하지 않음 → `git restore`/`reset`/`checkout` 미사용. before 스냅샷·SHA256·inverse rollback map으로 복구한다.
 
 ## 출처
 
-1. Apple/HIG verified_v2 reference: `C:\Users\hajin\Downloads\DESIGN.md` (verified 2026-07-11).
+1. Apple/HIG verified_v2 외부 참고 문서(2026-07-11 검증, 원본은 저장소에 포함하지 않음).
 2. Stage 0 직전 프로젝트 `DESIGN.md` v2.0.
 3. 현재 프런트: `src/index.css`, `src/styles/theme-tokens.css`, `src/styles/landing.css`.
 4. 현재 공용 UI: `src/components/ui/button.tsx`, `input.tsx`, `sidebar.tsx`.

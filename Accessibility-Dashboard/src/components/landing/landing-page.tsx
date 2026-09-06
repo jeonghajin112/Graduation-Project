@@ -14,8 +14,9 @@ const LANDING_CONFIG = {
   cta: { label: "새 페이지 분석", href: "/analyze", action: "enter-app" },
   skipLabel: "본문으로 바로가기",
   mainId: "uni-access-main",
+  hint: "SCROLL DOWN",
   nav: false,
-  route: true,
+  route: false,
   showSectionNumbers: false,
   mobileVideo: false,
   diveScroll: 1.4,
@@ -41,9 +42,9 @@ const LANDING_CONFIG = {
       scroll: 1.6,
       linger: 0.3,
       eyebrow: "통합형 웹 접근성 평가 플랫폼",
-      title: "찾고, 고치고, 다시 확인합니다",
-      body: "실제 UNI ACCESS 화면으로 이어지는 흐름을 스크롤로 따라가 보세요.",
-      tags: ["axe-core", "KWCAG 2.2", "명암비"]
+      title: "복잡한 웹 접근성, 이제 한눈에.",
+      body: "코드부터 문장, 화면까지. 누구에게나 편한 웹을 만드세요.",
+      tags: []
     },
     {
       id: "input",
@@ -82,7 +83,7 @@ const LANDING_CONFIG = {
       linger: 0.3,
       eyebrow: "라이브 리포트",
       title: "문제가 있는 자리를 그대로",
-      body: "실제 페이지 위의 마커에 올리면 KWCAG 검사항목과 문제 위치, 개선 방향이 바로 열립니다.",
+      body: "페이지 위의 마커를 선택해 문제 위치와 개선 방향을 확인하세요.",
       tags: ["KWCAG 매핑", "DOM 선택자", "심각도"]
     },
     {
@@ -95,7 +96,7 @@ const LANDING_CONFIG = {
       scroll: 1.5,
       linger: 0.4,
       title: "접근성을 한 화면에서",
-      body: "프로젝트별 점수와 최근 분석을 모아 보고, 고친 뒤 다시 검사해 달라진 항목을 비교하세요.",
+      body: "프로젝트의 페이지별 점수와 분석 상태를 모아 보고, 페이지 상세에서 최근 분석 추이를 확인하세요.",
       tags: [],
       cta: {
         primary: {

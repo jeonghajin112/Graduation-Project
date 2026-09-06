@@ -6,6 +6,7 @@
  * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
+import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
@@ -313,7 +314,9 @@ try {
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
 
   await dialog.getByText(/페이지 등록 완료 · 분석 시작 전/).waitFor();
-  await dialog.getByText("분석을 시작할 수 있습니다", { exact: true }).waitFor();
+  assert.equal(await dialog.getByLabel("페이지 이름", { exact: true }).inputValue(), target.name);
+  assert.equal(await dialog.getByLabel("페이지 주소", { exact: true }).isDisabled(), true,
+    "the registered target must not be editable while retrying its analysis request");
   const requestRetryButton = dialog.getByRole("button", {
     name: "분석 시작",
     exact: true
@@ -359,13 +362,30 @@ try {
 
   targetLookupStatus = "ACTIVE";
   await page.setViewportSize({ width: 580, height: 560 });
-  await requestRetryButton.click();
-  await dialog.getByText("분석 진행 중", { exact: true }).waitFor();
+  await requestRetryButton.evaluate(button => { button.click(); button.click(); });
+  const busyButton = dialog.getByRole("button", { name: "요청 중…", exact: true });
+  await busyButton.waitFor();
+  assert.equal(await busyButton.isDisabled(), true, "the pending request must prevent duplicate submission");
+  assert.equal(await dialog.getByLabel("페이지 이름", { exact: true }).inputValue(), target.name);
+  assert.equal(await dialog.getByLabel("페이지 주소", { exact: true }).inputValue(), target.accessUrl);
+  assert.equal(await dialog.getByLabel("페이지 주소", { exact: true }).isDisabled(), true);
   assert.equal(
-    await dialog.locator("[data-site-create-footer]").count(),
+    await dialog.getByRole("list").count(),
     0,
-    "active analysis must not render the modal footer"
+    "the add-page dialog must not render the removed analysis step list"
   );
+  assert.equal(await dialog.getByText("분석 진행 중", { exact: true }).count(), 0);
+  assert.equal(await dialog.locator("[data-site-create-footer]").count(), 1,
+    "the input form and its actions must remain visible while submitting");
+  await mkdir("artifacts/site-create-compact", { recursive: true });
+  for (const [name, width, colorScheme] of [["desktop", 1280, "light"], ["dark", 1280, "dark"], ["mobile", 320, "light"]]) {
+    await page.setViewportSize({ width, height: 568 });
+    await page.emulateMedia({ colorScheme });
+    const rect = await dialog.boundingBox();
+    assert.ok(rect.height < 360 && rect.x >= 0 && rect.x + rect.width <= width,
+      "the pending form must remain compact and fit the viewport");
+    await dialog.screenshot({ path: `artifacts/site-create-compact/pending-${name}.png` });
+  }
   assert.equal(
     await dialog.getByText("분석 중에는 창을 닫을 수 없습니다.", { exact: true }).count(),
     0,
@@ -377,245 +397,31 @@ try {
     "active analysis must not render an auto-close button"
   );
   releaseSecondRequestResponse();
-  const terminalFailureAlert = dialog
-    .getByRole("alert")
-    .filter({ hasText: "페이지 검사를 완료하지 못했습니다" });
-  await terminalFailureAlert.waitFor();
-  await dialog.getByText("분석을 완료하지 못했습니다", { exact: true }).waitFor();
-  assert.match(await terminalFailureAlert.innerText(), /페이지 등록 완료 · 분석 실패/);
-  assert.equal(
-    await dialog
-      .getByText(
-        "페이지 검사를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요. 같은 문제가 계속되면 관리자에게 문의해 주세요.",
-        { exact: false }
-      )
-      .count(),
-    1,
-    "terminal failure details must be rendered in only one announcement region"
-  );
-
-  const terminalFailureText = await terminalFailureAlert.innerText();
-  assert.match(
-    terminalFailureText,
-    /잠시 후 다시 시도해 주세요\. 같은 문제가 계속되면 관리자에게 문의해 주세요\./
-  );
-  assert.doesNotMatch(
-    terminalFailureText,
-    /자동 접속|차단|리다이렉트|FAILED|HTTP|\/(?:api|requests|targets)\//,
-    "terminal analysis failures must not expose speculative causes or implementation details"
-  );
-
-  const failureLayout = await dialog.evaluate((element) => {
-    const scrollRegion = element.querySelector("[data-site-create-scroll-region]");
-    const footer = element.querySelector("[data-site-create-footer]");
-    const title = element.querySelector("#site-create-title");
-    if (
-      !(scrollRegion instanceof HTMLElement) ||
-      !(footer instanceof HTMLElement) ||
-      !(title instanceof HTMLElement)
-    ) {
-      throw new Error("site-create modal regions are missing");
-    }
-    const dialogRect = element.getBoundingClientRect();
-    const footerRectBefore = footer.getBoundingClientRect();
-    const titleRectBefore = title.getBoundingClientRect();
-    scrollRegion.scrollTop = scrollRegion.scrollHeight;
-    const footerRectAfter = footer.getBoundingClientRect();
-    const titleRectAfter = title.getBoundingClientRect();
-    return {
-      dialogBottom: dialogRect.bottom,
-      dialogOverflowY: getComputedStyle(element).overflowY,
-      dialogTop: dialogRect.top,
-      footerBottom: footerRectAfter.bottom,
-      footerTopDelta: footerRectAfter.top - footerRectBefore.top,
-      scrollClientHeight: scrollRegion.clientHeight,
-      scrollHeight: scrollRegion.scrollHeight,
-      scrollOverflowY: getComputedStyle(scrollRegion).overflowY,
-      titleTopDelta: titleRectAfter.top - titleRectBefore.top
-    };
-  });
-  assert.equal(failureLayout.dialogOverflowY, "hidden");
-  assert.equal(failureLayout.scrollOverflowY, "auto");
-  assert.ok(
-    failureLayout.scrollHeight > failureLayout.scrollClientHeight,
-    "the compact failure state must scroll only its content region"
-  );
-  assert.ok(failureLayout.dialogTop >= 0 && failureLayout.dialogBottom <= 560);
-  assert.ok(failureLayout.footerBottom <= failureLayout.dialogBottom + 1);
-  assert.ok(Math.abs(failureLayout.footerTopDelta) < 1, "footer must stay fixed while content scrolls");
-  assert.ok(Math.abs(failureLayout.titleTopDelta) < 1, "title must stay fixed while content scrolls");
-
-  const scrollRegion = dialog.locator("[data-site-create-scroll-region]");
-  await scrollRegion.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await scrollRegion.focus();
-  await page.keyboard.press("PageDown");
-  await page.waitForFunction(
-    () => (document.querySelector("[data-site-create-scroll-region]")?.scrollTop ?? 0) > 0
-  );
-
-  await page.setViewportSize({ width: 320, height: 568 });
-  const narrowFailureLayout = await dialog.evaluate((element) => {
-    const footer = element.querySelector("[data-site-create-footer]");
-    if (!(footer instanceof HTMLElement)) {
-      throw new Error("site-create modal footer is missing");
-    }
-    const dialogRect = element.getBoundingClientRect();
-    const footerRect = footer.getBoundingClientRect();
-    const buttonRects = Array.from(footer.querySelectorAll("button")).map((button) => {
-      const rect = button.getBoundingClientRect();
-      return { left: rect.left, right: rect.right };
-    });
-    return {
-      buttonRects,
-      dialogBottom: dialogRect.bottom,
-      dialogLeft: dialogRect.left,
-      dialogRight: dialogRect.right,
-      dialogTop: dialogRect.top,
-      footerBottom: footerRect.bottom,
-      footerLeft: footerRect.left,
-      footerRight: footerRect.right,
-      footerScrollWidth: footer.scrollWidth,
-      footerWidth: footer.clientWidth
-    };
-  });
-  assert.ok(narrowFailureLayout.dialogTop >= 0 && narrowFailureLayout.dialogBottom <= 568);
-  assert.ok(narrowFailureLayout.footerBottom <= narrowFailureLayout.dialogBottom + 1);
-  assert.ok(
-    narrowFailureLayout.footerScrollWidth <= narrowFailureLayout.footerWidth,
-    "the compact footer must not overflow horizontally"
-  );
-  for (const buttonRect of narrowFailureLayout.buttonRects) {
-    assert.ok(buttonRect.left >= narrowFailureLayout.footerLeft - 1);
-    assert.ok(buttonRect.right <= narrowFailureLayout.footerRight + 1);
-  }
-  await page.setViewportSize({ width: 1440, height: 900 });
-
-  const failedRecovery = await page.evaluate((key) => {
-    const rawValue = window.sessionStorage.getItem(key);
-    return rawValue === null ? null : JSON.parse(rawValue);
-  }, storageKey);
-  assert.ok(failedRecovery, "a terminal failure must leave a retry checkpoint");
-  assert.equal(failedRecovery.phase, "request-ready");
-  assert.equal(failedRecovery.targetId, target.id);
-  assert.equal(failedRecovery.previousFailedRequestId, terminalPendingRequest.id);
+  await dialog.waitFor({ state: "hidden" });
   assert.equal(observed.targetPosts, 1);
   assert.equal(observed.requestPosts, 2);
-  assert.equal(observed.targetStatusGets, 3);
-  assert.equal(observed.terminalFailedStatusGets, 1);
-  assert.equal(observed.requestStatusGets, 0);
+  assert.equal(observed.terminalFailedStatusGets, 0, "registration must not wait for terminal status");
+  assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
 
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
-  await dialog.waitFor({ state: "hidden" });
-  await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
-  await dialog.waitFor();
-  const terminalRetryButton = dialog.getByRole("button", {
-    name: "분석 요청 다시 시도",
-    exact: true
-  });
-  await terminalRetryButton.waitFor();
-  await page.waitForTimeout(250);
-  assert.equal(
-    observed.requestPosts,
-    2,
-    "restoring a terminal-failure checkpoint must not automatically create another request"
-  );
-
-  await page.setViewportSize({ width: 320, height: 568 });
-  const retryScrollRegion = dialog.locator("[data-site-create-scroll-region]");
-  const retryScrollMaximum = await retryScrollRegion.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-    return element.scrollHeight - element.clientHeight;
-  });
-  assert.ok(retryScrollMaximum > 0, "the compact retry state must provide scrollable content");
-  await terminalRetryButton.click();
-  const pollRetryButton = dialog.getByRole("button", {
-    name: "상태 확인 다시 시도",
-    exact: true
-  });
-  await pollRetryButton.waitFor();
-
-  const statusCheckAlert = dialog
-    .getByRole("alert")
-    .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" });
-  await statusCheckAlert.waitFor();
-  const statusAlertVisibility = await statusCheckAlert.evaluate((alert) => {
-    const scrollRegion = alert.closest("[data-site-create-scroll-region]");
-    if (!(scrollRegion instanceof HTMLElement)) {
-      throw new Error("status alert is outside the site-create scroll region");
+  // Migrate a retry checkpoint left by an older client, then recover an ambiguous POST.
+  await page.evaluate(({ key, value }) => sessionStorage.setItem(key, JSON.stringify(value)), {
+    key: storageKey, value: {
+      version: 1, apiScope: "/api", projectId: organization.id, name: target.name,
+      accessUrl: target.accessUrl, previousTargetIds: [inactiveTarget.id, lateInactiveTarget.id],
+      startedAt: Date.now(), targetId: target.id, attemptId: "legacy-terminal-retry",
+      phase: "request-ready", previousFailedRequestId: terminalPendingRequest.id
     }
-    const alertRect = alert.getBoundingClientRect();
-    const scrollRect = scrollRegion.getBoundingClientRect();
-    return {
-      alertBottom: alertRect.bottom,
-      alertTop: alertRect.top,
-      scrollBottom: scrollRect.bottom,
-      scrollTop: scrollRect.top,
-      scrollPosition: scrollRegion.scrollTop
-    };
   });
-  assert.equal(statusAlertVisibility.scrollPosition, 0, "new errors must reset content to the top");
-  assert.ok(statusAlertVisibility.alertTop >= statusAlertVisibility.scrollTop - 1);
-  assert.ok(statusAlertVisibility.alertBottom <= statusAlertVisibility.scrollBottom + 1);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
-  assert.doesNotMatch(
-    await statusCheckAlert.innerText(),
-    /분석 실패|분석을 완료하지 못했습니다/,
-    "a temporary status lookup failure must not be presented as a terminal analysis failure"
-  );
-  assert.equal(
-    await dialog
-      .getByText("서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.", {
-        exact: false
-      })
-      .count(),
-    1,
-    "status lookup error details must be rendered in only one announcement region"
-  );
-
-  assert.equal(observed.targetPosts, 1);
-  assert.equal(observed.requestPosts, 3);
-  assert.equal(observed.targetStatusGets, 4);
-  assert.equal(observed.terminalFailedStatusGets, 1);
-  assert.equal(observed.requestStatusGets, 1);
-
-  await dialog.getByRole("button", { name: "닫기", exact: true }).click();
-  await dialog.waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
-  await dialog.waitFor();
-  await statusCheckAlert.waitFor();
-  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
-  assert.equal(observed.requestPosts, 3);
-  assert.equal(
-    observed.requestStatusGets,
-    1,
-    "restoring an in-progress request must wait for an explicit status-check retry"
-  );
-
-  await pollRetryButton.click();
-  await dialog.waitFor({ state: "hidden", timeout: 10_000 });
-
-  assert.equal(observed.targetPosts, 1);
-  assert.equal(observed.requestPosts, 3);
-  assert.equal(observed.requestStatusGets, 2);
-  assert.equal(await page.evaluate((key) => sessionStorage.getItem(key), storageKey), null);
-  assert.deepEqual(observed.targetPostBody, {
-    name: target.name,
-    accessUrl: target.accessUrl
-  });
-  assert.ok(
-    observed.requestPostBodies.every((body) => body?.evaluationTargetId === target.id),
-    "every analysis request must reuse the created target"
-  );
-  const createdTargetDetailButton = page.getByRole("button", {
-    name: `${target.name} 상세 보기`,
-    exact: true
-  });
-  await createdTargetDetailButton.waitFor({ state: "visible", timeout: 10_000 });
-  assert.equal(await createdTargetDetailButton.count(), 1);
-  assert.equal(new URL(page.url()).pathname, `/projects/${organization.id}`);
+  await dialog.getByRole("button", { name: "분석 요청 다시 시도", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(observed.targetPosts, 1, "analysis recovery must reuse the original target");
+  assert.equal(observed.requestPosts, 3, "lost response must reconcile without a fourth POST");
+  assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
+  assert.deepEqual(observed.targetPostBody, { name: target.name, accessUrl: target.accessUrl });
+  assert.ok(observed.requestPostBodies.every(body => body.evaluationTargetId === target.id));
+  assert.equal(new URL(page.url()).pathname, "/projects/" + organization.id);
 
   const recoveryBase = {
     version: 1,
@@ -645,7 +451,7 @@ try {
     .getByRole("alert")
     .filter({ hasText: "페이지 등록 완료 · 분석 시작 전" })
     .waitFor();
-  await dialog.getByText("분석을 시작할 수 있습니다", { exact: true }).waitFor();
+  assert.equal(await dialog.getByLabel("페이지 주소", { exact: true }).inputValue(), target.accessUrl);
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).waitFor();
   assert.equal(await dialog.getByText("분석 실패", { exact: false }).count(), 0);
   assert.equal(observed.requestPosts, 3, "request-ready recovery must not auto-submit analysis");
@@ -716,7 +522,7 @@ try {
     .getByRole("alert")
     .filter({ hasText: "페이지 등록 완료 · 상태 확인 필요" })
     .waitFor();
-  await dialog.getByText("분석 상태를 다시 확인해 주세요", { exact: true }).waitFor();
+  await dialog.getByRole("alert").filter({ hasText: "이전 분석 요청이 시작되었는지 확인이 필요합니다" }).waitFor();
   await dialog.getByRole("button", { name: "분석 시작 여부 확인", exact: true }).waitFor();
   assert.equal(await dialog.getByText("분석 실패", { exact: false }).count(), 0);
   assert.equal(

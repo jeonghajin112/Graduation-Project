@@ -253,7 +253,7 @@ def split_sentences(text: str) -> list:
 # 5. CSS 선택자 생성 (간이)
 # ────────────────────────────────────────────
 
-def build_selector(tag) -> str:
+def build_selector(tag, original_positions=None) -> str:
     """
     태그의 DOM 트리 내 위치를 나타내는 간이 CSS 선택자를 생성.
 
@@ -279,10 +279,17 @@ def build_selector(tag) -> str:
             parts.append(f'{name}#{tag_id}')
             break
         # 같은 태그명의 형제 중 몇 번째인지 확인
-        siblings = [s for s in (current.parent.children if current.parent else [])
-                     if getattr(s, 'name', None) == name]
-        if len(siblings) > 1:
-            idx = siblings.index(current) + 1
+        position = original_positions.get(id(current)) if original_positions is not None else None
+        if position is None:
+            siblings = [s for s in (current.parent.children if current.parent else [])
+                        if getattr(s, 'name', None) == name]
+            # BeautifulSoup compares tags by contents; identical siblings are
+            # still distinct DOM elements and need their own positional index.
+            idx = next((i for i, sibling in enumerate(siblings, 1) if sibling is current), 1)
+            count = len(siblings)
+        else:
+            idx, count = position
+        if count > 1:
             parts.append(f'{name}:nth-of-type({idx})')
         else:
             parts.append(name)
@@ -291,11 +298,25 @@ def build_selector(tag) -> str:
     return ' > '.join(parts)
 
 
+def snapshot_sibling_positions(soup):
+    """Record the rendered DOM positions before analysis removes hidden nodes."""
+    positions = {}
+    for parent in [soup, *soup.find_all(True)]:
+        groups = {}
+        for child in parent.children:
+            if getattr(child, 'name', None):
+                groups.setdefault(child.name, []).append(child)
+        for siblings in groups.values():
+            for index, child in enumerate(siblings, 1):
+                positions[id(child)] = (index, len(siblings))
+    return positions
+
+
 # ────────────────────────────────────────────
 # 6. form_guide (안내 문구) 추출
 # ────────────────────────────────────────────
 
-def extract_form_guides(soup) -> list:
+def extract_form_guides(soup, original_positions=None) -> list:
     """
     HTML 속성(attribute)에 들어있는 안내 문구를 별도로 추출.
 
@@ -331,7 +352,7 @@ def extract_form_guides(soup) -> list:
                 text=text,
                 category='form_guide',
                 tag=el.name,
-                selector=build_selector(el),
+                selector=build_selector(el, original_positions),
                 attributes={'source': 'placeholder'},
                 sentences=split_sentences(text),
             ))
@@ -345,7 +366,7 @@ def extract_form_guides(soup) -> list:
                 text=text,
                 category='form_guide',
                 tag=el.name,
-                selector=build_selector(el),
+                selector=build_selector(el, original_positions),
                 attributes={'source': 'aria-label'},
                 sentences=split_sentences(text),
             ))
@@ -362,7 +383,7 @@ def extract_form_guides(soup) -> list:
                 text=text,
                 category='form_guide',
                 tag=el.name,
-                selector=build_selector(el),
+                selector=build_selector(el, original_positions),
                 attributes={'source': 'title'},
                 sentences=split_sentences(text),
             ))
@@ -489,6 +510,7 @@ def extract_texts(html: str) -> dict:
       }
     """
     soup = BeautifulSoup(html, 'html.parser')
+    original_positions = snapshot_sibling_positions(soup)
 
     # ── 1단계: 제거 대상 태그 삭제 ──
     # decompose()는 태그와 그 안의 모든 내용을 DOM에서 완전히 제거
@@ -604,7 +626,7 @@ def extract_texts(html: str) -> dict:
             text=text,
             category=category,
             tag=tag.name,
-            selector=build_selector(tag),
+            selector=build_selector(tag, original_positions),
             attributes={
                 k: v for k, v in {
                     'id': tag.get('id'),
@@ -617,7 +639,7 @@ def extract_texts(html: str) -> dict:
     # ── 4단계: form_guide (속성 기반 안내 문구) 별도 추출 ──
     # 3단계에서는 태그의 텍스트 노드만 수집하므로,
     # placeholder, aria-label, title 속성에 들어있는 안내 문구는 여기서 별도 추출
-    guides = extract_form_guides(soup)
+    guides = extract_form_guides(soup, original_positions)
     for g in guides:
         text_key = f'{g.category}:{g.text}'
         if text_key not in seen_texts:  # 중복 방지

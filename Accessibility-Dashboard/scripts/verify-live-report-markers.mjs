@@ -580,6 +580,38 @@ try {
 
   await frame.locator("#purchase").click();
   assert.equal(await frame.locator("body").evaluate(() => window.actionClicks), 0);
+
+  const announcementPopup = frame.getByRole("dialog", { name: "서비스 점검 안내" });
+  for (const closeButtonId of ["popup-close-icon", "popup-close-footer"]) {
+    for (const activation of ["click", "Enter", "Space"]) {
+      await frame.locator("#announcement-popup").evaluate(popup => { popup.hidden = false; });
+      await announcementPopup.waitFor({ state: "visible" });
+      const closeButton = announcementPopup.locator(`#${closeButtonId}`);
+      if (activation === "click") {
+        // Exercise the icon's nested text target as well as the footer button itself.
+        await (closeButtonId === "popup-close-icon" ? closeButton.locator("span") : closeButton).click();
+      } else {
+        await closeButton.press(activation);
+      }
+      assert.equal(await announcementPopup.isVisible(), false,
+        `${closeButtonId} must dismiss the announcement via ${activation}`);
+    }
+  }
+  assert.equal(await frame.locator("body").evaluate(() => window.popupDismissals), 6);
+
+  await frame.locator("#announcement-popup").evaluate(popup => { popup.hidden = false; });
+  for (const actionId of ["popup-purchase", "popup-save-close", "popup-submit", "popup-reset"]) {
+    const action = announcementPopup.locator(`#${actionId}`);
+    await action.click();
+    await action.press("Enter");
+    await action.press("Space");
+    assert.equal(await frame.locator("body").evaluate(() => window.actionClicks), 0,
+      `${actionId} must stay blocked inside a dialog`);
+    assert.equal(await announcementPopup.isVisible(), true);
+  }
+  await announcementPopup.locator("#popup-close-footer").click();
+  assert.equal(await announcementPopup.isVisible(), false);
+
   await frame.locator("#next-slide").click();
   assert.equal(await frame.locator("body").evaluate(() => window.slideClicks), 1);
 
@@ -929,6 +961,501 @@ try {
   await page.waitForTimeout(100);
   assert.equal(await frame.locator(".ap-live-marker").count(), 2, "malformed carousel context must reject INIT");
 
+  // Short controls at the document/viewport top cannot fit a chip above them.
+  // Keep each label tied to its own corner, including in a scaled, scrolled viewer.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.__liveConnected === true && window.__liveEvents.some(
+    event => event?.type === "EVENT" && event.payload?.type === "READY"
+  ));
+  await frame.locator("body").evaluate(() => {
+    window.scrollTo(0, 0);
+    const header = document.createElement("nav");
+    header.id = "edge-marker-nav";
+    header.style.cssText = "position:fixed;inset:3px 0 auto;height:44px;background:#f5f5f7;z-index:1000";
+    for (let index = 0; index < 6; index += 1) {
+      const target = document.createElement("button");
+      target.id = `edge-marker-target-${index}`;
+      target.textContent = `메뉴 ${index + 1}`;
+      target.style.cssText = `position:absolute;left:${100 + index * 140}px;top:0;width:22px;height:44px;padding:0;border:0;font-size:10px`;
+      header.append(target);
+    }
+    document.body.append(header);
+  });
+  const edgeIssues = Array.from({ length: 6 }, (_, index) => createIssue(
+    301 + index, `#edge-marker-target-${index}`, `상단 메뉴 ${index + 1}`, "HIGH", "interaction", "6.1.3"
+  ));
+  edgeIssues.push(createIssue(307, "#edge-marker-target-0", "첫 메뉴 추가 문제", "LOW", "text", "6.4.3"));
+  const edgeLayouts = [];
+  for (const scale of [1, 0.5]) {
+    await page.locator("#viewer").evaluate((iframe, value) => {
+      iframe.style.transformOrigin = "top left";
+      iframe.style.transform = `scale(${value})`;
+    }, scale);
+    await page.evaluate(({ scale, issues }) => {
+      window.__sendLiveCommand({ source: "accessibility-dashboard", type: "SET_VIEW_SCALE",
+        documentToken: window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+        scale, visualWidth: 900 * scale });
+      window.__sendLiveCommand({ source: "accessibility-dashboard", type: "INIT_ISSUES", issues, selectedIssueId: null, markersVisible: true });
+    }, { scale, issues: edgeIssues });
+    for (const scrollTop of [0, 220, 0]) {
+      await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
+      await frame.locator('.ap-live-marker[data-issue-id="301"]').waitFor({ state: "visible" });
+      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const layout = await frame.locator("body").evaluate(() => {
+        const rect = element => {
+          const bounds = element.getBoundingClientRect();
+          return { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
+        };
+        return Array.from({ length: 6 }, (_, index) => {
+          const marker = document.querySelector(`.ap-live-marker[data-issue-id="${301 + index}"]`);
+          return {
+            hidden: marker.hidden,
+            issueCount: Number(marker.querySelector(".ap-live-marker__count")?.textContent || 1),
+            position: getComputedStyle(marker).position,
+            marker: rect(marker),
+            target: rect(document.getElementById(`edge-marker-target-${index}`)),
+            count: marker.querySelector(".ap-live-marker__count") ? rect(marker.querySelector(".ap-live-marker__count")) : null
+          };
+        });
+      });
+      assert.equal(layout.filter(item => !item.hidden).reduce((sum, item) => sum + item.issueCount, 0), edgeIssues.length,
+        "clustering at a viewport edge must keep every menu issue available");
+      let previousVisible = null;
+      for (const [index, item] of layout.entries()) {
+        if (item.hidden) {
+          await page.evaluate(issueId => window.__sendLiveCommand({
+            source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId
+          }), 301 + index);
+          await popover.locator(".ap-live-popover__title").filter({ hasText: `상단 메뉴 ${index + 1}` }).waitFor();
+          const gap = 4 / scale;
+          assert.deepEqual(await highlightRectFor(), [
+            item.target.left - gap, Math.max(0, item.target.top - gap),
+            item.target.right + gap, item.target.bottom + gap
+          ].map(Math.round), "an edge-cluster member must still open and highlight its own menu");
+          continue;
+        }
+        assert.equal(item.position, "fixed", "fixed menu markers must use viewport coordinates");
+        assert.ok(Math.abs(item.marker.left - (item.target.left - 8 / scale)) * scale <= 18,
+          `edge packing must keep marker ${index} near its own menu at scale ${scale}, scroll ${scrollTop}: ${JSON.stringify(item)}`);
+        assert.ok(item.marker.top >= 0 && item.marker.top <= 12 / scale, "top-edge marker must stay visible near the target top");
+        if (item.count) assert.ok(item.count.top >= 0, "group count must remain inside the viewport");
+        assert.ok(Math.abs(item.marker.top - layout[0].marker.top) * scale <= 0.75,
+          `same-row chips must share a baseline with and without a count badge: ${JSON.stringify(layout)}`);
+        assert.ok(item.marker.right <= 900 && (!item.count || item.count.right <= 900),
+          "the chip and its count must fit inside the right edge");
+        if (previousVisible) {
+          const previousRight = Math.max(previousVisible.marker.right, previousVisible.count?.right ?? 0);
+          assert.ok((item.marker.left - previousRight) * scale >= 5.5,
+            "neighboring menu chips and count badges must keep at least a 6px gap");
+        }
+        previousVisible = item;
+      }
+      await frame.locator('.ap-live-marker[data-issue-id="301"]').hover();
+      await popover.locator(".ap-live-popover__title").filter({ hasText: "상단 메뉴 1" }).waitFor();
+      const firstTarget = layout[0].target;
+      const highlightGap = 4 / scale;
+      const expectedHighlight = [
+        firstTarget.left - highlightGap, Math.max(0, firstTarget.top - highlightGap),
+        firstTarget.right + highlightGap, firstTarget.bottom + highlightGap
+      ].map(Math.round);
+      assert.deepEqual(await highlightRectFor(), expectedHighlight, "the corner marker must highlight its own menu, clipped to the viewport");
+      if (process.env.AP_MARKER_SHOT && scale === 0.5 && scrollTop === 220) {
+        await page.screenshot({ path: process.env.AP_MARKER_SHOT.replace(/\.png$/, "-top-edge.png") });
+      }
+      await page.mouse.move(980, 800);
+      await popover.waitFor({ state: "hidden" });
+      edgeLayouts.push({ scale, scrollTop, layout });
+    }
+  }
+
+  // Slightly uneven target tops, different engine labels, a nested cluster at
+  // the right edge, and partially visible document targets after scrolling.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.__liveConnected === true && window.__liveEvents.some(
+    event => event?.type === "EVENT" && event.payload?.type === "READY"
+  ));
+  await frame.locator("body").evaluate(() => {
+    const main = document.querySelector("main");
+    main.replaceChildren();
+    main.style.cssText = "position:relative;width:900px;height:2200px;padding:0";
+    [0, 2, 4, 1].forEach((offset, index) => {
+      const target = document.createElement("button");
+      target.id = `aligned-target-${index}`;
+      target.textContent = `같은 줄 ${index + 1}`;
+      target.style.cssText = `position:absolute;left:${[100, 232, 392, 520][index]}px;top:${220 + offset}px;width:96px;height:80px`;
+      main.append(target);
+    });
+    const right = document.createElement("section");
+    right.id = "right-cluster-target";
+    right.style.cssText = "position:absolute;left:860px;top:430px;width:32px;height:60px";
+    const child = document.createElement("button");
+    child.id = "right-cluster-child";
+    child.textContent = "끝";
+    child.style.cssText = "display:block;width:32px;height:60px;padding:0;border:0";
+    right.append(child);
+    main.append(right);
+  });
+  const alignmentIssues = [
+    createIssue(501, "#aligned-target-0", "첫 메뉴 규칙", "HIGH", "interaction", "6.1.3"),
+    createIssue(502, "#aligned-target-1", "문장 읽기 수준", "MEDIUM", "text", "3.1.5"),
+    createIssue(503, "#aligned-target-2", "색상 대비", "HIGH", "visual", "5.4.3"),
+    createIssue(504, "#aligned-target-3", "마지막 메뉴", "HIGH", "interaction", "6.1.3"),
+    createIssue(505, "#right-cluster-target", "끝 영역", "HIGH", "interaction", "6.1.3"),
+    createIssue(506, "#right-cluster-child", "끝 영역의 문장", "MEDIUM", "text", "3.1.5"),
+    createIssue(507, "#aligned-target-0", "첫 메뉴 추가 문제", "LOW", "text", "6.4.3")
+  ];
+  const alignmentLayouts = [];
+  for (const scale of [1, 0.5, 0.24]) {
+    await page.locator("#viewer").evaluate((iframe, value) => {
+      iframe.style.transformOrigin = "top left";
+      iframe.style.transform = `scale(${value})`;
+    }, scale);
+    await frame.locator("body").evaluate(() => window.scrollTo(0, 0));
+    await page.evaluate(({ scale, issues }) => {
+      window.__sendLiveCommand({ source: "accessibility-dashboard", type: "SET_VIEW_SCALE",
+        documentToken: window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+        scale, visualWidth: 900 * scale });
+      window.__sendLiveCommand({ source: "accessibility-dashboard", type: "INIT_ISSUES", issues, selectedIssueId: null, markersVisible: true });
+    }, { scale, issues: alignmentIssues });
+    let initialRow = null;
+    for (const scrollTop of [0, 205, 225, 0]) {
+      await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
+      await frame.locator('.ap-live-marker[data-issue-id="501"]').waitFor({ state: "visible" });
+      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const layout = await frame.locator("body").evaluate(() => {
+        const rect = element => {
+          const r = element.getBoundingClientRect();
+          return { left:r.left, top:r.top, right:r.right, bottom:r.bottom };
+        };
+        const markers = [...document.querySelectorAll(".ap-live-marker")].filter(marker => !marker.hidden).map(marker => {
+          const count = marker.querySelector(".ap-live-marker__count");
+          const r = rect(marker);
+          const badge = count ? rect(count) : r;
+          return { id:Number(marker.dataset.issueId), rect:r, count:Number(count?.textContent || 1), footprint:{
+            left:Math.min(r.left,badge.left), top:Math.min(r.top,badge.top),
+            right:Math.max(r.right,badge.right), bottom:Math.max(r.bottom,badge.bottom)
+          }};
+        });
+        const targets = Array.from({length:4}, (_, index) => rect(document.getElementById(`aligned-target-${index}`)));
+        return {width:document.documentElement.clientWidth, height:document.documentElement.clientHeight, markers, targets};
+      });
+      assert.equal(layout.markers.reduce((sum, marker) => sum + marker.count, 0), alignmentIssues.length,
+        "edge packing and narrow-screen clustering must keep every visible issue reachable");
+      for (const [index, marker] of layout.markers.entries()) {
+        const r = marker.footprint;
+        assert.ok(r.left >= -0.1 && r.top >= -0.1 && r.right <= layout.width + 0.1 && r.bottom <= layout.height + 0.1,
+          `whole chip and count must remain inside all viewport edges at scale ${scale}, scroll ${scrollTop}: ${JSON.stringify(marker)}`);
+        for (const other of layout.markers.slice(index + 1)) {
+          assert.equal(rectsOverlap(r, other.footprint), false,
+            `chips including cluster badges must not overlap: ${marker.id}, ${other.id}`);
+        }
+      }
+      const row = layout.markers.filter(marker => marker.id >= 501 && marker.id <= 504).sort((a, b) => a.rect.left - b.rect.left);
+      if (scale === 1) assert.equal(row.length, 4, "noncolliding target anchors must keep distinct markers available");
+      for (const [index, marker] of row.entries()) {
+        const target = layout.targets[marker.id - 501];
+        assert.ok(Math.abs(marker.rect.left - (target.left - 8 / scale)) * scale <= 0.75,
+          `row alignment must keep each chip at its own target, including uneven gaps: ${JSON.stringify({marker,target,scale})}`);
+        assert.ok(Math.abs(marker.rect.top - row[0].rect.top) * scale <= 0.75,
+          `same-row targets must align despite small target offsets, scroll ${scrollTop}: ${JSON.stringify(row)}`);
+        assert.ok(Math.abs((marker.rect.right - marker.rect.left) * scale - 56) <= 0.75,
+          "engine labels must use a consistent chip width");
+        if (index) assert.ok((marker.rect.left - row[index - 1].footprint.right) * scale >= 5.5,
+          "mixed engine labels and count badges must retain the standard minimum gap");
+      }
+      if (initialRow === null) initialRow = row;
+      else if (scrollTop === 0) {
+        assert.deepEqual(row.map(marker => marker.rect), initialRow.map(marker => marker.rect),
+          "scrolling back must restore the row instead of preserving a boundary-clamped offset");
+      }
+      alignmentLayouts.push({scale, scrollTop, layout});
+    }
+    if (scale < 1) {
+      for (const issue of alignmentIssues) {
+        await page.evaluate(issueId => window.__sendLiveCommand({
+          source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId
+        }), issue.id);
+        await popover.locator(".ap-live-popover__title").filter({ hasText: issue.title }).waitFor();
+      }
+    }
+  }
+
+  // An uneven three-column news grid must not distribute the middle chip
+  // across the row's span. Its corner stays tied to the middle card even when
+  // the neighboring cards, chip widths and count badges have different sizes.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.__liveConnected === true && window.__liveEvents.some(
+    event => event?.type === "EVENT" && event.payload?.type === "READY"
+  ));
+  await frame.locator("body").evaluate(() => {
+    const main = document.querySelector("main");
+    main.replaceChildren();
+    main.style.cssText = "position:relative;width:900px;height:2200px;padding:0";
+    [{left:52,width:420,top:220}, {left:500,width:180,top:222}, {left:714,width:150,top:221}]
+      .forEach(({left,width,top}, index) => {
+        const card = document.createElement("article");
+        card.id = `uneven-card-${index}`;
+        card.textContent = `소식 카드 ${index + 1}`;
+        card.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:120px;background:#edf1f7`;
+        main.append(card);
+      });
+  });
+  const unevenIssues = [
+    createIssue(601, "#uneven-card-0", "첫 소식의 링크", "HIGH", "text", "6.4.3"),
+    createIssue(602, "#uneven-card-1", "가운데 소식의 대비", "HIGH", "visual", "5.4.3"),
+    createIssue(603, "#uneven-card-2", "마지막 소식의 문장", "MEDIUM", "text", "3.1.5"),
+    createIssue(604, "#uneven-card-0", "첫 소식의 제목", "LOW", "interaction", "6.1.3")
+  ];
+  const unevenColumnLayouts = [];
+  for (const scale of [1, 0.5]) {
+    await page.locator("#viewer").evaluate((iframe, value) => {
+      iframe.style.transformOrigin = "top left";
+      iframe.style.transform = `scale(${value})`;
+    }, scale);
+    await frame.locator("body").evaluate(() => window.scrollTo(0, 0));
+    await page.evaluate(({scale, issues}) => {
+      window.__sendLiveCommand({ source:"accessibility-dashboard", type:"SET_VIEW_SCALE",
+        documentToken:window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+        scale, visualWidth:900 * scale });
+      window.__sendLiveCommand({ source:"accessibility-dashboard", type:"INIT_ISSUES", issues, selectedIssueId:null, markersVisible:true });
+    }, {scale, issues:unevenIssues});
+    await frame.locator('.ap-live-marker[data-issue-id="602"]').waitFor({state:"visible"});
+    await frame.locator("body").evaluate(() => {
+      [44, 72, 56].forEach((width, index) => {
+        document.querySelector(`.ap-live-marker[data-issue-id="${601 + index}"]`).style.width = `${width}px`;
+      });
+    });
+    await page.evaluate(scale => window.__sendLiveCommand({
+      source:"accessibility-dashboard", type:"SET_VIEW_SCALE",
+      documentToken:window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+      scale, visualWidth:900 * scale
+    }), scale);
+    for (const scrollTop of [0, 190, 0]) {
+      await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
+      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const layout = await frame.locator("body").evaluate(() => {
+        const rect = element => {
+          const r = element.getBoundingClientRect();
+          return {left:r.left,top:r.top,right:r.right,bottom:r.bottom};
+        };
+        return Array.from({length:3}, (_, index) => {
+          const marker = document.querySelector(`.ap-live-marker[data-issue-id="${601 + index}"]`);
+          return {hidden:marker.hidden,marker:rect(marker),target:rect(document.getElementById(`uneven-card-${index}`))};
+        });
+      });
+      for (const item of layout) {
+        assert.equal(item.hidden, false, "well-separated news cards must retain their own markers");
+        assert.ok(Math.abs(item.marker.left - (item.target.left - 8 / scale)) * scale <= 0.75,
+          `uneven columns must not move the middle chip toward the first card: ${JSON.stringify({scale,scrollTop,layout})}`);
+        assert.ok(Math.abs(item.marker.top - layout[0].marker.top) * scale <= 0.75,
+          "uneven columns must preserve the existing vertical row alignment");
+      }
+      await frame.locator('.ap-live-marker[data-issue-id="602"]').hover();
+      await popover.locator(".ap-live-popover__title").filter({hasText:"가운데 소식의 대비"}).waitFor();
+      // Hover/focus can scroll the scaled iframe to reveal its chip. Compare
+      // the target and highlight together after that interaction settles.
+      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const focusedGeometry = await frame.locator("body").evaluate((_body, scale) => {
+        const target = document.getElementById("uneven-card-1").getBoundingClientRect();
+        const highlight = document.querySelector(".ap-live-highlight__fragment").getBoundingClientRect();
+        const gap = 4 / scale;
+        return {
+          target: [target.left-gap,target.top-gap,target.right+gap,target.bottom+gap].map(Math.round),
+          highlight: [highlight.left,highlight.top,highlight.right,highlight.bottom].map(Math.round)
+        };
+      }, scale);
+      assert.deepEqual(focusedGeometry.highlight, focusedGeometry.target,
+        "the middle news marker must show its own issue and highlight its own card");
+      await page.mouse.move(980, 800);
+      await popover.waitFor({state:"hidden"});
+      unevenColumnLayouts.push({scale,scrollTop,layout});
+    }
+  }
+
+  await frame.locator("body").evaluate(() => {
+    const embedded = document.createElement("iframe");
+    embedded.id = "unsupported-frame";
+    embedded.srcdoc = "<button>Frame target</button>";
+    document.body.append(embedded);
+  });
+  // A saved positional selector must not attach a text analysis to a new article.
+  // Use the generated bridge with real DOM mutations, including characterData
+  // changes that preserve both the target element and its text node.
+  await page.locator("#viewer").evaluate(iframe => { iframe.style.transform = "scale(1)"; });
+  await frame.locator("body").evaluate(() => {
+    window.scrollTo(0, 0);
+    const main = document.querySelector("main");
+    main.replaceChildren();
+    main.style.cssText = "position:relative;display:grid;grid-template-columns:280px 280px;gap:70px 100px;width:900px;height:1200px;padding:100px 70px;align-content:start";
+    const matching = document.createElement("p");
+    matching.id = "content-identity-matching";
+    matching.textContent = "학교 소식 ＡＢＣ\u00a0전시\n  안내입니다";
+    const list = document.createElement("ul");
+    list.id = "content-identity-news";
+    for (const text of ["디자인컨버전스학부 XR 글래스 기반 온보딩 OS BE-ON 수상 2026.09.06",
+      "“나란히 가자!” 몽골 해외봉사단 ‘나란’을 만나다 본교 해외봉사단이 몽골에서 교육과 문화 교류를 펼쳤다. 학교 2026.08.31"]) {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = "#";
+      link.style.display = "block";
+      link.textContent = text;
+      item.append(link);
+      list.append(item);
+    }
+    const mutable = document.createElement("p");
+    mutable.id = "content-identity-mutable";
+    mutable.append(document.createTextNode("사유의 발화점 행사 2026.08.30"));
+    const labelled = document.createElement("button");
+    labelled.id = "content-identity-labelled";
+    labelled.setAttribute("aria-label", "검색 페이지 열기");
+    const placeholder = document.createElement("input");
+    placeholder.id = "content-identity-placeholder";
+    placeholder.placeholder = "검색어를 입력하세요";
+    const legacy = document.createElement("p");
+    legacy.id = "content-identity-legacy";
+    legacy.textContent = "이전 분석 원문이 없는 현재 기사";
+    const container = document.createElement("section");
+    container.id = "content-identity-container";
+    const inline = document.createElement("strong");
+    inline.textContent = "중요 안내";
+    const block = document.createElement("div");
+    block.textContent = "별도로 수집되는 블록 내용";
+    container.append("앞 문장 ", inline, block, " 끝 문장");
+    for (const element of [matching, list, mutable, labelled, placeholder, legacy, container]) {
+      element.style.cssText = "display:block;box-sizing:border-box;width:280px;min-height:60px;margin:0";
+      main.append(element);
+    }
+  });
+  const withSourceText = (issue, sourceText) => ({
+    ...issue,
+    analyzer: "AI_TEXT",
+    textAnalysis: { kind: "text-analysis", sourceText, flags: [], suggestions: [], revision: null }
+  });
+  const contentIdentityIssues = [
+    withSourceText(createIssue(601, "#content-identity-matching", "공백과 전각 문자", "MEDIUM", "text", "3.1.5"), "ABC 전시 안내"),
+    withSourceText(createIssue(602, "ul#content-identity-news > li:nth-of-type(1) > a", "몽골 봉사 기사", "LOW", "text", "6.4.3"),
+      "“나란히 가자!” 몽골 해외봉사단 ‘나란’을 만나다 본교 해외봉사단이 몽골에서 교육과 문화 교류를 펼쳤다. 학교 2026.08.31"),
+    withSourceText(createIssue(603, "#content-identity-mutable", "원문이 바뀌는 기사", "LOW", "text", "6.4.3"), "사유의 발화점 행사 2026.08.30"),
+    withSourceText(createIssue(604, "#content-identity-labelled", "접근성 이름의 원문", "LOW", "text", "6.4.3"), "검색 페이지 열기"),
+    withSourceText(createIssue(605, "#content-identity-placeholder", "입력 안내의 원문", "LOW", "text", "6.4.3"), "검색어를 입력하세요"),
+    createIssue(606, "#content-identity-legacy", "원문 없는 기존 문제", "MEDIUM", "text", "3.1.5"),
+    withSourceText(createIssue(607, "#content-identity-container", "컨테이너의 직접 문장", "MEDIUM", "text", "3.1.5"), "앞 문장 중요 안내 끝 문장")
+  ];
+  await page.evaluate(issues => {
+    window.__sendLiveCommand({ source: "accessibility-dashboard", type: "SET_VIEW_SCALE",
+      documentToken: window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+      scale: 1, visualWidth: 900 });
+    window.__sendLiveCommand({ source: "accessibility-dashboard", type: "INIT_ISSUES", issues,
+      selectedIssueId: null, markersVisible: true });
+  }, contentIdentityIssues);
+  const waitForContentStatus = (issueId, status, reason = null) => page.waitForFunction(expected => {
+    const latest = window.__liveEvents.filter(event => event?.type === "EVENT"
+      && event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === expected.issueId).at(-1)?.payload;
+    return latest?.status === expected.status && (expected.reason === null || latest.reason === expected.reason);
+  }, { issueId, status, reason });
+  for (const id of [601, 603, 604, 605, 606, 607]) {
+    await waitForContentStatus(id, "VISIBLE");
+    await frame.locator(`.ap-live-marker[data-issue-id="${id}"]`).waitFor({ state: "visible" });
+  }
+  const assertMongoliaTarget = async () => {
+    await waitForContentStatus(602, "VISIBLE");
+    await page.evaluate(() => window.__sendLiveCommand({
+      source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 602
+    }));
+    await popover.locator(".ap-live-popover__title").filter({ hasText: "몽골 봉사 기사" }).waitFor();
+    await page.waitForFunction(() => {
+      const viewerDocument = document.querySelector("#viewer").contentDocument;
+      const article = Array.from(viewerDocument.querySelectorAll("#content-identity-news a"))
+        .find(element => element.textContent.includes("몽골"));
+      const target = article?.getBoundingClientRect();
+      const highlight = viewerDocument.querySelector(".ap-live-highlight__fragment")?.getBoundingClientRect();
+      return target && highlight && Math.abs(target.left - 4 - highlight.left) < 1
+        && Math.abs(target.top - 4 - highlight.top) < 1
+        && Math.abs(target.right + 4 - highlight.right) < 1
+        && Math.abs(target.bottom + 4 - highlight.bottom) < 1;
+    });
+  };
+  await assertMongoliaTarget();
+  const movedArticle = await frame.locator("#content-identity-news li").nth(1).elementHandle();
+  await frame.locator("#content-identity-news").evaluate(list => {
+    const newer = document.createElement("li");
+    newer.innerHTML = "<a href='#'>추가된 새로운 학교 소식 2026.09.07</a>";
+    list.prepend(newer);
+  });
+  await assertMongoliaTarget();
+  await movedArticle.evaluate(element => element.remove());
+  await waitForContentStatus(602, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED");
+  await frame.locator('.ap-live-marker[data-issue-id="602"]').waitFor({ state: "detached" });
+  // An identical article elsewhere must not defeat the saved structural scope.
+  await movedArticle.evaluate(element => document.querySelector("main").append(element));
+  await waitForContentStatus(602, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED");
+  await page.evaluate(() => window.__sendLiveCommand({ source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 602 }));
+  await page.waitForFunction(() => window.__liveEvents.some(event =>
+    event?.type === "EVENT" && event.payload?.type === "ISSUE_DETAIL_FALLBACK" && event.payload.issueId === 602));
+  await movedArticle.evaluate(element => document.querySelector("#content-identity-news").append(element));
+  await assertMongoliaTarget();
+  await movedArticle.evaluate(element => {
+    const duplicate = element.cloneNode(true);
+    duplicate.id = "ambiguous-article";
+    element.after(duplicate);
+  });
+  await waitForContentStatus(602, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED");
+  await frame.locator('.ap-live-marker[data-issue-id="602"]').waitFor({ state: "detached" });
+  await frame.locator("#ambiguous-article").evaluate(element => element.remove());
+  await assertMongoliaTarget();
+  await movedArticle.dispose();
+
+  await page.evaluate(() => window.__sendLiveCommand({
+    source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 603
+  }));
+  await popover.locator(".ap-live-popover__title").filter({ hasText: "원문이 바뀌는 기사" }).waitFor();
+  const originalContentNode = await frame.locator("#content-identity-mutable").evaluateHandle(element => element.firstChild);
+  await originalContentNode.evaluate(node => { node.nodeValue = "Becoming Forms 전시 2026.09.05"; });
+  await waitForContentStatus(603, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED");
+  await frame.locator('.ap-live-marker[data-issue-id="603"]').waitFor({ state: "detached" });
+  await popover.waitFor({ state: "hidden" });
+  assert.equal(await originalContentNode.evaluate(node => node.parentElement?.id), "content-identity-mutable",
+    "content reconciliation must detect characterData changes without replacing the target or text node");
+  await page.evaluate(() => window.__sendLiveCommand({
+    source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 603
+  }));
+  await page.waitForFunction(() => window.__liveEvents.some(event =>
+    event?.type === "EVENT" && event.payload?.type === "ISSUE_DETAIL_FALLBACK" && event.payload.issueId === 603
+  ));
+  await waitForContentStatus(603, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED");
+  assert.equal(await frame.locator('.ap-live-marker[data-issue-id="603"]').count(), 0,
+    "explicit focus must not resurrect a marker on changed content");
+  await originalContentNode.evaluate(node => { node.nodeValue = "사유의 발화점 행사 2026.08.30"; });
+  await waitForContentStatus(603, "VISIBLE");
+  await frame.locator('.ap-live-marker[data-issue-id="603"]').waitFor({ state: "visible" });
+  await page.evaluate(() => window.__sendLiveCommand({
+    source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 603
+  }));
+  await popover.locator(".ap-live-popover__title").filter({ hasText: "원문이 바뀌는 기사" }).waitFor();
+  await originalContentNode.dispose();
+
+  const locationReasonCases = [
+    { issue: { ...createIssue(401, "#unsupported-frame", "프레임 내부", "HIGH", "rule", "5.1.1"),
+      pathSteps: [{ context: "DOCUMENT", selector: "#unsupported-frame" }, { context: "FRAME", selector: "button" }] }, reason: "FRAME_UNSUPPORTED" },
+    { issue: { ...createIssue(402, "", "경로 없음", "HIGH", "rule", "5.1.1"), pathSteps: [] }, reason: "EMPTY_PATH" },
+    { issue: createIssue(403, "[", "경로 오류", "HIGH", "rule", "5.1.1"), reason: "INVALID_SELECTOR" }
+  ];
+  await page.evaluate(issues => window.__sendLiveCommand({
+    source: "accessibility-dashboard", type: "INIT_ISSUES", issues, selectedIssueId: null, markersVisible: true
+  }), locationReasonCases.map(({ issue }) => issue));
+  for (const { issue, reason } of locationReasonCases) {
+    await page.waitForFunction(({ id, reason }) => window.__liveEvents.some(event =>
+      event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === id && event.payload.reason === reason
+    ), { id: issue.id, reason });
+    await page.evaluate(issueId => window.__sendLiveCommand({ source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId }), issue.id);
+    await page.waitForFunction(id => window.__liveEvents.some(event =>
+      event.payload?.type === "ISSUE_DETAIL_FALLBACK" && event.payload.issueId === id
+    ), issue.id);
+    assert.equal(await page.evaluate(id => window.__liveEvents.filter(event =>
+      event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === id
+    ).at(-1)?.payload.reason, issue.id), reason, "retrying an unavailable location must preserve its actual failure reason");
+  }
+
   console.log(JSON.stringify({
     result: "PASS",
     bridge: "LiveReportDocumentRewriter",
@@ -937,6 +1464,9 @@ try {
     groupedIssueCount: 3,
     locatorStatusCount: locatorEvents.length,
     deterministicLeftRail: true,
+    topEdgeScenarios: edgeLayouts.length,
+    alignedRowAndBoundaryScenarios: alignmentLayouts.length,
+    unevenColumnAnchorScenarios: unevenColumnLayouts.length,
     blockedActionClicks: 0,
     allowedCarouselClicks: 1
   }, null, 2));

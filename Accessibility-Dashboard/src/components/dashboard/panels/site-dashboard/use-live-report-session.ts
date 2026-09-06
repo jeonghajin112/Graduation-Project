@@ -7,6 +7,7 @@ import {
   renewLiveReportSession
 } from "@/services/backend-api";
 import { registerDashboardSessionCache } from "@/services/dashboard-session-cache";
+import { SharedRequestPool, TimedLruCache } from "@/services/request-cache";
 import type { EvaluationRequestModel, LiveReportSession } from "@/types/accessibility-domain";
 
 import {
@@ -42,18 +43,6 @@ type ReadyLiveReportSessionState = LiveReportSessionState & {
   session: LiveReportSession;
 };
 
-type SharedLiveReportSessionRequest = {
-  abortTimer: number | null;
-  consumers: number;
-  controller: AbortController;
-  promise: Promise<CachedLiveReportSessionState>;
-};
-
-type LiveReportSessionCacheEntry = {
-  cachedAt: number;
-  state: CachedLiveReportSessionState;
-};
-
 const IDLE_STATE: LiveReportSessionState = {
   errorMessage: null,
   loadState: "idle",
@@ -64,28 +53,24 @@ const UNAVAILABLE_CACHE_TTL_MS = 10_000;
 const SESSION_CACHE_MAX_ENTRIES = 20;
 const LIVE_SESSION_REQUEST_TIMEOUT_MS = 12_000;
 
-const sessionCache = new Map<number, LiveReportSessionCacheEntry>();
-const sharedSessionRequests = new Map<string, SharedLiveReportSessionRequest>();
+const sessionCache = new TimedLruCache<number, CachedLiveReportSessionState>(SESSION_CACHE_MAX_ENTRIES);
+const sharedSessionRequests = new SharedRequestPool<string, CachedLiveReportSessionState>(
+  LIVE_SESSION_REQUEST_TIMEOUT_MS,
+  "동적 검사 화면 준비 시간이 초과되었습니다."
+);
 const sessionGenerationFence = new LiveReportSessionGenerationFence();
 
 registerDashboardSessionCache("live-report-sessions", () => {
   sessionCache.clear();
   sessionGenerationFence.clear();
-  for (const request of sharedSessionRequests.values()) {
-    if (request.abortTimer !== null) {
-      window.clearTimeout(request.abortTimer);
-    }
-    request.controller.abort();
-  }
   sharedSessionRequests.clear();
 });
 
 function readSessionCache(requestId: number): CachedLiveReportSessionState | null {
-  const entry = sessionCache.get(requestId);
-  if (!entry) {
+  const cached = sessionCache.get(requestId);
+  if (!cached) {
     return null;
   }
-  const cached = entry.state;
 
   if (cached.loadState === "ready") {
     if (
@@ -95,26 +80,15 @@ function readSessionCache(requestId: number): CachedLiveReportSessionState | nul
       sessionCache.delete(requestId);
       return null;
     }
-  } else if (Date.now() - entry.cachedAt >= UNAVAILABLE_CACHE_TTL_MS) {
-    sessionCache.delete(requestId);
-    return null;
   }
-
-  sessionCache.delete(requestId);
-  sessionCache.set(requestId, entry);
   return cached;
 }
 
 function writeSessionCache(state: CachedLiveReportSessionState): void {
-  sessionCache.delete(state.requestId);
-  sessionCache.set(state.requestId, { cachedAt: Date.now(), state });
-  while (sessionCache.size > SESSION_CACHE_MAX_ENTRIES) {
-    const oldestRequestId = sessionCache.keys().next().value;
-    if (typeof oldestRequestId !== "number") {
-      break;
-    }
-    sessionCache.delete(oldestRequestId);
-  }
+  // Ready sessions are checked against their expiration and viewer origin on every read.
+  sessionCache.set(state.requestId, state, state.loadState === "ready"
+    ? Infinity
+    : UNAVAILABLE_CACHE_TTL_MS);
 }
 
 async function loadLiveReportSession(
@@ -122,37 +96,9 @@ async function loadLiveReportSession(
   signal: AbortSignal,
   sessionToRenew: LiveReportSession | null
 ): Promise<CachedLiveReportSessionState> {
-  const requestController = new AbortController();
-  let timedOut = false;
-  const abortFromConsumer = () => requestController.abort();
-  if (signal.aborted) {
-    requestController.abort();
-  } else {
-    signal.addEventListener("abort", abortFromConsumer, { once: true });
-  }
-  const timeoutId = window.setTimeout(() => {
-    timedOut = true;
-    requestController.abort();
-  }, LIVE_SESSION_REQUEST_TIMEOUT_MS);
-
-  let session: LiveReportSession | null;
-  try {
-    session = sessionToRenew === null
-      ? await createLiveReportSession(requestId, requestController.signal)
-      : await renewLiveReportSession(
-          requestId,
-          sessionToRenew.sessionId,
-          requestController.signal
-        );
-  } catch (error: unknown) {
-    if (timedOut && !signal.aborted) {
-      throw new Error("동적 검사 화면 준비 시간이 초과되었습니다.");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeoutId);
-    signal.removeEventListener("abort", abortFromConsumer);
-  }
+  const session = sessionToRenew === null
+    ? await createLiveReportSession(requestId, signal)
+    : await renewLiveReportSession(requestId, sessionToRenew.sessionId, signal);
 
   if (session === null) {
     return {
@@ -189,54 +135,8 @@ function acquireSessionRequest(
   const requestKey = sessionToRenew === null
     ? `create:${requestId}:${generation}`
     : `renew:${requestId}:${sessionToRenew.sessionId}:${generation}`;
-  let request = sharedSessionRequests.get(requestKey);
-  if (!request) {
-    const controller = new AbortController();
-    request = {
-      abortTimer: null,
-      consumers: 0,
-      controller,
-      promise: loadLiveReportSession(requestId, controller.signal, sessionToRenew)
-    };
-    sharedSessionRequests.set(requestKey, request);
-    const clearSettledRequest = () => {
-      if (sharedSessionRequests.get(requestKey) === request) {
-        sharedSessionRequests.delete(requestKey);
-      }
-    };
-    void request.promise.then(clearSettledRequest, clearSettledRequest);
-  }
-
-  const sharedRequest = request;
-  if (sharedRequest.abortTimer !== null) {
-    window.clearTimeout(sharedRequest.abortTimer);
-    sharedRequest.abortTimer = null;
-  }
-  sharedRequest.consumers += 1;
-
-  let released = false;
-  return {
-    promise: sharedRequest.promise,
-    release: () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      sharedRequest.consumers -= 1;
-      if (sharedRequest.consumers > 0 || sharedRequest.abortTimer !== null) {
-        return;
-      }
-      sharedRequest.abortTimer = window.setTimeout(() => {
-        sharedRequest.abortTimer = null;
-        if (sharedRequest.consumers === 0) {
-          sharedRequest.controller.abort();
-          if (sharedSessionRequests.get(requestKey) === sharedRequest) {
-            sharedSessionRequests.delete(requestKey);
-          }
-        }
-      }, 0);
-    }
-  };
+  return sharedSessionRequests.acquire(requestKey, (signal) =>
+    loadLiveReportSession(requestId, signal, sessionToRenew));
 }
 
 export function useLiveReportSession(

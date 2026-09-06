@@ -83,7 +83,7 @@ export function ModalLoadFallback() {
 
   return createPortal(
     <section
-      className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px]"
+      className="dashboard-modal-layer"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -96,9 +96,9 @@ export function ModalLoadFallback() {
         aria-atomic="true"
         aria-busy="true"
         tabIndex={-1}
-        className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        className="dashboard-modal-surface dashboard-modal-content outline-none"
       >
-        <p id={titleId} className="text-sm font-medium text-slate-700">
+        <p id={titleId} className="dashboard-modal-description">
           창을 불러오는 중...
         </p>
       </div>
@@ -122,28 +122,28 @@ export function ModalErrorFallback({
   const dialogRef = useModalLayerOwnership<HTMLElement>();
 
   return createPortal(
-    <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/60 px-4 py-6">
+    <div className="dashboard-modal-layer">
       <article
         ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-md rounded-[18px] border border-rose-200 bg-white p-6 shadow-xl outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+        className="dashboard-modal-surface dashboard-modal-content w-full max-w-md outline-none"
       >
-        <h2 id={titleId} className="text-lg font-semibold text-slate-900">
+        <h2 id={titleId} className="dashboard-modal-title">
           창을 표시할 수 없습니다
         </h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="dashboard-modal-description mt-2">
           {isChunkError
             ? "필요한 화면 파일을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해 주세요."
             : "화면을 표시하는 중 문제가 발생했습니다. 다시 시도하거나 페이지를 새로고침해 주세요."}
         </p>
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <div className="dashboard-modal-actions">
           <button
             type="button"
             onClick={onDismiss}
-            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            className="dashboard-modal-button"
           >
             닫기
           </button>
@@ -151,7 +151,7 @@ export function ModalErrorFallback({
             <button
               type="button"
               onClick={onRetry}
-              className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              className="dashboard-modal-button dashboard-modal-button--primary"
             >
               다시 시도
             </button>
@@ -159,9 +159,9 @@ export function ModalErrorFallback({
           <button
             type="button"
             onClick={onReload}
-            className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+            className="dashboard-modal-button dashboard-modal-button--primary"
           >
-            페이지 새로고침
+            새로고침
           </button>
         </div>
       </article>

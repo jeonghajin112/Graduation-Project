@@ -6,6 +6,7 @@ import com.accessibility.platform.request.repository.EvaluationRequestRepository
 import com.accessibility.platform.score.repository.ScoreResultRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -19,6 +20,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -40,6 +43,7 @@ public class AiEvaluationRunnerService {
     private final EvaluationRequestRepository requestRepository;
     private final ScoreResultRepository scoreResultRepository;
     private final PlatformTransactionManager transactionManager;
+    private final Environment environment;
     private final String configuredPythonExecutable;
     private final long processTimeoutSeconds;
     private final AtomicReference<Long> activeRequestId = new AtomicReference<>();
@@ -52,6 +56,7 @@ public class AiEvaluationRunnerService {
             EvaluationRequestRepository requestRepository,
             ScoreResultRepository scoreResultRepository,
             PlatformTransactionManager transactionManager,
+            Environment environment,
             @Value("${accessibility.ai.python-executable:}") String configuredPythonExecutable,
             @Value("${accessibility.ai.process-timeout-seconds:" + DEFAULT_PROCESS_TIMEOUT_SECONDS + "}")
             long processTimeoutSeconds
@@ -62,6 +67,7 @@ public class AiEvaluationRunnerService {
         this.requestRepository = requestRepository;
         this.scoreResultRepository = scoreResultRepository;
         this.transactionManager = transactionManager;
+        this.environment = environment;
         this.configuredPythonExecutable = configuredPythonExecutable;
         this.processTimeoutSeconds = processTimeoutSeconds;
     }
@@ -119,9 +125,6 @@ public class AiEvaluationRunnerService {
     public void runEvaluationAsync(Long requestId, String targetUrl) {
         log.info("Starting asynchronous AI evaluation for request ID: {}, URL: {}", requestId, targetUrl);
 
-        // Update status to IN_PROGRESS synchronously
-        updateStatus(requestId, EvaluationRequestStatus.IN_PROGRESS);
-
         dispatchAfterCommitIfNecessary(() -> submitEvaluation(requestId, targetUrl));
     }
 
@@ -139,6 +142,8 @@ public class AiEvaluationRunnerService {
 
     private void executeEvaluation(Long requestId, String targetUrl) {
         try {
+            // Queued requests remain PENDING until the worker actually starts them.
+            updateStatus(requestId, EvaluationRequestStatus.IN_PROGRESS);
             executeAnalysisScript(requestId, targetUrl);
         } catch (Exception e) {
             log.error("Failed to execute AI analysis script for request: " + requestId, e);
@@ -195,7 +200,7 @@ public class AiEvaluationRunnerService {
         action.run();
     }
 
-    private void executeAnalysisScript(Long requestId, String targetUrl) throws Exception {
+    void executeAnalysisScript(Long requestId, String targetUrl) throws Exception {
         File aiModuleDir = resolveAiModuleDir();
         List<String> pythonCommand = resolvePythonCommand(
                 aiModuleDir,
@@ -215,8 +220,7 @@ public class AiEvaluationRunnerService {
         command.add(targetUrl);
         command.add(requestId.toString());
 
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(aiModuleDir);
+        ProcessBuilder pb = createAnalysisProcess(command, aiModuleDir);
 
         Process process = pb.start();
         if (!activeProcess.compareAndSet(null, process)) {
@@ -280,6 +284,47 @@ public class AiEvaluationRunnerService {
             }
         } finally {
             activeProcess.compareAndSet(process, null);
+        }
+    }
+
+    ProcessBuilder createAnalysisProcess(List<String> command, File aiModuleDir) {
+        ProcessBuilder process = new ProcessBuilder(command).directory(aiModuleDir);
+        // The child otherwise falls back to port 9090, even when this server
+        // accepted the analysis request on a different port.
+        process.environment().put("API_BASE_URL", resolveBackendApiBaseUrl(environment));
+        return process;
+    }
+
+    static String resolveBackendApiBaseUrl(Environment environment) {
+        String configured = environment.getProperty("accessibility.ai.api-base-url", "").trim();
+        if (configured.isEmpty()) {
+            configured = environment.getProperty("API_BASE_URL", "").trim();
+        }
+        if (!configured.isEmpty()) {
+            return configured.replaceAll("/+$", "");
+        }
+
+        // Resolve at process creation time, after Spring has bound its actual
+        // port (including server.port=0). Do not derive callbacks from Host headers.
+        int port = environment.getProperty("local.server.port", Integer.class,
+                environment.getProperty("server.port", Integer.class, 9090));
+        if (port <= 0 || port > 65535) {
+            throw new IllegalStateException("The analysis callback requires a bound server port");
+        }
+        String host = environment.getProperty("server.address", "127.0.0.1").trim();
+        if (host.isEmpty() || host.equals("0.0.0.0")) {
+            host = "127.0.0.1";
+        } else if (host.equals("::") || host.equals("[::]")) {
+            host = "::1";
+        }
+        String scheme = environment.getProperty("server.ssl.enabled", Boolean.class, false)
+                ? "https" : "http";
+        String contextPath = environment.getProperty("server.servlet.context-path", "")
+                .replaceAll("/+$", "");
+        try {
+            return new URI(scheme, null, host, port, contextPath + "/api/v1", null, null).toString();
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("Invalid analysis callback address", e);
         }
     }
 

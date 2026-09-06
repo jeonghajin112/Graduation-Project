@@ -328,16 +328,34 @@ describe("createEvaluationCaptureMetadataParser", () => {
 describe("createEvaluationIssuesResponseParser", () => {
   const parseIssues = createEvaluationIssuesResponseParser(501);
 
-  it("keeps the locator path and carousel state used by live markers", () => {
+  it("keeps the recorded element evidence as well as the live marker path", () => {
     const parsed = parseIssues([createEvaluationIssue()], "$.data");
     expect(parsed[0]?.locator).toEqual({
       pathSteps: [{ context: "DOCUMENT", selector: "a.more", frameUrl: null }],
+      htmlSnippet: '<a class="more">더 보기</a>',
+      x: 10,
+      y: 20,
+      width: 30,
+      height: 40,
+      coordinateSpace: "CSS_PIXEL",
       carouselContext: {
         carouselId: 2,
         slideIndex: 1,
         slideCount: 4
       }
     });
+  });
+
+  it.each([
+    [{ x: "10" }, "x"],
+    [{ width: Number.POSITIVE_INFINITY }, "width"],
+    [{ htmlSnippet: { html: "<img>" } }, "htmlSnippet"]
+  ])("rejects malformed recorded element evidence %#", (override, field) => {
+    const issue = createEvaluationIssue();
+    expectContractError(
+      () => parseIssues([{ ...issue, locator: { ...issue.locator, ...override } }], "$.data"),
+      `$.data[0].locator.${field}`
+    );
   });
 
   it.each([

@@ -82,6 +82,7 @@ public class LiveReportBrowserFixtureExporterTest {
                       #hidden-state-target { min-height: 36px; }
                       #hidden-without-context { display: none; }
                       #offscreen-target { width: 360px; min-height: 72px; margin-top: 900px; padding: 18px; border: 1px solid #ccd2dc; }
+                      #announcement-popup:not([hidden]) { position: fixed; inset: 80px 100px auto 180px; z-index: 10000; padding: 24px; background: white; border: 2px solid #333; }
                       svg { display: none !important; width: 2px !important; height: 2px !important; opacity: 0 !important; }
                       svg * { visibility: hidden !important; opacity: 0 !important; fill: none !important; stroke: none !important; }
                     </style>
@@ -118,10 +119,32 @@ public class LiveReportBrowserFixtureExporterTest {
                       <section id="hidden-without-context">복구 정보가 없는 숨은 대상</section>
                       <section id="offscreen-target">초기 뷰포트 아래에 있는 대상</section>
                     </main>
+                    <div id="announcement-popup" role="dialog" aria-modal="true" aria-label="서비스 점검 안내" hidden>
+                      <div class="modal-wrap"><div class="modal-dialog">
+                        <h2>서비스 점검 안내</h2>
+                        <button id="popup-close-icon" type="button" class="btn-close-modal close-modal"><span>닫기</span></button>
+                        <div class="modal-footer"><div class="func-wrap"><div class="btn-wrap">
+                          <button id="popup-close-footer" type="button" class="btn tertiary close-modal"> 닫기 </button>
+                        </div></div></div>
+                        <button id="popup-purchase" type="button" onclick="window.actionClicks += 1">구매하기</button>
+                        <button id="popup-save-close" type="button" onclick="window.actionClicks += 1">저장 후 닫기</button>
+                        <form method="post">
+                          <button id="popup-submit" type="submit" onclick="window.actionClicks += 1">닫기</button>
+                          <button id="popup-reset" type="reset" onclick="window.actionClicks += 1">닫기</button>
+                        </form>
+                      </div></div>
+                    </div>
                     <script>
                       window.actionClicks = 0;
                       window.slideClicks = 0;
                       window.dynamicActionClicks = 0;
+                      window.popupDismissals = 0;
+                      document.querySelectorAll('#announcement-popup .close-modal').forEach(button => {
+                        button.addEventListener('click', () => {
+                          window.popupDismissals += 1;
+                          document.getElementById('announcement-popup').hidden = true;
+                        });
+                      });
                     </script>
                   </body>
                 </html>

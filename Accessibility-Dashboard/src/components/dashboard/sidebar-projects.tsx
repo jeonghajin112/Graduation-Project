@@ -14,7 +14,9 @@ import {
   subscribeQuickAnalysisRegistry,
   type QuickAnalysisResultRecord
 } from "@/services/quick-analysis-registry";
-import type { OrganizationModel } from "@/types/accessibility-domain";
+import type { OrganizationModel, EvaluationRequestModel } from "@/types/accessibility-domain";
+import { PageAnalysisStatus } from "./shared/page-analysis-status";
+import { API_BASE_URL } from "@/config/api";
 
 import { PanelMessage } from "./shared/display";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
@@ -25,6 +27,17 @@ const PROJECT_MENU_GAP = 4;
 const PROJECT_MENU_VIEWPORT_PADDING = 8;
 const EMPTY_QUICK_ANALYSIS_RESULTS: readonly QuickAnalysisResultRecord[] = [];
 const subscribeStaticQuickAnalysisResults = () => () => undefined;
+const ANALYSIS_ACKNOWLEDGED_KEY = `uni-access.analysis-acknowledged.v1:${API_BASE_URL}`;
+
+function readAcknowledgedAnalyses(): Record<number, number> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(ANALYSIS_ACKNOWLEDGED_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([target, request]) =>
+      Number.isSafeInteger(Number(target)) && Number(target) > 0 &&
+      Number.isSafeInteger(request) && Number(request) > 0));
+  } catch { return {}; }
+}
 
 /** Shared selected/hover/focus chrome for project + recent-page sidebar rows (radius via design token, never pill). */
 const SIDEBAR_NAV_ITEM_BASE =
@@ -39,8 +52,8 @@ const SIDEBAR_SECTION_HEADING =
 
 export function SidebarProjectsSection({
   organizations,
+  evaluationRequests = [],
   selection,
-  isDarkMode,
   onSelectProject,
   onSelectPage,
   onSelectRecentPage,
@@ -51,8 +64,8 @@ export function SidebarProjectsSection({
   readOnly = false
 }: {
   organizations: OrganizationModel[];
+  evaluationRequests?: EvaluationRequestModel[];
   selection: DashboardSidebarSelection | null;
-  isDarkMode: boolean;
   onSelectProject: (projectId: number) => void;
   onSelectPage?: (input: { projectId: number; pageId: number }) => void;
   onSelectRecentPage: (pageId: number) => void;
@@ -62,6 +75,7 @@ export function SidebarProjectsSection({
   quickAnalysisResultsOverride?: readonly QuickAnalysisResultRecord[];
   readOnly?: boolean;
 }) {
+  const projects = useMemo(() => organizations.filter((organization) => !organization.systemManaged), [organizations]);
   const projectMenuElements = useRef(new Map<number, HTMLDivElement>());
   const projectMenuTriggers = useRef(new Map<number, HTMLButtonElement>());
   const [editingProject, setEditingProject] = useState<OrganizationModel | null>(null);
@@ -76,6 +90,26 @@ export function SidebarProjectsSection({
   const deleteLockRef = useRef(false);
   const activeDeleteOperationIdRef = useRef<symbol | null>(null);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<number>>(() => new Set());
+  const [acknowledgedAnalyses, setAcknowledgedAnalyses] = useState(readAcknowledgedAnalyses);
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === ANALYSIS_ACKNOWLEDGED_KEY || event.key === null) setAcknowledgedAnalyses(readAcknowledgedAnalyses());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  const acknowledgeAnalysis = (request: EvaluationRequestModel) => {
+    const next = { ...readAcknowledgedAnalyses(), ...acknowledgedAnalyses, [request.evaluationTargetId]: request.id };
+    setAcknowledgedAnalyses(next);
+    try { localStorage.setItem(ANALYSIS_ACKNOWLEDGED_KEY, JSON.stringify(next)); } catch { /* Keep the dismissal for this session. */ }
+  };
+  const pageAnalysisRequests = useMemo(() => {
+    const priority = (request: EvaluationRequestModel) => request.status === "IN_PROGRESS" ? 2 : request.status === "PENDING" ? 1 : 0;
+    const sorted = [...evaluationRequests].sort((a, b) => priority(b) - priority(a) || Date.parse(b.requestedAt) - Date.parse(a.requestedAt) || b.id - a.id);
+    const byTarget = new Map<number, EvaluationRequestModel>();
+    for (const request of sorted) if (!byTarget.has(request.evaluationTargetId)) byTarget.set(request.evaluationTargetId, request);
+    return byTarget;
+  }, [evaluationRequests]);
   const autoExpandedPageProjectId = useRef<number | null>(null);
   const hasQuickAnalysisResultsOverride = quickAnalysisResultsOverride !== undefined;
   const staticQuickAnalysisResults = quickAnalysisResultsOverride ?? EMPTY_QUICK_ANALYSIS_RESULTS;
@@ -94,9 +128,10 @@ export function SidebarProjectsSection({
     () =>
       buildRecentAnalyzedPages({
         organizations,
-        quickAnalysisResults
+        quickAnalysisResults,
+        evaluationRequests
       }),
-    [organizations, quickAnalysisResults]
+    [organizations, quickAnalysisResults, evaluationRequests]
   );
   const selectedPageProjectId = selection?.kind === "projectPage" ? selection.projectId : null;
 
@@ -294,9 +329,9 @@ export function SidebarProjectsSection({
       </div>
 
       <div className="sidebar-tree-projects min-h-0 overflow-y-auto">
-        {organizations.length > 0 ? (
+        {projects.length > 0 ? (
           <ul className="sidebar-tree-list flex flex-col">
-            {organizations.map((project) => {
+            {projects.map((project) => {
               const isActive = selection?.kind === "project" && selection.id === project.id;
               const isExpanded = expandedProjectIds.has(project.id);
               const childListId = `sidebar-project-pages-${project.id}`;
@@ -439,13 +474,14 @@ export function SidebarProjectsSection({
                   {isExpanded ? (
                     <ul id={childListId} className="sidebar-tree-children flex flex-col">
                       {project.evaluationTargets.map((page) => {
+                        const analysis = pageAnalysisRequests.get(page.id);
                         const isPageActive =
                           selection?.kind === "projectPage" &&
                           selection.projectId === project.id &&
                           selection.pageId === page.id;
 
                         return (
-                          <li key={page.id}>
+                          <li key={page.id} className="relative">
                             {readOnly ? (
                               <button
                                 type="button"
@@ -455,7 +491,7 @@ export function SidebarProjectsSection({
                                 onClick={() => onSelectPage?.({ projectId: project.id, pageId: page.id })}
                                 className={cn(
                                   SIDEBAR_NAV_ITEM_BASE,
-                                  "sidebar-tree-child-row",
+                                  "sidebar-tree-child-row pr-8",
                                   isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
                                 )}
                               >
@@ -467,12 +503,15 @@ export function SidebarProjectsSection({
                             ) : (
                               <Link
                                 to={`/projects/${project.id}/pages/${page.id}`}
+                                onClick={() => {
+                                  if (analysis?.status === "COMPLETED") acknowledgeAnalysis(analysis);
+                                }}
                                 aria-current={isPageActive ? "page" : undefined}
                                 aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
                                 title={`${page.name} · ${project.name}`}
                                 className={cn(
                                   SIDEBAR_NAV_ITEM_BASE,
-                                  "sidebar-tree-child-row",
+                                  "sidebar-tree-child-row pr-8",
                                   isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
                                 )}
                               >
@@ -482,6 +521,8 @@ export function SidebarProjectsSection({
                                 <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
                               </Link>
                             )}
+                            {!readOnly && <PageAnalysisStatus request={analysis} pageName={page.name}
+                              acknowledged={!!analysis && acknowledgedAnalyses[page.id] === analysis.id} />}
                           </li>
                         );
                       })}
@@ -504,7 +545,10 @@ export function SidebarProjectsSection({
           ) : (
             recentAnalyzedPages.map((page) => {
               const isActive = selection?.kind === "recentPage" && selection.id === page.pageId;
-              const contextLabel = `${page.pageName} 페이지 열기 (${page.projectName} 프로젝트)`;
+              const contextLabel = page.systemManaged
+                ? `${page.pageName} 페이지 열기 (최근 분석)`
+                : `${page.pageName} 페이지 열기 (${page.projectName} 프로젝트)`;
+              const analysis = pageAnalysisRequests.get(page.pageId);
 
               return (
                 <button
@@ -512,11 +556,14 @@ export function SidebarProjectsSection({
                   type="button"
                   aria-label={contextLabel}
                   aria-current={isActive ? "page" : undefined}
-                  title={`${page.pageName} · ${page.projectName}`}
-                  onClick={() => onSelectRecentPage(page.pageId)}
+                  title={page.systemManaged ? page.pageName : `${page.pageName} · ${page.projectName}`}
+                  onClick={() => {
+                    if (!readOnly && analysis?.status === "COMPLETED") acknowledgeAnalysis(analysis);
+                    onSelectRecentPage(page.pageId);
+                  }}
                   className={cn(
                     SIDEBAR_NAV_ITEM_BASE,
-                    "sidebar-tree-child-row",
+                    "sidebar-tree-child-row relative pr-8",
                     isActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
                   )}
                 >
@@ -524,6 +571,8 @@ export function SidebarProjectsSection({
                     <FileText size={16} aria-hidden="true" />
                   </span>
                   <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.pageName}</span>
+                  {!readOnly && <PageAnalysisStatus request={analysis} pageName={page.pageName}
+                    acknowledged={analysis !== undefined && acknowledgedAnalyses[page.pageId] === analysis.id} />}
                 </button>
               );
             })
@@ -533,7 +582,7 @@ export function SidebarProjectsSection({
 
       {editingProject
         ? createPortal(
-            <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
+            <div className="dashboard-modal-layer">
               <div className="absolute inset-0" onClick={closeEdit} aria-hidden="true" />
               <article
                 ref={editDialogRef}
@@ -541,53 +590,37 @@ export function SidebarProjectsSection({
                 aria-modal="true"
                 aria-labelledby="sidebar-project-edit-title"
                 tabIndex={-1}
-                className={cn(
-                  "relative z-10 w-full max-w-xl rounded-2xl border p-5",
-                  isDarkMode ? "border-[#222222] bg-black" : "border-slate-200 bg-white"
-                )}
+                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
               >
                 <h3
                   id="sidebar-project-edit-title"
-                  className={cn("text-lg font-semibold", isDarkMode ? "text-white" : "text-slate-900")}
+                  className="dashboard-modal-title"
                 >
                   프로젝트 수정
                 </h3>
-                <p className={cn("mt-1 text-sm", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                  프로젝트 이름을 수정할 수 있습니다.
-                </p>
 
-                {editError.length > 0 && <PanelMessage label={`프로젝트 수정 실패: ${editError}`} isError />}
+                {editError.length > 0 && <PanelMessage className="dashboard-modal-message" label={`프로젝트 수정 실패: ${editError}`} isError />}
 
                 <div className="mt-4 space-y-4">
                   <label className="block">
-                    <span className={cn("mb-1 block text-sm font-semibold", isDarkMode ? "text-slate-300" : "text-slate-700")}>
+                    <span className="dashboard-modal-label">
                       프로젝트 이름
                     </span>
                     <input
                       value={editName}
                       onChange={(event) => setEditName(event.target.value)}
-                      className={cn(
-                        "h-10 w-full rounded-lg border px-3 text-sm outline-none",
-                        isDarkMode
-                          ? "border-[#222222] bg-[#111111] text-white placeholder:text-slate-500 focus:border-slate-500"
-                          : "border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-slate-400"
-                      )}
+                      className="dashboard-modal-input"
                       placeholder="예: 고령자 접근성 점검"
                     />
                   </label>
                 </div>
 
-                <div className="mt-5 flex items-center justify-end gap-2">
+                <div className="dashboard-modal-actions">
                   <button
                     type="button"
                     disabled={isSaving}
                     onClick={closeEdit}
-                    className={cn(
-                      "inline-flex h-9 items-center rounded-lg px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60",
-                      isDarkMode
-                        ? "bg-[#1a1a1a] font-semibold text-white hover:bg-[#262626]"
-                        : "border border-slate-200 bg-white font-medium text-slate-700 hover:bg-slate-50"
-                    )}
+                    className="dashboard-modal-button"
                   >
                     취소
                   </button>
@@ -597,7 +630,7 @@ export function SidebarProjectsSection({
                     onClick={() => {
                       void handleSave();
                     }}
-                    className="inline-flex h-9 items-center rounded-lg bg-[#ef6a50] px-3 text-sm font-semibold text-white hover:bg-[#e85d43] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="dashboard-modal-button dashboard-modal-button--primary"
                   >
                     {isSaving ? "저장 중..." : "저장"}
                   </button>
@@ -610,7 +643,7 @@ export function SidebarProjectsSection({
 
       {deletingProject
         ? createPortal(
-            <div className="dashboard-modal-layer fixed inset-0 flex items-center justify-center bg-black/55 px-4 py-6 backdrop-blur-sm">
+            <div className="dashboard-modal-layer">
               <div className="absolute inset-0" onClick={closeDelete} aria-hidden="true" />
               <article
                 ref={deleteDialogRef}
@@ -618,37 +651,29 @@ export function SidebarProjectsSection({
                 aria-modal="true"
                 aria-labelledby="sidebar-project-delete-title"
                 tabIndex={-1}
-                className={cn(
-                  "relative z-10 w-full max-w-md rounded-2xl border p-5",
-                  isDarkMode ? "border-[#222222] bg-black" : "border-slate-200 bg-white"
-                )}
+                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
               >
                 <h3
                   id="sidebar-project-delete-title"
-                  className={cn("text-lg font-semibold", isDarkMode ? "text-white" : "text-slate-900")}
+                  className="dashboard-modal-title"
                 >
                   프로젝트 제거
                 </h3>
-                <p className={cn("mt-2 text-sm", isDarkMode ? "text-slate-400" : "text-slate-500")}>
-                  <span className={cn("font-medium", isDarkMode ? "text-slate-200" : "text-slate-700")}>
+                <p className="dashboard-modal-description mt-2">
+                  <span className="font-medium text-foreground">
                     {deletingProject.name}
                   </span>{" "}
                   프로젝트를 제거하시겠습니까?
                 </p>
 
-                {deleteError.length > 0 && <PanelMessage label={`프로젝트 제거 실패: ${deleteError}`} isError />}
+                {deleteError.length > 0 && <PanelMessage className="dashboard-modal-message" label={`프로젝트 제거 실패: ${deleteError}`} isError />}
 
-                <div className="mt-5 flex items-center justify-end gap-2">
+                <div className="dashboard-modal-actions">
                   <button
                     type="button"
                     disabled={isDeleting}
                     onClick={closeDelete}
-                    className={cn(
-                      "inline-flex h-9 items-center rounded-lg border px-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60",
-                      isDarkMode
-                        ? "border-[#222222] bg-[#111111] text-neutral-200 hover:bg-[#1a1a1a]"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                    )}
+                    className="dashboard-modal-button"
                   >
                     아니요
                   </button>
@@ -660,7 +685,7 @@ export function SidebarProjectsSection({
                     onClick={() => {
                       void handleDelete();
                     }}
-                    className="h-9 px-3 text-sm font-semibold"
+                    className="dashboard-modal-button dashboard-modal-button--danger"
                   >
                     {isDeleting ? "제거 중..." : "네"}
                   </Button>

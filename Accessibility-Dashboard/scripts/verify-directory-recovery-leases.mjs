@@ -210,7 +210,7 @@ try {
   assert.equal(observed.organizationPosts, 1);
   assert.equal(observed.targetPosts, 1);
   assert.equal(observed.requestPosts, 1);
-  assert.equal(observed.requestStatusGets, 1);
+  assert.equal(observed.requestStatusGets, 0, "page registration releases on receipt without awaiting a status read");
   await page
     .getByRole("button", { name: `${createdTarget.name} 상세 보기`, exact: true })
     .waitFor();
@@ -219,7 +219,7 @@ try {
   await addProjectButton.click();
   projectDialog = page.getByRole("dialog", { name: "프로젝트 추가", exact: true });
   await projectDialog
-    .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+    .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
     .click();
   await page.waitForFunction(() => {
     const heading = document.querySelector("h1");

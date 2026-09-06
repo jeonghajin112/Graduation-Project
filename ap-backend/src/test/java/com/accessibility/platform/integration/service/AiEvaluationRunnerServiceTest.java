@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.mock.env.MockEnvironment;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,6 +33,51 @@ class AiEvaluationRunnerServiceTest {
             TransactionSynchronizationManager.clearSynchronization();
         }
         TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+
+    @Test
+    void analysisCallbackFollowsChangedAndDynamicallyBoundServerPorts() {
+        MockEnvironment environment = new MockEnvironment().withProperty("server.port", "19090");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("http://127.0.0.1:19090/api/v1");
+
+        environment.withProperty("server.port", "0").withProperty("local.server.port", "41942");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("http://127.0.0.1:41942/api/v1");
+    }
+
+    @Test
+    void analysisCallbackHonorsExplicitConfigurationAndLegacyEnvironment() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("server.port", "19090")
+                .withProperty("API_BASE_URL", "http://localhost:29090/api/v1/");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("http://localhost:29090/api/v1");
+
+        environment.withProperty("accessibility.ai.api-base-url", " https://backend.example/api/v1/ ");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("https://backend.example/api/v1");
+    }
+
+    @Test
+    void analysisCallbackUsesReachableBindAddressSchemeAndContextPath() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("server.port", "19090")
+                .withProperty("server.address", "0.0.0.0")
+                .withProperty("server.servlet.context-path", "/uniaccess/");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("http://127.0.0.1:19090/uniaccess/api/v1");
+
+        environment.withProperty("server.address", "::").withProperty("server.ssl.enabled", "true");
+        assertThat(AiEvaluationRunnerService.resolveBackendApiBaseUrl(environment))
+                .isEqualTo("https://[::1]:19090/uniaccess/api/v1");
+    }
+
+    @Test
+    void analysisCallbackDoesNotGuessAPortBeforeRandomPortServerStarts() {
+        assertThatThrownBy(() -> AiEvaluationRunnerService.resolveBackendApiBaseUrl(
+                new MockEnvironment().withProperty("server.port", "0")))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

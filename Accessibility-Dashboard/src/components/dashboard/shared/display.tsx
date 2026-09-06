@@ -11,13 +11,13 @@ export function renderTargetTypeIcon(type: string) {
 }
 
 
-export function PanelMessage({ label, isError = false }: { label: string; isError?: boolean }) {
+export function PanelMessage({ label, isError = false, className = "" }: { label: string; isError?: boolean; className?: string }) {
   return (
     <article
       role={isError ? "alert" : "status"}
       className={`rounded-[28px] border p-5 text-sm ${
         isError ? "border-rose-200 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"
-      }`}
+      } ${className}`}
     >
       {label}
     </article>

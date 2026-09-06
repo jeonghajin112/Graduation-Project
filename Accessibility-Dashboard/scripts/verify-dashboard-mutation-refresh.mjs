@@ -280,7 +280,7 @@ async function runMutationReplacementScenario(browser) {
     await page.getByRole("heading", { level: 1, name: createdProject.name, exact: true }).waitFor();
     const replacementProbe = await readOverviewProbe(page);
     assert.equal(replacementProbe.stalledCalls, 1);
-    assert.equal(replacementProbe.aborts, 1);
+    assert.equal(replacementProbe.aborts, 0, "an unrelated mutation must not restart background status polling");
     assert.equal(observed.postMutationOverviewGets, 1);
 
     await page.evaluate(() => window.__dashboardOverviewLoadProbe.releaseStale());

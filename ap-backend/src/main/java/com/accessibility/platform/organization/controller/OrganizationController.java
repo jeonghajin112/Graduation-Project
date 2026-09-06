@@ -28,8 +28,11 @@ public class OrganizationController {
     private final EvaluationTargetService evaluationTargetService;
 
     @PostMapping
-    public ApiResponse<OrganizationResponse> create(@Valid @RequestBody OrganizationCreateRequest request) {
-        return ApiResponse.ok(organizationService.create(request));
+    public ApiResponse<OrganizationResponse> create(
+            @Valid @RequestBody OrganizationCreateRequest request,
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey
+    ) {
+        return ApiResponse.ok(organizationService.create(request, idempotencyKey));
     }
 
     @GetMapping

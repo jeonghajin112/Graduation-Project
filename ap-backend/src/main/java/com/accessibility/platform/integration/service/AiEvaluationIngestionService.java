@@ -12,8 +12,7 @@ import com.accessibility.platform.capturemetadata.exception.CaptureMetadataValid
 import com.accessibility.platform.capturemetadata.service.EvaluationCaptureMetadataService;
 import com.accessibility.platform.integration.dto.AiEvaluationSaveResponse;
 import com.accessibility.platform.organization.domain.Organization;
-import com.accessibility.platform.organization.domain.OrganizationType;
-import com.accessibility.platform.organization.repository.OrganizationRepository;
+import com.accessibility.platform.organization.service.ImportedOrganizationService;
 import com.accessibility.platform.request.domain.EvaluationRequest;
 import com.accessibility.platform.request.domain.EvaluationRequestStatus;
 import com.accessibility.platform.request.repository.EvaluationRequestRepository;
@@ -48,10 +47,9 @@ import java.util.Optional;
 @Transactional
 public class AiEvaluationIngestionService {
 
-    private static final String MODULE_ORGANIZATION_NAME = "AI Module Imported";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final OrganizationRepository organizationRepository;
+    private final ImportedOrganizationService importedOrganizationService;
     private final EvaluationTargetRepository targetRepository;
     private final EvaluationRequestRepository requestRepository;
     private final ScoreResultRepository scoreResultRepository;
@@ -231,13 +229,7 @@ public class AiEvaluationIngestionService {
             return target;
         }
 
-        Organization organization = organizationRepository.findByName(MODULE_ORGANIZATION_NAME)
-                .orElseGet(() -> organizationRepository.save(new Organization(
-                        MODULE_ORGANIZATION_NAME,
-                        OrganizationType.ETC,
-                        null,
-                        "AI-module imported evaluation results"
-                )));
+        Organization organization = importedOrganizationService.getOrCreate();
 
         return targetRepository.save(new EvaluationTarget(
                 organization,

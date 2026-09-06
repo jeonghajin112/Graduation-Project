@@ -6,7 +6,7 @@ import {
   isAbortError
 } from "@/services/backend-api";
 import { registerDashboardSessionCache } from "@/services/dashboard-session-cache";
-import { UserFacingError } from "@/services/user-facing-error";
+import { SharedRequestPool, TimedLruCache } from "@/services/request-cache";
 import type {
   AnalysisResult,
   EvaluationRequestModel,
@@ -30,19 +30,6 @@ type EvaluationIssueViewModels = Pick<
 
 export type EvaluationResultDetailsFixture = EvaluationIssueViewModels;
 
-type SharedDetailsRequest = {
-  abortTimer: number | null;
-  controller: AbortController;
-  consumers: number;
-  promise: Promise<EvaluationIssueViewModels>;
-  timeoutTimer: number | null;
-};
-
-type DetailsCacheEntry = {
-  cachedAt: number;
-  value: EvaluationIssueViewModels;
-};
-
 const IDLE_STATE: EvaluationResultDetailsState = {
   analysisResults: [],
   errorMessage: null,
@@ -56,148 +43,16 @@ const DETAILS_REQUEST_TIMEOUT_MESSAGE =
   "검사 결과를 불러오는 데 시간이 오래 걸리고 있습니다. 다시 시도해 주세요.";
 const DETAILS_CACHE_TTL_MS = 60_000;
 const DETAILS_CACHE_MAX_ENTRIES = 8;
-const detailsCache = new Map<number, DetailsCacheEntry>();
-const sharedDetailsRequests = new Map<number, SharedDetailsRequest>();
+const detailsCache = new TimedLruCache<number, EvaluationIssueViewModels>(DETAILS_CACHE_MAX_ENTRIES);
+const sharedDetailsRequests = new SharedRequestPool<number, EvaluationIssueViewModels>(
+  DETAILS_REQUEST_TIMEOUT_MS,
+  DETAILS_REQUEST_TIMEOUT_MESSAGE
+);
 
 registerDashboardSessionCache("evaluation-result-details", () => {
   detailsCache.clear();
-  for (const request of sharedDetailsRequests.values()) {
-    if (request.abortTimer !== null) {
-      window.clearTimeout(request.abortTimer);
-      request.abortTimer = null;
-    }
-    if (request.timeoutTimer !== null) {
-      window.clearTimeout(request.timeoutTimer);
-      request.timeoutTimer = null;
-    }
-    request.controller.abort();
-  }
   sharedDetailsRequests.clear();
 });
-
-function readDetailsCache(
-  requestId: number,
-  now = Date.now()
-): EvaluationIssueViewModels | null {
-  const entry = detailsCache.get(requestId);
-  if (!entry) {
-    return null;
-  }
-
-  const ageMs = now - entry.cachedAt;
-  if (ageMs < 0 || ageMs >= DETAILS_CACHE_TTL_MS) {
-    detailsCache.delete(requestId);
-    return null;
-  }
-
-  detailsCache.delete(requestId);
-  detailsCache.set(requestId, entry);
-  return entry.value;
-}
-
-function writeDetailsCache(requestId: number, value: EvaluationIssueViewModels): void {
-  detailsCache.delete(requestId);
-  detailsCache.set(requestId, { cachedAt: Date.now(), value });
-
-  while (detailsCache.size > DETAILS_CACHE_MAX_ENTRIES) {
-    const oldestRequestId = detailsCache.keys().next().value;
-    if (typeof oldestRequestId !== "number") {
-      break;
-    }
-    detailsCache.delete(oldestRequestId);
-  }
-}
-
-function acquireDetailsRequest(request: EvaluationRequestModel): {
-  promise: Promise<EvaluationIssueViewModels>;
-  release: () => void;
-} {
-  let sharedRequest = sharedDetailsRequests.get(request.id);
-  if (!sharedRequest) {
-    const controller = new AbortController();
-    let didTimeout = false;
-    let timeoutTimer: number | null = null;
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timeoutTimer = window.setTimeout(() => {
-        didTimeout = true;
-        timeoutTimer = null;
-        controller.abort();
-        reject(new UserFacingError(DETAILS_REQUEST_TIMEOUT_MESSAGE));
-      }, DETAILS_REQUEST_TIMEOUT_MS);
-    });
-    const promise = Promise.race([
-      fetchEvaluationIssueViewModels(request, controller.signal),
-      timeoutPromise
-    ])
-      .then((value) => {
-        writeDetailsCache(request.id, value);
-        return value;
-      })
-      .catch((error: unknown) => {
-        if (didTimeout) {
-          throw new UserFacingError(DETAILS_REQUEST_TIMEOUT_MESSAGE);
-        }
-        throw error;
-      });
-    const createdRequest: SharedDetailsRequest = {
-      abortTimer: null,
-      controller,
-      consumers: 0,
-      promise,
-      timeoutTimer
-    };
-    sharedRequest = createdRequest;
-    sharedDetailsRequests.set(request.id, createdRequest);
-    const clearSettledRequest = () => {
-      if (createdRequest.timeoutTimer !== null) {
-        window.clearTimeout(createdRequest.timeoutTimer);
-        createdRequest.timeoutTimer = null;
-      }
-      if (sharedDetailsRequests.get(request.id) === createdRequest) {
-        sharedDetailsRequests.delete(request.id);
-      }
-    };
-    void promise.then(clearSettledRequest, clearSettledRequest);
-  }
-
-  if (sharedRequest.abortTimer !== null) {
-    window.clearTimeout(sharedRequest.abortTimer);
-    sharedRequest.abortTimer = null;
-  }
-  sharedRequest.consumers += 1;
-
-  let released = false;
-  return {
-    promise: sharedRequest.promise,
-    release: () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      sharedRequest.consumers -= 1;
-      if (sharedRequest.consumers > 0 || sharedRequest.abortTimer !== null) {
-        return;
-      }
-
-      // React StrictMode immediately remounts effects after cleanup. Deferring
-      // the underlying abort by one task lets that remount reuse the same GET,
-      // while a genuine unmount still cancels the request promptly.
-      sharedRequest.abortTimer = window.setTimeout(() => {
-        sharedRequest.abortTimer = null;
-        if (sharedRequest.consumers === 0) {
-          sharedRequest.controller.abort();
-          if (sharedRequest.timeoutTimer !== null) {
-            window.clearTimeout(sharedRequest.timeoutTimer);
-            sharedRequest.timeoutTimer = null;
-          }
-          if (sharedDetailsRequests.get(request.id) === sharedRequest) {
-            sharedDetailsRequests.delete(request.id);
-          }
-        }
-      }, 0);
-    }
-  };
-}
 
 export function useEvaluationResultDetails(
   request: EvaluationRequestModel | null,
@@ -226,8 +81,8 @@ export function useEvaluationResultDetails(
       return;
     }
 
-    const cachedDetails = readDetailsCache(request.id);
-    if (cachedDetails !== null) {
+    const cachedDetails = detailsCache.get(request.id);
+    if (cachedDetails !== undefined) {
       setState({
         ...cachedDetails,
         errorMessage: null,
@@ -238,7 +93,12 @@ export function useEvaluationResultDetails(
     }
 
     const controller = new AbortController();
-    const sharedRequest = acquireDetailsRequest(request);
+    const sharedRequest = sharedDetailsRequests.acquire(request.id, async (signal) => {
+      const value = await fetchEvaluationIssueViewModels(request, signal);
+      signal.throwIfAborted();
+      detailsCache.set(request.id, value, DETAILS_CACHE_TTL_MS);
+      return value;
+    });
     setState({
       analysisResults: [],
       errorMessage: null,

@@ -377,8 +377,8 @@ export function DashboardSurface({
 
               <SidebarProjectsSection
                 organizations={dashboard.organizations}
+                evaluationRequests={isPreview ? undefined : dashboard.dashboardData?.evaluationRequests}
                 selection={dashboard.sidebarSelection}
-                isDarkMode={dashboard.isDarkMode}
                 onSelectProject={dashboard.goToProject}
                 onSelectRecentPage={dashboard.goToRecentPage}
                 onCreateProject={dashboard.openOrganizationCreateModal}
@@ -467,13 +467,15 @@ export function DashboardSurface({
                 {dashboard.menu === "analyze" && (
                   <QuickAnalyzePanel
                     isDarkMode={dashboard.isDarkMode}
-                    onAnalysisComplete={dashboard.handleQuickAnalyzeComplete}
+                  onAnalysisAccepted={dashboard.handleQuickAnalysisAccepted}
                     readOnly={isPreview}
                   />
                 )}
 
                 {dashboard.menu === "projects" && dashboard.selectedOrganizationModel && dashboard.selectedEvaluationTargetModel && (
                   <SiteDashboardPanel
+                    onRequestEvaluationTargetAnalysis={isPreview ? undefined : dashboard.handleRequestEvaluationTargetAnalysis}
+                    onAnalysisAccepted={isPreview ? undefined : dashboard.handleAnalysisAccepted}
                     evaluationTarget={dashboard.selectedEvaluationTargetModel}
                     evaluationRequests={dashboard.dashboardData?.evaluationRequests ?? []}
                     resultSummaries={dashboard.dashboardData?.resultSummaries ?? []}
@@ -522,7 +524,7 @@ export function DashboardSurface({
                   project={dashboard.selectedOrganizationModel}
                   onCreateEvaluationTargetModel={dashboard.handleCreateEvaluationTargetModel}
                   onRequestEvaluationTargetAnalysis={dashboard.handleRequestEvaluationTargetAnalysis}
-                  onAnalysisComplete={dashboard.refreshDashboardForSiteCreate}
+              onAnalysisAccepted={dashboard.handleAnalysisAccepted}
                   onClose={() => dashboard.setIsSiteCreateOpen(false)}
                 />
               </Suspense>
@@ -544,10 +546,9 @@ export function DashboardSurface({
               <Suspense fallback={<ModalLoadFallback />}>
                 <OrganizationModelCreateModal
                   isOpen
-                  isDarkMode={dashboard.isDarkMode}
                   name={dashboard.newOrganizationModelName}
                   isSubmitting={dashboard.isCreatingOrganizationModel}
-                  hasCreatedOrganization={dashboard.hasCreatedOrganization}
+                  hasPendingOrganizationCreate={dashboard.hasPendingOrganizationCreate}
                   canDiscardRecovery={dashboard.canDiscardOrganizationCreateRecovery}
                   isRecoveryBlocked={dashboard.isOrganizationCreateRecoveryBlocked}
                   errorMessage={dashboard.projectCreateError}
@@ -580,7 +581,6 @@ export function DashboardSurface({
               <Suspense fallback={<ModalLoadFallback />}>
                 <AccountSettingsModal
                   isOpen
-                  isDarkMode={dashboard.isDarkMode}
                   themeMode={dashboard.themeMode}
                   onThemeModeChange={dashboard.setThemeMode}
                   onClose={closeAccountSettings}

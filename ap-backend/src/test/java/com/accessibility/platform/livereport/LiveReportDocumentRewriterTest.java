@@ -201,7 +201,7 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("badge.className = 'ap-live-popover__severity'");
         assertThat(rewritten).contains("badge.className = 'ap-live-popover__code'");
         assertThat(rewritten).contains("? `KWCAG ${code}` : code");
-        assertThat(rewritten).contains("min-height:0;max-height:min(440px");
+        assertThat(rewritten).contains("min-height:0;max-height:min(520px");
         assertThat(rewritten).contains(".ap-live-popover__code{max-width:140px");
         assertThat(rewritten).contains(".ap-live-popover__tags{display:flex;align-items:center;justify-content:flex-start;gap:6px");
         assertThat(rewritten).contains("background:#101828;color:#fff");
@@ -295,12 +295,10 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).doesNotContain("side:'right', axis:'vertical'");
         assertThat(rewritten).doesNotContain("side:'top', axis:'horizontal'");
         assertThat(rewritten).doesNotContain("side:'bottom', axis:'horizontal'");
-        assertThat(rewritten).contains("const preferredMarkerLaneOffsets = measurements =>");
-        assertThat(rewritten).contains("const cumulativeSeparation = new Array(rail.length).fill(0)");
-        assertThat(rewritten).contains("while (blocks.length > 1)");
-        assertThat(rewritten).contains("if (left.mean <= right.mean) break");
+        // Row alignment, spacing, cluster bounds and scroll restoration are asserted
+        // against this emitted bridge by verify-live-report-markers.mjs. Do not pin
+        // those behaviors to the former lane solver's private variables and loops.
         assertThat(rewritten).contains("const markerPlacementFor = (");
-        assertThat(rewritten).contains("preferredLaneOffset = 0");
         assertThat(rewritten).contains("const markerSearchRingLimit = 12");
         assertThat(rewritten).contains(
                 "!markerClearsTarget(targetFootprint, targetGeometry.rects)) return null"
@@ -325,7 +323,6 @@ class LiveReportDocumentRewriterTest {
         assertThat(markerClampIndex).isGreaterThanOrEqualTo(0).isLessThan(markerTargetClearanceIndex);
         assertThat(markerTargetClearanceIndex).isLessThan(markerCollisionIndex);
         assertThat(rewritten).doesNotContain("if (entry.markerOffset?.side === 'left')");
-        assertThat(rewritten).contains("addLaneOffset(preferredLaneOffset)");
         assertThat(rewritten).contains("addLaneOffset(-ring * step)");
         assertThat(rewritten).contains("addLaneOffset(ring * step)");
         assertThat(rewritten).contains("const targetVisibleInViewport = (element, rect) =>");
@@ -388,8 +385,6 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("const orderedMeasurements = measurements.slice().sort((left, right) =>");
         assertThat(rewritten).contains("leftBounds.top - rightBounds.top");
         assertThat(rewritten).contains("orderedMeasurements.forEach(placeMeasurement)");
-        assertThat(rewritten).contains("const preferredLaneOffsets = preferredMarkerLaneOffsets(orderedMeasurements)");
-        assertThat(rewritten).contains("const shiftStep = (markerPillWidth(entry) + markerCollisionGap) / viewScale");
         assertThat(rewritten).doesNotContain("if (measurement.entry.markerWasVisible) placeMeasurement(measurement)");
         assertThat(rewritten).contains("measurement.targetGeometry");
         assertThat(rewritten).contains("return {...candidate, markerOffset}");

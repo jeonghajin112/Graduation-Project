@@ -106,7 +106,8 @@ export function DashboardProductPreview() {
       setMenu("projects");
       goToSite(pageId);
     },
-    handleQuickAnalyzeComplete: unsupportedMutation,
+    handleAnalysisAccepted: unsupportedMutation,
+    handleQuickAnalysisAccepted: unsupportedMutation,
     handleCreateEvaluationTargetModel: unsupportedMutation,
     handleRequestEvaluationTargetAnalysis: unsupportedMutation,
     handleDeleteEvaluationTargetModel: unsupportedMutation,
@@ -118,7 +119,7 @@ export function DashboardProductPreview() {
       menu === "analyze"
         ? "새 페이지 분석"
         : selectedEvaluationTargetModel?.name ?? selectedOrganizationModel.name,
-    hasCreatedOrganization: false,
+    hasPendingOrganizationCreate: false,
     isCreatingOrganizationModel: false,
     isOrganizationCreateRecoveryBlocked: false,
     isDarkMode,
@@ -132,7 +133,6 @@ export function DashboardProductPreview() {
     organizations: PRODUCT_DEMO_ORGANIZATIONS,
     projectCreateError: "",
     refreshDashboard: async () => PRODUCT_DEMO_DASHBOARD,
-    refreshDashboardForSiteCreate: async () => PRODUCT_DEMO_DASHBOARD,
     selectedEvaluationTargetModel,
     selectedOrganizationModel,
     selectedOrganizationModelId: selectedOrganizationModel.id,

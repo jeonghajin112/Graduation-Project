@@ -2,6 +2,7 @@
 
 @import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 @import "./styles/theme-tokens.css";
+@import "./styles/dashboard-modals.css";
 
 @theme inline {
   --color-background: var(--background);
@@ -379,6 +380,12 @@
     backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
   }
 
+  /* Keep the page evidence card flat, without a surrounding highlight or shadow.
+     Same layer, later rule, so it wins the !important tie. */
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
+    box-shadow: none !important;
+  }
+
   /* Without backdrop-filter the translucent fill alone can drop text contrast. */
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
@@ -461,12 +468,12 @@
     color: var(--dashboard-text-muted) !important;
   }
 
-  .bridge-dashboard.theme-dark input,
+  .bridge-dashboard.theme-dark input:not(.dashboard-modal-input),
   .bridge-dashboard.theme-dark textarea {
     color: #e6e6e6 !important;
   }
 
-  .bridge-dashboard.theme-dark input::placeholder,
+  .bridge-dashboard.theme-dark input:not(.dashboard-modal-input)::placeholder,
   .bridge-dashboard.theme-dark textarea::placeholder {
     color: #8f8f8f !important;
   }
@@ -972,12 +979,6 @@
   }
 }
 
-/* Systemic layer: every modal must cover page actions, popovers, and tooltips. */
-.dashboard-modal-layer {
-  z-index: 10000;
-  isolation: isolate;
-}
-
 /* Keep long modal content scrollable without cutting through the rounded shell. */
 .site-create-modal-scroll {
   scrollbar-color: var(--dashboard-text-muted) transparent;
@@ -1293,32 +1294,6 @@
   flex-direction: column;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: clamp(1rem, 0.7292vw, 1.75rem);
-  border-bottom: 1px solid var(--dashboard-nested-border);
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-header h2 {
-  color: var(--dashboard-text-strong);
-  font-size: clamp(0.9375rem, 0.4167vw, 1rem);
-  font-weight: 700;
-  line-height: 1.4;
-  text-wrap: balance;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-header p {
-  margin-top: 0.25rem;
-  color: var(--dashboard-text-muted);
-  font-size: clamp(0.75rem, 0.3385vw, 0.8125rem);
-  line-height: 1.5;
-  text-wrap: balance;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-retry {
   display: flex;
   align-items: center;
@@ -1460,7 +1435,7 @@
   position: relative;
   height: clamp(30rem, 62dvh, 50rem);
   overflow: hidden;
-  border: 1px solid var(--dashboard-nested-border);
+  border: 0;
   border-radius: var(--dashboard-site-nested-radius);
   background: #ffffff;
 }

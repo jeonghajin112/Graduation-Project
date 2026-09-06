@@ -103,6 +103,10 @@ function parseString(value: unknown, path: string): string {
   return value;
 }
 
+function parseBoolean(value: unknown, path: string): boolean {
+  return typeof value === "boolean" ? value : failContract(value, path, "boolean");
+}
+
 function parseNonBlankString(value: unknown, path: string, maxLength?: number): string {
   const parsed = parseString(value, path);
   if (parsed.trim().length === 0 || (maxLength !== undefined && parsed.length > maxLength)) {
@@ -356,6 +360,7 @@ const issueSeverities = ["CRITICAL", "SERIOUS", "MODERATE", "MINOR"] as const;
 export const parseOrganizationResponse: ApiResponseParser<Organization> = (value, path) => {
   const fields = readFields(value, path);
   return {
+    systemManaged: fields.optional("systemManaged", parseBoolean),
     id: fields.required("id", parsePositiveInteger),
     name: fields.required("name", (field, fieldPath) =>
       parseNonBlankString(field, fieldPath, 100)),
@@ -465,6 +470,7 @@ export const parseEvaluationRequestResponse: ApiResponseParser<EvaluationRequest
 ) => {
   const fields = readFields(value, path);
   return {
+    quickAnalysis: fields.optional("quickAnalysis", parseBoolean),
     id: fields.required("id", parsePositiveInteger),
     evaluationTargetId: fields.required("evaluationTargetId", parsePositiveInteger),
     status: fields.required("status", (field, fieldPath) =>
@@ -701,9 +707,17 @@ const parseIssueLocator: ApiResponseParser<IssueLocator> = (value, path) => {
   const fields = readFields(value, path);
   const carouselContext = fields.optional("carouselContext", (field, fieldPath) =>
     field === null ? null : parseIssueLocatorCarouselContext(field, fieldPath));
+  const nullableNumber: ApiResponseParser<number | null> = (field, fieldPath) =>
+    field === null ? null : parseFiniteNumber(field, fieldPath);
   return {
     pathSteps: fields.required("pathSteps", (field, fieldPath) =>
       parseArray(field, fieldPath, parseIssueLocatorPathStep)),
+    htmlSnippet: fields.optional("htmlSnippet", parseNullableString),
+    x: fields.optional("x", nullableNumber),
+    y: fields.optional("y", nullableNumber),
+    width: fields.optional("width", nullableNumber),
+    height: fields.optional("height", nullableNumber),
+    coordinateSpace: fields.optional("coordinateSpace", parseNullableString),
     ...(carouselContext !== undefined ? { carouselContext } : {})
   };
 };

@@ -21,6 +21,12 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class EvaluationRequest extends BaseTimeEntity {
 
+    public static final String QUICK_ANALYSIS_NOTE = "Web UI initiated request";
+
+    public boolean isQuickAnalysis() {
+        return QUICK_ANALYSIS_NOTE.equals(requestNote);
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;

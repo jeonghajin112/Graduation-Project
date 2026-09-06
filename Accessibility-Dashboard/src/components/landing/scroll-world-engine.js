@@ -167,11 +167,23 @@ export function mountScrollWorld(container, config, options = {}) {
   const route = el('nav', 'sw-route');
   route.setAttribute('aria-label', '현재 장면');
   if (config.route === false) route.style.display = 'none';   // route:false → 오른쪽 세로 진행 레일 숨김
-  const hint = config.hint ? el('div', 'sw-hint') : null;
+  const hint = config.hint ? el('button', 'sw-hint') : null;
+  const hintText = el('span');
+  let hintAtBottom = false;
   if (hint) {
-    hint.setAttribute('aria-hidden', 'true');
-    const hintText = el('span'); hintText.textContent = config.hint; hint.appendChild(hintText);
-    hint.appendChild(el('i'));
+    hint.type = 'button';
+    hint.setAttribute('aria-label', `${config.hint}: 아래로 스크롤`);
+    const arrow = el('i');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16m-6-6 6 6 6-6"/></svg>';
+    hintText.textContent = config.hint;
+    hint.append(arrow, hintText);
+    hint.addEventListener('click', () => {
+      window.scrollTo({
+        top: hintAtBottom ? 0 : window.scrollY + window.innerHeight * 0.8,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
+      });
+    });
   }
   const track = el('div', 'sw-track');
   track.setAttribute('aria-hidden', 'true');
@@ -448,9 +460,17 @@ export function mountScrollWorld(container, config, options = {}) {
     }
     // This replaces the removed horizontal page gauge, so it follows the
     // complete scroll range rather than jumping to fixed scene bands.
-    const routeProgress = clamp(y / Math.max(1, document.documentElement.scrollHeight - window.innerHeight));
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const routeProgress = clamp(y / Math.max(1, maxScroll));
     route.style.setProperty('--sw-route-progress', routeProgress.toFixed(5));
-    if (hint) hint.style.opacity = clamp(1 - y / (0.5 * vh));
+    // Keep the control through the content after the film, until the document's actual end.
+    const atBottom = maxScroll > 0 && maxScroll - y <= 24;
+    if (hint && atBottom !== hintAtBottom) {
+      hintAtBottom = atBottom;
+      hint.classList.toggle('is-top', atBottom);
+      hintText.textContent = atBottom ? 'TOP' : config.hint;
+      hint.setAttribute('aria-label', atBottom ? 'TOP: 맨 위로 이동' : `${config.hint}: 아래로 스크롤`);
+    }
     if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
     ticking = false;
   }
@@ -511,7 +531,7 @@ export function mountScrollWorld(container, config, options = {}) {
   // changes (rotation still comes through orientationchange). layout() records the
   // width it laid out at.
   function onResize() {
-    if (coarse && window.innerWidth === laidOutW) return;
+    if (coarse && window.innerWidth === laidOutW) { read(); return; }
     layout();
   }
   window.addEventListener('resize', onResize);
@@ -630,16 +650,17 @@ function injectCSS() {
   .sw-btn--primary{color:#fff;background:var(--sw-accent);} .sw-btn--primary:hover{transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb,var(--sw-accent) 26%,transparent);}
   .sw-btn--ghost{color:var(--sw-ink);border:1.5px solid color-mix(in srgb,var(--sw-ink) 25%,transparent);} .sw-btn--ghost:hover{transform:translateY(-2px);}
   .sw-route{--sw-route-progress:0;position:fixed;right:clamp(8px,2.1vw,26px);top:50%;z-index:40;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;padding:12px 0;}
-  .sw-root.sw-ended .sw-route,.sw-root.sw-ended .sw-hint{opacity:0;pointer-events:none;}
+  .sw-root.sw-ended .sw-route{opacity:0;pointer-events:none;}
   .sw-route{transition:opacity .25s;}
   .sw-route::before,.sw-route::after{content:"";position:absolute;left:50%;top:30px;bottom:30px;z-index:0;width:3px;border-radius:999px;pointer-events:none;}
   .sw-route::before{transform:translateX(-50%);background:color-mix(in srgb,var(--sw-accent) 18%,transparent);}
   .sw-route::after{transform:translateX(-50%) scaleY(var(--sw-route-progress));transform-origin:50% 0;background:var(--sw-accent);will-change:transform;}
   .sw-route__dot{position:relative;z-index:1;border:0;background:transparent;cursor:pointer;width:44px;height:44px;display:grid;place-items:center;}
-  .sw-hint{position:fixed;left:50%;bottom:26px;z-index:30;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:10px;font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;color:var(--sw-ink-soft);transition:opacity .3s;}
-  .sw-hint i{width:22px;height:34px;border-radius:12px;border:2px solid color-mix(in srgb,var(--sw-ink) 28%,transparent);position:relative;}
-  .sw-hint i::after{content:"";position:absolute;left:50%;top:7px;width:4px;height:7px;border-radius:2px;background:var(--sw-accent);transform:translateX(-50%);animation:sw-wheel 1.7s ease-in-out infinite;}
-  @keyframes sw-wheel{0%{opacity:0;top:6px}40%{opacity:1}100%{opacity:0;top:17px}}
+  .sw-hint{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));z-index:60;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:104px;min-height:56px;margin:0;padding:6px 8px;border:0;border-radius:4px;background:transparent;font-family:var(--sw-font-body);font-size:.625rem;font-weight:800;line-height:1.4;letter-spacing:.1em;white-space:nowrap;color:var(--sw-ink);text-shadow:0 1px 8px var(--sw-bg);cursor:pointer;}
+  .sw-hint i{display:grid;place-items:center;width:20px;height:20px;transition:transform .25s ease;}
+  .sw-hint svg{display:block;animation:sw-scroll-down 1.8s ease-in-out infinite;}
+  .sw-hint.is-top i{transform:rotate(180deg);}
+  @keyframes sw-scroll-down{0%,100%{transform:translateY(-2px)}50%{transform:translateY(3px)}}
   .sw-track{position:relative;z-index:1;width:100%;pointer-events:none;}
   @media (min-width:861px) and (max-width:1279px){
     .sw-copy{width:min(40vw,460px);}
@@ -696,7 +717,7 @@ function injectCSS() {
   }
   @media (prefers-reduced-motion:reduce){
     .sw-root *,.sw-root *::before,.sw-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important;}
-    .sw-hint i::after{animation:none;}.sw-pt{display:none;}
+    .sw-hint svg{animation:none;}.sw-pt{display:none;}
   }
   `;
   // Wrap in a cascade layer so the page's own theme tokens (unlayered

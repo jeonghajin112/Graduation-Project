@@ -14,6 +14,8 @@
     "pretest": "npm run test:bundle && npm run test:unit",
     "test": "node scripts/run-frontend-tests.mjs --suite ci",
     "test:unit": "vitest run",
+    "test:run": "node scripts/run-frontend-tests.mjs",
+    "test:list": "node scripts/run-frontend-tests.mjs --list",
     "test:ci": "npm test",
     "test:browser": "node scripts/run-frontend-tests.mjs --suite browser",
     "test:recovery": "node scripts/run-frontend-tests.mjs --suite recovery",

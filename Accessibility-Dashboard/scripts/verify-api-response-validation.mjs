@@ -1,14 +1,11 @@
 /**
  * Runtime response-contract regressions. Successful HTTP responses with
  * malformed data must fail at the API boundary, never inside React rendering,
- * and ambiguous mutation outcomes must recover with GETs instead of re-POSTing.
+ * and ambiguous mutation outcomes must retry with the same idempotency key.
  *
  * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 import {
@@ -19,36 +16,6 @@ import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
 const timestamp = "2026-08-23T10:00:00.000Z";
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const dashboardDirectory = path.resolve(scriptDirectory, "..");
-const resultDetailsSource = await readFile(
-  path.join(
-    dashboardDirectory,
-    "src/components/dashboard/panels/site-dashboard/use-evaluation-result-details.ts"
-  ),
-  "utf8"
-);
-
-assert.match(
-  resultDetailsSource,
-  /const DETAILS_REQUEST_TIMEOUT_MS\s*=\s*15_000;/,
-  "result details must have a bounded network deadline"
-);
-assert.match(
-  resultDetailsSource,
-  /timeoutPromise[\s\S]*?window\.setTimeout\([\s\S]*?controller\.abort\(\);[\s\S]*?reject\(new UserFacingError\(DETAILS_REQUEST_TIMEOUT_MESSAGE\)\)/,
-  "the shared request owner must abort and surface a safe timeout message"
-);
-assert.match(
-  resultDetailsSource,
-  /Promise\.race\(\[[\s\S]*?fetchEvaluationIssueViewModels\(request, controller\.signal\)[\s\S]*?timeoutPromise[\s\S]*?\]\)/,
-  "result details must race the shared fetch against its owner timeout"
-);
-assert.match(
-  resultDetailsSource,
-  /sharedRequest\.consumers === 0[\s\S]*?sharedRequest\.controller\.abort\(\)[\s\S]*?, 0\)/,
-  "StrictMode cleanup must defer a consumerless shared-request abort"
-);
 
 function organization(id, name) {
   return {
@@ -612,6 +579,8 @@ async function runMalformedMutationScenario(browser) {
   let organizationCommitted = false;
   let revealCommittedOrganization = false;
   let organizationPosts = 0;
+  const postKeys = [];
+  const projectsByKey = new Map();
   let postMutationOverviewGets = 0;
   const unknownRequests = [];
 
@@ -635,13 +604,16 @@ async function runMalformedMutationScenario(browser) {
       }
       if (method === "POST" && pathname === "/api/organizations") {
         organizationPosts += 1;
+        const key = browserRequest.headers()["idempotency-key"];
+        assert.match(key ?? "", /^[0-9a-f-]{36}$/i);
+        postKeys.push(key);
+        if (!projectsByKey.has(key)) projectsByKey.set(key, createdProject);
         organizationCommitted = true;
         await fulfillJson(
           route,
-          {
-            ...organization(77, createdProject.name),
-            name: 12345
-          },
+          organizationPosts === 1
+            ? { ...projectsByKey.get(key), name: 12345 }
+            : projectsByKey.get(key),
           { status: 201 }
         );
         return;
@@ -664,19 +636,21 @@ async function runMalformedMutationScenario(browser) {
       .filter({ hasText: "프로젝트 생성 결과를 확인하지 못했습니다" });
     await recoveryAlert.waitFor();
     assert.equal(organizationPosts, 1);
-    assert.ok(postMutationOverviewGets >= 1);
+    assert.equal(projectsByKey.size, 1);
 
     revealCommittedOrganization = true;
     await dialog
-      .getByRole("button", { name: "프로젝트 불러오기 다시 시도", exact: true })
+      .getByRole("button", { name: "프로젝트 다시 시도", exact: true })
       .click();
     await page.waitForURL(`**/projects/${createdProject.id}`, { timeout: 10_000 });
     await page
       .getByRole("heading", { level: 1, name: createdProject.name, exact: true })
       .waitFor();
 
-    assert.equal(organizationPosts, 1);
-    assert.ok(postMutationOverviewGets >= 2);
+    assert.equal(organizationPosts, 2);
+    assert.equal(postKeys[1], postKeys[0]);
+    assert.equal(projectsByKey.size, 1);
+    assert.ok(postMutationOverviewGets >= 1);
     assert.deepEqual(pageErrors, []);
     assert.deepEqual(unknownRequests, []);
     return { organizationPosts, postMutationOverviewGets, recoveredProjectId: createdProject.id };

@@ -809,8 +809,8 @@ public class LiveReportDocumentRewriter {
                   }
                 }
                 #ap-live-marker-layer{position:absolute;left:0;top:0;width:0;height:0;overflow:visible;z-index:2147483647;pointer-events:none}
-                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;display:inline-flex;align-items:center;gap:5px;
-                height:18px;padding:0 8px 0 7px;border:0;border-radius:999px;background:#1d1d1f;color:#fff;box-shadow:0 2px 6px rgba(16,24,40,.22);
+                .ap-live-marker{all:initial;box-sizing:border-box;position:absolute;z-index:2;display:inline-flex;align-items:center;justify-content:center;gap:5px;
+                min-width:56px;height:18px;padding:0 8px 0 7px;border:0;border-radius:999px;background:#1d1d1f;color:#fff;box-shadow:0 2px 6px rgba(16,24,40,.22);
                 pointer-events:auto;cursor:pointer;white-space:nowrap;font:700 10px/1 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:0;
                 transform:translate(0,-50%);transform-origin:0 50%;isolation:isolate}
                 .ap-live-marker::before{content:"";box-sizing:border-box;flex:none;width:6px;height:6px;border-radius:50%;
@@ -827,8 +827,8 @@ public class LiveReportDocumentRewriter {
                 border:0;border-radius:999px;background:#ff3b30;color:#fff;display:grid;place-items:center;
                 font:700 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 3px rgba(16,24,40,.25);
                 pointer-events:none}
-                .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(360px,calc(100vw - 24px));
-                min-height:0;max-height:min(440px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
+                .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(480px,calc(100vw - 24px));
+                min-height:0;max-height:min(520px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
                 border-radius:14px;background:rgba(255,255,255,.96);color:#101828;box-shadow:0 18px 44px rgba(16,24,40,.25),inset 0 1px rgba(255,255,255,.9);
                 -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);pointer-events:auto;
                 font:400 13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:left;transform-origin:top left}
@@ -866,8 +866,8 @@ public class LiveReportDocumentRewriter {
                 .ap-live-highlight[hidden]{display:none!important}
                 .ap-live-highlight__fragment{all:initial!important;box-sizing:border-box!important;position:absolute!important;
                 border-style:solid!important;border-color:var(--ap-highlight-color,#0b6ff4)!important;border-radius:8px!important;
-                background:color-mix(in srgb,var(--ap-highlight-color,#0b6ff4) 6%,transparent)!important;pointer-events:none!important;transform:none!important}
-                .ap-live-highlight.is-selected .ap-live-highlight__fragment{border-color:#0b6ff4!important;background:rgba(11,111,244,.1)!important;
+                background:transparent!important;pointer-events:none!important;transform:none!important}
+                .ap-live-highlight.is-selected .ap-live-highlight__fragment{border-color:#0b6ff4!important;background:transparent!important;
                 box-shadow:0 0 0 4px rgba(11,111,244,.14)!important}
                 @media(prefers-reduced-motion:no-preference){.ap-live-marker{transition:box-shadow 120ms ease}}
                 @media(forced-colors:active){.ap-live-marker{forced-color-adjust:auto;border-color:Canvas}.ap-live-popover{background:Canvas;color:CanvasText;border:2px solid CanvasText;box-shadow:none}.ap-live-highlight__fragment{border-color:Highlight!important}}
@@ -982,11 +982,12 @@ public class LiveReportDocumentRewriter {
                     LOW:'#10b981',MEDIUM:'#f3b234',MODERATE:'#f3b234',HIGH:'#fb8a3d',SERIOUS:'#fb8a3d',CRITICAL:'#f35f63'
                   });
                   const markerPillHeight = 18;
-                  const markerPillEstimatedWidth = 52;
+                  const markerPillEstimatedWidth = 56;
                   const markerCornerOverhang = 8;
                   const markerCountBadgeOverhang = 6;
                   const markerCollisionGap = 6;
                   const markerTargetGap = 6;
+                  const markerRowTolerance = 6;
                   const markerSlotStep = 40;
                   const markerViewportMargin = 2;
                   const markerSearchRingLimit = 12;
@@ -1786,7 +1787,7 @@ public class LiveReportDocumentRewriter {
                     };
                   }
 
-                  // Live reports are interactive only for read-only navigation. Page scripts
+                  // Live reports allow read-only navigation and dismissing dialogs. Page scripts
                   // still need to hydrate and carousels/tabs need to move, but arbitrary action
                   // buttons must not run login, purchase, save or application handlers. Install
                   // the guard on window before upstream scripts so delegated and inline handlers
@@ -1875,9 +1876,14 @@ public class LiveReportDocumentRewriter {
                     if (/^(?:next|prev)$/i.test(slide)) return true;
                     if (nativeGetAttribute.call(control, 'data-slide-to') !== null
                         || nativeGetAttribute.call(control, 'data-bs-slide-to') !== null) return true;
-                    const label = [
+                    const labels = [
                       readAttribute(control, 'aria-label'), readAttribute(control, 'title'), readElementText(control)
-                    ].filter(Boolean).join(' ');
+                    ].filter(Boolean);
+                    // Let the page's own close handler remove its dialog and backdrop together.
+                    // Form submission/reset and disabled controls have already been checked above.
+                    if (closestElement(control, 'dialog,[role=dialog i],[role=alertdialog i],[aria-modal=true i]')
+                        && labels.some(label => /^(?:(?:close|dismiss)(?: (?:dialog|modal|popup|window))?|(?:(?:팝업|모달|대화 ?상자|창) *)?닫기)$/i.test(label))) return true;
+                    const label = labels.join(' ');
                     if (explicitNavigationLabelPattern.test(label)) return true;
                     const surface = navigationSurfaceFor(control);
                     if (!surface) return false;
@@ -2034,6 +2040,7 @@ public class LiveReportDocumentRewriter {
                       if (currentIssues.length > 0 && externalRecords.length > 0) {
                         if (externalRecords.some(record => (
                           record.type === 'childList'
+                          || record.type === 'characterData'
                           || (record.type === 'attributes'
                             && !locatorStateOnlyAttributes.has(String(record.attributeName || '').toLowerCase()))
                         ))) {
@@ -2581,13 +2588,11 @@ public class LiveReportDocumentRewriter {
                     const width = markerPillWidth(entry);
                     const half = markerPillHeight / 2;
                     const leftExtent = 0;
-                    let topExtent = half;
-                    let rightExtent = width;
+                    // Reserve the same badge slot for every chip. A cluster can gain a
+                    // count (or change its engine label) after its host has been placed.
+                    const topExtent = half + markerCountBadgeOverhang;
+                    const rightExtent = width + markerCountBadgeOverhang;
                     const bottomExtent = half;
-                    if (entry.issues.length > 1) {
-                      topExtent = Math.max(topExtent, half + markerCountBadgeOverhang);
-                      rightExtent = Math.max(rightExtent, width + markerCountBadgeOverhang);
-                    }
                     return {
                       left: left - (leftExtent + collisionPadding) * inverseScale,
                       top: top - (topExtent + collisionPadding) * inverseScale,
@@ -2787,15 +2792,17 @@ public class LiveReportDocumentRewriter {
                   const clampMarkerCenter = (entry, left, top) => {
                     const requestedLeft = left;
                     const requestedTop = top;
+                    const viewportWidth = document.documentElement.clientWidth || innerWidth;
+                    const viewportHeight = document.documentElement.clientHeight || innerHeight;
                     const margin = markerViewportMargin / viewScale;
                     const collisionPadding = markerCollisionGap / 2;
                     let footprint = markerFootprint(entry, left, top, collisionPadding);
-                    if (footprint.right - footprint.left > innerWidth - margin * 2
-                        || footprint.bottom - footprint.top > innerHeight - margin * 2) return null;
+                    if (footprint.right - footprint.left > viewportWidth - margin * 2
+                        || footprint.bottom - footprint.top > viewportHeight - margin * 2) return null;
                     if (footprint.left < margin) left += margin - footprint.left;
-                    if (footprint.right > innerWidth - margin) left -= footprint.right - (innerWidth - margin);
+                    if (footprint.right > viewportWidth - margin) left -= footprint.right - (viewportWidth - margin);
                     if (footprint.top < margin) top += margin - footprint.top;
-                    if (footprint.bottom > innerHeight - margin) top -= footprint.bottom - (innerHeight - margin);
+                    if (footprint.bottom > viewportHeight - margin) top -= footprint.bottom - (viewportHeight - margin);
                     footprint = markerFootprint(entry, left, top, collisionPadding);
                     return {
                       left, top, footprint,
@@ -2811,109 +2818,49 @@ public class LiveReportDocumentRewriter {
                       baseTop:firstRect.top - gap - (markerPillHeight / 2) / viewScale
                     };
                   };
-                  const preferredMarkerLaneOffsets = measurements => {
-                    const railGroups = new Map();
-                    measurements.forEach((measurement, order) => {
-                      if (!measurement.targetGeometry) return;
-                      const {entry, targetGeometry} = measurement;
-                      const family = markerLeftGutter(entry, targetGeometry);
-                      const footprint = markerFootprint(
-                        entry, family.baseLeft, family.baseTop, markerCollisionGap / 2
-                      );
-                      const railKey = Math.round(family.baseLeft * viewScale);
-                      const descriptor = {
-                        entry,
-                        order,
-                        desiredTop:family.baseTop,
-                        topExtent:family.baseTop - footprint.top,
-                        bottomExtent:footprint.bottom - family.baseTop
-                      };
-                      const rail = railGroups.get(railKey);
-                      if (rail) rail.push(descriptor);
-                      else railGroups.set(railKey, [descriptor]);
-                    });
-                    const offsets = new Map();
-                    const viewportMargin = markerViewportMargin / viewScale;
-                    railGroups.forEach(rail => {
-                      rail.sort((left, right) => left.desiredTop - right.desiredTop
-                        || left.order - right.order);
-                      const cumulativeSeparation = new Array(rail.length).fill(0);
-                      for (let index = 1; index < rail.length; index += 1) {
-                        cumulativeSeparation[index] = cumulativeSeparation[index - 1]
-                          + rail[index - 1].bottomExtent + rail[index].topExtent;
+                  const preferredMarkerRowPositions = measurements => {
+                    const positions = new Map();
+                    const currentRows = new Map();
+                    const tolerance = markerRowTolerance / viewScale;
+                    measurements.forEach(({entry, targetGeometry, viewportAttached}) => {
+                      if (!targetGeometry) return;
+                      const top = targetGeometry.firstRect.top;
+                      const anchor = markerLeftGutter(entry, targetGeometry);
+                      let row = currentRows.get(viewportAttached);
+                      // Do not chain the tolerance: every member must be near the row's
+                      // first target. Fixed headers and document content align separately.
+                      if (!row || top < row.targetTop || top - row.targetTop > tolerance) {
+                        row = {targetTop:top, markerTop:anchor.baseTop};
+                        currentRows.set(viewportAttached, row);
                       }
-
-                      // Solve the one-dimensional label packing problem with isotonic
-                      // regression. This keeps the target order and required gaps while
-                      // centering each dense group around its real anchors instead of
-                      // greedily pushing every later marker farther down the page.
-                      const blocks = [];
-                      rail.forEach((descriptor, index) => {
-                        const transformedTop = descriptor.desiredTop - cumulativeSeparation[index];
-                        blocks.push({start:index, end:index, sum:transformedTop, count:1, mean:transformedTop});
-                        while (blocks.length > 1) {
-                          const right = blocks[blocks.length - 1];
-                          const left = blocks[blocks.length - 2];
-                          if (left.mean <= right.mean) break;
-                          blocks.splice(blocks.length - 2, 2, {
-                            start:left.start,
-                            end:right.end,
-                            sum:left.sum + right.sum,
-                            count:left.count + right.count,
-                            mean:(left.sum + right.sum) / (left.count + right.count)
-                          });
-                        }
-                      });
-                      blocks.forEach(block => {
-                        const centeredTops = [];
-                        for (let index = block.start; index <= block.end; index += 1) {
-                          centeredTops.push(block.mean + cumulativeSeparation[index]);
-                        }
-                        let minimumShift = Number.NEGATIVE_INFINITY;
-                        let maximumShift = Number.POSITIVE_INFINITY;
-                        centeredTops.forEach((top, localIndex) => {
-                          const descriptor = rail[block.start + localIndex];
-                          minimumShift = Math.max(
-                            minimumShift,
-                            viewportMargin + descriptor.topExtent - top
-                          );
-                          maximumShift = Math.min(
-                            maximumShift,
-                            innerHeight - viewportMargin - descriptor.bottomExtent - top
-                          );
-                        });
-                        const viewportShift = minimumShift <= maximumShift
-                          ? Math.max(minimumShift, Math.min(0, maximumShift))
-                          : 0;
-                        centeredTops.forEach((top, localIndex) => {
-                          const descriptor = rail[block.start + localIndex];
-                          offsets.set(
-                            descriptor.entry,
-                            top + viewportShift - descriptor.desiredTop
-                          );
-                        });
-                      });
+                      // Align the row vertically without moving a chip away from its
+                      // own element in an uneven grid. Existing placement/clustering
+                      // handles actual collisions and viewport boundaries.
+                      positions.set(entry, {left:anchor.baseLeft, top:row.markerTop});
                     });
-                    return offsets;
+                    return positions;
                   };
                   const markerPlacementFor = (
                     entry,
                     targetGeometry,
                     spatialIndex,
                     contentSpatialIndex,
-                    preferredLaneOffset = 0
+                    rowPosition
                   ) => {
                     const step = markerSlotStep / viewScale;
                     const seenCandidates = new Set();
                     const anchorRect = targetGeometry.firstRect;
                     const family = markerLeftGutter(entry, targetGeometry);
+                    if (rowPosition) {
+                      family.baseLeft = rowPosition.left;
+                      family.baseTop = rowPosition.top;
+                    }
                     const laneOffsets = [];
                     const addLaneOffset = laneOffset => {
                       if (!numberIsFinite(laneOffset)) return;
                       if (laneOffsets.some(candidate => Math.abs(candidate - laneOffset) <= 0.01)) return;
                       laneOffsets.push(laneOffset);
                     };
-                    addLaneOffset(preferredLaneOffset);
                     addLaneOffset(0);
                     for (let ring = 1; ring <= markerSearchRingLimit; ring += 1) {
                       addLaneOffset(ring * step);
@@ -2950,15 +2897,16 @@ public class LiveReportDocumentRewriter {
                     let placement = null;
                     // 코너 탭: 박스 왼쪽 위 모서리가 기본 자리. 같은 모서리를 다른 칩이 쓰고 있으면
                     // 같은 줄에서 오른쪽으로 한 칩씩 밀고, 그래도 안 되면 위아래 슬롯을 본다.
-                    // 코너 자리는 뷰포트 경계로 끌어오지 않는다. 요소가 화면 밖으로 나가면 칩도 같이 나가고,
-                    // 스크롤 중에도 항상 요소 왼쪽 위에 그대로 붙어 있어야 한다.
-                    const cornerCandidate = (left, top, markerOffset) => {
-                      const footprint = markerFootprint(entry, left, top, markerCollisionGap / 2);
-                      if (!markerClearsTarget(markerFootprint(entry, left, top, 0), targetGeometry.rects)) return null;
-                      if (spatialIndex.overlaps(footprint)) return null;
-                      return {left, top, footprint, viewportClamped:false, markerOffset};
+                    // Keep the whole chip and count inside the current viewport, including
+                    // when its document target is only partially visible after scrolling.
+                    const cornerCandidate = (requestedLeft, requestedTop, markerOffset) => {
+                      const candidate = clampMarkerCenter(entry, requestedLeft, requestedTop);
+                      if (!candidate || spatialIndex.overlaps(candidate.footprint)) return null;
+                      if (!candidate.viewportClamped && !markerClearsTarget(
+                          markerFootprint(entry, candidate.left, candidate.top, 0), targetGeometry.rects)) return null;
+                      return {...candidate, markerOffset};
                     };
-                    const shiftStep = (markerPillWidth(entry) + markerCollisionGap) / viewScale;
+                    const shiftStep = (markerPillWidth(entry) + markerCountBadgeOverhang + markerCollisionGap) / viewScale;
                     for (let shift = 0; shift <= markerSearchRingLimit; shift += 1) {
                       const left = family.baseLeft + shift * shiftStep;
                       const top = family.baseTop;
@@ -3016,6 +2964,8 @@ public class LiveReportDocumentRewriter {
                     const preserveRootPlacement = mode === 'preserve-root';
                     const documentLeft = globalThis.scrollX;
                     const documentTop = globalThis.scrollY;
+                    const viewportWidth = document.documentElement.clientWidth || innerWidth;
+                    const viewportHeight = document.documentElement.clientHeight || innerHeight;
                     const spatialIndex = createMarkerSpatialIndex();
                     const measurements = marked.map(entry => {
                       if (!preserveRootPlacement) entry.positionAnchor = undefined;
@@ -3035,11 +2985,20 @@ public class LiveReportDocumentRewriter {
                       });
                       const preservePlacement = preserveRootPlacement
                         && !tracksRootScroll
+                        && !entry.markerViewportClamped
                         && entry.markerWasVisible
                         && numberIsFinite(entry.markerDocumentLeft)
                         && numberIsFinite(entry.markerDocumentTop)
                         && markerDocumentRectsMatch(entry.markerAnchorDocumentRect, targetDocumentRect)
                         && (!initiallyVisible || targetGeometry !== null);
+                      const preservedFootprint = preservePlacement ? markerFootprint(entry,
+                        entry.markerDocumentLeft - documentLeft, entry.markerDocumentTop - documentTop,
+                        markerCollisionGap / 2) : null;
+                      const margin = markerViewportMargin / viewScale;
+                      const preservedInsideViewport = preservedFootprint
+                        && preservedFootprint.left >= margin && preservedFootprint.top >= margin
+                        && preservedFootprint.right <= viewportWidth - margin
+                        && preservedFootprint.bottom <= viewportHeight - margin;
                       return {
                         entry,
                         targetDocumentRect,
@@ -3047,7 +3006,7 @@ public class LiveReportDocumentRewriter {
                         protectedTextRects:[],
                         visible:targetGeometry !== null,
                         viewportAttached,
-                        preservePlacement
+                        preservePlacement:preservePlacement && Boolean(preservedInsideViewport)
                       };
                     });
                     const markerEntryOrder = entry => entry.issues.reduce(
@@ -3076,9 +3035,16 @@ public class LiveReportDocumentRewriter {
                       );
                       remainingProtectedTextRects -= measurement.protectedTextRects.length;
                     });
+                    const preferredRowPositions = preferredMarkerRowPositions(orderedMeasurements);
                     const contentSpatialIndex = createMarkerSpatialIndex();
                     orderedMeasurements.forEach(measurement => {
                       measurement.protectedTextRects.forEach(rect => contentSpatialIndex.add(rect));
+                      const preferred = preferredRowPositions.get(measurement.entry);
+                      if (measurement.preservePlacement && preferred
+                          && (Math.abs(measurement.entry.markerDocumentLeft - documentLeft - preferred.left) > 0.5
+                            || Math.abs(measurement.entry.markerDocumentTop - documentTop - preferred.top) > 0.5)) {
+                        measurement.preservePlacement = false;
+                      }
                       if (!measurement.preservePlacement || !measurement.visible) return;
                       const preservedFootprint = markerFootprint(
                         measurement.entry,
@@ -3090,7 +3056,6 @@ public class LiveReportDocumentRewriter {
                       spatialIndex.add(preservedFootprint);
                     });
                     const placements = new Map();
-                    const preferredLaneOffsets = preferredMarkerLaneOffsets(orderedMeasurements);
                     const placeMeasurement = measurement => {
                       const entry = measurement.entry;
                       if (measurement.preservePlacement) return;
@@ -3098,11 +3063,15 @@ public class LiveReportDocumentRewriter {
                       if (!measurement.visible) return;
                       // 코너 자리가 이미 놓인 칩과 겹치면 옆으로 밀지 않고 그 칩에 합류한다
                       const family = markerLeftGutter(entry, measurement.targetGeometry);
+                      const preferred = preferredRowPositions.get(entry);
+                      if (preferred) {
+                        family.baseLeft = preferred.left;
+                        family.baseTop = preferred.top;
+                      }
                       const natural = clampMarkerCenter(entry, family.baseLeft, family.baseTop);
                       const hostRect = natural ? spatialIndex.collidingRect(natural.footprint) : null;
                       const host = hostRect?.entry || null;
-                      if (host && host !== entry && !host.clusterHost && host.element?.isConnected
-                          && markerClearsTarget(markerFootprint(entry, natural.left, natural.top, 0), measurement.targetGeometry.rects)) {
+                      if (host && host !== entry && !host.clusterHost && host.element?.isConnected) {
                         joinCluster(host, entry);
                         return;
                       }
@@ -3111,7 +3080,7 @@ public class LiveReportDocumentRewriter {
                         measurement.targetGeometry,
                         spatialIndex,
                         contentSpatialIndex,
-                        0
+                        preferredRowPositions.get(entry)
                       );
                       if (!placement) return;
                       placements.set(measurement.entry, placement);
@@ -3149,6 +3118,7 @@ public class LiveReportDocumentRewriter {
                         return;
                       }
                       entry.markerOffset = placement.markerOffset;
+                      entry.markerViewportClamped = placement.viewportClamped;
                       const markerViewportAttached = viewportAttached;
                       entry.markerViewportAttached = markerViewportAttached;
                       const markerLeft = placement.left + (markerViewportAttached ? 0 : documentLeft);
@@ -3218,6 +3188,54 @@ public class LiveReportDocumentRewriter {
                       position(scheduledMode);
                     });
                   };
+                  const matchesAnalyzedText = (element, issue) => {
+                    const detail = issue.textAnalysis;
+                    if (issue.analyzer !== 'AI_TEXT' || !isObjectRecord(detail)
+                        || detail.kind !== 'text-analysis' || typeof detail.sourceText !== 'string') return true;
+                    const normalize = value => String(value || '').normalize('NFKC').replace(/\\s+/g, '');
+                    const expected = normalize(detail.sourceText.slice(0, 800));
+                    if (!expected) return true;
+                    // Text analysis also reads attribute-based form guidance. Do not
+                    // mistake those valid targets for changed article/link contents.
+                    const candidates = [element.textContent];
+                    if (['DIV', 'SECTION', 'ARTICLE', 'MAIN', 'SPAN', 'BLOCKQUOTE'].includes(element.tagName)) {
+                      // The analyzer excludes child blocks when extracting container text.
+                      const inlineTags = ['EM', 'STRONG', 'B', 'I', 'U', 'MARK', 'SMALL', 'SUB', 'SUP',
+                        'ABBR', 'CITE', 'Q', 'SPAN', 'A', 'TIME', 'BR'];
+                      candidates.push(Array.from(element.childNodes).filter(node =>
+                        node.nodeType === Node.TEXT_NODE || inlineTags.includes(node.nodeName)
+                      ).map(node => node.textContent || '').join(''));
+                    }
+                    for (const attribute of ['aria-label', 'title', 'placeholder', 'alt']) {
+                      candidates.push(element.getAttribute(attribute));
+                    }
+                    if (element instanceof HTMLInputElement
+                        && ['button', 'submit', 'reset'].includes(element.type)) candidates.push(element.value);
+                    return candidates.some(candidate => normalize(candidate).includes(expected));
+                  };
+                  const findReorderedTextTarget = (root, selector, issue) => {
+                    const detail = issue.textAnalysis;
+                    if (issue.analyzer !== 'AI_TEXT' || !isObjectRecord(detail)
+                        || detail.kind !== 'text-analysis' || typeof detail.sourceText !== 'string'
+                        || detail.sourceText.replace(/\\s+/g, '').length < 20) return null;
+                    // Only relax the numeric positions in paths emitted by the text
+                    // extractor. Keep the same root, hierarchy, tags and IDs; never
+                    // search arbitrary page text or rewrite quoted CSS attributes.
+                    if (!selector.split(/\\s*>\\s*/).every(segment =>
+                        /^[a-zA-Z][\\w-]*(?:#[\\w-]+)?(?::nth-of-type\\([1-9]\\d*\\))?$/.test(segment))) return null;
+                    const structuralSelector = selector.replace(/:nth-of-type\\([1-9]\\d*\\)/g, '');
+                    if (structuralSelector === selector) return null;
+                    const candidates = root.querySelectorAll(structuralSelector);
+                    if (candidates.length > 500) return null;
+                    let match = null;
+                    for (const candidate of candidates) {
+                      if (layer.contains(candidate) || !matchesAnalyzedText(candidate, issue)) continue;
+                      // Duplicate headlines/cloned slides cannot identify one target.
+                      if (match) return null;
+                      match = candidate;
+                    }
+                    return match;
+                  };
                   const resolveIssue = item => {
                     const storedSteps = Array.isArray(item.pathSteps) ? item.pathSteps : [];
                     const steps = storedSteps.length > 0
@@ -3227,7 +3245,7 @@ public class LiveReportDocumentRewriter {
                     let root = document;
                     let current = null;
                     try {
-                      for (const step of steps) {
+                      for (const [index, step] of steps.entries()) {
                         if (!step || typeof step.selector !== 'string' || !step.selector.trim()) {
                           return {element:null, reason:'INVALID_PATH_STEP'};
                         }
@@ -3240,9 +3258,16 @@ public class LiveReportDocumentRewriter {
                           return {element:null, reason:'FRAME_UNSUPPORTED'};
                         } else return {element:null, reason:'UNSUPPORTED_CONTEXT'};
                         current = root.querySelector(step.selector);
+                        if (index === steps.length - 1 && (!current || !matchesAnalyzedText(current, item))) {
+                          const recovered = findReorderedTextTarget(root, step.selector, item);
+                          if (recovered) current = recovered;
+                        }
                         if (!current) return {element:null, reason:'SELECTOR_NOT_FOUND'};
                       }
                     } catch (_) { return {element:null, reason:'INVALID_SELECTOR'}; }
+                    // An nth-of-type selector can still resolve after a news card was
+                    // replaced. Its old analysis must never label the new content.
+                    if (!matchesAnalyzedText(current, item)) return {element:null, reason:'ELEMENT_CONTENT_CHANGED'};
                     return {element:current, reason:null};
                   };
                   const reconcileIssueTargets = preferredIssueId => {
@@ -3296,6 +3321,7 @@ public class LiveReportDocumentRewriter {
                       group.markerViewportAttached = false;
                       group.markerOffset = null;
                       group.markerWasVisible = false;
+                      group.markerViewportClamped = false;
                       group.markerDocumentLeft = null;
                       group.markerDocumentTop = null;
                       group.markerAnchorDocumentRect = null;
@@ -3408,7 +3434,7 @@ public class LiveReportDocumentRewriter {
                     if (reconcileIssueTargets(issueId)) requestVersion = focusRequestVersion;
                     const entry = marked.find(candidate => candidate.issues.some(item => item.id === issueId));
                     if (!entry) {
-                      reportLocatorState(issue, {status:'UNAVAILABLE', reason:'SELECTOR_NOT_FOUND'});
+                      reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolveIssue(issue).reason || 'SELECTOR_NOT_FOUND'});
                       showIssueFallback(issueId);
                       return;
                     }

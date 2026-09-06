@@ -1,20 +1,10 @@
-import { ArrowRight, Check, Loader2, Search, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { ArrowRight, Loader2, Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
-import {
-  Stepper,
-  StepperIndicator,
-  StepperItem,
-  StepperNav,
-  StepperSeparator,
-  StepperTitle,
-  StepperTrigger
-} from "@/components/ui/stepper";
 import { API_BASE_URL } from "@/config/api";
 import {
   fetchDashboardViewModel,
   fetchEvaluationRequest,
-  fetchEvaluationTarget,
   getApiErrorMessage,
   isAbortError,
   startUrlEvaluation
@@ -25,8 +15,7 @@ import {
   writeQuickAnalysisAttempt,
   type PersistedQuickAnalysisAttempt
 } from "@/services/analysis-recovery-storage";
-import { wait } from "@/services/async-cancellation";
-import { recordQuickAnalysisResult } from "@/services/quick-analysis-registry";
+
 import {
   SITE_URL_MAX_LENGTH,
   isValidEvaluationTargetAccessUrl
@@ -39,31 +28,17 @@ import type {
 } from "@/types/accessibility-domain";
 
 import {
-  ANALYSIS_POLL_ATTEMPTS,
   commitMutationOnce,
-  getAnalysisPollDelayMs,
   isDefinitiveMutationRejection,
   reconcileWithRetries,
-  runMutationRequestWithDeadline,
-  waitForDocumentVisible
+  runMutationRequestWithDeadline
 } from "../shared/mutation-recovery";
-import {
-  EVALUATION_REQUEST_FAILED_MESSAGE,
-  evaluationRequestPhaseFromStatus
-} from "../shared/evaluation-request-status";
+
 import { useMutationOperation } from "../shared/use-mutation-operation";
+import { QuickAnalysisProgress, type AnalysisPhase } from "./quick-analysis-progress";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
-
-type AnalysisPhase =
-  | "idle"
-  | "requesting"
-  | "queued"
-  | "running"
-  | "completed"
-  | "paused"
-  | "failed";
 
 type ProgressState = {
   phase: AnalysisPhase;
@@ -110,61 +85,9 @@ const QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE =
 const QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE =
   "확인할 수 없는 이전 분석 작업이 남아 있어 중복 요청을 막았습니다. 로그아웃한 뒤 다시 시도해 주세요.";
 const QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE =
-  "이전 페이지의 분석 결과를 먼저 확인해야 합니다. 진행 중이던 주소로 되돌렸습니다.";
+  "이전 주소의 접수 여부를 먼저 확인해야 합니다. 중복 접수를 막기 위해 기존 주소로 되돌렸습니다.";
 
-const analysisJourneySteps = ["페이지 연결", "접근성 검사", "결과 준비"] as const;
 
-function phaseFromRequestStatus(status: EvaluationStatus | string): AnalysisPhase {
-  return evaluationRequestPhaseFromStatus(status);
-}
-
-function messageFromRequestStatus(status: EvaluationStatus | string): string {
-  if (status === "PENDING") {
-    return "분석 요청이 대기열에 등록되었습니다.";
-  }
-  if (status === "COMPLETED") {
-    return "분석이 완료되었습니다. 결과 화면으로 이동합니다.";
-  }
-  if (status === "FAILED") {
-    return EVALUATION_REQUEST_FAILED_MESSAGE;
-  }
-  return "페이지 접근성 분석을 진행하고 있습니다.";
-}
-
-function labelFromPhase(phase: AnalysisPhase): string {
-  if (phase === "requesting") {
-    return "분석 요청 중";
-  }
-  if (phase === "queued") {
-    return "대기열 등록 중";
-  }
-  if (phase === "running") {
-    return "페이지 분석 중";
-  }
-  if (phase === "completed") {
-    return "결과 준비 완료";
-  }
-  if (phase === "paused") {
-    return "상태 확인 필요";
-  }
-  if (phase === "failed") {
-    return "분석 실패";
-  }
-  return "분석 준비";
-}
-
-function journeyStepIndexFromPhase(phase: AnalysisPhase): number {
-  if (phase === "requesting" || phase === "queued") {
-    return 0;
-  }
-  if (phase === "running" || phase === "paused" || phase === "failed") {
-    return 1;
-  }
-  if (phase === "completed") {
-    return 2;
-  }
-  return 0;
-}
 
 function normalizeUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -329,11 +252,11 @@ function findReconciledQuickAnalysisRequest(
 
 export function QuickAnalyzePanel({
   isDarkMode,
-  onAnalysisComplete,
+  onAnalysisAccepted,
   readOnly = false
 }: {
   isDarkMode: boolean;
-  onAnalysisComplete: (route: { projectId: number; siteId: number }) => void | Promise<void>;
+  onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
   readOnly?: boolean;
 }) {
   const initialRecoveryRef = useRef<ReturnType<typeof readQuickAnalysisRecovery> | null>(null);
@@ -349,6 +272,8 @@ export function QuickAnalyzePanel({
     initialRecovery.kind === "blocked" ? QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE : ""
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [acceptedMessage, setAcceptedMessage] = useState("");
+  const urlInputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ProgressState>(emptyProgress);
   const {
     beginMutationOperation,
@@ -402,6 +327,25 @@ export function QuickAnalyzePanel({
   const canSubmit = hasUrlInput && !isBusy && !readOnly;
   const hasError = errorMessage.length > 0;
 
+  useEffect(() => {
+    const restored = checkpointRef.current;
+    if (readOnly || !restored || restored.kind === "reconciling" || restored.targetId === null) return;
+    onAnalysisAccepted({
+      id: restored.requestId,
+      evaluationTargetId: restored.targetId,
+      status: restored.kind === "target" ? "COMPLETED" : (restored.status as EvaluationRequestModel["status"] ?? "PENDING"),
+      requestedAt: new Date(restored.startedAt).toISOString(),
+      updatedAt: restored.updatedAt ?? ""
+    }, restored.url);
+    if (clearPersistedCheckpoint()) {
+      checkpointRef.current = null;
+      setUrlInput("");
+      setAcceptedMessage("접수된 분석은 사이드바에서 확인할 수 있습니다. 다음 주소를 입력해 주세요.");
+    }
+    // Consume mount-time recovery once; the dashboard owns ongoing requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, onAnalysisAccepted]);
+
   const handleReset = () => {
     cancelMutationOperation();
     setProgress(emptyProgress);
@@ -443,7 +387,7 @@ export function QuickAnalyzePanel({
       status: null,
       message: "분석 요청을 생성하고 있습니다."
     });
-    let terminalRequestFailed = false;
+
     let requiresInputReset = false;
 
     try {
@@ -585,167 +529,39 @@ export function QuickAnalyzePanel({
         checkpoint = recoveredCheckpoint;
       }
 
-      if (checkpoint.kind === "request") {
-        let requestCheckpoint = checkpoint;
-        if (requestCheckpoint.status !== null) {
-          setProgress({
-            phase: phaseFromRequestStatus(requestCheckpoint.status),
-            requestId: requestCheckpoint.requestId,
-            status: requestCheckpoint.status,
-            message: messageFromRequestStatus(requestCheckpoint.status)
-          });
-        }
-
-        if (requestCheckpoint.status === "FAILED") {
-          terminalRequestFailed = true;
-          if (!clearPersistedCheckpoint()) {
-            throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-          }
-          checkpointRef.current = null;
-          throw new UserFacingError(EVALUATION_REQUEST_FAILED_MESSAGE);
-        }
-
-        if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
-          let reachedUsableFinalRequest = false;
-          for (let attempt = 0; attempt < ANALYSIS_POLL_ATTEMPTS; attempt += 1) {
-            await waitForDocumentVisible(signal);
-            if (attempt > 0) {
-              await wait(getAnalysisPollDelayMs(attempt), signal);
-              await waitForDocumentVisible(signal);
-            }
-
-            const request = await runQuickAnalysisRequestWithTimeout({
-              signal,
-              timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
-              operation: (requestSignal) =>
-                fetchEvaluationRequest(requestCheckpoint.requestId, requestSignal)
-            });
-            if (!isActiveOperation()) {
-              return;
-            }
-
-            const nextCheckpoint = requestCheckpointFromResponse(normalized, request, {
-              attemptId: requestCheckpoint.attemptId,
-              startedAt: requestCheckpoint.startedAt
-            });
-            if (nextCheckpoint === null) {
-              throw new UserFacingError("분석 진행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-            }
-            if (
-              !persistCheckpoint(nextCheckpoint)
-            ) {
-              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-            }
-            requestCheckpoint = nextCheckpoint;
-            checkpointRef.current = requestCheckpoint;
-            setProgress({
-              phase: phaseFromRequestStatus(request.status),
-              requestId: requestCheckpoint.requestId,
-              status: request.status,
-              message: messageFromRequestStatus(request.status)
-            });
-
-            if (request.status === "FAILED") {
-              terminalRequestFailed = true;
-              if (!clearPersistedCheckpoint()) {
-                throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-              }
-              checkpointRef.current = null;
-              throw new UserFacingError(EVALUATION_REQUEST_FAILED_MESSAGE);
-            }
-            if (request.status === "COMPLETED" && requestCheckpoint.targetId !== null) {
-              reachedUsableFinalRequest = true;
-              break;
-            }
-          }
-
-          if (!reachedUsableFinalRequest) {
-            throw new UserFacingError("페이지 검사에 예상보다 오래 걸리고 있습니다. 잠시 후 결과를 다시 확인해 주세요.");
-          }
-        }
-
-        if (requestCheckpoint.status !== "COMPLETED" || requestCheckpoint.targetId === null) {
-          throw new UserFacingError("완료된 분석 결과를 찾지 못했습니다. 결과 목록을 다시 불러와 주세요.");
-        }
-
-        const targetCheckpoint: Extract<QuickAnalysisCheckpoint, { kind: "target" }> = {
-          kind: "target",
-          attemptId: requestCheckpoint.attemptId,
-          startedAt: requestCheckpoint.startedAt,
-          url: normalized,
-          requestId: requestCheckpoint.requestId,
-          targetId: requestCheckpoint.targetId,
-          updatedAt: requestCheckpoint.updatedAt
-        };
-        if (
-          !persistCheckpoint(targetCheckpoint)
-        ) {
-          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-        }
-        checkpointRef.current = targetCheckpoint;
-        checkpoint = targetCheckpoint;
-      }
-
-      if (checkpoint.kind !== "target") {
-        throw new UserFacingError("분석 결과를 찾지 못했습니다. 결과 목록을 다시 불러와 주세요.");
-      }
-
-      const target = await runQuickAnalysisRequestWithTimeout({
-        signal,
-        timeoutMessage: "분석 결과를 불러오는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
-        operation: (requestSignal) =>
-          fetchEvaluationTarget(checkpoint.targetId, requestSignal)
-      });
-      if (!isActiveOperation()) {
-        return;
-      }
-      if (
-        target.status !== "ACTIVE" ||
-        toComparableUrl(target.accessUrl) !== toComparableUrl(normalized)
-      ) {
-        throw new UserFacingError(
-          "완료된 분석 결과가 현재 페이지와 일치하지 않습니다. 결과 목록에서 다시 확인해 주세요."
-        );
-      }
-      const completedTimestamp = Date.parse(checkpoint.updatedAt ?? "");
-      recordQuickAnalysisResult({
-        projectId: target.organizationId,
-        pageId: target.id,
-        timestamp: Number.isFinite(completedTimestamp) ? completedTimestamp : Date.now()
-      });
-      setProgress({
-        phase: "completed",
-        requestId: checkpoint.requestId,
-        status: "COMPLETED",
-        message: "분석이 완료되었습니다. 결과 화면으로 이동합니다."
-      });
-      await wait(350, signal);
-      try {
-        await onAnalysisComplete({
-          projectId: target.organizationId,
-          siteId: target.id
+      // A positive receipt releases this form. Status/result reads are owned by
+      // the dashboard and cannot hold the next submission hostage.
+      if (checkpoint.targetId === null) {
+        const requestId = checkpoint.requestId;
+        const request = await runQuickAnalysisRequestWithTimeout({
+          signal,
+          timeoutMessage: "분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.",
+          operation: (requestSignal) => fetchEvaluationRequest(requestId, requestSignal)
         });
-      } catch (error) {
-        if (!isActiveOperation() || isAbortError(error)) {
-          return;
+        const recovered = requestCheckpointFromResponse(normalized, request, checkpoint);
+        if (!isActiveOperation()) return;
+        if (!recovered || recovered.requestId !== requestId || recovered.targetId === null) {
+          throw new UserFacingError("분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.");
         }
-        const message = getApiErrorMessage(
-          error,
-          "분석은 완료되었지만 결과를 불러오지 못했습니다."
-        );
-        setErrorMessage(message);
-        setProgress({
-          phase: "completed",
-          requestId: checkpoint.requestId,
-          status: "COMPLETED",
-          message
-        });
-        return;
+        checkpoint = recovered;
+        checkpointRef.current = recovered;
+        if (!persistCheckpoint(recovered)) throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
+      onAnalysisAccepted({
+        id: checkpoint.requestId,
+        evaluationTargetId: checkpoint.targetId!,
+        status: checkpoint.kind === "target" ? "COMPLETED" : (checkpoint.status as EvaluationRequestModel["status"] ?? "PENDING"),
+        requestedAt: new Date(checkpoint.startedAt).toISOString(),
+        updatedAt: checkpoint.updatedAt ?? ""
+      }, normalized);
       if (!clearPersistedCheckpoint()) {
         throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
       }
       checkpointRef.current = null;
+      setUrlInput("");
+      setProgress(emptyProgress);
+      setAcceptedMessage("분석을 접수했습니다. 사이드바에서 진행 상태를 확인하고 다음 주소를 입력해 주세요.");
+      window.requestAnimationFrame(() => urlInputRef.current?.focus());
     } catch (error) {
       if (!isActiveOperation() || isAbortError(error)) {
         return;
@@ -756,7 +572,7 @@ export function QuickAnalyzePanel({
       setProgress((current) => ({
         ...current,
         phase:
-          terminalRequestFailed || requiresInputReset || checkpointRef.current === null
+          requiresInputReset || checkpointRef.current === null
             ? "failed"
             : "paused",
         message
@@ -768,31 +584,11 @@ export function QuickAnalyzePanel({
     }
   };
 
-  const journeyStepIndex = journeyStepIndexFromPhase(progress.phase);
-
   return (
-    <div className="quick-analyze-layout relative min-h-0 w-full flex-1">
+    <div className={`quick-analyze-layout min-h-0 w-full flex-1 ${showProgressView ? "quick-analyze-layout--progress" : "relative"}`}>
       <article
-        className="absolute left-1/2 top-[40%] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[28px] bg-transparent p-5 sm:max-w-2xl sm:p-7 lg:max-w-3xl lg:p-8"
+        className={showProgressView ? "quick-analyze-progress-panel" : "absolute left-1/2 top-[40%] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[28px] bg-transparent p-5 sm:max-w-2xl sm:p-7 lg:max-w-3xl lg:p-8"}
       >
-        {showProgressView && (
-          <div className="mb-8 text-center sm:mb-10">
-            <h2
-              className={`text-2xl font-black tracking-tight sm:text-3xl ${
-                isDarkMode ? "text-white" : "text-slate-900"
-              }`}
-            >
-              {progress.phase === "failed"
-                ? "분석을 완료하지 못했습니다"
-                : progress.phase === "paused"
-                  ? "분석 상태를 다시 확인해 주세요"
-                : progress.phase === "completed"
-                  ? "분석이 완료되었습니다"
-                  : "페이지를 분석하고 있습니다"}
-            </h2>
-          </div>
-        )}
-
         {!showProgressView ? (
           <div>
             <h2
@@ -826,6 +622,7 @@ export function QuickAnalyzePanel({
                   }`}
                 />
                 <input
+                  ref={urlInputRef}
                   id="quick-analyze-url"
                   value={urlInput}
                   onChange={(event) => {
@@ -866,6 +663,7 @@ export function QuickAnalyzePanel({
                 {!isBusy && <ArrowRight size={15} aria-hidden="true" />}
               </button>
             </div>
+            {acceptedMessage && <p role="status" className="mt-3 text-center text-xs text-[var(--dashboard-text-muted)]">{acceptedMessage}</p>}
             {hasError && (
               <p id="quick-analyze-url-error" className="mt-2 text-left text-xs text-[#ff453a]">
                 {errorMessage}
@@ -873,105 +671,10 @@ export function QuickAnalyzePanel({
             )}
           </div>
         ) : (
-          <section className="mx-auto w-full max-w-2xl" aria-live="polite" aria-busy={isBusy}>
-            <p
-              className={`mb-6 text-center text-sm font-medium ${
-                progress.phase === "failed"
-                  ? "text-[#ff453a]"
-                  : isDarkMode
-                    ? "text-[#a1a1a6]"
-                    : "text-[#6e6e73]"
-              }`}
-            >
-              {labelFromPhase(progress.phase)}
-            </p>
-
-            <Stepper
-              value={journeyStepIndex + 1}
-              role="group"
-              aria-label="분석 진행 단계"
-              indicators={{
-                completed: <Check className="size-3.5" strokeWidth={2.5} aria-hidden="true" />,
-                loading: <Loader2 className="size-3.5 animate-spin" strokeWidth={2.5} aria-hidden="true" />
-              }}
-            >
-              <StepperNav className="items-start px-2 sm:px-8" aria-label="URL 분석 과정">
-                {analysisJourneySteps.map((step, index) => {
-                  const stepNumber = index + 1;
-                  const isCompletedStep = progress.phase === "completed" || index < journeyStepIndex;
-                  const isFailedStep = progress.phase === "failed" && index === journeyStepIndex;
-                  const isActiveStep =
-                    !isCompletedStep &&
-                    !isFailedStep &&
-                    index === journeyStepIndex &&
-                    progress.phase !== "idle" &&
-                    progress.phase !== "paused";
-
-                  return (
-                    <StepperItem
-                      key={step}
-                      step={stepNumber}
-                      completed={isCompletedStep}
-                      loading={isActiveStep}
-                      aria-current={isActiveStep ? "step" : undefined}
-                    >
-                      <StepperTrigger
-                        asChild
-                        className="pointer-events-none flex min-w-[4.75rem] shrink-0 flex-col items-center gap-2"
-                      >
-                        <StepperIndicator
-                          className={`size-7 border ${
-                            isFailedStep
-                              ? "border-[#ff453a] bg-[#ff453a] text-white"
-                              : isDarkMode
-                                ? "border-[#3a3a3c] bg-[#242426] text-[#8e8e93]"
-                                : "border-[#d2d2d7] bg-[#f5f5f7] text-[#86868b]"
-                          } data-[state=active]:border-[#0071e3] data-[state=active]:bg-[#0071e3] data-[state=active]:text-white data-[state=completed]:border-[#0071e3] data-[state=completed]:bg-[#0071e3] data-[state=completed]:text-white`}
-                        >
-                          {isFailedStep ? (
-                            <X className="size-3.5" strokeWidth={2.5} aria-hidden="true" />
-                          ) : (
-                            stepNumber
-                          )}
-                        </StepperIndicator>
-                        <StepperTitle
-                          className={`whitespace-nowrap text-xs ${
-                            isFailedStep
-                              ? "text-[#ff453a]"
-                              : isActiveStep || isCompletedStep
-                                ? isDarkMode
-                                  ? "text-[#f5f5f7]"
-                                  : "text-[#1d1d1f]"
-                                : isDarkMode
-                                  ? "text-[#636366]"
-                                  : "text-[#86868b]"
-                          }`}
-                        >
-                          {step}
-                        </StepperTitle>
-                      </StepperTrigger>
-                      {stepNumber < analysisJourneySteps.length && (
-                        <StepperSeparator
-                          className={`mt-3 ${
-                            isDarkMode ? "bg-[#3a3a3c]" : "bg-[#d2d2d7]"
-                          } group-data-[state=completed]/step:bg-[#0071e3]`}
-                        />
-                      )}
-                    </StepperItem>
-                  );
-                })}
-              </StepperNav>
-            </Stepper>
-
-            {urlInput.trim().length > 0 && (
-              <p className={`mt-7 truncate text-center text-xs ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
-                {normalizeUrl(urlInput)}
-              </p>
-            )}
-
+          <QuickAnalysisProgress phase={progress.phase} url={normalizeUrl(urlInput)} isBusy={isBusy}>
             {progress.phase === "failed" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p className="text-center text-xs text-rose-500">{errorMessage || progress.message}</p>
+                <p role="alert" className="text-center text-xs text-rose-500">{errorMessage || progress.message}</p>
                 <button
                   type="button"
                   onClick={handleReset}
@@ -984,7 +687,7 @@ export function QuickAnalyzePanel({
 
             {progress.phase === "paused" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p className="text-center text-xs text-amber-600">{errorMessage || progress.message}</p>
+                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage || progress.message}</p>
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -1000,7 +703,7 @@ export function QuickAnalyzePanel({
 
             {progress.phase === "completed" && hasError && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p className="text-center text-xs text-amber-600">{errorMessage}</p>
+                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage}</p>
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -1013,7 +716,7 @@ export function QuickAnalyzePanel({
                 </button>
               </div>
             )}
-          </section>
+          </QuickAnalysisProgress>
         )}
       </article>
     </div>

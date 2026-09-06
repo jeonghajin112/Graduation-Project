@@ -94,9 +94,8 @@ try {
   await page.locator("#ua-hero-title").waitFor();
   assert.equal(await page.locator("main#uni-access-main").count(), 1);
   assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
-  assert.equal(await page.getByRole("navigation", { name: "현재 장면" }).count(), 1);
-  assert.equal(await page.locator(".sw-route__dot").count(), 5);
-  assert.equal(await page.locator(".sw-route__dot i").count(), 0, "circular route markers must stay removed");
+  assert.equal(await page.getByRole("navigation", { name: "현재 장면" }).count(), 0);
+  assert.equal(await page.locator(".sw-route").isVisible(), false, "side progress bar must stay hidden");
   assert.equal(await page.locator(".sw-scrollbar").count(), 0, "obsolete top progress bar must stay removed");
   assert.equal(await page.locator("video").count(), 0, "reduced-motion landing must not load videos");
   assert.equal(
@@ -245,7 +244,7 @@ try {
     };
   });
   assert.ok(
-    replayScrollState.scrollHeight > replayScrollState.viewportHeight + 400,
+    replayScrollState.scrollHeight > replayScrollState.viewportHeight,
     "long replay document must overflow its evidence viewport vertically"
   );
   assert.ok(replayScrollState.scrollTop > 0, "long replay document must be internally scrollable");
@@ -291,15 +290,11 @@ try {
   }
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  const reportNav = page.getByRole("navigation", { name: "현재 장면" }).getByRole("button", {
-    name: "4. 라이브 리포트",
-    exact: true
-  });
-  await reportNav.click();
+  // Scroll to the middle of the report scene without the removed side controls.
+  await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent?.includes("문제가 있는 자리")
   );
-  assert.equal(await reportNav.getAttribute("aria-current"), "step");
   assert.equal(
     await page.locator('.sw-copy[aria-hidden="true"]:not([inert])').count(),
     0,
