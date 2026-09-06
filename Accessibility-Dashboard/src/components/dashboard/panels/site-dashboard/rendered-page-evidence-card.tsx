@@ -1038,7 +1038,9 @@ export function RenderedPageEvidenceCard({
     replayViewportMetrics.visualWidth
   ]);
 
-  useEffect(() => {
+  // Consume the iframe selection in its commit, before another message can replace
+  // its origin marker while a passive effect is still waiting to run.
+  useLayoutEffect(() => {
     if (replayConnectionState !== "ready") {
       return;
     }

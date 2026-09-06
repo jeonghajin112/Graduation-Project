@@ -200,8 +200,10 @@ const replayHtml = `<!doctype html>
       #replay-markers { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
       .replay-marker { position: fixed; z-index: 10001; width: 24px; height: 24px; border: 2px solid #fff; border-radius: 999px; background: #d73535; color: #fff; font-weight: 800; pointer-events: auto; box-shadow: 0 4px 12px rgba(0,0,0,.3); transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
       .replay-marker[data-issue-id="9001"] { left: 34px; top: 120px; }
-      .replay-marker[data-issue-id="9002"] { left: 78px; top: 120px; background: #e77922; }
-      .replay-marker-description { position: fixed; left: 32px; top: 164px; z-index: 10002; width: min(320px, calc(var(--replay-visual-width) - 24px)); padding: 10px; border: 1px solid #cbd3dc; border-radius: 8px; background: #fff; color: #18202b; font: 400 13px/13px Arial, sans-serif; transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
+      .replay-marker[data-issue-id="9002"] { left: calc(34px + 44px * var(--replay-overlay-inverse-scale)); top: 120px; background: #e77922; }
+      /* Keep the fixture tooltip below the marker at every outer iframe scale.
+         Its full border box must fit the reported visual viewport. */
+      .replay-marker-description { box-sizing: border-box; position: fixed; left: 32px; top: calc(120px + 32px * var(--replay-overlay-inverse-scale)); z-index: 10002; width: min(320px, calc(var(--replay-visual-width) - 24px)); padding: 10px; border: 1px solid #cbd3dc; border-radius: 8px; background: #fff; color: #18202b; font: 400 13px/13px Arial, sans-serif; transform: scale(var(--replay-overlay-inverse-scale)); transform-origin: top left; }
       .replay-marker-description__text { display: block; height: 13px; overflow: hidden; white-space: nowrap; }
       [data-replay-selected="true"] { outline: 4px solid #1378d1 !important; outline-offset: 4px; }
     </style>
