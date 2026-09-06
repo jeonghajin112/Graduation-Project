@@ -6,6 +6,12 @@ import {
   type ScrollWorldConfig
 } from "@/components/landing/scroll-world-engine.js";
 import { LandingEngineSection } from "@/components/landing/landing-engine-section";
+import { LandingMessageSection } from "@/components/landing/landing-message-section";
+import { LandingFindingsSection } from "@/components/landing/landing-findings-section";
+import { LandingFaqSection } from "@/components/landing/landing-faq-section";
+import { LandingFooter } from "@/components/landing/landing-footer";
+
+import "@/styles/landing-large-screen.css";
 
 const ASSET_ROOT = "/landing/scroll-world";
 
@@ -75,16 +81,16 @@ const LANDING_CONFIG = {
     {
       id: "report",
       layout: "card",
-      label: "라이브 리포트",
+      label: "페이지 보기",
       still: `${ASSET_ROOT}/report.webp`,
       clip: `${ASSET_ROOT}/vid/report.mp4`,
       accent: "#0071e3",
       scroll: 1.7,
       linger: 0.3,
-      eyebrow: "라이브 리포트",
-      title: "문제가 있는 자리를 그대로",
-      body: "페이지 위의 마커를 선택해 문제 위치와 개선 방향을 확인하세요.",
-      tags: ["KWCAG 매핑", "DOM 선택자", "심각도"]
+      eyebrow: "실제 페이지",
+      title: "실제 페이지를 그대로 확인하세요.",
+      body: "입력한 사이트를 직접 열어, 익숙한 화면에서 확인할 수 있습니다.",
+      tags: []
     },
     {
       id: "overview",
@@ -105,7 +111,7 @@ const LANDING_CONFIG = {
           action: "enter-app"
         },
         secondary: {
-          label: "라이브 리포트 보기",
+          label: "페이지 보기",
           href: "#report",
           section: "report"
         }
@@ -147,7 +153,11 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
     <>
       <div ref={rootRef} className="uni-scroll-world" data-landing-root />
       {/* 스크롤 필름이 끝난 뒤 이어지는 일반 섹션 */}
+      <LandingMessageSection />
+      <LandingFindingsSection />
       <LandingEngineSection />
+      <LandingFaqSection />
+      <LandingFooter />
     </>
   );
 }

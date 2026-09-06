@@ -678,19 +678,21 @@ export async function updateOrganizationModel({
   projectId: number;
   name: string;
   description: string;
-}): Promise<void> {
+}, signal?: AbortSignal): Promise<void> {
   await apiRequest(`/organizations/${projectId}`, createOrganizationResponseParser(projectId), {
     method: "PATCH",
     body: {
       name,
       description
-    }
+    },
+    signal
   });
 }
 
-export async function deleteOrganizationModel(projectId: number): Promise<void> {
+export async function deleteOrganizationModel(projectId: number, signal?: AbortSignal): Promise<void> {
   await apiRequest(`/organizations/${projectId}/deactivate`, parseVoidResponse, {
-    method: "PATCH"
+    method: "PATCH",
+    signal
   });
 }
 
@@ -743,9 +745,10 @@ export async function deleteEvaluationTargetModel({
 }: {
   projectId: number;
   siteId: number;
-}): Promise<void> {
+}, signal?: AbortSignal): Promise<void> {
   await apiRequest(`/targets/${siteId}/delete`, parseVoidResponse, {
-    method: "PATCH"
+    method: "PATCH",
+    signal
   });
 }
 

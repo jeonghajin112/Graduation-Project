@@ -1,0 +1,20 @@
+.ua-faq { position: relative; z-index: 45; background: #fff; color: #1c222b; font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.ua-faq__inner { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: clamp(40px, 7vw, 100px); max-width: 1440px; margin: 0 auto; padding: clamp(80px, 8vw, 128px) clamp(24px, 5vw, 64px) clamp(120px, 12vw, 180px); }
+.ua-faq__head h2 { margin: 0; font-size: clamp(32px, 3vw, 44px); font-weight: 750; line-height: 1.3; letter-spacing: -.04em; word-break: keep-all; }
+.ua-faq__head p { margin: 26px 0 0; color: #626973; font-size: 15px; line-height: 1.7; }
+.ua-faq__questions { min-width: 0; border-top: 1px solid #d7dce2; }
+.ua-faq__item { border-bottom: 1px solid #dfe3e8; }
+.ua-faq__item summary { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 76px; padding: 22px 0; box-sizing: border-box; list-style: none; cursor: pointer; font-size: 16px; font-weight: 550; line-height: 1.6; word-break: keep-all; }
+.ua-faq__item summary::-webkit-details-marker { display: none; }
+.ua-faq__item summary svg { flex: none; color: #626973; transition: transform .25s ease; }
+.ua-faq__item[open] summary svg { transform: rotate(45deg); }
+.ua-faq__item summary:hover { color: #0071e3; }
+.ua-faq__item summary:focus-visible { outline: 2px solid #0071e3; outline-offset: 4px; border-radius: 2px; }
+.ua-faq__item > p { margin: 0; padding: 0 42px 26px 0; color: #626973; font-size: 15px; line-height: 1.85; word-break: keep-all; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .ua-faq__inner { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .ua-faq__head p { margin-top: 18px; }
+  .ua-faq__item summary { gap: 16px; font-size: 15px; }
+  .ua-faq__item > p { padding-right: 0; font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .ua-faq__item summary svg { transition: none; } }

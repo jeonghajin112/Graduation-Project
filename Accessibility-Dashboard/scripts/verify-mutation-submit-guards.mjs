@@ -172,7 +172,7 @@ try {
   releasePageDelete.resolve();
   const pageDeleteAlert = pageDeleteDialog
     .getByRole("alert")
-    .filter({ hasText: "페이지를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    .filter({ hasText: "요청 처리 결과를 확인하지 못했습니다. 서버에서 처리 중일 수 있습니다. 창을 닫아도 되며, 다시 시도하면 먼저 처리 상태를 확인합니다." });
   await pageDeleteAlert.waitFor();
   assert.doesNotMatch(
     await pageDeleteAlert.innerText(),
@@ -252,7 +252,7 @@ try {
   releaseProjectDelete.resolve();
   const projectDeleteAlert = projectDeleteDialog
     .getByRole("alert")
-    .filter({ hasText: "프로젝트를 제거하지 못했습니다. 잠시 후 다시 시도해 주세요." });
+    .filter({ hasText: "요청 처리 결과를 확인하지 못했습니다. 서버에서 처리 중일 수 있습니다. 창을 닫아도 되며, 다시 시도하면 먼저 처리 상태를 확인합니다." });
   await projectDeleteAlert.waitFor();
   assert.doesNotMatch(
     await projectDeleteAlert.innerText(),

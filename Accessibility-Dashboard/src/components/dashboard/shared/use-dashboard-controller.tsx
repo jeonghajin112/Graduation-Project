@@ -11,6 +11,7 @@ import {
 import { parseDashboardRoute } from "@/services/dashboard-route";
 import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 
+import { runDirectoryMutation } from "./directory-mutation";
 import { useDashboardData } from "./use-dashboard-data";
 import { useDashboardTheme } from "./use-dashboard-theme";
 import { useOrganizationModelCreateForm } from "./use-organization-model-create-form";
@@ -40,6 +41,11 @@ export function useDashboardController({
   } = useDashboardData({ onBootstrapComplete });
 
   const [isSiteCreateOpen, setIsSiteCreateOpen] = useState(false);
+  const directoryOperationsRef = useRef(new Set<AbortController>());
+  useEffect(() => () => {
+    for (const controller of directoryOperationsRef.current) controller.abort();
+    directoryOperationsRef.current.clear();
+  }, []);
   const organizationCreationNavigationRef = useRef<number | null>(null);
   const {
     handleCreateEvaluationTargetModel,
@@ -195,6 +201,21 @@ export function useDashboardController({
     selectedOrganizationModel
   ]);
 
+  const applyDirectoryMutation = useCallback(async (
+    options: Omit<Parameters<typeof runDirectoryMutation>[0], "signal">
+  ) => {
+    const controller = new AbortController();
+    directoryOperationsRef.current.add(controller);
+    try {
+      await runDirectoryMutation({ ...options, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      await loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
+      controller.signal.throwIfAborted();
+    } finally {
+      directoryOperationsRef.current.delete(controller);
+    }
+  }, [loadDashboard]);
+
   const handleUpdateOrganizationModel = useCallback(
     async ({
       projectId,
@@ -205,40 +226,38 @@ export function useDashboardController({
       name: string;
       description: string;
     }) => {
-      await updateOrganizationModel({
-        projectId,
-        name,
-        description
+      await applyDirectoryMutation({
+        operation: (signal) => updateOrganizationModel({ projectId, name, description }, signal),
+        isApplied: (snapshot) => snapshot.organizations.some((project) =>
+          project.id === projectId && project.name === name && project.description === description)
       });
-
-      await loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
     },
-    [loadDashboard]
+    [applyDirectoryMutation]
   );
 
   const handleDeleteOrganizationModel = useCallback(
     async (projectId: number) => {
-      await deleteOrganizationModel(projectId);
+      await applyDirectoryMutation({
+        operation: (signal) => deleteOrganizationModel(projectId, signal),
+        isApplied: (snapshot) => !snapshot.organizations.some((project) => project.id === projectId)
+      });
 
       if (routeState.selectedOrganizationModelId === projectId) {
         navigate(APP_HOME_PATH, { replace: true });
       }
-
-      await loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
     },
-    [loadDashboard, navigate, routeState.selectedOrganizationModelId]
+    [applyDirectoryMutation, navigate, routeState.selectedOrganizationModelId]
   );
 
   const handleDeleteEvaluationTargetModel = useCallback(
     async ({ projectId, siteId }: { projectId: number; siteId: number }) => {
-      await deleteEvaluationTargetModel({
-        projectId,
-        siteId
+      await applyDirectoryMutation({
+        operation: (signal) => deleteEvaluationTargetModel({ projectId, siteId }, signal),
+        isApplied: (snapshot) => !snapshot.organizations.some((project) =>
+          project.id === projectId && project.evaluationTargets.some((target) => target.id === siteId))
       });
-
-      await loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
     },
-    [loadDashboard]
+    [applyDirectoryMutation]
   );
   const sidebarLinks: SidebarItem[] = useMemo(
     () => [

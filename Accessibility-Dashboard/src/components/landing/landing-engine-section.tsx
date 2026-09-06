@@ -6,7 +6,7 @@ import { RuleVisual, TextVisual, ContrastVisual } from "@/components/landing/lan
  * 분석 엔진 소개 + 분석 과정.
  *  - 분석 엔진: 제목과 모듈 카드 3개 (SVG 루프는 화면에 보일 때만 재생)
  *  - 분석 과정: 6단계 레일. 화면에 들어오면 1 → 6 단계가 자동으로 차례로 켜지고(약 7초), 벗어나면 되감겨 다시 들어올 때 재생된다
- *  - 그 아래 총점 구성 · 등급 기준
+ *  - 질문과 답변은 랜딩 마지막의 별도 섹션에서 제공
  * 내용은 AI-module/README.md 와 run_all.py 의 실제 동작을 옮긴 것. 수치를 바꿀 때는 그 문서와 함께 바꿀 것.
  * 900px 이하와 모션 축소 설정에서는 레일을 완료 상태의 정적 목록으로 보여준다.
  */
@@ -73,17 +73,6 @@ const STEPS: readonly Step[] = [
   { id: "report", label: "라이브 리포트", detail: "마커 표시", caption: "찾아낸 문제를 실제 페이지 위의 마커로 보여줍니다.",
     icon: (<svg {...stepIcon} aria-hidden="true"><path d="M12 21s-6-5.2-6-10a6 6 0 0 1 12 0c0 4.8-6 10-6 10Z" /><circle cx="12" cy="11" r="2.2" /></svg>) },
 ];
-
-const WEIGHTS = [
-  { label: "규칙 기반", pct: 50, basis: "KWCAG 감점 점수" },
-  { label: "텍스트 난이도", pct: 30, basis: "난이도 점수 (높을수록 좋음)" },
-  { label: "시각 명암비", pct: 20, basis: "명도 대비 통과율" },
-] as const;
-
-const GRADES = [
-  { grade: "A+", from: 95 }, { grade: "A", from: 90 }, { grade: "B+", from: 85 }, { grade: "B", from: 80 },
-  { grade: "C", from: 70 }, { grade: "D", from: 60 }, { grade: "F", from: 0 },
-] as const;
 
 const STEP_MS = 1200;                      // 단계 하나가 켜져 있는 시간
 const PLAY_MS = STEP_MS * STEPS.length;    // 레일 한 바퀴
@@ -217,41 +206,6 @@ export function LandingEngineSection() {
         </div>
       </div>
 
-      <div className="ua-engine__after">
-        <ScoreBreakdown />
-        <p className="ua-engine__limit">
-          자동 검사는 반복 확인이 가능한 항목을 빠짐없이 찾는 데 강하고, 문맥과 의미 판단은 사람의 몫으로 남깁니다.
-          그래서 결과는 점수로 끝나지 않고, 실제 페이지 위에 마커로 표시되는 라이브 리포트로 이어집니다.
-        </p>
-      </div>
     </section>
-  );
-}
-
-/** 총점 구성 + 등급 기준 */
-export function ScoreBreakdown() {
-  return (
-    <div className="ua-engine__score">
-      <div className="ua-engine__score-formula">
-        <span className="ua-engine__score-kicker">총점 구성</span>
-        <div className="ua-engine__bar" role="img" aria-label="총점은 규칙 기반 50%, 텍스트 난이도 30%, 시각 명암비 20%로 합산됩니다">
-          {WEIGHTS.map((w) => (
-            <span className={`ua-engine__bar-seg ua-engine__bar-seg--${w.pct}`} key={w.label} style={{ flexBasis: `${w.pct}%` }}>
-              <b>{w.pct}%</b><span>{w.label}</span>
-            </span>
-          ))}
-        </div>
-        <ul className="ua-engine__weights">
-          {WEIGHTS.map((w) => (<li key={w.label}><span>{w.label}</span><span>{w.basis}</span></li>))}
-        </ul>
-        <p className="ua-engine__note">한 모듈이 실패하면 나머지 모듈의 가중치를 다시 나눠 계산합니다. 규칙 기반 결과는 필수라서, 이 단계가 실패하면 완료로 처리하지 않습니다.</p>
-      </div>
-      <div className="ua-engine__grades">
-        <span className="ua-engine__score-kicker">등급 기준</span>
-        <ol className="ua-engine__grade-list">
-          {GRADES.map((g) => (<li key={g.grade}><b>{g.grade}</b><span>{g.from > 0 ? `${g.from}점 이상` : "60점 미만"}</span></li>))}
-        </ol>
-      </div>
-    </div>
   );
 }

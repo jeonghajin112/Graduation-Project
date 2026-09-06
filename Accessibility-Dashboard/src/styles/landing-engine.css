@@ -7,11 +7,9 @@
   color: #1d1d1f;
   font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  border-top: 1px solid #e5e7eb;
 }
 .ua-engine__inner { max-width: 1320px; margin: 0 auto; padding: clamp(72px, 9vw, 120px) clamp(20px, 5vw, 64px) clamp(28px, 4vw, 48px); box-sizing: border-box; display: flex; flex-direction: column; gap: clamp(28px, 4vw, 44px); }
 .ua-engine__process { max-width: 1320px; margin: 0 auto; padding: clamp(24px, 4vw, 56px) clamp(20px, 5vw, 64px) 0; box-sizing: border-box; }
-.ua-engine__after { max-width: 1320px; margin: 0 auto; padding: clamp(40px, 6vw, 72px) clamp(20px, 5vw, 64px) clamp(80px, 9vw, 128px); box-sizing: border-box; display: flex; flex-direction: column; gap: clamp(28px, 4vw, 44px); }
 
 .ua-engine__head { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; max-width: 760px; margin: 0 auto; }
 .ua-engine__eyebrow { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.16em; color: #0071e3; text-transform: uppercase; }
@@ -35,35 +33,8 @@
 .ua-engine__facts { list-style: none; margin: auto 0 0; padding: 6px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .ua-engine__facts li { font-size: 0.76rem; font-weight: 600; color: #ffffff; background: #1d1d1f; border: 1px solid #1d1d1f; border-radius: 999px; padding: 5px 10px; }
 
-/* 총점 / 등급 */
-.ua-engine__score { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; }
-.ua-engine__score-formula, .ua-engine__grades { display: flex; flex-direction: column; gap: 14px; background: rgba(255,255,255,.55); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); border: 1px solid rgba(255,255,255,.75); box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 12px 40px rgba(16,24,40,.08); border-radius: 20px; padding: 24px; }
-.ua-engine__score-kicker { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; color: #8e8e93; }
-.ua-engine__bar { display: flex; gap: 4px; height: 64px; }
-.ua-engine__bar-seg { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 14px; border-radius: 10px; color: #ffffff; min-width: 0; overflow: hidden; white-space: nowrap; }
-.ua-engine__bar-seg b { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.01em; }
-.ua-engine__bar-seg span { font-size: 0.74rem; opacity: 0.9; }
-.ua-engine__bar-seg--50 { background: #0071e3; }
-.ua-engine__bar-seg--30 { background: #2997ff; }
-.ua-engine__bar-seg--20 { background: #6bb6ff; color: #0b2e55; }
-.ua-engine__weights { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.ua-engine__weights li { display: flex; justify-content: space-between; gap: 12px; font-size: 0.9rem; padding: 8px 0; border-bottom: 1px solid rgba(29,29,31,.08); }
-.ua-engine__weights li span:last-child { color: #6e6e73; text-align: right; }
-.ua-engine__note { margin: 0; font-size: 0.85rem; line-height: 1.55; color: #6e6e73; word-break: keep-all; text-wrap: pretty; }
-.ua-engine__grade-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
-.ua-engine__grade-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(29,29,31,.08); font-size: 0.9rem; }
-.ua-engine__grade-list b { font-size: 1.05rem; font-weight: 800; color: #0071e3; min-width: 2.2em; }
-.ua-engine__grade-list span { color: #6e6e73; }
-
-.ua-engine__limit { margin: 0; max-width: 760px; font-size: 0.95rem; line-height: 1.65; color: #6e6e73; word-break: keep-all; text-wrap: pretty; }
-
 @media (max-width: 1024px) {
   .ua-engine__modules { grid-template-columns: 1fr; }
-  .ua-engine__score { grid-template-columns: 1fr; }
-}
-@media (max-width: 600px) {
-  .ua-engine__bar { height: auto; flex-direction: column; }
-  .ua-engine__bar-seg { flex-basis: auto !important; padding: 10px 14px; }
 }
 
 /* ── 모듈 시각화 (SVG + CSS 루프, 6초) ─────────────────────────────────────── */
@@ -185,3 +156,5 @@
   .ua-engine__step { padding: 14px 14px 16px; }
   .ua-engine__step-num { font-size: 2rem; }
 }
+
+.ua-engine { padding-bottom: clamp(72px, 8vw, 112px); }

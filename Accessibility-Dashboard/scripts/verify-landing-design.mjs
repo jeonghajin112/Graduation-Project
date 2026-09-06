@@ -256,7 +256,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   // The report scene spans 4.3–6 viewport heights; inspect its settled midpoint.
   await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "문제가 있는 자리를 그대로"
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "실제 페이지를 그대로 확인하세요."
   );
   await settle(page);
   const report = await page.evaluate(() => {
@@ -280,7 +280,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
   });
-  assert.equal(report.title, "문제가 있는 자리를 그대로", `${label}: report copy did not activate`);
+  assert.equal(report.title, "실제 페이지를 그대로 확인하세요.", `${label}: report copy did not activate`);
   assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
   assert.equal(report.cardElementFound, true, `${label}: report card surface is missing`);
   assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
@@ -306,12 +306,12 @@ async function verifyReducedMotionViewport(browser, viewport) {
   );
   assert.deepEqual(
     await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__cta a').allTextContents(),
-    ["새 페이지 분석", "라이브 리포트 보기"],
+    ["새 페이지 분석", "페이지 보기"],
     `${label}: final actions are missing`
   );
-  await page.getByRole("link", { name: "라이브 리포트 보기", exact: true }).click();
+  await page.getByRole("link", { name: "페이지 보기", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "문제가 있는 자리를 그대로"
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "실제 페이지를 그대로 확인하세요."
   );
 
   assert.equal(apiRequestCount, 0, `${label}: landing unexpectedly requested an API`);
@@ -482,6 +482,9 @@ async function verifyMobileHeightOnlyResize(browser) {
   const page = await context.newPage();
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  // Finish initial assets/font layout before isolating a height-only resize.
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => document.fonts.ready);
   await page.setViewportSize({ width: 390, height: 844 });
   await settle(page);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));

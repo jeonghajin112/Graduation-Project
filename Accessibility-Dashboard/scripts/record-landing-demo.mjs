@@ -5,11 +5,13 @@
  * Set BASE_URL to the running frontend and LANDING_TARGET_ID to an existing page.
  * npm run record:landing -- --stills-only    (review PNGs before encoding)
  * npm run record:landing -- --publish        (replace all four scenes together)
- * Requires ffmpeg. Each new run, including --stills-only, starts ONE REAL analysis.
+ * npm run record:landing -- --report-only --publish (refresh only the page-view scene)
+ * Requires ffmpeg. New full runs, including --stills-only, start ONE REAL analysis.
  * --resume-results with LANDING_RECORDING_DIR reuses recorded input/progress and
  * opens the service's existing completed result without starting another scan.
  * --resume-analysis reuses recorded input and its still-active request ID.
- * LANDING_MARKER_ID optionally selects a real issue marker for the report scene.
+ * --report-only records the existing live page without starting another scan.
+ * The report scene captures only the real page viewport, without opening issue details.
  */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -37,12 +39,14 @@ const reportPath = "/projects/" + project.id + "/pages/" + target.id;
 const overviewPath = "/projects/" + project.id;
 const args = new Set(process.argv.slice(2));
 for (const arg of args) {
-  if (!["--stills-only", "--publish", "--resume-results", "--resume-analysis"].includes(arg)) throw new Error("Unknown option: " + arg);
+  if (!["--stills-only", "--publish", "--resume-results", "--resume-analysis", "--report-only"].includes(arg)) throw new Error("Unknown option: " + arg);
 }
 const stillsOnly = args.has("--stills-only");
 const resumeResults = args.has("--resume-results");
 const resumeAnalysis = args.has("--resume-analysis");
+const reportOnly = args.has("--report-only");
 assert.ok(!(resumeResults && resumeAnalysis), "Choose one recording resume point.");
+assert.ok(!(reportOnly && (resumeResults || resumeAnalysis)), "Report-only recording does not resume a full recording.");
 assert.ok(!(stillsOnly && args.has("--publish")), "Publishing requires posters and videos together.");
 const recordingsRoot = join(root, "artifacts/landing-recordings");
 const output = resumeResults || resumeAnalysis
@@ -106,11 +110,11 @@ const scenes = previousCapture?.scenes.filter(item => (resumeResults ? ["input",
 async function saveManifest() {
   await writeFile(join(output, "capture-manifest.json"), JSON.stringify({
     capturedAt: new Date().toISOString(), sampleData: false,
-    viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 2, framesPerSecond: FPS,
+    viewport: page.viewportSize(), deviceScaleFactor: 2, framesPerSecond: FPS,
     source: "Real running service, real analysis request and live upstream page",
     targetId: target.id, projectId: project.id, targetUrl: target.accessUrl,
     analysisRequestId,
-    resultSource: resumeResults ? "Previously completed real analysis stored in the service" : "New real analysis",
+    resultSource: resumeResults || reportOnly ? "Previously completed real analysis stored in the service" : "New real analysis",
     scenes, variants: stillsOnly ? [] : variants
   }, null, 2));
 }
@@ -127,10 +131,10 @@ async function verifyScene(scene) {
   } else if (scene === "report") {
     assert.equal(await page.locator('.site-page-evidence-preview[aria-busy="false"][data-connection-state="ready"]').count(), 1);
     const viewer = page.frameLocator('iframe[data-report-mode="live"]');
-    assert.ok(await viewer.locator(".ap-live-marker:visible").count() >= 1);
-    assert.equal(await viewer.locator(".ap-live-popover:visible").count(), 1);
+    assert.ok(await viewer.locator("body").innerText(), "The live upstream page must contain real content.");
+    assert.equal(await viewer.locator(".ap-live-popover:visible").count(), 0);
     assert.equal(await page.getByRole("dialog", { name: "문제 위치 정보", exact: true }).isVisible(), false,
-      "The landing recording must stay on the live marker explanation.");
+      "The page-view recording must not open issue details.");
     assert.equal(await page.getByRole("complementary", { name: "최근 분석 추이", exact: true }).isVisible(), true);
     const pageInformation = page.getByRole("region", { name: "페이지 정보", exact: true });
     assert.equal(await pageInformation.getByRole("button", { name: "재분석", exact: true }).isEnabled(), true);
@@ -142,7 +146,7 @@ async function verifyScene(scene) {
   assert.deepEqual(pageErrors, [], scene + ": browser error");
 }
 
-async function captureScene(scene, renderFrame, posterFrame = 30) {
+async function captureScene(scene, renderFrame, posterFrame = 30, clip) {
   console.log("Capturing " + scene + " from the current application…");
   const frameDirectory = join(output, scene);
   await mkdir(frameDirectory, { recursive: true });
@@ -153,19 +157,20 @@ async function captureScene(scene, renderFrame, posterFrame = 30) {
     await settle(page);
     if (frame === posterFrame) await verifyScene(scene);
     const framePath = join(frameDirectory, String(frame).padStart(4, "0") + ".png");
-    await page.screenshot({ path: framePath, type: "png" });
+    await page.screenshot({ path: framePath, type: "png", ...(clip ? { clip } : {}) });
     if (frame === posterFrame) await copyFile(framePath, posterPath);
   }
   if (!stillsOnly) {
     console.log("Encoding " + scene + ": 4K, 1440p, 1080p and WebP…");
     await encodeScene(scene, frameDirectory, posterPath);
   }
-  scenes.push({ scene, posterPath, frames: indices.length, source: page.url(), verified: true });
+  scenes.push({ scene, posterPath, frames: indices.length, source: page.url(), viewport: page.viewportSize(),
+    ...(clip ? { captureRegion: clip } : {}), verified: true });
   await saveManifest();
 }
 
 try {
-  if (!resumeResults) {
+  if (!resumeResults && !reportOnly) {
   await page.goto(baseUrl + "/analyze", { waitUntil: "networkidle" });
   if (!resumeAnalysis) {
   const urlInput = page.getByRole("textbox", { name: "페이지 주소", exact: true });
@@ -225,38 +230,39 @@ try {
   assert.equal(completedReceipt.data.status, "COMPLETED",
     "Only the newly completed real analysis may be used for a fresh recording.");
   }
+  // Capture a native-resolution crop of the actual viewer, keeping the app's
+  // sidebar and metrics outside the frame without changing the rendered UI.
+  await page.setViewportSize({ width: 3840, height: 2160 });
   await page.goto(baseUrl + reportPath, { waitUntil: "domcontentloaded" });
   await page.locator('.site-page-evidence-preview[aria-busy="false"][data-connection-state="ready"]').waitFor({ timeout: 60_000 });
   const viewer = page.frameLocator('iframe[data-report-mode="live"]');
-  const markerId = process.env.LANDING_MARKER_ID;
-  assert.ok(!markerId || /^\d+$/.test(markerId), "LANDING_MARKER_ID must be a real numeric issue ID.");
-  const marker = markerId
-    ? viewer.locator('.ap-live-marker[data-issue-id="' + markerId + '"]')
-    : viewer.locator(".ap-live-marker:visible").first();
-  await marker.waitFor();
-  await settle(page);
-  let markerOpened = false;
-  await captureScene("report", async frame => {
-    if (frame >= 12) {
-      // The real viewer positions markers in a zero-size overflow layer. Move
-      // the real pointer to its rendered box instead of scrolling that layer.
-      if (!markerOpened) {
-        const box = await marker.boundingBox();
-        assert.ok(box && box.width > 0 && box.height > 0, "A visible marker is required for the report recording.");
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        markerOpened = true;
-      }
-      await viewer.locator(".ap-live-popover:visible").waitFor();
-    } else {
-      await page.mouse.move(1, 1);
-    }
+  await viewer.locator("html").evaluate(async () => {
+    await document.fonts.ready;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    await Promise.all([...document.images].filter(image => image.getBoundingClientRect().top < innerHeight)
+      .map(image => image.decode().catch(() => undefined)));
   });
+  const viewerBox = await page.locator('iframe[data-report-mode="live"]').boundingBox();
+  assert.ok(viewerBox && viewerBox.width * 2 >= 3840, "The actual page crop must provide native 4K pixels.");
+  const reportClip = { x: viewerBox.x, y: viewerBox.y, width: viewerBox.width, height: viewerBox.width * 9 / 16 };
+  assert.ok(reportClip.height <= viewerBox.height, "The real page must contain the entire 16:9 recording region.");
+  const maximumScroll = await viewer.locator("html").evaluate(() => document.documentElement.scrollHeight - innerHeight);
+  const scrollDistance = Math.min(reportClip.height * 0.72, Math.max(0, maximumScroll));
+  await page.mouse.move(1, 1);
+  await settle(page);
+  await captureScene("report", async frame => {
+    const progress = Math.max(0, Math.min(1, (frame - 8) / 32));
+    const eased = progress * progress * (3 - 2 * progress);
+    await viewer.locator("html").evaluate((_, top) => window.scrollTo({ top, behavior: "instant" }), Math.round(scrollDistance * eased));
+  }, 24, reportClip);
 
+  if (!reportOnly) {
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(baseUrl + overviewPath, { waitUntil: "networkidle" });
   await page.locator(".dashboard-project-card").first().waitFor();
   await settle(page);
   await captureScene("overview", async () => { await page.mouse.move(1, 1); });
+  }
 
   assert.deepEqual(pageErrors, []);
   await saveManifest();
@@ -268,7 +274,7 @@ try {
         await copyFile(join(mediaOutput, "vid", scene + suffix + ".mp4"), join(destination, "vid", scene + suffix + ".mp4"));
       }
     }
-    console.log("Updated all four landing UI posters and twelve videos.");
+    console.log("Updated " + scenes.length + " landing posters and " + scenes.length * variants.length + " videos.");
   }
   console.log("Verified capture: " + output);
 } catch (error) {

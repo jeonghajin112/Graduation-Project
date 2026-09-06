@@ -293,7 +293,7 @@ try {
   // Scroll to the middle of the report scene without the removed side controls.
   await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent?.includes("문제가 있는 자리")
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent?.includes("실제 페이지를 그대로 확인하세요.")
   );
   assert.equal(
     await page.locator('.sw-copy[aria-hidden="true"]:not([inert])').count(),

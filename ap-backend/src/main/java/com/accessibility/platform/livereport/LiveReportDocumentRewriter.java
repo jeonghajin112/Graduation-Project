@@ -820,8 +820,6 @@ public class LiveReportDocumentRewriter {
                 .ap-live-marker[hidden]{display:none!important}
                 .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 4px 10px rgba(16,24,40,.28)}
                 .ap-live-marker[aria-expanded="true"]{box-shadow:0 4px 10px rgba(16,24,40,.28)}
-                .ap-live-marker.is-selected{background:#0b6ff4;box-shadow:0 4px 12px rgba(11,111,244,.4)}
-                .ap-live-marker.is-selected::before{background:#fff;box-shadow:0 0 0 1.5px rgba(255,255,255,.35)}
                 .ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}
                 .ap-live-marker__count{all:initial;box-sizing:border-box;position:absolute;right:-6px;top:-6px;min-width:13px;height:13px;padding:0 3px;
                 border:0;border-radius:999px;background:#ff3b30;color:#fff;display:grid;place-items:center;
@@ -867,8 +865,6 @@ public class LiveReportDocumentRewriter {
                 .ap-live-highlight__fragment{all:initial!important;box-sizing:border-box!important;position:absolute!important;
                 border-style:solid!important;border-color:var(--ap-highlight-color,#0b6ff4)!important;border-radius:8px!important;
                 background:transparent!important;pointer-events:none!important;transform:none!important}
-                .ap-live-highlight.is-selected .ap-live-highlight__fragment{border-color:#0b6ff4!important;background:transparent!important;
-                box-shadow:0 0 0 4px rgba(11,111,244,.14)!important}
                 @media(prefers-reduced-motion:no-preference){.ap-live-marker{transition:box-shadow 120ms ease}}
                 @media(forced-colors:active){.ap-live-marker{forced-color-adjust:auto;border-color:Canvas}.ap-live-popover{background:Canvas;color:CanvasText;border:2px solid CanvasText;box-shadow:none}.ap-live-highlight__fragment{border-color:Highlight!important}}
                 """;

@@ -243,7 +243,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains(".ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}");
         assertThat(rewritten).doesNotContain("color-mix(in srgb,var(--ap-marker-color");
         assertThat(rewritten).contains("height:18px;padding:0 8px 0 7px;border:0;border-radius:999px;background:#1d1d1f");
-        assertThat(rewritten).contains(".ap-live-marker.is-selected{background:#0b6ff4");
+        assertThat(rewritten).doesNotContain(".ap-live-marker.is-selected{");
+        assertThat(rewritten).doesNotContain(".ap-live-highlight.is-selected .ap-live-highlight__fragment{");
         assertThat(rewritten).contains("transform:translate(0,-50%);transform-origin:0 50%");
         assertThat(rewritten).contains("border:0;border-radius:999px;background:#ff3b30");
         assertThat(rewritten).doesNotContain("width:24px;height:24px;border:2px solid #fff");
