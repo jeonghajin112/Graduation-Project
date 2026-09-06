@@ -1,4 +1,4 @@
-import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
+import { SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import { ChevronDown, ChevronRight, CircleAlert, LogOut, RotateCcw, Settings } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 
@@ -287,110 +287,108 @@ export function DashboardSurface({
         본문으로 바로가기
       </a>
       <div className="dashboard-shell flex min-h-[100dvh] w-full flex-col bg-transparent md:flex-row">
-        <Sidebar open animate={false}>
-          <SidebarBody className="reference-sidebar-body justify-start gap-0">
-            <div className="dashboard-header-account reference-sidebar-account relative z-30 shrink-0 p-0">
-              <button
-                ref={accountTriggerRef}
-                type="button"
-                className="dashboard-account-menu-trigger w-fit max-w-full rounded-lg text-left outline-none transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-offset-2"
-                aria-expanded={isAccountMenuOpen}
-                aria-controls={accountMenuId}
-                aria-haspopup="menu"
-                onClick={() => {
-                  if (isAccountMenuOpen) {
-                    closeAccountMenu(true);
-                    return;
-                  }
-                  openAccountMenu(0);
-                }}
-                onKeyDown={handleAccountTriggerKeyDown}
-              >
-                <span className="dashboard-account-avatar" aria-hidden="true">
-                  {userName.slice(0, 1)}
-                </span>
-                <span className="dashboard-account-name max-w-36 truncate font-bold">
-                  {userName}
-                </span>
-                <ChevronDown
-                  size={16}
-                  aria-hidden="true"
-                  className={`dashboard-account-menu-chevron transition-transform duration-150 ease-out ${
-                    isAccountMenuOpen ? "rotate-180" : ""
-                  }`}
-                />
-              </button>
-
-              {isAccountMenuOpen ? (
-                <div
-                  ref={accountMenuRef}
-                  id={accountMenuId}
-                  role="menu"
-                  aria-label="계정 메뉴"
-                  onKeyDown={handleAccountMenuKeyDown}
-                  className="dashboard-account-menu dashboard-account-menu-open absolute left-0 right-auto top-full z-40 mt-1.5 origin-top rounded-2xl bg-white p-1.5 shadow-lg"
-                >
-                  <button
-                    ref={(element) => {
-                      accountMenuItemRefs.current[0] = element;
-                    }}
-                    type="button"
-                    role="menuitem"
-                    className="dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset"
-                    onClick={openAccountSettings}
-                  >
-                    <Settings size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
-                    설정
-                  </button>
-                  <button
-                    ref={(element) => {
-                      accountMenuItemRefs.current[1] = element;
-                    }}
-                    type="button"
-                    role="menuitem"
-                    aria-disabled={isPreview}
-                    title={isPreview ? "읽기 전용 미리보기에서는 로그아웃할 수 없습니다" : undefined}
-                    className={`dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset ${
-                      isPreview ? "cursor-not-allowed" : ""
-                    }`}
-                    onClick={() => {
-                      if (isPreview) {
-                        return;
-                      }
-                      closeAccountMenu();
-                      onLogout?.();
-                    }}
-                  >
-                    <LogOut size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
-                    로그아웃
-                  </button>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="reference-sidebar-content flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
-              <div className="reference-sidebar-primary flex flex-col gap-1">
-                {dashboard.sidebarLinks.map((link) => (
-                  <SidebarLink key={link.label} link={link} />
-                ))}
-              </div>
-
-              <SidebarProjectsSection
-                organizations={dashboard.organizations}
-                evaluationRequests={isPreview ? undefined : dashboard.dashboardData?.evaluationRequests}
-                selection={dashboard.sidebarSelection}
-                onSelectProject={dashboard.goToProject}
-                onSelectRecentPage={dashboard.goToRecentPage}
-                onCreateProject={dashboard.openOrganizationCreateModal}
-                onUpdateProject={dashboard.handleUpdateOrganizationModel}
-                onDeleteProject={dashboard.handleDeleteOrganizationModel}
-                onSelectPage={({ pageId }) => dashboard.goToSite(pageId)}
-                quickAnalysisResultsOverride={previewQuickAnalysisResults}
-                readOnly={isPreview}
+        <SidebarBody className="reference-sidebar-body justify-start gap-0">
+          <div className="dashboard-header-account reference-sidebar-account relative z-30 shrink-0 p-0">
+            <button
+              ref={accountTriggerRef}
+              type="button"
+              className="dashboard-account-menu-trigger w-fit max-w-full rounded-lg text-left outline-none transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-offset-2"
+              aria-expanded={isAccountMenuOpen}
+              aria-controls={accountMenuId}
+              aria-haspopup="menu"
+              onClick={() => {
+                if (isAccountMenuOpen) {
+                  closeAccountMenu(true);
+                  return;
+                }
+                openAccountMenu(0);
+              }}
+              onKeyDown={handleAccountTriggerKeyDown}
+            >
+              <span className="dashboard-account-avatar" aria-hidden="true">
+                {userName.slice(0, 1)}
+              </span>
+              <span className="dashboard-account-name max-w-36 truncate font-bold">
+                {userName}
+              </span>
+              <ChevronDown
+                size={16}
+                aria-hidden="true"
+                className={`dashboard-account-menu-chevron transition-transform duration-150 ease-out ${
+                  isAccountMenuOpen ? "rotate-180" : ""
+                }`}
               />
+            </button>
+
+            {isAccountMenuOpen ? (
+              <div
+                ref={accountMenuRef}
+                id={accountMenuId}
+                role="menu"
+                aria-label="계정 메뉴"
+                onKeyDown={handleAccountMenuKeyDown}
+                className="dashboard-account-menu dashboard-account-menu-open absolute left-0 right-auto top-full z-40 mt-1.5 origin-top rounded-2xl bg-white p-1.5 shadow-lg"
+              >
+                <button
+                  ref={(element) => {
+                    accountMenuItemRefs.current[0] = element;
+                  }}
+                  type="button"
+                  role="menuitem"
+                  className="dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset"
+                  onClick={openAccountSettings}
+                >
+                  <Settings size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
+                  설정
+                </button>
+                <button
+                  ref={(element) => {
+                    accountMenuItemRefs.current[1] = element;
+                  }}
+                  type="button"
+                  role="menuitem"
+                  aria-disabled={isPreview}
+                  title={isPreview ? "읽기 전용 미리보기에서는 로그아웃할 수 없습니다" : undefined}
+                  className={`dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset ${
+                    isPreview ? "cursor-not-allowed" : ""
+                  }`}
+                  onClick={() => {
+                    if (isPreview) {
+                      return;
+                    }
+                    closeAccountMenu();
+                    onLogout?.();
+                  }}
+                >
+                  <LogOut size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
+                  로그아웃
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="reference-sidebar-content flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            <div className="reference-sidebar-primary flex flex-col gap-1">
+              {dashboard.sidebarLinks.map((link) => (
+                <SidebarLink key={link.label} link={link} />
+              ))}
             </div>
-          </SidebarBody>
-        </Sidebar>
+
+            <SidebarProjectsSection
+              organizations={dashboard.organizations}
+              evaluationRequests={isPreview ? undefined : dashboard.dashboardData?.evaluationRequests}
+              selection={dashboard.sidebarSelection}
+              onSelectProject={dashboard.goToProject}
+              onSelectRecentPage={dashboard.goToRecentPage}
+              onCreateProject={dashboard.openOrganizationCreateModal}
+              onUpdateProject={dashboard.handleUpdateOrganizationModel}
+              onDeleteProject={dashboard.handleDeleteOrganizationModel}
+              onSelectPage={({ pageId }) => dashboard.goToSite(pageId)}
+              quickAnalysisResultsOverride={previewQuickAnalysisResults}
+              readOnly={isPreview}
+            />
+          </div>
+        </SidebarBody>
 
         <main
           ref={mainContentRef}

@@ -1,6 +1,5 @@
 @layer base {
   .bridge-dashboard {
-    /* Stage 1: Coral action → semantic action. */
     --dashboard-accent: var(--primary, #0071e3);
     /* Control radius (8px) — selected sidebar rows must not use pill / 9999px */
     --dashboard-sidebar-item-radius: 0.5rem;
@@ -77,7 +76,6 @@
   }
 
   .bridge-dashboard.theme-dark {
-    /* off-black dark palette (pure black canvas removed) */
     --dashboard-page-bg: var(--background, #111113);
     --dashboard-top-bg: var(--background, #111113);
     --dashboard-content-bg: var(--background, #111113);

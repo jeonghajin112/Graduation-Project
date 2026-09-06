@@ -11,11 +11,6 @@ export type QuickAnalysisResultRecord = {
   timestamp: number;
 };
 
-type QuickAnalysisRegistryPayload = {
-  version: typeof QUICK_ANALYSIS_REGISTRY_VERSION;
-  records: QuickAnalysisResultRecord[];
-};
-
 export type RecentAnalyzedPage = {
   pageId: number;
   pageName: string;
@@ -168,39 +163,6 @@ export function subscribeQuickAnalysisRegistry(listener: () => void): () => void
   return () => {
     registryListeners.delete(listener);
   };
-}
-
-export function recordQuickAnalysisResult(input: QuickAnalysisResultRecord): void {
-  const nextRecord = normalizeRegistryRecord(input);
-  if (!nextRecord) {
-    return;
-  }
-
-  const currentRecords = getQuickAnalysisRegistrySnapshot();
-  registrySnapshot = Object.freeze(
-    [
-      nextRecord,
-      ...currentRecords.filter(
-        (record) =>
-          record.projectId !== nextRecord.projectId || record.pageId !== nextRecord.pageId
-      )
-    ].slice(0, MAX_STORED_QUICK_ANALYSIS_RESULTS)
-  );
-
-  if (typeof window !== "undefined") {
-    const payload: QuickAnalysisRegistryPayload = {
-      version: QUICK_ANALYSIS_REGISTRY_VERSION,
-      records: [...registrySnapshot]
-    };
-
-    try {
-      window.localStorage.setItem(QUICK_ANALYSIS_REGISTRY_KEY, JSON.stringify(payload));
-    } catch {
-      // Keep the in-memory registry available when storage is blocked or full.
-    }
-  }
-
-  notifyRegistryListeners();
 }
 
 export function buildRecentAnalyzedPages({

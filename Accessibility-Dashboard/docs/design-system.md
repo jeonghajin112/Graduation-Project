@@ -46,8 +46,7 @@ light·dark·system에서 같은 정보를 제공한다. 문서 루트의 `.dark
 
 ## 기존 컴포넌트의 제한
 
-- Sidebar는 현재 영구 rail을 사용한다. deprecated `MobileSidebar`를 새 경로의 기준으로 삼지 않는다.
-- Stepper는 `asChild` 및 panel 연결에 제한이 있어 컴포넌트 사용만으로 완전한 tabs 동작이 보장되지 않는다.
+- Sidebar는 모든 화면 크기에서 영구 rail을 사용하며, `SidebarBody`로 렌더링한다.
 - 기본 차트 툴팁의 0값 표시와 분석 추이의 빈 슬롯은 별도로 확인해야 한다. 추이 오류는 [아키텍처의 현재 오류](architecture.md)에 기록되어 있다.
 - 일부 상태 패널에는 전용 색상이 남아 있다. 정리할 때 의미·포커스·알림 동작을 함께 보존한다.
 

@@ -67,7 +67,3 @@ export function getReplayIssueCarouselContext(
     slideCount: context.slideCount
   };
 }
-
-export function hasUsableIssueLocator(issue: IssueResultModel): boolean {
-  return getReplayIssuePathSteps(issue).length > 0;
-}
