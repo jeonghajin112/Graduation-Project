@@ -51,11 +51,13 @@ const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
 const modalAppearance = viteTest("verify-modal-appearance.mjs");
+const dashboardResponsiveLayout = viteTest("verify-dashboard-responsive-layout.mjs");
 
 const ci = [
   infrastructure,
   accessibility,
   modalAppearance,
+  dashboardResponsiveLayout,
   landingDesign,
   dashboardBootAccessibility,
   pollingCancel,

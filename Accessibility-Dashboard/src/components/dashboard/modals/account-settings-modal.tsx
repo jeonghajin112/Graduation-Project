@@ -59,7 +59,7 @@ export function AccountSettingsModal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="dashboard-modal-surface dashboard-modal-surface--split w-full max-w-2xl"
+        className="dashboard-modal-surface w-full max-w-2xl"
       >
         <div className="flex min-h-[20rem] flex-col sm:flex-row">
           <aside
