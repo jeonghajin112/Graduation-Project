@@ -1205,6 +1205,113 @@ async function verifyMetadataBeforeResultDetails(page) {
   assert.equal(await frame.locator(".replay-marker:not([hidden])").count(), 2);
 }
 
+async function verifyUnavailableIssueDescription(page) {
+  // This 165-character message matches the backend: description is the stored
+  // message and recommendation is null without a legacy suggestions= marker.
+  const description = "화면에서 배너 제목이 이전보다 낮은 단계로 표시됩니다. 스크린리더 사용자는 제목 목록으로 페이지를 탐색하므로 중간 단계를 건너뛰면 문서의 구조를 파악하기 어렵습니다. 관련 내용을 확인하고 페이지의 제목 계층을 순서대로 구성해 주세요. 권장사항: 제목은 h1 다음에 h2, h3 순서로 사용하세요.";
+  const detailPage = await page.context().browser().newPage();
+  const results = [];
+  try {
+    await installFixture(detailPage);
+    await detailPage.route("**/api/results/requests/501/issues", route =>
+      fulfillJson(route, issues.map(issue => issue.id === 9003
+        ? { ...issue, description, recommendation: null }
+        : issue)));
+    await detailPage.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+    const evidence = detailPage.getByRole("article", { name: "페이지 검사 화면" });
+    await waitForReplayReady(evidence);
+    await waitForUnavailableLocatorCount(evidence, 2);
+    for (const viewport of [{ width: 390, height: 668 }, { width: 1280, height: 720 }]) {
+      await detailPage.setViewportSize(viewport);
+      const card = detailPage.locator('.site-unavailable-locator-panel__issue[data-issue-id="9003"]');
+      const open = card.getByRole("button", { name: "문제 상세", exact: true });
+      const before = await card.evaluate(card => ({ height: card.getBoundingClientRect().height,
+        ids: [...card.parentElement.children].map(issue => issue.getAttribute("data-issue-id")) }));
+      await open.focus();
+      await detailPage.keyboard.press("Enter");
+      const dialog = detailPage.getByRole("dialog", { name: "문제 상세", exact: true });
+      await dialog.waitFor({ state: "visible" });
+      const explanation = dialog.getByRole("region", { name: "문제 설명", exact: true });
+      assert.equal(await explanation.count(), 1, "unavailable issues must offer their full explanation in the details dialog");
+      assert.equal(await explanation.locator("p").textContent(), description,
+        "the final remediation sentence must remain available when its card preview is clipped");
+      const body = dialog.getByRole("region", { name: "문제 상세 내용", exact: true });
+      await body.focus();
+      await detailPage.keyboard.press("Home");
+      const geometry = await explanation.locator("p").evaluate(message => {
+        const style = getComputedStyle(message);
+        return { horizontalOverflow: message.scrollWidth - message.clientWidth,
+          verticalOverflow: message.scrollHeight - message.clientHeight,
+          overflowY: style.overflowY, lineClamp: style.webkitLineClamp };
+      });
+      assert.ok(geometry.horizontalOverflow <= 1 && geometry.verticalOverflow <= 1,
+        `${viewport.width}px full issue description must wrap without clipping: ${JSON.stringify(geometry)}`);
+      assert.ok(!["hidden", "clip"].includes(geometry.overflowY) && ["none", "unset"].includes(geometry.lineClamp));
+      mkdirSync(outDir, { recursive: true });
+      await dialog.screenshot({ path: `${outDir}/issue-description-${viewport.width}x${viewport.height}.png` });
+      await detailPage.keyboard.press("End");
+      await detailPage.waitForFunction(() => {
+        const body = document.querySelector(".site-issue-location-dialog__body");
+        return body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+      });
+      assert.match(await dialog.getByRole("region", { name: "분석 당시 요소 경로" }).textContent(), /#missing-promotion-title/);
+      await detailPage.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      assert.equal(await open.evaluate(button => document.activeElement === button), true);
+      const after = await card.evaluate(card => ({ height: card.getBoundingClientRect().height,
+        ids: [...card.parentElement.children].map(issue => issue.getAttribute("data-issue-id")) }));
+      assert.deepEqual(after, before, "reading the explanation must preserve card size and the visible issue page");
+      results.push({ ...viewport, fullDescription: "PASS", keyboardScrollAndFocus: "PASS" });
+    }
+    const longDescription = `${description.repeat(12)}\n\n마지막 개선 안내: 제목 순서와 스크린리더 탐색을 확인하세요.`;
+    assert.ok(longDescription.length > 1600);
+    await detailPage.route("**/api/results/requests/501/issues", route =>
+      fulfillJson(route, issues.map(issue => issue.id === 9003
+        ? { ...issue, description: longDescription, recommendation: null }
+        : issue)));
+    await detailPage.setViewportSize({ width: 390, height: 668 });
+    await detailPage.reload({ waitUntil: "domcontentloaded" });
+    await waitForReplayReady(evidence);
+    await waitForUnavailableLocatorCount(evidence, 2);
+    await detailPage.locator('[data-issue-id="9003"]').getByRole("button", { name: "문제 상세", exact: true }).click();
+    const dialog = detailPage.getByRole("dialog", { name: "문제 상세", exact: true });
+    const message = dialog.getByRole("region", { name: "문제 설명", exact: true }).locator("p");
+    assert.equal(await message.textContent(), longDescription, "full details must not reuse the replay's 1600-character preview");
+    assert.equal(await message.evaluate(message => message.scrollHeight > message.clientHeight + 1), false);
+    const body = dialog.getByRole("region", { name: "문제 상세 내용", exact: true });
+    await body.focus();
+    await detailPage.keyboard.press("End");
+    await detailPage.waitForFunction(() => {
+      const body = document.querySelector(".site-issue-location-dialog__body");
+      return body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+    });
+    await detailPage.keyboard.press("Escape");
+    results.push({ longDescriptionLength: longDescription.length, fullDescription: "PASS", keyboardScrollAndFocus: "PASS" });
+    const suggestion = `${"쉬운 표현을 사용하고 문장을 짧게 나누세요. ".repeat(40)}개선 제안의 마지막 안내도 확인하세요.`;
+    assert.ok(suggestion.length > 600);
+    const aiDescription = ["text=어려운 안내 문장", 'flags=["어려운 어휘"]', `suggestions=${suggestion}`,
+      'llm_revision={"revised_text":"쉬운 안내 문장","reason":"읽기 쉽게 바꿨습니다.","model":"internal-model"}'].join("\n");
+    await detailPage.route("**/api/results/requests/501/issues", route =>
+      fulfillJson(route, issues.map(issue => issue.id === 9003
+        ? { ...issue, module: "text_difficulty", description: aiDescription,
+            recommendation: aiDescription.slice(aiDescription.indexOf("suggestions=") + "suggestions=".length) }
+        : issue)));
+    await detailPage.reload({ waitUntil: "domcontentloaded" });
+    await waitForReplayReady(evidence);
+    await waitForUnavailableLocatorCount(evidence, 2);
+    await detailPage.locator('[data-issue-id="9003"]').getByRole("button", { name: "문제 상세", exact: true }).click();
+    const aiMessage = await dialog.getByRole("region", { name: "문제 설명", exact: true }).textContent();
+    assert.ok(aiMessage.includes(suggestion), "local AI details must retain suggestions beyond the replay's 600-character field limit");
+    assert.match(aiMessage, /수정 예시\n쉬운 안내 문장/);
+    assert.doesNotMatch(aiMessage, /(?:text|flags|suggestions|llm_revision)=|internal-model/);
+    await detailPage.keyboard.press("Escape");
+    results.push({ aiSuggestionLength: suggestion.length, fullDescription: "PASS" });
+    return results;
+  } finally {
+    await detailPage.close();
+  }
+}
+
 async function verifyDesktop(page) {
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -1316,9 +1423,9 @@ async function verifyDesktop(page) {
   assert.match(await missingBannerCard.textContent(), /사라진 배너 제목 구조가 올바르지 않습니다/);
   assert.match(await missingBannerCard.textContent(), /현재 재현 DOM에는 이 요소가 없습니다/);
   assert.equal(await missingBannerCard.locator(".site-unavailable-locator-panel__reason").textContent(), "요소를 찾지 못함");
-  const locationButton = missingBannerCard.getByRole("button", { name: "위치 정보", exact: true });
+  const locationButton = missingBannerCard.getByRole("button", { name: "문제 상세", exact: true });
   await locationButton.click();
-  const locationDialog = page.getByRole("dialog", { name: "문제 위치 정보" });
+  const locationDialog = page.getByRole("dialog", { name: "문제 상세" });
   await locationDialog.waitFor({ state: "visible" });
   assert.equal(await missingBannerCard.count(), 1, "opening location details must not paginate the issue card");
   assert.match(await locationDialog.getByRole("region", { name: "분석 당시 요소 경로" }).textContent(), /#missing-promotion-title/);
@@ -1328,9 +1435,9 @@ async function verifyDesktop(page) {
     cells.map(cell => [cell.querySelector("dt").textContent, cell.querySelector("dd").textContent])),
     [["X", "48"], ["Y", "960"], ["너비", "320"], ["높이", "44"]]);
   assert.match(await locationDialog.textContent(), /문서 왼쪽 위 기준/);
-  const closeLocation = locationDialog.getByRole("button", { name: "위치 정보 닫기" });
+  const closeLocation = locationDialog.getByRole("button", { name: "문제 상세 닫기" });
   assert.deepEqual(await locationDialog.getByRole("button").evaluateAll(buttons =>
-    buttons.map(button => button.getAttribute("aria-label") ?? button.textContent.trim())), ["위치 정보 닫기"]);
+    buttons.map(button => button.getAttribute("aria-label") ?? button.textContent.trim())), ["문제 상세 닫기"]);
   mkdirSync(outDir, { recursive: true });
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
@@ -1340,7 +1447,7 @@ async function verifyDesktop(page) {
     await locationDialog.screenshot({ path: `${outDir}/desktop-issue-location-${colorScheme}.png` });
   }
   await page.emulateMedia({ colorScheme: "light" });
-  const locationBody = locationDialog.getByRole("region", { name: "저장된 위치 정보" });
+  const locationBody = locationDialog.getByRole("region", { name: "문제 상세 내용" });
   await closeLocation.focus();
   await page.keyboard.press("Shift+Tab");
   assert.equal(await locationBody.evaluate(body => document.activeElement === body), true);
@@ -1399,8 +1506,12 @@ async function verifyDesktop(page) {
   assert.match(await readingLevelCard.textContent(), /KWCAG 3\.1\.5/);
   assert.match(await readingLevelCard.textContent(), /읽기 수준/);
   assert.match(await readingLevelCard.textContent(), /건축학부 제70회 졸업 전시회 개최/);
-  await readingLevelCard.getByRole("button", { name: "위치 정보", exact: true }).click();
+  await readingLevelCard.getByRole("button", { name: "문제 상세", exact: true }).click();
   await locationDialog.waitFor({ state: "visible" });
+  const textAnalysisDescription = await locationDialog.getByRole("region", { name: "문제 설명", exact: true }).textContent();
+  assert.match(textAnalysisDescription, /분석 문장\n건축학부 제70회 졸업 전시회 개최/);
+  assert.match(textAnalysisDescription, /건축학부 졸업 전시회가 열립니다/);
+  assert.doesNotMatch(textAnalysisDescription, /(?:text|flags|suggestions|llm_revision)=|internal-model/);
   assert.match(await locationDialog.textContent(), /저장된 요소 경로가 없습니다/);
   assert.match(await locationDialog.textContent(), /저장된 HTML이 없습니다/);
   assert.match(await locationDialog.textContent(), /저장된 좌표가 없습니다/);
@@ -2654,27 +2765,27 @@ async function verifyMobile(page) {
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   await verifyNoExternalReplayControls(evidence, frame);
 
-  const mobileLocationButton = page.locator('[data-issue-id="9003"]').getByRole("button", { name: "위치 정보", exact: true });
+  const mobileLocationButton = page.locator('[data-issue-id="9003"]').getByRole("button", { name: "문제 상세", exact: true });
   await mobileLocationButton.click();
-  const mobileLocationDialog = page.getByRole("dialog", { name: "문제 위치 정보" });
+  const mobileLocationDialog = page.getByRole("dialog", { name: "문제 상세" });
   await mobileLocationDialog.waitFor({ state: "visible" });
   const locationGeometry = await mobileLocationDialog.evaluate(dialog => {
     const rect = dialog.getBoundingClientRect();
-    const close = dialog.querySelector('button[aria-label="위치 정보 닫기"]').getBoundingClientRect();
+    const close = dialog.querySelector('button[aria-label="문제 상세 닫기"]').getBoundingClientRect();
     return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
       closeTop: close.top, closeBottom: close.bottom, overflow: dialog.scrollWidth - dialog.clientWidth };
   });
   assert.ok(locationGeometry.left >= 0 && locationGeometry.right <= 320 && locationGeometry.top >= 0 && locationGeometry.bottom <= 568);
   assert.ok(locationGeometry.closeTop >= 0 && locationGeometry.closeBottom <= 568 && locationGeometry.overflow <= 1);
   await mobileLocationDialog.screenshot({ path: `${outDir}/mobile-issue-location.png` });
-  const mobileLocationBody = mobileLocationDialog.getByRole("region", { name: "저장된 위치 정보" });
+  const mobileLocationBody = mobileLocationDialog.getByRole("region", { name: "문제 상세 내용" });
   await mobileLocationBody.focus();
   await page.keyboard.press("End");
   await page.waitForFunction(() => {
     const body = document.querySelector(".site-issue-location-dialog__body");
     return body && body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
   });
-  await mobileLocationDialog.getByRole("button", { name: "위치 정보 닫기" }).click();
+  await mobileLocationDialog.getByRole("button", { name: "문제 상세 닫기" }).click();
   await mobileLocationDialog.waitFor({ state: "detached" });
 
   const facts = await page.evaluate(() => {
@@ -2861,6 +2972,7 @@ page.on("console", (message) => {
 
 try {
   await installFixture(page);
+  const issueDescription = verificationScope === "scale" ? null : await verifyUnavailableIssueDescription(page);
   if (verificationScope !== "scale") {
     await verifyMetadataBeforeResultDetails(page);
   }
@@ -2889,7 +3001,7 @@ try {
   }
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
-  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, desktop, responsive, capacityResize, mobile, statusFeedback }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, responsive, capacityResize, mobile, statusFeedback }, null, 2));
 } finally {
   await page.close();
   await browser.close();

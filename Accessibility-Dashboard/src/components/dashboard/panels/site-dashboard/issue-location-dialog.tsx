@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useDialogAccessibility } from "../../shared/use-dialog-accessibility";
 import { getReplayIssuePathSteps } from "./issue-locator";
 import { getLocatorExplanation } from "./locator-explanation";
-import { toPageReplayIssue } from "./page-replay-protocol";
+import { formatIssueDescription, toPageReplayIssue } from "./page-replay-protocol";
 import type { LocatorIssueState, RecentIssueRow } from "./types";
 
 export function IssueLocationDialog({ row, state, onClose }: {
@@ -17,6 +17,10 @@ export function IssueLocationDialog({ row, state, onClose }: {
   const descriptionId = useId();
   const dialogRef = useDialogAccessibility({ isOpen: true, onClose });
   const issue = row.issue;
+  const replayIssue = toPageReplayIssue(row);
+  // The card/replay message is a bounded preview. Details retain the full
+  // stored explanation while keeping text-analysis formatting consistent.
+  const description = formatIssueDescription(issue.message, row.analyzerType);
   const locator = issue.locator;
   const explanation = getLocatorExplanation(state);
   const pathSteps = locator?.pathSteps.length ? locator.pathSteps : getReplayIssuePathSteps(issue);
@@ -35,12 +39,16 @@ export function IssueLocationDialog({ row, state, onClose }: {
       <article ref={dialogRef} className="dashboard-modal-surface dashboard-modal-surface--split site-issue-location-dialog" role="dialog" aria-modal="true"
         aria-labelledby={headingId} aria-describedby={descriptionId} tabIndex={-1}>
         <header className="site-issue-location-dialog__header">
-          <div><h2 id={headingId} className="dashboard-modal-title">문제 위치 정보</h2><p>{toPageReplayIssue(row).title}</p></div>
-          <button type="button" className="dashboard-modal-button dashboard-modal-button--icon" aria-label="위치 정보 닫기" onClick={onClose}>
+          <div><h2 id={headingId} className="dashboard-modal-title">문제 상세</h2><p>{replayIssue.title}</p></div>
+          <button type="button" className="dashboard-modal-button dashboard-modal-button--icon" aria-label="문제 상세 닫기" onClick={onClose}>
             <X size={20} aria-hidden="true" />
           </button>
         </header>
-        <div className="site-issue-location-dialog__body" role="region" aria-label="저장된 위치 정보" tabIndex={0}>
+        <div className="site-issue-location-dialog__body" role="region" aria-label="문제 상세 내용" tabIndex={0}>
+          <section aria-label="문제 설명">
+            <h3>문제 설명</h3>
+            <p className="site-issue-location-dialog__description">{description}</p>
+          </section>
           <section className="site-issue-location-dialog__status" aria-label="현재 표시 상태">
             <Info size={18} aria-hidden="true" />
             <div>

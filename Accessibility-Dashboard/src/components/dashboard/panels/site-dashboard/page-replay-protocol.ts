@@ -319,6 +319,11 @@ export function parseLegacyTextAnalysisMessage(
   if (typeof value !== "string" || value.length > LEGACY_TEXT_ANALYSIS_INPUT_MAX_LENGTH) {
     return null;
   }
+  const detail = parseTextAnalysisMessage(value);
+  return detail ? boundTextAnalysisDetail(detail) : null;
+}
+
+function parseTextAnalysisMessage(value: string): ReplayTextAnalysisDetail | null {
   const message = value.replace(/\0/g, "").replace(/\r\n?/g, "\n").trim();
   if (!message.startsWith("text=")) return null;
 
@@ -339,10 +344,7 @@ export function parseLegacyTextAnalysisMessage(
     return null;
   }
 
-  const sourceText = toOptionalBoundedReplayText(
-    message.slice("text=".length, flagsIndex),
-    TEXT_ANALYSIS_LIMITS.sourceText
-  ) ?? "";
+  const sourceText = message.slice("text=".length, flagsIndex).trim();
   const flagsEnd = suggestionsIndex >= 0 ? suggestionsIndex : suggestionsBoundary;
   const flags = parseTextAnalysisFlags(
     message.slice(flagsIndex + flagsMarker.length, flagsEnd)
@@ -360,13 +362,13 @@ export function parseLegacyTextAnalysisMessage(
   if (revisionIndex >= 0 && !revision) return null;
   if (!sourceText && flags.length === 0 && suggestions.length === 0 && !revision) return null;
 
-  return boundTextAnalysisDetail({
+  return {
     kind: "text-analysis",
     sourceText,
     flags,
     suggestions,
     revision
-  });
+  };
 }
 
 function boundTextAnalysisDetail(
@@ -379,11 +381,13 @@ function boundTextAnalysisDetail(
     remaining -= normalized.length;
     return normalized;
   };
-  const sourceText = take(detail.sourceText);
-  const flags = detail.flags.map(take).filter(Boolean);
-  const suggestions = detail.suggestions.map(take).filter(Boolean);
-  const revisionText = take(detail.revision?.text ?? "");
-  const revisionReason = take(detail.revision?.reason ?? "");
+  const sourceText = take(detail.sourceText.slice(0, TEXT_ANALYSIS_LIMITS.sourceText));
+  const flags = normalizeTextAnalysisList(detail.flags, TEXT_ANALYSIS_LIMITS.flags, TEXT_ANALYSIS_LIMITS.flag)
+    .map(take).filter(Boolean);
+  const suggestions = normalizeTextAnalysisList(detail.suggestions, TEXT_ANALYSIS_LIMITS.suggestions, TEXT_ANALYSIS_LIMITS.suggestion)
+    .map(take).filter(Boolean);
+  const revisionText = take(detail.revision?.text.slice(0, TEXT_ANALYSIS_LIMITS.revisionText) ?? "");
+  const revisionReason = take(detail.revision?.reason.slice(0, TEXT_ANALYSIS_LIMITS.revisionReason) ?? "");
   return {
     kind: "text-analysis",
     sourceText,
@@ -399,11 +403,7 @@ function parseTextAnalysisFlags(value: string): string[] | null {
   try {
     const parsed: unknown = JSON.parse(value.trim());
     if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) return null;
-    return normalizeTextAnalysisList(
-      parsed,
-      TEXT_ANALYSIS_LIMITS.flags,
-      TEXT_ANALYSIS_LIMITS.flag
-    );
+    return normalizeTextAnalysisList(parsed);
   } catch {
     return null;
   }
@@ -422,21 +422,14 @@ function parseTextAnalysisSuggestions(value: string): string[] {
           if (isRecord(entry) && typeof entry.guide === "string") return entry.guide;
           return "";
         });
-        return normalizeTextAnalysisList(
-          guides,
-          TEXT_ANALYSIS_LIMITS.suggestions,
-          TEXT_ANALYSIS_LIMITS.suggestion
-        );
+        return normalizeTextAnalysisList(guides);
       }
     } catch {
       // The current backend stores concatenated guide text rather than JSON.
     }
   }
 
-  const suggestion = toOptionalBoundedReplayText(
-    normalized,
-    TEXT_ANALYSIS_LIMITS.suggestion
-  );
+  const suggestion = normalizeTextAnalysisText(normalized);
   return suggestion ? [suggestion] : [];
 }
 
@@ -452,14 +445,8 @@ function parseTextAnalysisRevision(
     ) {
       return null;
     }
-    const text = toOptionalBoundedReplayText(
-      typeof parsed.revised_text === "string" ? parsed.revised_text : "",
-      TEXT_ANALYSIS_LIMITS.revisionText
-    ) ?? "";
-    const reason = toOptionalBoundedReplayText(
-      typeof parsed.reason === "string" ? parsed.reason : "",
-      TEXT_ANALYSIS_LIMITS.revisionReason
-    ) ?? "";
+    const text = normalizeTextAnalysisText(typeof parsed.revised_text === "string" ? parsed.revised_text : "");
+    const reason = normalizeTextAnalysisText(typeof parsed.reason === "string" ? parsed.reason : "");
     return text || reason ? { text, reason } : null;
   } catch {
     return null;
@@ -468,22 +455,30 @@ function parseTextAnalysisRevision(
 
 function normalizeTextAnalysisList(
   values: unknown[],
-  maximumItems: number,
-  maximumLength: number
+  maximumItems = Infinity,
+  maximumLength = Infinity
 ): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
-    const normalized = toOptionalBoundedReplayText(
-      typeof value === "string" ? value : "",
-      maximumLength
-    );
+    const normalized = normalizeTextAnalysisText(typeof value === "string" ? value : "").slice(0, maximumLength);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     result.push(normalized);
     if (result.length >= maximumItems) break;
   }
   return result;
+}
+
+function normalizeTextAnalysisText(value: string): string {
+  return value.replace(/\0/g, "").trim();
+}
+
+// Local details share the legacy grammar, but are not an iframe payload and
+// must retain explanation text beyond the replay's field and total limits.
+export function formatIssueDescription(message: string, analyzerType?: AnalyzerType): string {
+  const detail = analyzerType === "AI_TEXT" ? parseTextAnalysisMessage(message) : null;
+  return detail ? formatTextAnalysisMessage(detail) : message.trim() || "상세 설명이 없습니다.";
 }
 
 function formatTextAnalysisMessage(detail: ReplayTextAnalysisDetail): string {

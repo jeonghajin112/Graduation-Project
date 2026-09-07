@@ -133,7 +133,7 @@ async function verifyScene(scene) {
     const viewer = page.frameLocator('iframe[data-report-mode="live"]');
     assert.ok(await viewer.locator("body").innerText(), "The live upstream page must contain real content.");
     assert.equal(await viewer.locator(".ap-live-popover:visible").count(), 0);
-    assert.equal(await page.getByRole("dialog", { name: "문제 위치 정보", exact: true }).isVisible(), false,
+    assert.equal(await page.getByRole("dialog", { name: "문제 상세", exact: true }).isVisible(), false,
       "The page-view recording must not open issue details.");
     assert.equal(await page.getByRole("complementary", { name: "최근 분석 추이", exact: true }).isVisible(), true);
     const pageInformation = page.getByRole("region", { name: "페이지 정보", exact: true });

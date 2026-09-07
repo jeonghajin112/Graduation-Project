@@ -8,6 +8,7 @@ import {
   REPLAY_VIEW_SCALE_MIN,
   REPLAY_VISUAL_WIDTH_MAX,
   classifyReplayIssueCategory,
+  formatIssueDescription,
   isMeaningfulLiveDocumentHealth,
   isValidReplayViewportMetrics,
   parsePageReplayMessage,
@@ -382,6 +383,44 @@ describe("replay viewport scale contract", () => {
 });
 
 describe("legacy AI text issue presentation", () => {
+  it("keeps full local explanations while retaining every replay field and total limit", () => {
+    const sourceText = `${"가".repeat(820)}원문 끝`;
+    const suggestion = `${"쉬운 표현을 사용하세요. ".repeat(50)}개선 제안 마지막 안내`;
+    const revisionText = `${"나".repeat(810)}수정 예시 끝`;
+    const revisionReason = `${"다".repeat(510)}수정 이유 끝`;
+    const message = [
+      `text=${sourceText}`,
+      `flags=${JSON.stringify(Array.from({ length: 14 }, (_, index) => `${index}: ${"라".repeat(325)}지적 끝`))}`,
+      `suggestions=${JSON.stringify([suggestion, "두 번째", "세 번째", "네 번째", "다섯 번째 안내"])}`,
+      `llm_revision=${JSON.stringify({ revised_text: revisionText, reason: revisionReason, model: "internal-model" })}`
+    ].join("\n");
+    const fullDescription = formatIssueDescription(message, "AI_TEXT");
+    for (const text of [sourceText, suggestion, revisionText, revisionReason, "13: ", "다섯 번째 안내"]) {
+      expect(fullDescription).toContain(text);
+    }
+    expect(fullDescription).not.toMatch(/(?:text|flags|suggestions|llm_revision)=|internal-model/);
+    const replay = parseLegacyTextAnalysisMessage(message)!;
+    expect(replay.sourceText).toHaveLength(800);
+    expect(replay.flags.length).toBeLessThanOrEqual(12);
+    expect(replay.flags.every(flag => flag.length <= 320)).toBe(true);
+    expect(replay.suggestions.length).toBeLessThanOrEqual(4);
+    expect(replay.suggestions.every(guide => guide.length <= 600)).toBe(true);
+    expect(replay.revision?.text.length ?? 0).toBeLessThanOrEqual(800);
+    expect(replay.revision?.reason.length ?? 0).toBeLessThanOrEqual(500);
+    expect(replay.sourceText.length + replay.flags.join("").length + replay.suggestions.join("").length
+      + (replay.revision?.text.length ?? 0) + (replay.revision?.reason.length ?? 0)).toBe(2400);
+    expect(replayIssue(message).message.length).toBeLessThanOrEqual(1600);
+  });
+
+  it("formats long local AI messages without exposing internal revision fields", () => {
+    const sourceText = `${"가".repeat(16_384)}긴 원문 끝`;
+    const message = `text=${sourceText}\nflags=[]\nllm_revision={"reason":"마지막 수정 이유","model":"internal-model"}`;
+    expect(formatIssueDescription(message, "AI_TEXT")).toContain(sourceText);
+    expect(formatIssueDescription(message, "AI_TEXT")).toContain("마지막 수정 이유");
+    expect(formatIssueDescription(message, "AI_TEXT")).not.toContain("internal-model");
+    expect(parseLegacyTextAnalysisMessage(message)).toBeNull();
+  });
+
   it("turns raw text, flags, suggestions, and revision fields into bounded sections", () => {
     const message = [
       "text=건축학부 제70회 졸업 전시회 개최",
@@ -439,6 +478,9 @@ describe("legacy AI text issue presentation", () => {
     expect(parseLegacyTextAnalysisMessage(malformedRevision)).toBeNull();
     expect(ruleIssue.textAnalysis).toBeNull();
     expect(ruleIssue.message).toContain("flags=");
+    expect(formatIssueDescription(malformed, "AI_TEXT")).toBe(malformed);
+    expect(formatIssueDescription(mixedFlags, "AI_TEXT")).toBe(mixedFlags);
+    expect(formatIssueDescription(malformedRevision, "AI_TEXT")).toBe(malformedRevision);
   });
 
   it("fails closed for duplicate section markers and oversized legacy payloads", () => {

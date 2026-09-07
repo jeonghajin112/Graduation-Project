@@ -1207,6 +1207,27 @@
 }
 
 @media (max-width: 767px) {
+  /* Let wrapped project names reserve space before the action and page cards. */
+  .bridge-dashboard.dashboard-project-detail .dashboard-top-zone {
+    height: auto;
+    min-height: var(--dashboard-top-height);
+    padding-top: calc(var(--dashboard-fixed-top) + var(--dashboard-control-size) - 2.25rem);
+    padding-bottom: 1rem;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-fixed-header {
+    position: static;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
+    position: static;
+    transform: none;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-title {
+    overflow-wrap: anywhere;
+  }
+
   .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
     position: static;
     display: flex;

@@ -186,7 +186,7 @@ export function UnavailableLocatorPanel({
                     className="site-unavailable-locator-panel__reveal site-unavailable-locator-panel__location"
                     onClick={() => onShowLocation(row.issue.id)}
                   >
-                    위치 정보
+                    문제 상세
                   </button>
                 </div>
                 <h4>{replayIssue.title}</h4>
