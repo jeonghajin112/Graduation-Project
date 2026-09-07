@@ -603,7 +603,7 @@ export function QuickAnalyzePanel({
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <div
-                className={`relative flex h-11 min-w-0 flex-1 items-center rounded-[10px] border transition-colors ${
+                className={`quick-analyze-input-shell relative flex h-11 min-h-11 min-w-0 flex-none items-center rounded-[10px] border transition-colors sm:flex-1 ${
                   hasError
                     ? isDarkMode
                       ? "border-[#ff453a] bg-[#2c2c2e] focus-within:border-[#ff453a]"
@@ -656,7 +656,7 @@ export function QuickAnalyzePanel({
                 onClick={() => {
                   void handleSubmit();
                 }}
-                className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-not-allowed disabled:bg-[#3a3a3c] disabled:text-[#8e8e93] sm:w-auto sm:min-w-[7.5rem]"
+                className="quick-analyze-submit inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-not-allowed disabled:bg-[#3a3a3c] disabled:text-[#8e8e93] sm:w-auto sm:min-w-[7.5rem]"
               >
                 {isBusy && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
                 <span>{isBusy ? "분석 중..." : "분석 시작"}</span>
