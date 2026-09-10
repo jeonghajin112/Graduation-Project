@@ -1,57 +1,15 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
+import { exportLiveReportBrowserFixture } from "./fixtures/live-report-browser-fixture.mjs";
 
-const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
-const dashboardDirectory = path.resolve(scriptDirectory, "..");
-const workspaceDirectory = path.resolve(dashboardDirectory, "..");
-const backendDirectory = path.join(workspaceDirectory, "ap-backend");
 const sessionId = "6b2d884e-a7f4-4f09-9776-688d08fe8912";
 const bridgeSecret = "test-bridge-secret";
 const challenge = "live_marker_browser_challenge_00000001";
-
-function runFixtureExporter(outputPath) {
-  const args = ["exportLiveReportBrowserFixture", "--no-daemon", "--console=plain"];
-  const executable = process.platform === "win32"
-    ? (process.env.ComSpec || "cmd.exe")
-    : path.join(backendDirectory, "gradlew");
-  const executableArgs = process.platform === "win32"
-    ? ["/d", "/s", "/c", `gradlew.bat ${args.join(" ")}`]
-    : args;
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, executableArgs, {
-      cwd: backendDirectory,
-      env: {
-        ...process.env,
-        AP_LIVE_REPORT_FIXTURE_OUTPUT: outputPath
-      },
-      shell: false,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let output = "";
-    child.stdout.on("data", (chunk) => {
-      output += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      output += chunk;
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`Live report fixture export failed (${code}).\n${output}`));
-    });
-  });
-}
 
 function createParentHtml() {
   return `<!doctype html>
@@ -160,7 +118,7 @@ try {
   const prebuiltFixture = process.env.AP_LIVE_REPORT_FIXTURE_PATH?.trim();
   const rewrittenHtml = prebuiltFixture
     ? await readFile(prebuiltFixture, "utf8")
-    : (await runFixtureExporter(fixturePath), await readFile(fixturePath, "utf8"));
+    : (await exportLiveReportBrowserFixture(fixturePath), await readFile(fixturePath, "utf8"));
   assert.match(rewrittenHtml, /data-ap-live-bridge="true"/);
 
   const parentHtml = createParentHtml();
@@ -1348,11 +1306,11 @@ try {
     window.__sendLiveCommand({ source: "accessibility-dashboard", type: "INIT_ISSUES", issues,
       selectedIssueId: null, markersVisible: true });
   }, contentIdentityIssues);
-  const waitForContentStatus = (issueId, status, reason = null) => page.waitForFunction(expected => {
+  const waitForContentStatus = (issueId, status, reason = null, timeout = 30_000) => page.waitForFunction(expected => {
     const latest = window.__liveEvents.filter(event => event?.type === "EVENT"
       && event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === expected.issueId).at(-1)?.payload;
     return latest?.status === expected.status && (expected.reason === null || latest.reason === expected.reason);
-  }, { issueId, status, reason });
+  }, { issueId, status, reason }, { timeout });
   for (const id of [601, 603, 604, 605, 606, 607]) {
     await waitForContentStatus(id, "VISIBLE");
     await frame.locator(`.ap-live-marker[data-issue-id="${id}"]`).waitFor({ state: "visible" });
@@ -1433,6 +1391,102 @@ try {
   }));
   await popover.locator(".ap-live-popover__title").filter({ hasText: "원문이 바뀌는 기사" }).waitFor();
   await originalContentNode.dispose();
+
+  // Open shadow trees are separate mutation-observation roots. No light-DOM
+  // mutation is allowed to accidentally rescue these asynchronous updates.
+  await frame.locator("html").evaluate(() => {
+    window.scrollTo(0, 0);
+    const main = document.querySelector("main");
+    main.replaceChildren();
+    main.style.cssText = "width:900px;height:1200px;padding:100px";
+    const host = document.createElement("div");
+    host.id = "shadow-locator-host";
+    host.style.cssText = "width:320px;height:160px";
+    host.attachShadow({ mode: "open" });
+    main.append(host);
+  });
+  const shadowIssue = withSourceText({
+    ...createIssue(701, "#shadow-locator-host", "Shadow DOM 문장", "HIGH", "text", "3.1.5"),
+    pathSteps: [{ context: "DOCUMENT", selector: "#shadow-locator-host" }, { context: "SHADOW_ROOT", selector: "#shadow-text" }]
+  }, "분석 당시 저장된 Shadow DOM 원문입니다");
+  const initializeLocatorIssues = issues => page.evaluate(issues => window.__sendLiveCommand({
+    source: "accessibility-dashboard", type: "INIT_ISSUES", issues, selectedIssueId: null, markersVisible: true
+  }), issues);
+  await initializeLocatorIssues([shadowIssue]);
+  await waitForContentStatus(701, "UNAVAILABLE", "SELECTOR_NOT_FOUND");
+  await frame.locator("html").evaluate(() => {
+    const target = document.createElement("p");
+    target.id = "shadow-text";
+    target.textContent = "분석 당시 저장된 Shadow DOM 원문입니다";
+    document.querySelector("#shadow-locator-host").shadowRoot.append(target);
+  });
+  await waitForContentStatus(701, "VISIBLE", null, 3_000);
+  const shadowText = await frame.locator("#shadow-text").elementHandle();
+  await shadowText.evaluate(element => { element.firstChild.data = "새로 바뀐 뉴스의 전혀 다른 내용입니다"; });
+  await waitForContentStatus(701, "UNAVAILABLE", "ELEMENT_CONTENT_CHANGED", 3_000);
+  await frame.locator('.ap-live-marker[data-issue-id="701"]').waitFor({ state: "detached" });
+  await shadowText.evaluate(element => { element.firstChild.data = "분석 당시 저장된 Shadow DOM 원문입니다"; });
+  await waitForContentStatus(701, "VISIBLE", null, 3_000);
+  await shadowText.evaluate(element => element.remove());
+  await waitForContentStatus(701, "UNAVAILABLE", "SELECTOR_NOT_FOUND", 3_000);
+  await shadowText.evaluate(element => document.querySelector("#shadow-locator-host").shadowRoot.append(element));
+  await waitForContentStatus(701, "VISIBLE", null, 3_000);
+  await shadowText.dispose();
+
+  await frame.locator("html").evaluate(() => {
+    const nested = document.createElement("div");
+    nested.id = "late-shadow-host";
+    document.querySelector("#shadow-locator-host").shadowRoot.replaceChildren(nested);
+  });
+  const nestedIssue = {
+    ...shadowIssue, id: 702,
+    pathSteps: [{ context: "DOCUMENT", selector: "#shadow-locator-host" },
+      { context: "SHADOW_ROOT", selector: "#late-shadow-host" }, { context: "SHADOW_ROOT", selector: "#shadow-text" }]
+  };
+  await initializeLocatorIssues([nestedIssue]);
+  await waitForContentStatus(702, "UNAVAILABLE", "SHADOW_ROOT_UNAVAILABLE");
+  await frame.locator("html").evaluate(() => document.querySelector("#shadow-locator-host").shadowRoot
+    .querySelector("#late-shadow-host").attachShadow({ mode: "open" }));
+  // The root is now available, but its target is still absent: even an
+  // UNAVAILABLE -> UNAVAILABLE transition must update the reason.
+  await waitForContentStatus(702, "UNAVAILABLE", "SELECTOR_NOT_FOUND", 3_000);
+  await frame.locator("html").evaluate(() => {
+    const target = document.createElement("p");
+    target.id = "shadow-text";
+    target.textContent = "분석 당시 저장된 Shadow DOM 원문입니다";
+    document.querySelector("#shadow-locator-host").shadowRoot.querySelector("#late-shadow-host").shadowRoot.append(target);
+  });
+  await waitForContentStatus(702, "VISIBLE", null, 3_000);
+  await frame.locator("#late-shadow-host").evaluate(host => host.remove());
+  await waitForContentStatus(702, "UNAVAILABLE", "SELECTOR_NOT_FOUND", 3_000);
+  await frame.locator("html").evaluate(() => {
+    const host = document.createElement("div"); host.id = "late-shadow-host";
+    const root = host.attachShadow({ mode: "open" });
+    const target = document.createElement("p"); target.id = "shadow-text";
+    target.textContent = "분석 당시 저장된 Shadow DOM 원문입니다"; root.append(target);
+    document.querySelector("#shadow-locator-host").shadowRoot.append(host);
+  });
+  await waitForContentStatus(702, "VISIBLE", null, 3_000);
+  await initializeLocatorIssues([]);
+  await frame.locator(".ap-live-marker").waitFor({ state: "detached" });
+  await frame.locator("#shadow-text").evaluate(element => { element.textContent = "더 이상 분석 대상이 아닌 내용"; });
+  assert.equal(await frame.locator(".ap-live-marker").count(), 0);
+
+  await frame.locator("html").evaluate(() => {
+    const target = document.createElement("p"); target.id = "changing-hidden-reason";
+    target.textContent = "숨김 원인이 바뀌는 요소"; target.style.display = "none";
+    document.querySelector("main").append(target);
+  });
+  await initializeLocatorIssues([createIssue(703, "#changing-hidden-reason", "숨김 이유", "HIGH", "rule", "5.1.1")]);
+  await waitForContentStatus(703, "HIDDEN_STATE", "DISPLAY_NONE");
+  await frame.locator("#changing-hidden-reason").evaluate(element => {
+    element.style.display = "block"; element.style.opacity = "0";
+  });
+  await waitForContentStatus(703, "HIDDEN_STATE", "ZERO_OPACITY", 3_000);
+  await frame.locator("#changing-hidden-reason").evaluate(element => {
+    element.style.opacity = "1"; element.hidden = true;
+  });
+  await waitForContentStatus(703, "HIDDEN_STATE", "HIDDEN_ATTRIBUTE", 3_000);
 
   const locationReasonCases = [
     { issue: { ...createIssue(401, "#unsupported-frame", "프레임 내부", "HIGH", "rule", "5.1.1"),

@@ -237,17 +237,6 @@ export function RenderedPageEvidenceCard({
   );
 
   const replayIssues = useMemo(() => rows.map(toPageReplayIssue), [rows]);
-  // Polling replaces row arrays even when their wire payload is unchanged. Reinitializing the
-  // replay for an identity-only change destroys marker DOM, keyboard focus, and its tooltip link.
-  const replayIssuesSignature = useMemo(() => JSON.stringify(replayIssues), [replayIssues]);
-  const replayIssueIds = useMemo(
-    () => new Set(replayIssues.map((issue) => issue.id)),
-    [replayIssues]
-  );
-  const fallbackIssue = replayIssues.find((issue) => issue.id === fallbackIssueId) ?? null;
-  const selectedVisibleIssueId = selectedIssueId !== null && replayIssueIds.has(selectedIssueId)
-    ? selectedIssueId
-    : null;
   const {
     frameKind: activeFrameKind,
     loadState: effectiveLoadState
@@ -257,6 +246,22 @@ export function RenderedPageEvidenceCard({
     liveSessionFailed: liveSession !== null && failedLiveSessionId === liveSession.sessionId,
     liveSessionLoadState
   });
+  // Keep every result for the unavailable list and local details. Only the
+  // viewer's bounded subset participates in commands, selection and replies.
+  const transmittedReplayIssues = useMemo(() => activeFrameKind === "live"
+    ? replayIssues.slice(0, LIVE_REPORT_ISSUE_LIMIT)
+    : replayIssues, [activeFrameKind, replayIssues]);
+  // Polling replaces row arrays even when their wire payload is unchanged. Reinitializing the
+  // replay for an identity-only change destroys marker DOM, keyboard focus, and its tooltip link.
+  const replayIssuesSignature = useMemo(() => JSON.stringify(transmittedReplayIssues), [transmittedReplayIssues]);
+  const replayIssueIds = useMemo(
+    () => new Set(transmittedReplayIssues.map((issue) => issue.id)),
+    [transmittedReplayIssues]
+  );
+  const fallbackIssue = transmittedReplayIssues.find((issue) => issue.id === fallbackIssueId) ?? null;
+  const selectedVisibleIssueId = selectedIssueId !== null && replayIssueIds.has(selectedIssueId)
+    ? selectedIssueId
+    : null;
   const locatorReport = useMemo<LocatorReport>(() => {
     const connected = effectiveLoadState === "ready" && replayConnectionState === "ready";
     const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : replayIssues.length;
@@ -668,7 +673,7 @@ export function RenderedPageEvidenceCard({
     postToReplay({
       source: DASHBOARD_REPLAY_SOURCE,
       type: "INIT_ISSUES",
-      issues: replayIssues,
+      issues: transmittedReplayIssues,
       selectedIssueId: selectedVisibleIssueId,
       markersVisible: true
     });
@@ -1282,4 +1287,3 @@ export function RenderedPageEvidenceCard({
     </article>
   );
 }
-import "@/styles/page-evidence-layout.css";

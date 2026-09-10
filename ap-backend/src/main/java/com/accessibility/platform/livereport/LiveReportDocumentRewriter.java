@@ -907,6 +907,7 @@ public class LiveReportDocumentRewriter {
                   const nativeComposedPath = Event.prototype.composedPath;
                   const nativeNodeContains = Node.prototype.contains;
                   const nativeGetRootNode = Node.prototype.getRootNode;
+                  const nativeAttachShadow = Element.prototype.attachShadow;
                   const nativeClosest = Element.prototype.closest;
                   const nativeScrollIntoView = Element.prototype.scrollIntoView;
                   const nativePortPostMessage = MessagePort.prototype.postMessage;
@@ -952,6 +953,7 @@ public class LiveReportDocumentRewriter {
                   let healthCheckTimer = 0;
                   let healthObserver = null;
                   let markerObserver = null;
+                  const markerShadowObservers = new Map();
                   let documentReadyObserver = null;
                   let lastDocumentHealth = null;
                   let meaningfulHealthSamples = 0;
@@ -2029,9 +2031,7 @@ public class LiveReportDocumentRewriter {
                       });
                     }, 650);
                   };
-                  const startMarkerObserver = () => {
-                    if (markerObserver || !NativeMutationObserver) return;
-                    markerObserver = new NativeMutationObserver(records => {
+                  const handleMarkerMutations = records => {
                       const externalRecords = records.filter(record => !layer.contains(record.target));
                       if (currentIssues.length > 0 && externalRecords.length > 0) {
                         if (externalRecords.some(record => (
@@ -2047,7 +2047,20 @@ public class LiveReportDocumentRewriter {
                         }
                         schedulePosition('preserve-root');
                       }
-                    });
+                  };
+                  const observeMarkerShadowRoot = root => {
+                    if (!NativeMutationObserver || markerShadowObservers.has(root)) return;
+                    const observer = new NativeMutationObserver(handleMarkerMutations);
+                    observer.observe(root, {childList:true, subtree:true, characterData:true, attributes:true});
+                    markerShadowObservers.set(root, observer);
+                  };
+                  const clearMarkerShadowObservers = () => {
+                    markerShadowObservers.forEach(observer => observer.disconnect());
+                    markerShadowObservers.clear();
+                  };
+                  const startMarkerObserver = () => {
+                    if (markerObserver || !NativeMutationObserver) return;
+                    markerObserver = new NativeMutationObserver(handleMarkerMutations);
                     markerObserver.observe(document.body || document.documentElement, {
                       childList:true, subtree:true, characterData:true, attributes:true
                     });
@@ -2135,7 +2148,7 @@ public class LiveReportDocumentRewriter {
                   const reportLocatorState = (issue, state) => {
                     if (!issue || !isIssueId(issue.id) || !state?.status) return;
                     const recoverable = state.status === 'HIDDEN_STATE' && state.recoverable === true;
-                    const signature = `${state.status}:${state.status === 'HIDDEN_STATE' ? recoverable : ''}`;
+                    const signature = `${state.status}:${state.reason || ''}:${state.status === 'HIDDEN_STATE' ? recoverable : ''}`;
                     if (locatorStatusSignatures.get(issue.id) === signature) return;
                     locatorStatusSignatures.set(issue.id, signature);
                     const event = {type:'LOCATOR_STATUS', issueId:issue.id, status:state.status};
@@ -2555,6 +2568,7 @@ public class LiveReportDocumentRewriter {
                     closePopover();
                     marked = [];
                     clearMarkerScrollRoots();
+                    clearMarkerShadowObservers();
                     layer.replaceChildren(highlight, popover);
                   };
                   const observeMarkerShadowScrollRoots = element => {
@@ -3250,6 +3264,9 @@ public class LiveReportDocumentRewriter {
                         else if (context === 'SHADOW_ROOT') {
                           if (!current || !current.shadowRoot) return {element:null, reason:'SHADOW_ROOT_UNAVAILABLE'};
                           root = current.shadowRoot;
+                          // A document observer does not cross a shadow boundary.
+                          // Observe each traversed root even if the target is not mounted yet.
+                          observeMarkerShadowRoot(root);
                         } else if (context === 'FRAME') {
                           return {element:null, reason:'FRAME_UNSUPPORTED'};
                         } else return {element:null, reason:'UNSUPPORTED_CONTEXT'};
@@ -3268,6 +3285,12 @@ public class LiveReportDocumentRewriter {
                   };
                   const reconcileIssueTargets = preferredIssueId => {
                     locatorTargetsNeedReconciliation = false;
+                    markerShadowObservers.forEach((observer, root) => {
+                      if (!root.host.isConnected) {
+                        observer.disconnect();
+                        markerShadowObservers.delete(root);
+                      }
+                    });
                     if (currentIssues.length === 0) return false;
                     const currentElementByIssueId = new Map();
                     marked.forEach(entry => {
@@ -3276,7 +3299,9 @@ public class LiveReportDocumentRewriter {
                     const changed = currentIssues.some(issue => {
                       if (!issue || !Number.isSafeInteger(issue.id) || issue.id <= 0) return false;
                       const previousElement = currentElementByIssueId.get(issue.id) || null;
-                      const resolvedElement = resolveIssue(issue).element || null;
+                      const resolved = resolveIssue(issue);
+                      const resolvedElement = resolved.element || null;
+                      if (!resolvedElement) reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolved.reason});
                       return resolvedElement !== previousElement;
                     });
                     if (!changed) return false;
@@ -3554,6 +3579,18 @@ public class LiveReportDocumentRewriter {
                       schedulePosition('preserve-root');
                     }
                   }, 1000);
+                  // Attaching a root to an existing host emits no DOM mutation.
+                  // Reuse the normal reconciliation queue; only resolved locator
+                  // paths register observers, never unrelated or closed roots.
+                  const attachShadowForMarkers = function(...args) {
+                    const root = nativeApply(nativeAttachShadow, this, args);
+                    if (root.mode === 'open' && currentIssues.length > 0) {
+                      locatorTargetsNeedReconciliation = true;
+                      schedulePosition('preserve-root');
+                    }
+                    return root;
+                  };
+                  if (typeof nativeAttachShadow === 'function') Element.prototype.attachShadow = attachShadowForMarkers;
                   const resetLiveConnection = () => {
                     connectionAccepted = false;
                     activeChallenge = null;
@@ -3576,6 +3613,10 @@ public class LiveReportDocumentRewriter {
                       if (markerPositionFrame) cancelAnimationFrame(markerPositionFrame);
                       if (markerObserver) {
                         markerObserver.disconnect(); markerObserver = null;
+                      }
+                      clearMarkerShadowObservers();
+                      if (Element.prototype.attachShadow === attachShadowForMarkers) {
+                        Element.prototype.attachShadow = nativeAttachShadow;
                       }
                       if (healthObserver) {
                         healthObserver.disconnect(); healthObserver = null;

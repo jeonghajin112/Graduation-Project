@@ -7,18 +7,19 @@ import {
   requestEvaluationTargetRescan
 } from "@/services/backend-api";
 import {
+  clearSiteCreateRecovery,
   normalizeSiteCreateAccessUrl,
   readSiteCreateRecovery,
   writeSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
-import type { StoredSiteCreateAttempt } from "@/services/site-create-recovery-storage";
+import type { PersistedSiteCreateAttempt, StoredSiteCreateAttempt } from "@/services/site-create-recovery-storage";
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
   EvaluationRequestModel
 } from "@/types/accessibility-domain";
 
-import { selectLatestEvaluationRequest } from "./evaluation-request-selection";
+import { selectLatestEvaluationRequest } from "@/services/evaluation-request-selection";
 import {
   REQUEST_RECONCILE_ATTEMPTS,
   REQUEST_RECONCILE_INTERVAL_MS,
@@ -35,6 +36,10 @@ import {
   runWithNetworkDeadline
 } from "./site-create-recovery-workflow";
 import type { DirectoryRecoveryToken } from "./use-dashboard-data";
+import {
+  persistAcceptedAnalysisRequest,
+  recordAcceptedAnalysisRequest
+} from "./analysis-request-acceptance";
 
 type TargetAnalysisRequestCheckpoint = {
   targetId: number;
@@ -50,6 +55,13 @@ type UseEvaluationTargetAnalysisRequestOptions = {
   dashboardData: DashboardViewModel | null;
   endDirectoryRecovery: (token: DirectoryRecoveryToken) => void;
 };
+
+function isPreparedRescan(attempt: PersistedSiteCreateAttempt): boolean {
+  // A rescan starts with an existing target. A partially completed page
+  // creation excludes its new target from this baseline and must be preserved.
+  return attempt.phase === "request-ready" &&
+    attempt.previousTargetIds.includes(attempt.targetId);
+}
 
 export function useEvaluationTargetAnalysisRequest({
   beginDirectoryRecovery,
@@ -170,7 +182,13 @@ export function useEvaluationTargetAnalysisRequest({
       let stored: StoredSiteCreateAttempt | null = null;
       if (persistedRecovery.kind === "valid") {
         const persistedTargetId = getPersistedTargetId(persistedRecovery.attempt);
-        if (persistedTargetId === targetId) {
+        if (isPreparedRescan(persistedRecovery.attempt)) {
+          // Older clients wrote this before the first GET. No POST is pending
+          // in request-ready, so release only that exact standalone preparation.
+          if (!clearSiteCreateRecovery(persistedRecovery.rawValue)) {
+            throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          }
+        } else if (persistedTargetId === targetId) {
           stored = {
             attempt: persistedRecovery.attempt,
             rawValue: persistedRecovery.rawValue
@@ -215,6 +233,7 @@ export function useEvaluationTargetAnalysisRequest({
         stored = requestReady;
       }
 
+      let preparedAttempt: Extract<PersistedSiteCreateAttempt, { phase: "request-ready" }> | null = null;
       if (stored === null) {
         const project = dashboardData?.organizations.find((organization) =>
           organization.evaluationTargets.some((target) => target.id === targetId)
@@ -227,28 +246,22 @@ export function useEvaluationTargetAnalysisRequest({
             "등록된 페이지 정보를 확인하지 못했습니다. 목록을 새로 고친 뒤 다시 시도해 주세요."
           );
         }
-        stored = writeSiteCreateRecovery(
-          {
-            version: 1,
-            attemptId: window.crypto.randomUUID(),
-            apiScope: API_BASE_URL,
-            projectId: project.id,
-            name: target.name,
-            accessUrl: normalizeSiteCreateAccessUrl(target.accessUrl),
-            previousTargetIds: project.evaluationTargets.map((candidate) => candidate.id),
-            startedAt: Date.now(),
-            phase: "request-ready",
-            targetId,
-            previousFailedRequestId: replaceRequestId
-          },
-          null
-        );
-        if (stored === null) {
-          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        }
+        preparedAttempt = {
+          version: 1,
+          attemptId: window.crypto.randomUUID(),
+          apiScope: API_BASE_URL,
+          projectId: project.id,
+          name: target.name,
+          accessUrl: normalizeSiteCreateAccessUrl(target.accessUrl),
+          previousTargetIds: project.evaluationTargets.map((candidate) => candidate.id),
+          startedAt: Date.now(),
+          phase: "request-ready",
+          targetId,
+          previousFailedRequestId: replaceRequestId
+        };
       }
 
-      if (stored.attempt.phase === "request-reconciling") {
+      if (stored?.attempt.phase === "request-reconciling") {
         let existingCheckpoint = targetAnalysisRequestCheckpointRef.current;
         if (
           existingCheckpoint === null ||
@@ -275,25 +288,17 @@ export function useEvaluationTargetAnalysisRequest({
         if (recoveredRequestId === null) {
           throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
         }
-        const pollStored = writeSiteCreateRecovery(
-          {
-            ...stored.attempt,
-            phase: "poll",
-            targetId,
-            knownRequestIds: stored.attempt.knownRequestIds,
-            requestId: recoveredRequestId
-          },
-          stored.rawValue
-        );
-        if (pollStored === null) {
-          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        }
-        existingCheckpoint.stored = pollStored;
-        existingCheckpoint.requestId = recoveredRequestId;
-        return recoveredRequestId;
+        return recordAcceptedAnalysisRequest(existingCheckpoint, {
+          attempt: stored.attempt,
+          expectedRawValue: stored.rawValue,
+          targetId,
+          knownRequestIds: stored.attempt.knownRequestIds,
+          requestId: recoveredRequestId
+        });
       }
 
-      if (stored.attempt.phase !== "request-ready") {
+      const readyAttempt = stored?.attempt ?? preparedAttempt;
+      if (readyAttempt?.phase !== "request-ready") {
         throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
       }
 
@@ -303,34 +308,16 @@ export function useEvaluationTargetAnalysisRequest({
       );
       if (
         currentTarget.status !== "ACTIVE" ||
-        currentTarget.organizationId !== stored.attempt.projectId ||
-        currentTarget.name !== stored.attempt.name ||
+        currentTarget.organizationId !== readyAttempt.projectId ||
+        currentTarget.name !== readyAttempt.name ||
         normalizeSiteCreateAccessUrl(currentTarget.accessUrl) !==
-          normalizeSiteCreateAccessUrl(stored.attempt.accessUrl)
+          normalizeSiteCreateAccessUrl(readyAttempt.accessUrl)
       ) {
         throw new UserFacingError(TARGET_ANALYSIS_PREFLIGHT_MESSAGE);
       }
 
       const effectiveFailedRequestId =
-        replaceRequestId ?? stored.attempt.previousFailedRequestId;
-      if (
-        replaceRequestId !== null &&
-        stored.attempt.previousFailedRequestId !== replaceRequestId
-      ) {
-        const updatedReady = writeSiteCreateRecovery(
-          {
-            ...stored.attempt,
-            phase: "request-ready",
-            targetId,
-            previousFailedRequestId: replaceRequestId
-          },
-          stored.rawValue
-        );
-        if (updatedReady === null) {
-          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        }
-        stored = updatedReady;
-      }
+        replaceRequestId ?? readyAttempt.previousFailedRequestId;
 
       releaseRequestCheckpoint(targetAnalysisRequestCheckpointRef.current);
 
@@ -352,6 +339,7 @@ export function useEvaluationTargetAnalysisRequest({
           (requestSignal) => fetchEvaluationRequests(requestSignal),
           signal
         );
+        signal?.throwIfAborted();
       } catch (error) {
         endDirectoryRecovery(recoveryToken);
         throw error;
@@ -371,19 +359,17 @@ export function useEvaluationTargetAnalysisRequest({
         ) ?? []
       );
       if (inFlightRequest) {
-        const pollStored = writeSiteCreateRecovery(
-          {
-            ...stored.attempt,
-            phase: "poll",
+        let pollStored;
+        try {
+          pollStored = persistAcceptedAnalysisRequest({
+            attempt: readyAttempt,
+            expectedRawValue: stored?.rawValue ?? null,
             targetId,
             knownRequestIds: [...knownRequestIds],
             requestId: inFlightRequest.id
-          },
-          stored.rawValue
-        );
-        endDirectoryRecovery(recoveryToken);
-        if (pollStored === null) {
-          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          });
+        } finally {
+          endDirectoryRecovery(recoveryToken);
         }
         targetAnalysisRequestCheckpointRef.current = {
           targetId,
@@ -398,13 +384,13 @@ export function useEvaluationTargetAnalysisRequest({
 
       const requestReconciling = writeSiteCreateRecovery(
         {
-          ...stored.attempt,
+          ...readyAttempt,
           phase: "request-reconciling",
           targetId,
           knownRequestIds: [...knownRequestIds],
           previousFailedRequestId: effectiveFailedRequestId
         },
-        stored.rawValue
+        stored?.rawValue ?? null
       );
       if (requestReconciling === null) {
         endDirectoryRecovery(recoveryToken);
@@ -430,25 +416,22 @@ export function useEvaluationTargetAnalysisRequest({
             requestId !== null && !knownRequestIds.has(requestId) ? requestId : null
         });
         if (commitOutcome.kind === "accepted") {
-          const pollStored = writeSiteCreateRecovery(
-            {
-              ...checkpoint.stored.attempt,
-              phase: "poll",
-              targetId,
-              knownRequestIds: checkpoint.knownRequestIds,
-              requestId: commitOutcome.value
-            },
-            checkpoint.stored.rawValue
-          );
-          if (pollStored === null) {
-            throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-          }
-          checkpoint.stored = pollStored;
-          checkpoint.requestId = commitOutcome.value;
-          return commitOutcome.value;
+          return recordAcceptedAnalysisRequest(checkpoint, {
+            attempt: checkpoint.stored.attempt,
+            expectedRawValue: checkpoint.stored.rawValue,
+            targetId,
+            knownRequestIds: checkpoint.knownRequestIds,
+            requestId: commitOutcome.value
+          });
         }
       } catch (error) {
         if (isDefinitiveMutationRejection(error)) {
+          if (readyAttempt.previousTargetIds.includes(targetId)) {
+            const cleared = clearSiteCreateRecovery(checkpoint.stored.rawValue);
+            releaseRequestCheckpoint(checkpoint);
+            if (!cleared) throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+            throw error;
+          }
           const requestReady = writeSiteCreateRecovery(
             {
               ...checkpoint.stored.attempt,
@@ -472,22 +455,13 @@ export function useEvaluationTargetAnalysisRequest({
       // does not start a duplicate scan for the same target.
       const recoveredRequestId = await reconcileCheckpoint(checkpoint);
       if (recoveredRequestId !== null) {
-        const pollStored = writeSiteCreateRecovery(
-          {
-            ...checkpoint.stored.attempt,
-            phase: "poll",
-            targetId,
-            knownRequestIds: checkpoint.knownRequestIds,
-            requestId: recoveredRequestId
-          },
-          checkpoint.stored.rawValue
-        );
-        if (pollStored === null) {
-          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        }
-        checkpoint.stored = pollStored;
-        checkpoint.requestId = recoveredRequestId;
-        return recoveredRequestId;
+        return recordAcceptedAnalysisRequest(checkpoint, {
+          attempt: checkpoint.stored.attempt,
+          expectedRawValue: checkpoint.stored.rawValue,
+          targetId,
+          knownRequestIds: checkpoint.knownRequestIds,
+          requestId: recoveredRequestId
+        });
       }
 
       throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);

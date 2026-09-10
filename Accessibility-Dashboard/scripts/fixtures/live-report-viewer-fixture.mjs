@@ -2,6 +2,12 @@ const VIEWER_LABEL = "b".repeat(40);
 
 export const TEST_LIVE_REPORT_VIEWER_ORIGIN = `http://${VIEWER_LABEL}.localhost:9090`;
 
+export function createTestLiveReportExpiration(previousExpiration = Date.now()) {
+  // A far-future date overflows the browser's setTimeout delay and causes an
+  // immediate renewal. Use a realistic lifetime, extending it on renewal.
+  return new Date(Math.max(Date.now(), previousExpiration) + 15 * 60 * 1000).toISOString();
+}
+
 export function createTestLiveReportSession(requestId, sessionSuffix = String(requestId)) {
   const sessionId = `fixture_${sessionSuffix}`;
   return {
@@ -10,7 +16,7 @@ export function createTestLiveReportSession(requestId, sessionSuffix = String(re
     viewerOrigin: TEST_LIVE_REPORT_VIEWER_ORIGIN,
     nonce: "n".repeat(32),
     bridgeSecret: "s".repeat(43),
-    expiresAt: "2099-12-31T23:59:59Z"
+    expiresAt: createTestLiveReportExpiration()
   };
 }
 

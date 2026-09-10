@@ -58,6 +58,7 @@ assert(entry, "The bundle report must contain an entry chunk.");
 
 const landingChunk = findChunkByModule("src/components/ui/hero-demo.tsx");
 const dashboardAppChunk = findChunkByModule("src/components/dashboard/dashboard-app-route.tsx");
+const productPreviewChunk = findChunkByModule("src/components/dashboard/dashboard-product-preview.tsx");
 const quickAnalyzeChunk = findChunkByModule(
   "src/components/dashboard/panels/quick-analyze-panel.tsx"
 );
@@ -87,6 +88,14 @@ const isMotionModule = (moduleId) =>
   moduleId.startsWith("node_modules/motion-dom/");
 const isChartModule = (moduleId) => moduleId.startsWith("node_modules/recharts/");
 
+// The interactive demo renders the shared surface without the live controller
+// or the creation-modal host. Check the actual production import closure.
+const previewClosure = collectStaticClosure([entry, productPreviewChunk]);
+assert(!closureContainsModule(previewClosure, (moduleId) =>
+  moduleId.endsWith("/shared/use-dashboard-controller.tsx") ||
+  moduleId.endsWith("/dashboard-mutation-modals.tsx")
+));
+
 assert(!closureContainsModule(routeClosures.landing, isDashboardModule));
 assert(!closureContainsModule(routeClosures.landing, isChartModule));
 assert(!closureContainsModule(routeClosures.analyze, isLandingModule));
@@ -103,6 +112,8 @@ const initialAppRoutes = Object.entries(routeClosures).filter(([route]) => route
 for (const modalChunk of modalChunks) {
   assert(modalChunk.isDynamicEntry, `${modalChunk.fileName} must remain a dynamic modal entry.`);
   const modalModuleIds = new Set(modalChunk.modules.map((module) => module.id));
+  assert(!closureContainsModule(previewClosure, (moduleId) => modalModuleIds.has(moduleId)),
+    `Closed modal ${modalChunk.fileName} must remain outside the preview's initial closure.`);
   for (const [route, chunks] of initialAppRoutes) {
     assert(
       !closureContainsModule(chunks, (moduleId) => modalModuleIds.has(moduleId)),

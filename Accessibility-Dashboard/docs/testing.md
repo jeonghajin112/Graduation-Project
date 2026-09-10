@@ -54,9 +54,19 @@ npm run test:run -- --suite scale
 
 함수명, 변수명, 소스의 `if`문, 특정 Promise 작성 형태를 정규식으로 고정하지 않는다. 회귀를 수정할 때는 기존 기대값의 사용자 의미를 확인하고, 실제 기능을 유지하는 검증으로 바꾼다.
 
+대시보드 표시 계약을 바꾸면 기존 접근성 검사에서 미리보기 API 미호출·실제 복구 데이터 비노출·테마 비저장과 메뉴·모달 포커스를 확인한다. 번들 검사는 프로덕션의 정적 import 경로를 따라 미리보기에 실제 controller·생성 모달 host와 닫힌 모달이 포함되지 않는지 확인한다.
+
+요청 접수 전환의 단위 검사는 실제 저장 검증 함수를 사용한다. 저장 예외·rawValue 충돌·쓰기 확인 실패에서 메모리 checkpoint가 먼저 갱신되지 않는지 확인하고, 브라우저 복구 검사는 중복 POST·새로고침·취소·중첩 lease의 사용자 결과를 확인한다.
+
+재분석 복구는 기본 CI의 `verify-rescan-recovery-isolation.mjs`에서 접수 전 실패·취소, 확정 거절, 응답 유실과 다른 작업의 저장값 보존을 함께 확인한다.
+
+라이브 리포트의 React–Java 경계는 replay suite의 `verify-live-report-boundaries.mjs`로 검사한다. 실제 rewriter 문서를 사용해 5,000개 전송 한도의 앞뒤와 10,001개 입력, 초과 문제의 상세 열람, 후속 선택 명령, 폼 차단 후 연결 유지를 확인한다. Shadow DOM 갱신과 미표시 이유 변경은 같은 suite의 marker 회귀가 담당한다.
+
 ## Fixture와 실제 서버
 
 `ci`, `browser`, `recovery`, `visual`, `scale`은 API를 가로채는 격리 suite다. 공용 fixture의 미등록 API 호출은 실패해야 한다. runner는 개발자 환경의 API base와 프록시 설정이 실제 DB로 연결되지 않도록 자식 프로세스 설정을 주입한다.
+
+기본 dashboard fixture와 page-evidence·rail 검사는 [api-route-fixture.mjs](../scripts/fixtures/api-route-fixture.mjs)에 HTTP method·path별 handler를 등록한다. 이 공용 경계가 요청 기록과 미등록 요청의 500 응답을 담당하며, 각 검사는 종료 전에 모든 fixture의 `assertIsolated()`를 호출한다. 데이터·지연 응답 gate·viewer HTML은 시나리오가 소유한다. 별도 `page.route`로 실패·재시도 응답을 덮어쓸 때도 method를 확인하고, 담당하지 않는 요청은 `route.fallback()`으로 공용 경계에 넘긴다.
 
 리포트 fixture는 `localhost:9090` 뷰어를 사용한다. 로컬 `.env`가 다른 뷰어 포트를 지정한 경우 테스트 명령을 실행하는 셸에서 `$env:VITE_LIVE_REPORT_VIEWER_BASE_URL = "http://localhost:9090"`을 설정한다. 실제 개발 서버의 `.env`는 변경하지 않는다.
 

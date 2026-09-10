@@ -318,6 +318,8 @@ class CVRunner:
         """
         return {
             "module": "cv_visual_contrast",
+            "status": "not_measured",
+            "reason": "NO_TEXT_DETECTED",
             "version": "1.0.0",
             "analyzed_at": datetime.now().isoformat(),
             "elapsed_seconds": 0,
@@ -327,7 +329,7 @@ class CVRunner:
                 "total_texts_analyzed": 0,
                 "pass_count": 0,
                 "fail_count": 0,
-                "pass_rate": 0,
+                "pass_rate": None,
                 "avg_contrast_ratio": 0,
                 "min_contrast_ratio": 0,
                 "worst_text": None,

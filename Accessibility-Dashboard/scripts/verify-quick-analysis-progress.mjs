@@ -1,6 +1,6 @@
 // Background analysis contract: accepting another URL never depends on viewing a result.
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
@@ -19,6 +19,7 @@ let resultReads = 0;
 let failingStatusId = null;
 const browser = await chromium.launch({ headless: true });
 const errors = [];
+const requestJournal = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1560, height: 950 } });
   page.setDefaultTimeout(8000);
@@ -29,6 +30,13 @@ try {
   });
   await page.route("**/api/**", async route => {
     const pathname = new URL(route.request().url()).pathname;
+    requestJournal.push({
+      pathname,
+      statuses: requests.map(({ id, status }) => ({ id, status })),
+      overviewUnavailable,
+      staleOverview,
+      failingStatusId
+    });
     if (pathname === "/api/dashboard/overview") {
       if (overviewUnavailable) return fulfillJson(route, null, { status: 503 });
       return fulfillJson(route, createDashboardOverview({
@@ -143,6 +151,24 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: "PASS", submissions: requests.length, resultReads, recoveredAfterReload: true }));
+} catch (error) {
+  const page = browser.contexts()[0]?.pages()[0];
+  const snapshot = await page?.evaluate(() => ({
+    url: location.pathname,
+    visibility: document.visibilityState,
+    statuses: [...document.querySelectorAll("[data-analysis-request-id]")].map(element => ({
+      requestId: element.getAttribute("data-analysis-request-id"),
+      status: element.getAttribute("data-analysis-status"),
+      visible: element.getBoundingClientRect().height > 0
+    })),
+    acknowledgements: Object.keys(localStorage)
+      .filter(key => key.startsWith("uni-access.analysis-acknowledged."))
+      .map(key => ({ key, value: localStorage.getItem(key) }))
+  })).catch(() => null);
+  const diagnostics = { snapshot, errors, requestJournal: requestJournal.slice(-24) };
+  await writeFile(new URL("failure.json", output), JSON.stringify(diagnostics, null, 2));
+  console.error(JSON.stringify(diagnostics));
+  throw error;
 } finally {
   await browser.close();
 }

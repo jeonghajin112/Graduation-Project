@@ -25,3 +25,10 @@ ALTER TABLE IF EXISTS issue_result
     ADD COLUMN IF NOT EXISTS locator_carousel_slide_index INTEGER;
 ALTER TABLE IF EXISTS issue_result
     ADD COLUMN IF NOT EXISTS locator_carousel_slide_count INTEGER;
+
+-- An OCR run with no samples or a failed CV run has no measured score. Preserve
+-- historical numeric zeros and leave their new status unknown (NULL).
+ALTER TABLE IF EXISTS score_result
+    ALTER COLUMN IF EXISTS cv_score DROP NOT NULL;
+ALTER TABLE IF EXISTS score_result
+    ADD COLUMN IF NOT EXISTS cv_status VARCHAR(20);

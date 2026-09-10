@@ -1,3 +1,4 @@
+import type { ProjectPageActions } from "../dashboard-surface.types";
 ﻿import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -13,7 +14,7 @@ import type {
 } from "@/types/accessibility-domain";
 
 import { PanelMessage, renderTargetTypeIcon } from "../shared/display";
-import { buildLatestEvaluationRequestByTargetId } from "../shared/evaluation-request-selection";
+import { buildLatestEvaluationRequestByTargetId } from "@/services/evaluation-request-selection";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 import { formatDateTime, mapScanStatus } from "../shared/utils";
 
@@ -92,20 +93,17 @@ export function OrganizationModelDetailPanel({
   evaluationRequests,
   scoreResults,
   isDarkMode,
-  onOpenCreateSiteModal,
   onSiteClick,
-  onDeleteEvaluationTargetModel,
-  readOnly = false
+  actions
 }: {
   organization: OrganizationModel;
   evaluationRequests: EvaluationRequestModel[];
   scoreResults: ScoreResult[];
   isDarkMode: boolean;
-  onOpenCreateSiteModal: () => void;
   onSiteClick: (siteId: number) => void;
-  onDeleteEvaluationTargetModel: (input: { projectId: number; siteId: number }) => Promise<void>;
-  readOnly?: boolean;
+  actions: ProjectPageActions | null;
 }) {
+  const readOnly = actions === null;
   const [siteSortConfig, setSiteSortConfig] = useState<{
     key: ProjectDetailSiteSortKey;
     direction: "asc" | "desc";
@@ -296,7 +294,7 @@ export function OrganizationModelDetailPanel({
   });
 
   const handleConfirmDeleteEvaluationTargetModel = async () => {
-    if (deleteEvaluationTargetLockRef.current || !deletingEvaluationTargetModel) {
+    if (!actions || deleteEvaluationTargetLockRef.current || !deletingEvaluationTargetModel) {
       return;
     }
 
@@ -309,7 +307,7 @@ export function OrganizationModelDetailPanel({
     setDeleteEvaluationTargetError("");
 
     try {
-      await onDeleteEvaluationTargetModel({
+      await actions.onDeleteEvaluationTargetModel({
         projectId,
         siteId: target.id
       });
@@ -342,7 +340,7 @@ export function OrganizationModelDetailPanel({
       <div className="dashboard-project-add-action absolute top-[calc(var(--dashboard-fixed-top)+var(--dashboard-control-size)+1rem)] z-50">
         <button
           type="button"
-          onClick={onOpenCreateSiteModal}
+          onClick={actions?.onOpenCreateSiteModal}
           disabled={readOnly}
           title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
           className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"

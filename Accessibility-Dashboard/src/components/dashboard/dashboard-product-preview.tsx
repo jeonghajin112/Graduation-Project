@@ -10,7 +10,8 @@ import {
   PRODUCT_DEMO_QUICK_ANALYSIS_RESULTS
 } from "./preview/product-demo-data";
 import { useDashboardTheme } from "./shared/use-dashboard-theme";
-import { DashboardSurface, type DashboardController } from "./sidebar-demo";
+import { DashboardSurface } from "./dashboard-surface";
+import type { DashboardView } from "./dashboard-surface.types";
 
 type PreviewSelection = {
   pageId: number | null;
@@ -20,10 +21,6 @@ type PreviewSelection = {
 const INITIAL_SELECTION: PreviewSelection = {
   pageId: null,
   projectId: PRODUCT_DEMO_ORGANIZATIONS[0]!.id
-};
-
-const unsupportedMutation = async () => {
-  throw new Error("읽기 전용 미리보기에서는 변경 작업을 실행할 수 없습니다.");
 };
 
 export function DashboardProductPreview() {
@@ -79,18 +76,11 @@ export function DashboardProductPreview() {
   };
 
   const dashboard = {
-    canDiscardOrganizationCreateRecovery: false,
     dashboardData: PRODUCT_DEMO_DASHBOARD,
     dashboardError: "",
-    goBackToProject: () => setSelection((current) => ({ ...current, pageId: null })),
     goToProject: (projectId: number) => {
       setMenu("projects");
       goToProject(projectId);
-    },
-    goToProjectsRoot: () => {
-      setMenu("projects");
-      setIsRecentSelection(false);
-      setSelection(INITIAL_SELECTION);
     },
     goToRecentPage: (pageId: number) => {
       setMenu("projects");
@@ -106,41 +96,17 @@ export function DashboardProductPreview() {
       setMenu("projects");
       goToSite(pageId);
     },
-    handleAnalysisAccepted: unsupportedMutation,
-    handleQuickAnalysisAccepted: unsupportedMutation,
-    handleCreateEvaluationTargetModel: unsupportedMutation,
-    handleRequestEvaluationTargetAnalysis: unsupportedMutation,
-    handleDeleteEvaluationTargetModel: unsupportedMutation,
-    handleCreateOrganizationModel: unsupportedMutation,
-    discardOrganizationCreateRecovery: () => undefined,
-    handleDeleteOrganizationModel: unsupportedMutation,
-    handleUpdateOrganizationModel: unsupportedMutation,
     headerTitle:
       menu === "analyze"
         ? "새 페이지 분석"
         : selectedEvaluationTargetModel?.name ?? selectedOrganizationModel.name,
-    hasPendingOrganizationCreate: false,
-    isCreatingOrganizationModel: false,
-    isOrganizationCreateRecoveryBlocked: false,
     isDarkMode,
     isDashboardLoading: false,
-    isOrganizationCreateOpen: false,
-    isSiteCreateOpen: false,
     menu,
-    newOrganizationModelName: "",
-    openOrganizationCreateModal: () => undefined,
-    openSiteCreateModal: () => undefined,
     organizations: PRODUCT_DEMO_ORGANIZATIONS,
-    projectCreateError: "",
-    refreshDashboard: async () => PRODUCT_DEMO_DASHBOARD,
     selectedEvaluationTargetModel,
     selectedOrganizationModel,
-    selectedOrganizationModelId: selectedOrganizationModel.id,
     sidebarSelection,
-    siteLatestScanLabel: "2026. 08. 11. 20:26",
-    setIsOrganizationCreateOpen: () => undefined,
-    setIsSiteCreateOpen: () => undefined,
-    setNewOrganizationModelName: () => undefined,
     setThemeMode,
     sidebarLinks: [
       {
@@ -155,13 +121,12 @@ export function DashboardProductPreview() {
       }
     ],
     themeMode
-  } as DashboardController;
+  } satisfies DashboardView;
 
   return (
     <DashboardSurface
       dashboard={dashboard}
-      isPreview
-      onLogout={() => undefined}
+      mode="preview"
       previewEvidenceByTargetId={PRODUCT_DEMO_EVIDENCE}
       previewQuickAnalysisResults={PRODUCT_DEMO_QUICK_ANALYSIS_RESULTS}
       userName="ADMIN"

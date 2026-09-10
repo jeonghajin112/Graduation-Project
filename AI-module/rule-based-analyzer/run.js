@@ -411,9 +411,17 @@ function toApiFormat(kwcagResult, scoreResult) {
   const unmappedViolations = kwcagResult.unmapped.violations.map(v => ({
     axe_rule_id: v.axeRuleId,
     description: v.description,
+    help: v.help,
     impact: v.impact,
     wcag_reference: v.wcagReference || 'WCAG 기준 미확인',
     node_count: (v.nodes || []).length,
+    nodes: (v.nodes || []).map(n => ({
+      selector: n.selector,
+      html: n.html,
+      impact: n.impact,
+      failure_summary: n.failureSummary,
+      locator: n.locator || null,
+    })),
   }));
 
   // ── 4) score: scorer 결과의 camelCase를 snake_case로 변환 ──

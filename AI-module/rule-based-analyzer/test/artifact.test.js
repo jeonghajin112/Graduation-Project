@@ -30,6 +30,38 @@ const {
   serializeDomReplayHtml,
 } = require('../artifact');
 
+test('keeps actual unmapped axe violations and their element evidence without changing the score', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.setContent(`<!doctype html><html lang="en"><head><title>Unmapped fixture</title>
+      <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+      </head><body><main><h1>Welcome</h1><p>A page with zoom disabled.</p></main></body></html>`);
+    const axe = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+    await enrichAxeResultsWithLocators(page, axe);
+    const converted = convert(axe);
+    const result = toApiFormat(converted, score(converted));
+    assert.equal(result.score.score, 99);
+    assert.equal(result.violations.length, 0);
+    assert.equal(result.unmapped_violations.length, 1);
+    const rule = result.unmapped_violations[0];
+    const originalRule = axe.violations.find(violation => violation.id === 'meta-viewport');
+    assert.equal(rule.axe_rule_id, 'meta-viewport');
+    assert.equal(rule.impact, originalRule.impact);
+    assert.equal(rule.help, originalRule.help);
+    assert.equal(rule.nodes.length, 1);
+    assert.equal(rule.nodes[0].selector, originalRule.nodes[0].target.join(' > '));
+    assert.equal(rule.nodes[0].html, originalRule.nodes[0].html);
+    assert.equal(rule.nodes[0].impact, originalRule.nodes[0].impact);
+    assert.deepEqual(rule.nodes[0].locator, originalRule.nodes[0].locator);
+    assert.equal(rule.nodes[0].failure_summary, originalRule.nodes[0].failureSummary);
+  } finally {
+    await browser.close();
+  }
+});
+
 test('normalizes axe target without flattening shadow-root selector arrays', () => {
   const target = ['iframe#outer', ['my-widget', 'button.submit']];
   assert.deepEqual(normalizeAxeTarget(target), target);

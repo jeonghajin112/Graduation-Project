@@ -651,10 +651,41 @@ def valid_cv_result(result: Any) -> bool:
     if not isinstance(result, dict) or not isinstance(result.get("violations"), list):
         return False
     summary = result.get("summary")
+    if not isinstance(summary, dict) or result.get("status") == "failed":
+        return False
+    sample_count = summary.get("total_texts_analyzed")
+    if "total_texts_analyzed" in summary:
+        if isinstance(sample_count, bool) or not isinstance(sample_count, int) or sample_count < 0:
+            return False
+        if sample_count == 0:
+            # Accept both the explicit empty result and legacy empty OCR output.
+            # Valid output does not necessarily contain a measured score.
+            pass_rate = summary.get("pass_rate")
+            return not result["violations"] and (
+                pass_rate is None or finite_numeric_score(pass_rate) == 0
+            )
     return (
-        isinstance(summary, dict)
+        result.get("status") != "not_measured"
         and finite_numeric_score(summary.get("pass_rate")) is not None
     )
+
+
+def cv_result_is_not_measured(result: Dict) -> bool:
+    """Use only after valid_cv_result; missing legacy counts remain unknown."""
+    return result["summary"].get("total_texts_analyzed") == 0
+
+
+def cv_result_payload(result: Any) -> Dict:
+    if not valid_cv_result(result):
+        return {"status": "failed", "message": "CV 분석 실패"}
+    if cv_result_is_not_measured(result):
+        return {
+            **result,
+            "status": "not_measured",
+            "reason": result.get("reason") or "NO_TEXT_DETECTED",
+            "summary": {**result["summary"], "pass_rate": None},
+        }
+    return {**result, "status": "success"}
 
 
 def calculate_total_score(rule_score: Optional[Dict],
@@ -703,7 +734,7 @@ def calculate_total_score(rule_score: Optional[Dict],
             weights["difficulty"] = WEIGHT_DIFFICULTY
 
     # CV 점수 추출 — 명암비 통과율(%)을 그대로 사용
-    if isinstance(cv_score, dict):
+    if valid_cv_result(cv_score) and not cv_result_is_not_measured(cv_score):
         summary = cv_score.get("summary", {})
         pass_rate = summary.get("pass_rate") if isinstance(summary, dict) else None
         numeric_score = finite_numeric_score(pass_rate)
@@ -801,9 +832,7 @@ def build_final_result(url, rule_result, difficulty_result,
             "text_suggestions": suggestion_result if valid_suggestion_result(suggestion_result) else {
                 "status": "failed", "message": "수정 제안 생성 실패"
             },
-            "cv_visual": cv_result if valid_cv_result(cv_result) else {
-                "status": "failed", "message": "CV 분석 실패"
-            },
+            "cv_visual": cv_result_payload(cv_result),
         },
     }
 

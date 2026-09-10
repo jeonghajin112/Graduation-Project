@@ -526,10 +526,16 @@ const parseEvaluationResultSummary: ApiResponseParser<EvaluationResultSummary> =
 
 const parseScoreResult: ApiResponseParser<ScoreResult> = (value, path) => {
   const fields = readFields(value, path);
+  const cvScore = fields.optional("cvScore", (field, fieldPath) =>
+    field === null ? null : parseScore(field, fieldPath));
+  const cvStatus = fields.optional("cvStatus", (field, fieldPath) =>
+    field === null ? null : parseEnumValue(field, fieldPath, ["SUCCESS", "NOT_MEASURED", "FAILED"]));
   return {
     id: fields.required("id", parsePositiveInteger),
     evaluationRequestId: fields.required("evaluationRequestId", parsePositiveInteger),
-    totalScore: fields.required("totalScore", parseScore)
+    totalScore: fields.required("totalScore", parseScore),
+    ...(cvScore !== undefined ? { cvScore } : {}),
+    ...(cvStatus !== undefined ? { cvStatus } : {})
   };
 };
 

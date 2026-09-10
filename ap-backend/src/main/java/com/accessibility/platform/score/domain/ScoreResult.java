@@ -32,14 +32,25 @@ public class ScoreResult extends BaseTimeEntity {
     @Column(nullable = false, precision = 5, scale = 2)
     private BigDecimal aiScore;
 
-    @Column(nullable = false, precision = 5, scale = 2)
+    @Column(precision = 5, scale = 2)
     private BigDecimal cvScore;
 
+    // Null status preserves uncertainty in historical rows; never reclassify an
+    // old numeric zero as an empty OCR result without its original evidence.
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private CvScoreStatus cvStatus;
+
     public ScoreResult(EvaluationRequest evaluationRequest, BigDecimal totalScore, BigDecimal ruleScore, BigDecimal aiScore, BigDecimal cvScore) {
+        this(evaluationRequest, totalScore, ruleScore, aiScore, cvScore, null);
+    }
+
+    public ScoreResult(EvaluationRequest evaluationRequest, BigDecimal totalScore, BigDecimal ruleScore, BigDecimal aiScore, BigDecimal cvScore, CvScoreStatus cvStatus) {
         this.evaluationRequest = evaluationRequest;
         this.totalScore = totalScore;
         this.ruleScore = ruleScore;
         this.aiScore = aiScore;
         this.cvScore = cvScore;
+        this.cvStatus = cvStatus;
     }
 }

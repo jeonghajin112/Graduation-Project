@@ -13,7 +13,7 @@ import type {
   ScoreResult
 } from "@/types/accessibility-domain";
 
-import { selectLatestEvaluationRequest } from "../shared/evaluation-request-selection";
+import { selectLatestEvaluationRequest } from "@/services/evaluation-request-selection";
 import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
@@ -27,6 +27,8 @@ import { UnavailableLocatorPanel } from "./site-dashboard/unavailable-locator-pa
 import { useEvaluationCaptureMetadata } from "./site-dashboard/use-evaluation-capture-metadata";
 import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
 import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
+
+import "@/styles/page-evidence-layout.css";
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;

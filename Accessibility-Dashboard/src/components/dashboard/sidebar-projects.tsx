@@ -1,3 +1,4 @@
+import type { SidebarProjectActions } from "./dashboard-surface.types";
 import { ChevronRight, FileText, Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
@@ -57,11 +58,8 @@ export function SidebarProjectsSection({
   onSelectProject,
   onSelectPage,
   onSelectRecentPage,
-  onCreateProject,
-  onUpdateProject,
-  onDeleteProject,
-  quickAnalysisResultsOverride,
-  readOnly = false
+  actions,
+  quickAnalysisResultsOverride
 }: {
   organizations: OrganizationModel[];
   evaluationRequests?: EvaluationRequestModel[];
@@ -69,12 +67,10 @@ export function SidebarProjectsSection({
   onSelectProject: (projectId: number) => void;
   onSelectPage?: (input: { projectId: number; pageId: number }) => void;
   onSelectRecentPage: (pageId: number) => void;
-  onCreateProject: () => void;
-  onUpdateProject: (input: { projectId: number; name: string; description: string }) => Promise<void>;
-  onDeleteProject: (projectId: number) => Promise<void>;
+  actions: SidebarProjectActions | null;
   quickAnalysisResultsOverride?: readonly QuickAnalysisResultRecord[];
-  readOnly?: boolean;
 }) {
+  const readOnly = actions === null;
   const projects = useMemo(() => organizations.filter((organization) => !organization.systemManaged), [organizations]);
   const projectMenuElements = useRef(new Map<number, HTMLDivElement>());
   const projectMenuTriggers = useRef(new Map<number, HTMLButtonElement>());
@@ -222,7 +218,7 @@ export function SidebarProjectsSection({
   };
 
   const handleSave = async () => {
-    if (saveLockRef.current || !editingProject) {
+    if (!actions || saveLockRef.current || !editingProject) {
       return;
     }
 
@@ -239,7 +235,7 @@ export function SidebarProjectsSection({
     setIsSaving(true);
     setEditError("");
     try {
-      await onUpdateProject({
+      await actions.onUpdateProject({
         projectId: project.id,
         name,
         description: project.description
@@ -261,7 +257,7 @@ export function SidebarProjectsSection({
   };
 
   const handleDelete = async () => {
-    if (deleteLockRef.current || !deletingProject) {
+    if (!actions || deleteLockRef.current || !deletingProject) {
       return;
     }
 
@@ -272,7 +268,7 @@ export function SidebarProjectsSection({
     setIsDeleting(true);
     setDeleteError("");
     try {
-      await onDeleteProject(project.id);
+      await actions.onDeleteProject(project.id);
       if (activeDeleteOperationIdRef.current === operationId) {
         setDeletingProject(null);
       }
@@ -318,7 +314,7 @@ export function SidebarProjectsSection({
         <p className={SIDEBAR_SECTION_HEADING}>프로젝트</p>
         <button
           type="button"
-          onClick={onCreateProject}
+          onClick={actions?.onCreateProject}
           disabled={readOnly}
           className="sidebar-tree-add ml-auto inline-flex shrink-0 items-center justify-center transition disabled:cursor-not-allowed"
           aria-label="프로젝트 추가"

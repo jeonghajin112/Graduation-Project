@@ -4,8 +4,10 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { installApiRouteFixture } from "./fixtures/api-route-fixture.mjs";
 import {
   TEST_LIVE_REPORT_VIEWER_ORIGIN,
+  createTestLiveReportExpiration,
   createTestLiveReportSession,
   createTestLiveReportViewerHtml
 } from "./fixtures/live-report-viewer-fixture.mjs";
@@ -188,7 +190,6 @@ const liveViewerHtml = createTestLiveReportViewerHtml({
 
 const overview = createDashboardOverview({
   organizations: [organization],
-  organizations: [organization],
   evaluationTargets: [target],
   evaluationRequests: [request],
   resultSummaries: [summary],
@@ -214,23 +215,13 @@ const overview = createDashboardOverview({
   }]
 });
 
-const requestLog = [];
-
-function payloadFor(pathname, fixtureTarget = target) {
-  if (pathname === "/api/requests") return [request];
-  if (pathname === "/api/organizations") return [organization];
-  if (pathname === "/api/organizations/1/evaluation-targets") return [fixtureTarget];
-  if (pathname === "/api/results/requests/501/summary") return summary;
-  if (pathname === "/api/results/requests/501/issues") return issues;
-  if (pathname === "/api/results/requests/501/capture-metadata") return captureMetadata;
-  if (pathname === "/api/targets/101") return fixtureTarget;
-  return [];
-}
+const apiFixtures = [];
 
 async function installFixture(
   page,
   { faviconUrl = target.faviconUrl, liveAvailable = true } = {}
 ) {
+  let fixtureSession = liveSession;
   const hasFaviconOverride = faviconUrl !== target.faviconUrl;
   const fixtureTarget = hasFaviconOverride ? { ...target, faviconUrl } : target;
   const fixtureOverview = hasFaviconOverride
@@ -245,24 +236,26 @@ async function installFixture(
       }
     : overview;
 
-  await page.route("**/api/**", async (route) => {
-    const requestUrl = new URL(route.request().url());
-    const pathname = requestUrl.pathname;
-    requestLog.push(route.request().method() + " " + pathname);
-    if (requestUrl.origin === TEST_LIVE_REPORT_VIEWER_ORIGIN) {
-      await route.fulfill({ status: 200, contentType: "text/html", body: liveViewerHtml });
-      return;
-    }
-    if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
-      await fulfillJson(route, fixtureOverview);
-      return;
-    }
-    if (route.request().method() === "POST" && pathname === "/api/results/requests/501/live-session") {
-      await fulfillJson(route, liveAvailable ? liveSession : null);
-      return;
-    }
-    await fulfillJson(route, payloadFor(pathname, fixtureTarget));
-  });
+  const fixture = await installApiRouteFixture(page, [
+    ...[
+      ["/api/dashboard/overview", fixtureOverview],
+      ["/api/requests", [request]],
+      ["/api/organizations", [organization]],
+      ["/api/organizations/1/evaluation-targets", [fixtureTarget]],
+      ["/api/results/requests/501/summary", summary],
+      ["/api/results/requests/501/issues", issues],
+      ["/api/results/requests/501/capture-metadata", captureMetadata],
+      ["/api/targets/101", fixtureTarget]
+    ].map(([pathname, payload]) => ({ method: "GET", pathname, handle: (route) => fulfillJson(route, payload) })),
+    { method: "POST", pathname: "/api/results/requests/501/live-session", handle: (route) => fulfillJson(route, liveAvailable ? fixtureSession : null) },
+    { method: "POST", pathname: `/api/results/requests/501/live-session/${liveSession.sessionId}/renew`, handle: (route) => {
+      fixtureSession = { ...fixtureSession, expiresAt: createTestLiveReportExpiration(Date.parse(fixtureSession.expiresAt)) };
+      return fulfillJson(route, fixtureSession);
+    } },
+    { method: "GET", pathname: new URL(liveSession.runtimeUrl).pathname, origin: TEST_LIVE_REPORT_VIEWER_ORIGIN,
+      handle: (route) => route.fulfill({ status: 200, contentType: "text/html", body: liveViewerHtml }) }
+  ]);
+  apiFixtures.push(fixture);
 }
 
 async function readPageInformationFaviconPresentation(page) {
@@ -419,7 +412,7 @@ try {
     }));
     throw new Error(
       "evidence card never appeared: " +
-        JSON.stringify({ diagnostics, requests: requestLog.slice(0, 40), pageErrors })
+        JSON.stringify({ diagnostics, requests: apiFixtures.flatMap((fixture) => fixture.journal).slice(0, 40), pageErrors })
     );
   }
 
@@ -719,6 +712,7 @@ try {
   assert.deepEqual(pageErrors, [], "the page must render without runtime errors");
   const faviconPresentation = await verifyPageInformationFaviconPresentation(browser);
   const liveUnavailable = await verifyRailWithoutLiveSession(browser);
+  apiFixtures.forEach((fixture) => fixture.assertIsolated());
   console.log(JSON.stringify({
     result: "PASS",
     liveUnavailable,

@@ -116,12 +116,62 @@ async function verify(browser, kind, mode) {
   }
 }
 
+async function verifyDeletePreservesCurrentRoute(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  const project = id => ({ id, name: `Navigation project ${id}`, type: "ETC", homepageUrl: null,
+    description: "", status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp });
+  let organizations = [project(1), project(2)];
+  let releasePatch;
+  const patchGate = new Promise(resolve => { releasePatch = resolve; });
+  let notifyPatch;
+  const patchSeen = new Promise(resolve => { notifyPatch = resolve; });
+  let patches = 0;
+  const unknown = [];
+  try {
+    await page.route("**/api/**", async route => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
+        return fulfillJson(route, createDashboardOverview({ organizations }));
+      }
+      if (request.method() === "PATCH" && pathname === "/api/organizations/1/deactivate") {
+        patches++;
+        notifyPatch();
+        await patchGate;
+        organizations = [project(2)];
+        return fulfillJson(route, null);
+      }
+      unknown.push(`${request.method()} ${pathname}`);
+      await fulfillJson(route, null, { status: 500 });
+    });
+    await page.goto(`${baseUrl}/projects/2`, { waitUntil: "domcontentloaded" });
+    await page.locator("aside").getByRole("button", { name: "Navigation project 1", exact: true }).click();
+    await page.waitForURL("**/projects/1");
+    await page.locator("aside").getByRole("button", { name: "Navigation project 1", exact: true }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "삭제", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "프로젝트 제거", exact: true });
+    await dialog.getByRole("button", { name: "네", exact: true }).click();
+    await patchSeen;
+    await page.goBack();
+    await page.waitForURL("**/projects/2");
+    releasePatch();
+    await dialog.waitFor({ state: "hidden" });
+    await page.getByRole("heading", { level: 1, name: "Navigation project 2", exact: true }).waitFor();
+    await page.locator("aside").getByRole("button", { name: "Navigation project 1", exact: true }).waitFor({ state: "detached" });
+    assert.equal(new URL(page.url()).pathname, "/projects/2", "late deletion must preserve the page selected while waiting");
+    assert.equal(patches, 1);
+    assert.deepEqual(unknown, []);
+    console.log("PASS project-delete: preserve current route after browser back");
+  } finally { releasePatch(); await page.close(); }
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   for (const kind of ["edit", "project-delete", "page-delete"]) {
     for (const mode of ["already-committed", "late-commit"]) await verify(browser, kind, mode);
   }
   await verify(browser, "page-delete", "lookup-stalled");
+  await verifyDeletePreservesCurrentRoute(browser);
 } finally {
   await browser.close();
 }

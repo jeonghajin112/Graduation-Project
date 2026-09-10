@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import { installApiRouteFixture } from "./api-route-fixture.mjs";
 
 const timestamp = "2026-08-20T10:00:00.000Z";
 
@@ -111,63 +111,21 @@ export async function installDashboardApiFixture(page) {
     resultSummaries: [summary],
     scoreResults: [score]
   });
-  const journal = [];
-  const unexpectedRequests = [];
-
-  await page.route("**/api/**", async (route) => {
-    const browserRequest = route.request();
-    const requestUrl = new URL(browserRequest.url());
-    const pathname = requestUrl.pathname;
-    const method = browserRequest.method();
-    journal.push({ method, pathname, search: requestUrl.search });
-
-    if (method === "GET" && pathname === "/api/dashboard/overview") {
-      await fulfillJson(route, overview);
-      return;
-    }
-
-    if (method === "GET" && pathname === `/api/results/requests/${request.id}/issues`) {
-      await fulfillJson(route, []);
-      return;
-    }
-
-    if (method === "GET" && pathname === `/api/results/requests/${request.id}/capture-metadata`) {
-      await fulfillJson(route, captureMetadata);
-      return;
-    }
-
-    if (method === "POST" && pathname === `/api/results/requests/${request.id}/live-session`) {
-      await fulfillJson(route, null);
-      return;
-    }
-
-    const requestLabel = `${method} ${pathname}${requestUrl.search}`;
-    unexpectedRequests.push(requestLabel);
-    await route.fulfill({
-      status: 500,
-      contentType: "application/json",
-      body: JSON.stringify({ success: false, data: null, message: `Unexpected fixture request: ${requestLabel}` })
-    });
-  });
+  const routing = await installApiRouteFixture(page, [
+    { method: "GET", pathname: "/api/dashboard/overview", handle: (route) => fulfillJson(route, overview) },
+    { method: "GET", pathname: `/api/results/requests/${request.id}/issues`, handle: (route) => fulfillJson(route, []) },
+    { method: "GET", pathname: `/api/results/requests/${request.id}/capture-metadata`, handle: (route) => fulfillJson(route, captureMetadata) },
+    { method: "POST", pathname: `/api/results/requests/${request.id}/live-session`, handle: (route) => fulfillJson(route, null) }
+  ]);
 
   return {
-    journal,
+    ...routing,
     captureMetadata,
     organization,
     overview,
     request,
     score,
     summary,
-    target,
-    countRequests({ method, pathname }) {
-      return journal.filter(
-        (entry) =>
-          (method === undefined || entry.method === method) &&
-          (pathname === undefined || entry.pathname === pathname)
-      ).length;
-    },
-    assertIsolated() {
-      assert.deepEqual(unexpectedRequests, [], "The dashboard fixture received an undeclared API request");
-    }
+    target
   };
 }

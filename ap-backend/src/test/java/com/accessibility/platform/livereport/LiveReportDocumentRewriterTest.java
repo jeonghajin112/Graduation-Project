@@ -139,7 +139,10 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).doesNotContain("carousel.slide.click(");
         assertThat(rewritten).doesNotContain("carousel.slide.dispatchEvent(");
         assertThat(rewritten).contains("const reconcileIssueTargets = preferredIssueId =>");
-        assertThat(rewritten).contains("const resolvedElement = resolveIssue(issue).element || null");
+        // Target changes and reason-only changes are exercised against this
+        // generated bridge in verify-live-report-markers.mjs.
+        assertThat(rewritten).contains("const resolved = resolveIssue(issue)");
+        assertThat(rewritten).contains("const resolvedElement = resolved.element || null");
         assertThat(rewritten).contains("if (reconcileIssueTargets(issueId)) requestVersion = focusRequestVersion");
         assertThat(rewritten).contains("const locatorStateOnlyAttributes = new Set([");
         assertThat(rewritten).contains("!locatorStateOnlyAttributes.has(String(record.attributeName || '').toLowerCase())");
@@ -227,9 +230,10 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("position(scheduledMode)");
         assertThat(rewritten).contains("new MutationObserver(records =>");
         assertThat(rewritten).contains("const externalRecords = records.filter(record => !layer.contains(record.target))");
-        int markerObserverIndex = rewritten.indexOf("markerObserver = new NativeMutationObserver(records =>");
-        int markerPreserveIndex = rewritten.indexOf("schedulePosition('preserve-root')", markerObserverIndex);
-        assertThat(markerObserverIndex).isGreaterThanOrEqualTo(0).isLessThan(markerPreserveIndex);
+        int markerHandlerIndex = rewritten.indexOf("const handleMarkerMutations = records =>");
+        int markerPreserveIndex = rewritten.indexOf("schedulePosition('preserve-root')", markerHandlerIndex);
+        assertThat(markerHandlerIndex).isGreaterThanOrEqualTo(0).isLessThan(markerPreserveIndex);
+        assertThat(rewritten).contains("markerObserver = new NativeMutationObserver(handleMarkerMutations)");
         assertThat(rewritten).contains("healthObserver = new NativeMutationObserver(() =>");
         assertThat(rewritten).contains("startMarkerObserver()");
         assertThat(rewritten).contains("new ResizeObserver(() => schedulePosition('preserve-root'))");

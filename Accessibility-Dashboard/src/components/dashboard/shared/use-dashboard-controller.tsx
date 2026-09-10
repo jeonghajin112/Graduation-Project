@@ -242,11 +242,10 @@ export function useDashboardController({
         isApplied: (snapshot) => !snapshot.organizations.some((project) => project.id === projectId)
       });
 
-      if (routeState.selectedOrganizationModelId === projectId) {
-        navigate(APP_HOME_PATH, { replace: true });
-      }
+      // The route-validation effect above uses the current selection after the
+      // refresh. A late deletion must not replace a page opened while waiting.
     },
-    [applyDirectoryMutation, navigate, routeState.selectedOrganizationModelId]
+    [applyDirectoryMutation]
   );
 
   const handleDeleteEvaluationTargetModel = useCallback(

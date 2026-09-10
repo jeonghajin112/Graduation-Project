@@ -194,6 +194,12 @@ export type PageReplayToDashboardMessage =
       type: "LINK_BLOCKED";
       documentToken: string;
       href?: string;
+    }
+  | {
+      source: typeof PAGE_REPLAY_SOURCE;
+      type: "FORM_BLOCKED";
+      documentToken: string;
+      method: "GET" | "POST" | "DIALOG";
     };
 
 export type LiveDocumentHealthMessage = Extract<
@@ -660,6 +666,20 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
       status: value.status,
       ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
       ...(typeof value.recoverable === "boolean" ? { recoverable: value.recoverable } : {})
+    };
+  }
+
+  if (
+    value.type === "FORM_BLOCKED" &&
+    hasExactOwnKeys(value, ["source", "type", "documentToken", "method"]) &&
+    isDocumentToken(value.documentToken) &&
+    (value.method === "GET" || value.method === "POST" || value.method === "DIALOG")
+  ) {
+    return {
+      source: PAGE_REPLAY_SOURCE,
+      type: "FORM_BLOCKED",
+      documentToken: value.documentToken,
+      method: value.method
     };
   }
 

@@ -16,6 +16,10 @@ import {
   type ApiResponseParser
 } from "@/services/api-contracts";
 import { UserFacingError } from "@/services/user-facing-error";
+import {
+  buildLatestEvaluationRequestByTargetId,
+  selectLatestEvaluationRequest
+} from "@/services/evaluation-request-selection";
 import type {
   AnalysisResult,
   CreateEvaluationTargetInput,
@@ -407,35 +411,6 @@ async function apiGet<T>(
   return apiRequest(path, parser, { signal });
 }
 
-function compareByUpdatedAt(left: EvaluationRequestModel, right: EvaluationRequestModel): number {
-  const leftUpdatedAt = Date.parse(left.updatedAt);
-  const rightUpdatedAt = Date.parse(right.updatedAt);
-  const comparableLeftUpdatedAt = Number.isNaN(leftUpdatedAt)
-    ? Number.NEGATIVE_INFINITY
-    : leftUpdatedAt;
-  const comparableRightUpdatedAt = Number.isNaN(rightUpdatedAt)
-    ? Number.NEGATIVE_INFINITY
-    : rightUpdatedAt;
-  const updatedAtDifference = comparableLeftUpdatedAt - comparableRightUpdatedAt;
-  return updatedAtDifference === 0 ? left.id - right.id : updatedAtDifference;
-}
-
-function buildLatestRequestByTargetId(requests: EvaluationRequestModel[]): Map<number, EvaluationRequestModel> {
-  const requestsByTargetId = new Map<number, EvaluationRequestModel[]>();
-  for (const request of requests) {
-    const current = requestsByTargetId.get(request.evaluationTargetId) ?? [];
-    current.push(request);
-    requestsByTargetId.set(request.evaluationTargetId, current);
-  }
-
-  return new Map(
-    [...requestsByTargetId.entries()].map(([targetId, targetRequests]) => {
-      const sortedRequests = [...targetRequests].sort(compareByUpdatedAt);
-      return [targetId, sortedRequests[sortedRequests.length - 1]!];
-    })
-  );
-}
-
 function buildOrganizationsFromApi(
   organizations: Organization[],
   evaluationTargets: EvaluationTarget[],
@@ -447,7 +422,7 @@ function buildOrganizationsFromApi(
     (target) => activeOrganizationIds.has(target.organizationId) && target.status !== "INACTIVE" && target.status !== "DELETED"
   );
   const targetsByOrganizationId = new Map<number, EvaluationTarget[]>();
-  const latestRequestByTargetId = buildLatestRequestByTargetId(requests);
+  const latestRequestByTargetId = buildLatestEvaluationRequestByTargetId(requests);
 
   for (const target of activeEvaluationTargets) {
     const currentTargets = targetsByOrganizationId.get(target.organizationId) ?? [];
@@ -471,11 +446,11 @@ function buildOrganizationsFromApi(
           createdAt: target.createdAt
         };
       });
-      const latestRequest = evaluationTargetModels
-        .map((target) => latestRequestByTargetId.get(target.id))
-        .filter((request): request is EvaluationRequestModel => request !== undefined)
-        .sort(compareByUpdatedAt);
-      const latestOrganizationRequest = latestRequest[latestRequest.length - 1];
+      const latestOrganizationRequest = selectLatestEvaluationRequest(
+        evaluationTargetModels
+          .map((target) => latestRequestByTargetId.get(target.id))
+          .filter((request): request is EvaluationRequestModel => request !== undefined)
+      );
 
       return {
         id: organization.id,

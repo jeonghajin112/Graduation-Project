@@ -139,6 +139,9 @@ export type ScoreResult = {
   id: number;
   evaluationRequestId: number;
   totalScore: number;
+  // Optional for older APIs. Null means no measured score; zero is a real score.
+  cvScore?: number | null;
+  cvStatus?: "SUCCESS" | "NOT_MEASURED" | "FAILED" | null;
 };
 
 export type EvaluationTargetModel = {

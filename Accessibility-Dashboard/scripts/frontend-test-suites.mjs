@@ -25,6 +25,7 @@ const analysisRequestLeaseRelease = viteTest("verify-analysis-request-lease-rele
 const mutationRefresh = viteTest("verify-dashboard-mutation-refresh.mjs");
 const mutationSubmitGuards = viteTest("verify-mutation-submit-guards.mjs");
 const directoryMutationRecovery = viteTest("verify-directory-mutation-recovery.mjs");
+const rescanRecoveryIsolation = viteTest("verify-rescan-recovery-isolation.mjs");
 const organizationPostTimeout = viteTest("verify-organization-create-post-timeout.mjs");
 const organizationRefreshRetry = viteTest("verify-organization-create-refresh-retry.mjs");
 const organizationReloadRecovery = viteTest("verify-organization-create-reload-recovery.mjs");
@@ -72,6 +73,7 @@ const ci = [
   mutationRefresh,
   mutationSubmitGuards,
   directoryMutationRecovery,
+  rescanRecoveryIsolation,
   quickRecovery,
   organizationPostTimeout,
   organizationRefreshRetry,
@@ -102,7 +104,10 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
   recovery: [quickRecovery],
   visual: [landingDesign],
   scale: [pageEvidenceScale],
-  replay: [nodeTest("verify-live-report-markers.mjs", { crossStack: true })],
+  replay: [
+    nodeTest("verify-live-report-markers.mjs", { crossStack: true }),
+    nodeTest("verify-live-report-boundaries.mjs", { crossStack: true })
+  ],
   backend: [
     viteTest("verify-sidebar-browser.mjs", { needsBackend: true }),
     viteTest("verify-sidebar-disclosure.mjs", { needsBackend: true })

@@ -150,12 +150,39 @@ describe("parseDashboardOverviewResponse", () => {
     expect(parsed.scoreResults[0]).toEqual({
       id: 601,
       evaluationRequestId: 501,
-      totalScore: 91
+      totalScore: 91,
+      cvScore: 91
     });
     expect(parsed.latestIssueCounts[0]).toEqual({
       evaluationTargetId: 101,
       requestId: 501
     });
+  });
+
+  it.each([
+    { cvScore: null, cvStatus: "NOT_MEASURED" },
+    { cvScore: null, cvStatus: "FAILED" },
+    { cvScore: 0, cvStatus: "SUCCESS" },
+    { cvScore: 91, cvStatus: "SUCCESS" },
+    { cvScore: 0, cvStatus: null }
+  ])("preserves CV measurement state through the dashboard contract: %j", (cvFields) => {
+    const overview = createValidOverview();
+    const payload = { ...overview, scoreResults: [{ ...overview.scoreResults[0], ...cvFields }] };
+    expect(parseDashboardOverviewResponse(payload, "$.data").scoreResults[0]).toMatchObject(cvFields);
+  });
+
+  it("accepts older score responses without CV fields", () => {
+    const overview = createValidOverview();
+    const payload = { ...overview, scoreResults: [{ id: 601, evaluationRequestId: 501, totalScore: 91 }] };
+    expect(parseDashboardOverviewResponse(payload, "$.data").scoreResults[0]).toEqual(payload.scoreResults[0]);
+  });
+
+  it.each([
+    ["cvScore", "0"], ["cvScore", -1], ["cvScore", 101], ["cvStatus", "unknown"]
+  ])("rejects malformed CV metadata: %s=%s", (field, value) => {
+    const overview = createValidOverview();
+    const payload = { ...overview, scoreResults: [{ ...overview.scoreResults[0], [field]: value }] };
+    expectContractError(() => parseDashboardOverviewResponse(payload, "$.data"), `$.data.scoreResults[0].${field}`);
   });
 
   it.each([

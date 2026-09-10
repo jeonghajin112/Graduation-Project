@@ -124,6 +124,7 @@ public class DashboardOverviewIntegrationTest {
                 "ruleScore",
                 "aiScore",
                 "cvScore",
+                "cvStatus",
                 "createdAt",
                 "updatedAt"
         );

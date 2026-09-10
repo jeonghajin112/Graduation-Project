@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiRequestError, getApiErrorMessage } from "./backend-api";
+import { ApiRequestError, fetchDashboardViewModel, getApiErrorMessage } from "./backend-api";
 import { UserFacingError } from "./user-facing-error";
 
 const SAFE_FALLBACK = "요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -89,5 +89,79 @@ describe("API error presentation", () => {
       SAFE_FALLBACK
     );
     expect(getApiErrorMessage("raw failure", SAFE_FALLBACK)).toBe(SAFE_FALLBACK);
+  });
+});
+
+describe("dashboard overview request selection", () => {
+  const timestamp = "2026-09-08T00:00:00Z";
+  const newerTimestamp = "2026-09-09T00:00:00Z";
+  const target = (id: number, organizationId: number, status = "ACTIVE") => ({
+    id, organizationId, name: `Page ${id}`, targetType: "WEB",
+    accessUrl: `https://example.com/${id}`, status, createdAt: timestamp
+  });
+  const request = (id: number, evaluationTargetId: number, updatedAt: string, status: string) => ({
+    id, evaluationTargetId, updatedAt, requestedAt: timestamp, status
+  });
+  const organization = (id: number, evaluationTargets: ReturnType<typeof target>[], status = "ACTIVE") => ({
+    id, name: `Project ${id}`, description: "", status, updatedAt: timestamp, evaluationTargets
+  });
+  const overview = () => ({
+    organizations: [
+      organization(1, [target(101, 1), target(102, 1), target(103, 1)]),
+      organization(2, [])
+    ],
+    evaluationRequests: [
+      request(510, 102, newerTimestamp, "FAILED"),
+      request(509, 101, newerTimestamp, "IN_PROGRESS"),
+      request(999, 101, timestamp, "COMPLETED")
+    ],
+    resultSummaries: [], scoreResults: [], latestIssueCounts: []
+  });
+  const respondWith = (data: ReturnType<typeof overview>) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true, data, message: null }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    )));
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses the latest page and project request while retaining fallbacks for unanalysed data", async () => {
+    const data = overview();
+    for (const requests of [data.evaluationRequests, [...data.evaluationRequests].reverse()]) {
+      respondWith({ ...data, evaluationRequests: requests });
+      const result = await fetchDashboardViewModel();
+      expect(result.organizations[0]).toMatchObject({ id: 1, status: "FAILED", updatedAt: newerTimestamp });
+      expect(result.organizations[0].evaluationTargets.map(({ id, status }) => ({ id, status }))).toEqual([
+        { id: 101, status: "IN_PROGRESS" },
+        { id: 102, status: "FAILED" },
+        { id: 103, status: "ACTIVE" }
+      ]);
+      expect(result.organizations[1]).toMatchObject({ id: 2, status: "ACTIVE", updatedAt: timestamp, evaluationTargets: [] });
+    }
+  });
+
+  it("excludes deleted targets and inactive organizations from latest request selection", async () => {
+    const data = overview();
+    data.organizations[0].evaluationTargets.push(target(104, 1, "DELETED"), target(105, 1, "INACTIVE"));
+    data.organizations.push(organization(3, [target(301, 3)], "INACTIVE"));
+    data.evaluationRequests.push(
+      request(1000, 104, newerTimestamp, "COMPLETED"),
+      request(1001, 105, newerTimestamp, "COMPLETED"),
+      request(1002, 301, newerTimestamp, "COMPLETED")
+    );
+    respondWith(data);
+    const result = await fetchDashboardViewModel();
+    expect(result.organizations.map(({ id }) => id)).toEqual([1, 2]);
+    expect(result.organizations[0].status).toBe("FAILED");
+    expect(result.organizations[0].evaluationTargets.map(({ id }) => id)).toEqual([101, 102, 103]);
+    expect(result.evaluationRequests.map(({ id }) => id)).toEqual([510, 509, 999]);
+  });
+
+  it("rejects invalid API dates before selecting a latest request", async () => {
+    const data = overview();
+    data.evaluationRequests[0].updatedAt = "invalid";
+    respondWith(data);
+    await expect(fetchDashboardViewModel()).rejects.toThrow("data.evaluationRequests[0].updatedAt");
   });
 });

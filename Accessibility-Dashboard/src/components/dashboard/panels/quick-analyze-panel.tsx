@@ -23,8 +23,7 @@ import {
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
-  EvaluationRequestModel,
-  EvaluationStatus
+  EvaluationRequestModel
 } from "@/types/accessibility-domain";
 
 import {
@@ -35,17 +34,12 @@ import {
 } from "../shared/mutation-recovery";
 
 import { useMutationOperation } from "../shared/use-mutation-operation";
-import { QuickAnalysisProgress, type AnalysisPhase } from "./quick-analysis-progress";
+import { QuickAnalysisProgress } from "./quick-analysis-progress";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
 
-type ProgressState = {
-  phase: AnalysisPhase;
-  requestId: number | null;
-  status: EvaluationStatus | string | null;
-  message: string;
-};
+type QuickAnalysisPhase = "idle" | "requesting" | "paused" | "failed";
 
 type QuickAnalysisCheckpointBase = {
   attemptId: string;
@@ -72,13 +66,6 @@ type QuickAnalysisCheckpoint = QuickAnalysisCheckpointBase & (
       updatedAt: string | null;
     }
 );
-
-const emptyProgress: ProgressState = {
-  phase: "idle",
-  requestId: null,
-  status: null,
-  message: ""
-};
 
 const QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE =
   "이전 분석 정보를 브라우저에 저장하지 못해 새 분석을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
@@ -253,12 +240,16 @@ function findReconciledQuickAnalysisRequest(
 export function QuickAnalyzePanel({
   isDarkMode,
   onAnalysisAccepted,
-  readOnly = false
+  readOnly
 }: {
   isDarkMode: boolean;
-  onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
-  readOnly?: boolean;
-}) {
+} & (
+  | { readOnly: true; onAnalysisAccepted?: never }
+  | {
+      readOnly?: false;
+      onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
+    }
+)) {
   const initialRecoveryRef = useRef<ReturnType<typeof readQuickAnalysisRecovery> | null>(null);
   if (initialRecoveryRef.current === null) {
     initialRecoveryRef.current = readOnly
@@ -274,7 +265,7 @@ export function QuickAnalyzePanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [acceptedMessage, setAcceptedMessage] = useState("");
   const urlInputRef = useRef<HTMLInputElement>(null);
-  const [progress, setProgress] = useState<ProgressState>(emptyProgress);
+  const [phase, setPhase] = useState<QuickAnalysisPhase>("idle");
   const {
     beginMutationOperation,
     cancelMutationOperation,
@@ -316,13 +307,8 @@ export function QuickAnalyzePanel({
     return true;
   };
 
-  const showProgressView = progress.phase !== "idle";
-  const isBusy =
-    isSubmitting ||
-    (progress.phase !== "idle" &&
-      progress.phase !== "paused" &&
-      progress.phase !== "failed" &&
-      progress.phase !== "completed");
+  const showProgressView = phase !== "idle";
+  const isBusy = isSubmitting || phase === "requesting";
   const hasUrlInput = urlInput.trim().length > 0;
   const canSubmit = hasUrlInput && !isBusy && !readOnly;
   const hasError = errorMessage.length > 0;
@@ -348,7 +334,7 @@ export function QuickAnalyzePanel({
 
   const handleReset = () => {
     cancelMutationOperation();
-    setProgress(emptyProgress);
+    setPhase("idle");
     setErrorMessage("");
     setIsSubmitting(false);
   };
@@ -381,12 +367,7 @@ export function QuickAnalyzePanel({
 
     setIsSubmitting(true);
     setErrorMessage("");
-    setProgress({
-      phase: "requesting",
-      requestId: null,
-      status: null,
-      message: "분석 요청을 생성하고 있습니다."
-    });
+    setPhase("requesting");
 
     let requiresInputReset = false;
 
@@ -559,7 +540,7 @@ export function QuickAnalyzePanel({
       }
       checkpointRef.current = null;
       setUrlInput("");
-      setProgress(emptyProgress);
+      setPhase("idle");
       setAcceptedMessage("분석을 접수했습니다. 사이드바에서 진행 상태를 확인하고 다음 주소를 입력해 주세요.");
       window.requestAnimationFrame(() => urlInputRef.current?.focus());
     } catch (error) {
@@ -569,14 +550,7 @@ export function QuickAnalyzePanel({
 
       const message = getApiErrorMessage(error, "페이지 분석을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.");
       setErrorMessage(message);
-      setProgress((current) => ({
-        ...current,
-        phase:
-          requiresInputReset || checkpointRef.current === null
-            ? "failed"
-            : "paused",
-        message
-      }));
+      setPhase(requiresInputReset || checkpointRef.current === null ? "failed" : "paused");
     } finally {
       if (finishMutationOperation(operation)) {
         setIsSubmitting(false);
@@ -671,10 +645,10 @@ export function QuickAnalyzePanel({
             )}
           </div>
         ) : (
-          <QuickAnalysisProgress phase={progress.phase} url={normalizeUrl(urlInput)} isBusy={isBusy}>
-            {progress.phase === "failed" && (
+          <QuickAnalysisProgress phase={phase} url={normalizeUrl(urlInput)} isBusy={isBusy}>
+            {phase === "failed" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p role="alert" className="text-center text-xs text-rose-500">{errorMessage || progress.message}</p>
+                <p role="alert" className="text-center text-xs text-rose-500">{errorMessage}</p>
                 <button
                   type="button"
                   onClick={handleReset}
@@ -685,23 +659,7 @@ export function QuickAnalyzePanel({
               </div>
             )}
 
-            {progress.phase === "paused" && (
-              <div className="mt-6 flex flex-col items-center gap-3">
-                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage || progress.message}</p>
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    void handleSubmit();
-                  }}
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
-                >
-                  {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
-                </button>
-              </div>
-            )}
-
-            {progress.phase === "completed" && hasError && (
+            {phase === "paused" && (
               <div className="mt-6 flex flex-col items-center gap-3">
                 <p role="alert" className="text-center text-xs text-amber-600">{errorMessage}</p>
                 <button
@@ -712,7 +670,7 @@ export function QuickAnalyzePanel({
                   }}
                   className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
                 >
-                  {isSubmitting ? "결과 불러오는 중..." : "결과 다시 불러오기"}
+                  {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
                 </button>
               </div>
             )}

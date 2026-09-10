@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { installApiRouteFixture } from "./fixtures/api-route-fixture.mjs";
+import { createTestLiveReportExpiration } from "./fixtures/live-report-viewer-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -167,7 +169,7 @@ const liveSession = {
   viewerOrigin,
   nonce: "n".repeat(32),
   bridgeSecret: "s".repeat(43),
-  expiresAt: "2099-12-31T23:59:59Z"
+  expiresAt: createTestLiveReportExpiration()
 };
 
 const replayHtml = `<!doctype html>
@@ -594,28 +596,41 @@ const overview = createDashboardOverview({
   }]
 });
 
-function payloadFor(pathname) {
-  if (pathname === "/api/requests") {
-    dashboardRequestFetchCount += 1;
-    return [request];
-  }
-  if (pathname === "/api/organizations") return [organization];
-  if (pathname === "/api/organizations/1/evaluation-targets") return [target];
-  if (pathname === "/api/results/requests/501/summary") return summary;
-  if (pathname === "/api/results/requests/501/issues") {
-    issueResponseFetchCount += 1;
-    return issues;
-  }
-  if (pathname === "/api/results/requests/501/capture-metadata") return captureMetadata;
-  if (pathname === "/api/targets/101") return target;
-  return [];
-}
+const apiFixtures = [];
 
 async function installFixture(page) {
-  await page.route("**/api/**", async (route) => {
-    const requestUrl = new URL(route.request().url());
-    const pathname = requestUrl.pathname;
-    if (requestUrl.origin === viewerOrigin) {
+  let fixtureSession = liveSession;
+  const fixture = await installApiRouteFixture(page, [
+    ...[
+      ["/api/organizations", () => [organization]],
+      ["/api/organizations/1/evaluation-targets", () => [target]],
+      ["/api/results/requests/501/summary", () => summary],
+      ["/api/results/requests/501/capture-metadata", () => captureMetadata],
+      ["/api/targets/101", () => target]
+    ].map(([pathname, payload]) => ({ method: "GET", pathname, handle: (route) => fulfillJson(route, payload()) })),
+    ...[
+      ["/api/dashboard/overview", () => overview],
+      ["/api/requests", () => [request]]
+    ].map(([pathname, payload]) => ({ method: "GET", pathname, handle: (route) => {
+      dashboardRequestFetchCount += 1;
+      return fulfillJson(route, payload());
+    } })),
+    { method: "POST", pathname: "/api/results/requests/501/live-session", handle: (route) => fulfillJson(route, fixtureSession) },
+    { method: "POST", pathname: `/api/results/requests/501/live-session/${liveSession.sessionId}/renew`, handle: (route) => {
+      fixtureSession = { ...fixtureSession, expiresAt: createTestLiveReportExpiration(Date.parse(fixtureSession.expiresAt)) };
+      return fulfillJson(route, fixtureSession);
+    } },
+    { method: "GET", pathname: "/api/results/requests/501/issues", handle: async (route) => {
+      if (nextIssueResponseGate) {
+        const gate = nextIssueResponseGate;
+        nextIssueResponseGate = null;
+        gate.markStarted();
+        await gate.releasePromise;
+      }
+      issueResponseFetchCount += 1;
+      await fulfillJson(route, issues);
+    } },
+    { method: "GET", pathname: new URL(liveSession.runtimeUrl).pathname, origin: viewerOrigin, handle: async (route) => {
       const holdReady = holdNextReplayReady;
       const holdLocatorStatuses = holdNextLocatorStatuses;
       const dropInitialLoading = dropNextReplayInitialLoading;
@@ -630,30 +645,9 @@ async function installFixture(page) {
           .replace("__HOLD_LOCATOR_STATUS__", holdLocatorStatuses ? "true" : "false")
           .replace("__DROP_INITIAL_LOADING__", dropInitialLoading ? "true" : "false")
       });
-      return;
-    }
-    if (route.request().method() === "GET" && pathname === "/api/dashboard/overview") {
-      dashboardRequestFetchCount += 1;
-      await fulfillJson(route, overview);
-      return;
-    }
-    if (
-      route.request().method() === "POST" &&
-      pathname === "/api/results/requests/501/live-session"
-    ) {
-      await fulfillJson(route, liveSession);
-      return;
-    }
-
-    if (pathname === "/api/results/requests/501/issues" && nextIssueResponseGate) {
-      const gate = nextIssueResponseGate;
-      nextIssueResponseGate = null;
-      gate.markStarted();
-      await gate.releasePromise;
-    }
-
-    await fulfillJson(route, payloadFor(pathname));
-  });
+    } }
+  ]);
+  apiFixtures.push(fixture);
 }
 
 async function getReplayMessages(frame) {
@@ -2881,6 +2875,7 @@ async function verifyEvidenceStatusFeedback(page) {
   let releaseMetadata;
   const metadataGate = new Promise((resolve) => { releaseMetadata = resolve; });
   await page.route("**/api/results/requests/501/capture-metadata", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
     metadataRequests += 1;
     if (metadataRequests === 1) {
       await fulfillJson(route, null, { status: 500 });
@@ -2890,6 +2885,7 @@ async function verifyEvidenceStatusFeedback(page) {
     await fulfillJson(route, captureMetadata);
   });
   await page.route("**/api/results/requests/501/live-session", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
     sessionRequests += 1;
     await fulfillJson(route, failSession ? null : liveSession, { status: failSession ? 503 : 200 });
   });
@@ -3000,6 +2996,7 @@ try {
     }
   }
   assert.deepEqual(pageErrors, []);
+  apiFixtures.forEach((fixture) => fixture.assertIsolated());
   assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
   console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, responsive, capacityResize, mobile, statusFeedback }, null, 2));
 } finally {

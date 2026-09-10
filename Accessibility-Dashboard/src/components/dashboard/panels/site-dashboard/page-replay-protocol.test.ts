@@ -18,6 +18,26 @@ import {
 import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
 import type { RecentIssueRow } from "./types";
 
+describe("blocked form notifications", () => {
+  const message = {
+    source: PAGE_REPLAY_SOURCE,
+    type: "FORM_BLOCKED",
+    documentToken: "live_document",
+    method: "POST"
+  };
+
+  it.each(["GET", "POST", "DIALOG"])("accepts the producer's %s method without treating it as connection failure", (method) => {
+    expect(parsePageReplayMessage({ ...message, method })).toEqual({ ...message, method });
+  });
+
+  it.each([
+    { method: "DELETE" }, { method: "post" }, { method: 1 }, { method: undefined },
+    { documentToken: "" }, { source: DASHBOARD_REPLAY_SOURCE }, { extra: true }
+  ])("rejects a malformed blocked-form payload: %j", (override) => {
+    expect(parsePageReplayMessage({ ...message, ...override })).toBeNull();
+  });
+});
+
 function classify(issueCode: string, analyzerType?: AnalyzerType, issueTitle = "접근성 문제") {
   const issue: IssueResultModel = {
     id: 1,

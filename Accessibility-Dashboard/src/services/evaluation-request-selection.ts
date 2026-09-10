@@ -1,6 +1,8 @@
 import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 
 function toComparableTimestamp(value: string): number {
+  // API dates are validated at the boundary. In-memory recovery data can lack
+  // one: rank it before dated requests and use the request ID to break ties.
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp;
 }

@@ -1,6 +1,6 @@
 # 프런트 아키텍처
 
-현재 상태 소유권과 모듈 간 계약을 설명한다. 실행은 [README](../README.md), 설계 판단은 [개발 기준](engineering.md), 검증은 [테스트 가이드](testing.md)를 참고한다. 현재 확인된 오류는 아래에 따로 기록한다.
+현재 상태 소유권과 모듈 간 계약을 설명한다. 실행은 [README](../README.md), 설계 판단은 [개발 기준](engineering.md), 검증은 [테스트 가이드](testing.md)를 참고한다. 수정 범위에서 제외한 항목은 아래에 따로 기록한다.
 
 ## 화면과 데이터 흐름
 
@@ -34,6 +34,12 @@ URL 분석의 저장용 조직은 `systemManaged`로 구분해 프로젝트 목�
 
 주요 경로는 `/`, `/product-preview`, `/analyze`, `/projects/:projectId`, `/projects/:projectId/pages/:pageId`, `/recent-pages/:pageId`다. 실제 라우팅은 [App.tsx](../src/App.tsx)와 [controller](../src/components/dashboard/shared/use-dashboard-controller.tsx)가 기준이다. `/dashboard`는 `/analyze`로 이동한다.
 
+## 대시보드 화면 재사용
+
+[DashboardSurface](../src/components/dashboard/dashboard-surface.tsx)는 [표시 계약](../src/components/dashboard/dashboard-surface.types.ts)의 데이터·선택·탐색·테마만 참조한다. 실제 controller의 전체 반환 타입이나 생성 복구 필드를 요구하지 않는다. `SidebarDemo`는 실제 controller와 작업 함수를 연결하고, `DashboardProductPreview`는 예제 데이터와 로컬 선택을 같은 화면에 연결한다.
+
+`mode: "live"`에서는 작업 함수가 필수이며 `mode: "preview"`에서는 변경 작업과 로그아웃 함수를 받지 않는다. 프로젝트 목록과 상세의 작업 묶음이 null이면 기존 읽기 전용 표시를 사용한다. 프로젝트·페이지 생성 및 복구 모달은 실제 앱의 [DashboardMutationModals](../src/components/dashboard/dashboard-mutation-modals.tsx)가 담당한다. 계정 설정·테마 조절은 공용 화면에 남으며 미리보기의 테마는 사용자 설정에 저장하지 않는다. 모달의 지연 로딩·오류 경계·포커스 수명은 유지한다.
+
 ## 대시보드 조회
 
 [useDashboardData](../src/components/dashboard/shared/use-dashboard-data.ts)는 `GET /dashboard/overview`를 받아 화면 모델을 만든다. 진행 중 요청이 있을 때만 요청별 상태를 polling하고, 완료·실패 또는 조회 오류가 발생하면 overview를 다시 가져온다. 숨겨진 탭에서는 polling을 건너뛴다.
@@ -52,15 +58,21 @@ URL 분석과 프로젝트 페이지 등록은 요청 ID가 확인되면 입력 
 
 일반 화면 API는 [backend-api.ts](../src/services/backend-api.ts)를 거쳐 [api-contracts.ts](../src/services/api-contracts.ts)에서 검증한다. API base는 `VITE_API_BASE_URL` 또는 `/api`다.
 
+최신 분석 요청 선택은 [evaluation-request-selection.ts](../src/services/evaluation-request-selection.ts)가 소유한다. overview 변환, 프로젝트·페이지 표시, 재분석 요청 확인이 같은 순수 함수를 사용한다. 실행 중 요청을 먼저 보여주는 사이드바 상태 정책은 별도 책임으로 유지한다.
+
 일반 API는 `{ success, data, message }` 형태를 사용한다. HTTP 2xx라도 실패 envelope나 잘못된 data이면 오류다. ID·URL·enum·점수·날짜뿐 아니라 요청과 결과의 참조 관계를 확인한다. AI가 쓰는 `POST /api/v1/evaluations`는 [별도 ingestion API](../../ap-backend/src/main/java/com/accessibility/platform/integration/controller/AiEvaluationController.java)로 이 일반 envelope 규칙의 대상이 아니다.
 
 주요 조회는 overview, 요청 상태, 선택된 요청의 이슈·캡처·라이브 세션이다. 생성·수정·삭제 endpoint와 필드의 정확한 목록은 HTTP 어댑터와 백엔드 controller가 원본이다. 문서에 두 번째 스키마를 유지하지 않는다.
 
 UI에는 내부 payload 대신 사용자에게 필요한 실패 원인과 재시도 동작을 제공한다. 데이터 없음, 실제 0점, 로딩과 실패를 구분한다.
 
+CV 점수의 `null`은 측정값이 없다는 뜻이며 실제 0점과 구분한다. 새 결과는 `cvStatus`에 `SUCCESS`, `NOT_MEASURED`, `FAILED`를 전달한다. 구형 응답은 두 필드가 없어도 읽을 수 있고, 과거 저장 데이터의 상태가 `null`이면 당시 측정 여부가 확인되지 않은 것이다. 기존 0점을 추정으로 미측정 처리하지 않는다.
+
 ## 페이지 상세와 캐시
 
 점수 또는 결과 요약이 있는 요청 중 최신 요청을 선택한 뒤 이슈, 캡처 정보, 라이브 세션을 독립적으로 조회한다. 캡처 404는 정상적인 자료 없음이며, 지원하지 않는 라이브 세션 응답은 별도 사용 불가 상태다.
+
+상세 패널의 evidence·rail·반응형 스타일은 `SiteDashboardPanel`이 [page-evidence-layout.css](../src/styles/page-evidence-layout.css)를 로드한다. 패널을 기다리는 동안의 바깥 프레임과 공용 카드의 `@layer base` 테마 우선순위는 `index.css`가 유지한다. 넓은 화면의 열 배치는 상세 CSS의 컨테이너 조건 한 곳에서 결정한다.
 
 [request-cache.ts](../src/services/request-cache.ts)는 TTL·LRU와 공유 중인 요청의 소비자 수, 취소, 제한시간을 담당한다. 각 조회 훅은 캐시 키와 도메인 상태를 결정한다. 라이브 세션의 origin·토큰·만료·갱신 판단도 라이브 세션 훅의 책임이다. 취소된 요청의 늦은 결과를 캐시에 저장하지 않고 로그아웃 때 등록된 요청과 캐시를 정리한다.
 
@@ -78,9 +90,15 @@ UI에는 내부 payload 대신 사용자에게 필요한 실패 원인과 재시
 
 복구 기록은 version·attempt ID·API scope·시각을 확인한다. 저장값 비교로 오래된 비동기 작업이 새 기록을 덮는 것을 막는다. 프로젝트 생성 기록 v2는 이전 v1을 감지할 수 있도록 저장 키를 유지하며, 구형 기록을 새 요청으로 자동 재실행하지 않는다.
 
+페이지 분석 요청의 정상 접수·응답 유실 복구·이전 기록 재개·실행 중 요청 재사용은 [analysis-request-acceptance](../src/components/dashboard/shared/analysis-request-acceptance.ts)의 poll 저장 전환을 공유한다. 호출 경로가 읽어 둔 rawValue를 비교하고, 저장에 성공한 뒤에만 checkpoint의 저장 기록과 요청 ID를 함께 갱신한다. 사전 확인 중인 재분석은 저장된 기록이 없을 수 있어 기대값 null도 명시적으로 전달한다. 취소 listener와 목록 보호 lease의 수명은 요청 훅이 소유하며, 기존 실행 요청을 찾은 경로는 저장 성공·실패 모두 사전 조회 lease를 해제한다. sessionStorage 비교를 여러 탭 전체의 잠금으로 취급하지 않는다.
+
+기존 페이지 재분석은 사전 GET이 끝난 뒤 POST 직전에 복구 기록을 저장한다. 사전 조회 실패·취소와 확정적인 접수 거절은 다른 페이지의 재분석을 막지 않는다. POST 응답 유실은 접수 여부가 불명확하므로 기존 GET 복구를 유지한다. 이전 클라이언트가 남긴 준비 기록은 기존 페이지의 재분석인지 확인하고 정확히 같은 저장값만 해제하며, 페이지 생성이 일부 완료된 기록은 보존한다.
+
 페이지 생성·분석의 복구를 더 줄이려면 해당 서버 API에도 중복 요청 식별 계약을 먼저 마련해야 한다. 프로젝트 생성만의 보장을 다른 POST에 있다고 가정하지 않는다.
 
 프로젝트 수정·제거와 페이지 제거는 실행 전에 최신 overview로 원하는 변경이 이미 반영됐는지 확인한다. 상태 조회는 5초, PATCH는 15초로 제한하며, 불명확한 PATCH 결과는 GET으로 한 번 더 확인한다. 처리 여부를 확인하지 못하면 모달에 안내하고 취소·Escape를 다시 허용한다. PATCH를 자동 재전송하지 않으며 사용자가 다시 시도하거나 모달을 다시 열어도 먼저 서버 상태를 확인한다. 확인 조회가 실패하면 변경 요청을 보내지 않는다. 대시보드를 떠나면 진행 중 요청을 취소하고 늦은 완료가 화면 이동을 일으키지 않도록 한다. 클라이언트의 대기 중단은 서버 작업 취소를 보장하지 않는다.
+
+프로젝트 삭제 후 이동은 갱신된 목록과 현재 URL을 검사하는 효과가 결정한다. 삭제를 시작했을 때 선택했던 프로젝트를 기준으로 이동하지 않으므로, 대기 중 다른 프로젝트로 이동한 사용자의 현재 경로를 유지한다.
 
 ## 라이브 리포트
 
@@ -90,11 +108,15 @@ UI에는 내부 payload 대신 사용자에게 필요한 실패 원인과 재시
 
 미표시 문제에는 뷰어가 전달한 사유를 표시한다. 카드의 ‘문제 상세’에서는 미리보기에서 잘린 전체 설명과 개선 안내, 분석 당시 요소 경로, 프레임·Shadow DOM 경로, HTML과 좌표를 확인한다. 긴 내용은 대화상자 본문에서 키보드로도 스크롤할 수 있다. 저장된 HTML은 텍스트로만 렌더링하며, 과거 좌표를 현재 페이지의 정확한 위치로 표시하지 않는다.
 
+위치 확인 경로에서 사용하는 열린 Shadow DOM은 별도로 관찰한다. 늦게 생성된 root·요소, 내용 변경과 제거도 기존 위치 갱신 큐로 처리하고, 이슈 재초기화·host 제거·문서 종료 때 관찰자를 해제한다. 상태가 같더라도 미표시 이유가 달라지면 새 이유를 전달한다.
+
 문제 목록의 페이지당 개수는 실제 목록 높이, 카드의 최소 높이와 간격으로 계산한다. 창 크기·브라우저 배율·주변 패널이 바뀌면 다시 측정하고, 보고 있던 문제를 포함하는 페이지를 유지한다. 목록 내용이 부모 높이를 늘려 표시 개수가 계속 증가하지 않도록 CSS 크기 격리를 적용한다.
 
 [viewer origin 설정](../src/config/live-report.ts)과 백엔드 설정을 맞춘다. iframe은 API가 제공한 viewer identity를 검증하고, MessageChannel은 session·secret·document token·순서를 확인한다. 다른 문서에서 도착한 메시지가 현재 선택과 위치 상태를 갱신하지 못해야 한다.
 
-초기 연결, 문서 표시 가능 여부, 이슈별 위치 확인은 별개의 상태다. 정상 연결만으로 모든 문제의 위치 확인이 완료됐다고 표시하지 않는다. 표시·전송·수신 한도도 함께 맞춰야 한다. 현재 대량 문제의 한도 불일치는 아래에 기록되어 있다.
+초기 연결, 문서 표시 가능 여부, 이슈별 위치 확인은 별개의 상태다. 정상 연결만으로 모든 문제의 위치 확인이 완료됐다고 표시하지 않는다. 라이브 뷰어에는 처음 5,000개 이슈만 전송하며 초기 선택·후속 명령·응답 ID 검증도 이 범위를 사용한다. 초과 항목은 응답을 기다리지 않고 표시 한도 초과로 안내하되 전체 문제와 저장된 위치 상세는 유지한다.
+
+폼 차단의 `FORM_BLOCKED` 이벤트는 연결 실패가 아니다. `GET`, `POST`, `DIALOG` 형식을 검증해 수신 순서를 유지하고, 차단 후에도 마커 선택을 계속 처리한다. 기존 폼 차단과 연결 identity 검증은 유지한다.
 
 | 책임 | 구현 |
 |---|---|
@@ -103,18 +125,11 @@ UI에는 내부 payload 대신 사용자에게 필요한 실패 원인과 재시
 | iframe 연결·위치 상태 | [rendered-page-evidence-card.tsx](../src/components/dashboard/panels/site-dashboard/rendered-page-evidence-card.tsx) |
 | 격리 문서와 브리지 생성 | [LiveReportDocumentRewriter.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportDocumentRewriter.java) |
 
-## 현재 확인된 프런트 오류
+## 회귀 검증과 보류 항목
 
-2026-09-05 감사에서 확인했으며 **문서 정리 시점에도 미해결**이다.
+재분석 실패의 작업 간 격리와 삭제 후 현재 경로 보존은 기본 CI의 [재분석 회귀](../scripts/verify-rescan-recovery-isolation.mjs)와 [삭제 회귀](../scripts/verify-directory-mutation-recovery.mjs)가 검증한다. 대량 이슈와 폼 차단은 실제 React 카드와 Java 문서를 연결하는 [리포트 경계 회귀](../scripts/verify-live-report-boundaries.mjs), Shadow DOM과 이유 변경은 [마커 회귀](../scripts/verify-live-report-markers.mjs)가 검증한다.
 
-| 문제 | 재현과 영향 | 수정 완료 기준 |
-|---|---|---|
-| 대량 문제의 리포트 초기화 거절 | 이슈 10,001개를 전송하면 브리지가 INIT를 거절한다. sequence도 어긋나 후속 명령이 거절되고, 정상 연결을 유지해도 위치 확인은 완료되지 않는다. | 표시·전송·수신 한도를 맞추고 초과 항목을 명시적으로 처리. 한도 직전·경계·직후와 후속 선택 동작 검증 |
-| 추이 차트의 가짜 0점 | 기록 없음은 7개 0점, 실제 80점 한 번은 6개 0점 뒤 80점으로 차트에 전달된다. | 기록 없음, 실제 0점, 한 번·여러 번의 분석을 구분하고 미실측 0점을 연결하지 않음 |
-
-첫 항목의 구현은 위 리포트 카드와 Java 브리지, 두 번째는 [AnalysisTrendPanel](../src/components/dashboard/panels/site-dashboard/analysis-trend-panel.tsx)이다. 실제 송신·수신 함수·API 파서와 실제 컴포넌트의 차트 props를 실행해 확인했다. 리포트 로딩 지속은 상태·타이머 경로를 대조한 결과이며 전체 브라우저 재현은 수행하지 않았다.
-
-전체 시스템 감사의 원본 자료는 작성자 로컬 `artifacts/deep-code-audit/`에만 보관되어 있다. 저장소에 포함되는 증거로 가정하지 않는다. 완료 처리는 기대 동작을 검증한 코드 변경과 함께 한다.
+[추이 차트](../src/components/dashboard/panels/site-dashboard/analysis-trend-panel.tsx)의 미실측 구간은 현재 0점으로 채워진다. 2026-09-09 사용자가 기존 선 그래프 동작 유지를 요청해 null 구간·단일 점 변경은 이번 수정 범위에서 제외했다. 이 항목을 수정 완료로 처리하지 않는다.
 
 ## 오류와 코드 분할
 

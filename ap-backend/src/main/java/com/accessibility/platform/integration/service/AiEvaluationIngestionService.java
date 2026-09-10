@@ -18,6 +18,7 @@ import com.accessibility.platform.request.domain.EvaluationRequestStatus;
 import com.accessibility.platform.request.repository.EvaluationRequestRepository;
 import com.accessibility.platform.score.domain.ScoreDetail;
 import com.accessibility.platform.score.domain.ScoreResult;
+import com.accessibility.platform.score.domain.CvScoreStatus;
 import com.accessibility.platform.score.repository.ScoreDetailRepository;
 import com.accessibility.platform.score.repository.ScoreResultRepository;
 import com.accessibility.platform.target.domain.EvaluationTarget;
@@ -243,22 +244,43 @@ public class AiEvaluationIngestionService {
 
     private ScoreResult saveScore(JsonNode result, EvaluationRequest request) {
         JsonNode moduleScores = result.path("score_breakdown").path("module_scores");
+        CvScoreStatus cvStatus = cvScoreStatus(result);
+        BigDecimal cvScore = cvStatus == CvScoreStatus.SUCCESS
+                ? decimal(moduleScores, "cv") : null;
 
         ScoreResult scoreResult = scoreResultRepository.save(new ScoreResult(
                 request,
                 decimal(result, "total_score"),
                 decimal(moduleScores, "rule_based"),
                 decimal(moduleScores, "difficulty"),
-                decimal(moduleScores, "cv")
+                cvScore,
+                cvStatus
         ));
 
         List<ScoreDetail> details = new ArrayList<>();
         details.add(new ScoreDetail(scoreResult, "rule_based", decimal(moduleScores, "rule_based"), BigDecimal.valueOf(100), "KWCAG rule-based analyzer score"));
         details.add(new ScoreDetail(scoreResult, "difficulty", decimal(moduleScores, "difficulty"), BigDecimal.valueOf(100), "Text difficulty accessibility score"));
-        details.add(new ScoreDetail(scoreResult, "cv", decimal(moduleScores, "cv"), BigDecimal.valueOf(100), "Visual contrast pass-rate score"));
+        if (cvScore != null) {
+            details.add(new ScoreDetail(scoreResult, "cv", cvScore, BigDecimal.valueOf(100), "Visual contrast pass-rate score"));
+        }
         scoreDetailRepository.saveAll(details);
 
         return scoreResult;
+    }
+
+    private CvScoreStatus cvScoreStatus(JsonNode result) {
+        JsonNode module = result.path("modules").path("cv_visual");
+        if ("failed".equals(module.path("status").asText())) {
+            return CvScoreStatus.FAILED;
+        }
+        JsonNode count = module.path("summary").path("total_texts_analyzed");
+        if ("not_measured".equals(module.path("status").asText())
+                || (count.isIntegralNumber() && count.asLong() == 0)) {
+            return CvScoreStatus.NOT_MEASURED;
+        }
+        JsonNode score = result.path("score_breakdown").path("module_scores").path("cv");
+        return score.isNumber() && Double.isFinite(score.asDouble())
+                ? CvScoreStatus.SUCCESS : CvScoreStatus.FAILED;
     }
 
     private void saveAnalysisResults(JsonNode result, EvaluationRequest request) {
@@ -299,7 +321,40 @@ public class AiEvaluationIngestionService {
                 }
             }
         }
+        for (JsonNode rule : module.path("unmapped_violations")) {
+            String code = text(rule, "axe_rule_id", "RULE_BASED");
+            String title = text(rule, "help", text(rule, "description", "Unclassified rule-based issue"));
+            if (rule.path("nodes").isArray()) {
+                for (JsonNode node : rule.path("nodes")) {
+                    IssueResult issue = new IssueResult(
+                            analysis, code, title,
+                            axeSeverity(text(node, "impact", text(rule, "impact", "minor"))),
+                            text(node, "selector", null),
+                            text(rule, "description", "") + "\n" + text(node, "failure_summary", "")
+                    );
+                    issue.applyLocator(issueLocatorParser.fromRuleNode(node));
+                    issues.add(issue);
+                }
+            } else {
+                // Older serializers kept only the rule and node count. Keep
+                // that known finding without inventing missing element paths.
+                issues.add(new IssueResult(
+                        analysis, code, title, axeSeverity(text(rule, "impact", "minor")), null,
+                        text(rule, "description", "") + "\n원본 요소 위치 정보가 없습니다."
+                                + " reported_nodes=" + rule.path("node_count").asText("unknown")
+                ));
+            }
+        }
         issueResultRepository.saveAll(issues);
+    }
+
+    private Severity axeSeverity(String impact) {
+        return switch (impact) {
+            case "critical" -> Severity.CRITICAL;
+            case "serious" -> Severity.HIGH;
+            case "moderate" -> Severity.MEDIUM;
+            default -> Severity.LOW;
+        };
     }
 
     private void saveTextAnalysis(JsonNode difficulty, JsonNode suggestions, EvaluationRequest request, LocalDateTime completedAt) {
@@ -353,12 +408,18 @@ public class AiEvaluationIngestionService {
 
     private void saveCvAnalysis(JsonNode module, EvaluationRequest request, LocalDateTime completedAt) {
         JsonNode summary = module.path("summary");
+        boolean notMeasured = "not_measured".equals(module.path("status").asText())
+                || (summary.path("total_texts_analyzed").isIntegralNumber()
+                    && summary.path("total_texts_analyzed").asLong() == 0
+                    && !"failed".equals(module.path("status").asText()));
         AnalysisResult analysis = analysisResultRepository.save(new AnalysisResult(
                 request,
                 AnalyzerType.CV_VISION,
                 status(module),
-                "pass_rate=" + summary.path("pass_rate").asText("0")
-                        + ", fail_count=" + summary.path("fail_count").asInt(0),
+                notMeasured
+                        ? "not_measured, reason=" + text(module, "reason", "NO_TEXT_DETECTED")
+                        : "pass_rate=" + summary.path("pass_rate").asText("unknown")
+                            + ", fail_count=" + summary.path("fail_count").asInt(0),
                 null,
                 completedAt
         ));

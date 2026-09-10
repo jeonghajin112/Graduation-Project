@@ -62,6 +62,27 @@ function createReadyEvent(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("blocked form port boundary", () => {
+  const event = createReadyEvent({ payload: {
+    source: PAGE_REPLAY_SOURCE, type: "FORM_BLOCKED", documentToken, method: "POST"
+  } });
+  const options = { session, challenge, expectedSequence: 2, expectedDocumentToken: documentToken };
+
+  it("consumes a valid notification while preserving the next event's sequence", () => {
+    expect(parseLiveReportPortMessage(event, options)?.type).toBe("EVENT");
+    expect(parseLiveReportPortMessage(createReadyEvent({ sequence: 3 }), {
+      ...options, expectedSequence: 3
+    })?.type).toBe("EVENT");
+  });
+
+  it.each([
+    { sequence: 1 }, { sequence: 3 }, { challenge: "other" }, { bridgeSecret: "other" },
+    { documentToken: "other" }, { protocolVersion: 2 }, { extra: true }
+  ])("does not relax authentication, identity, or ordering: %j", (override) => {
+    expect(parseLiveReportPortMessage({ ...event, ...override }, options)).toBeNull();
+  });
+});
+
 describe("live report session boundary", () => {
   it("requires the configured route origin, separate secrets, and an unexpired session", () => {
     const dashboardOrigin = "https://dashboard.example.test";
