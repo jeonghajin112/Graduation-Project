@@ -30,22 +30,44 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!hasVisibleRows || !list) return;
+    const panel = list.closest<HTMLElement>(".site-unavailable-locator-panel");
+    const rail = panel?.parentElement;
+    if (!panel || !rail) return;
 
     const measure = () => {
       const style = getComputedStyle(list);
-      // CSS reserves one readable card and keeps list content from expanding
-      // the rail. Measure that stable space, including gaps between cards.
       const minimumCardHeight = Number.parseFloat(style.minHeight);
       const gap = Number.parseFloat(style.rowGap) || 0;
       if (!Number.isFinite(minimumCardHeight) || minimumCardHeight <= 0) return;
-      const capacity = Math.max(1, Math.floor((list.clientHeight + gap) / (minimumCardHeight + gap)));
+      const panelBounds = panel.getBoundingClientRect();
+      // A compact panel leaves unused rail space below it. Include that space
+      // when measuring capacity so shrinking the panel does not shrink its pages.
+      const remainingRailHeight = panel === rail.lastElementChild && getComputedStyle(rail).alignSelf === "stretch"
+        ? Math.max(0, rail.getBoundingClientRect().bottom - panelBounds.bottom)
+        : 0;
+      const capacity = Math.max(1, Math.floor((list.clientHeight + remainingRailHeight + gap) / (minimumCardHeight + gap)));
+      const chromeHeight = `${panelBounds.height - list.getBoundingClientRect().height}px`;
+      if (panel.style.getPropertyValue("--site-unavailable-panel-chrome-height") !== chromeHeight) {
+        panel.style.setProperty("--site-unavailable-panel-chrome-height", chromeHeight);
+      }
       setPageSize(previous => previous === capacity ? previous : capacity);
     };
 
-    measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(list);
-    return () => observer.disconnect();
+    const observeRail = () => {
+      observer.disconnect();
+      observer.observe(list);
+      observer.observe(rail);
+      for (const card of rail.children) observer.observe(card);
+      measure();
+    };
+    observeRail();
+    const childObserver = new MutationObserver(observeRail);
+    childObserver.observe(rail, { childList: true });
+    return () => {
+      observer.disconnect();
+      childObserver.disconnect();
+    };
   }, [hasVisibleRows]);
 
   return { listRef, pageSize };
@@ -132,6 +154,7 @@ export function UnavailableLocatorPanel({
       data-hidden-state-locator-count={isRecoverable ? rows.length : undefined}
       data-unavailable-page-size={pageSize}
       data-visible-issue-count={visibleRows.length}
+      style={{ "--site-unavailable-visible-count": visibleRows.length } as CSSProperties}
       aria-labelledby={headingId}
     >
       <div className="site-unavailable-locator-panel__header">

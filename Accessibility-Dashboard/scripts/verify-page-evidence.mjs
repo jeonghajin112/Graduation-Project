@@ -1940,9 +1940,11 @@ async function verifyDesktop(page) {
     const cards = Array.from(rail.children);
     const railRect = rail.getBoundingClientRect();
     const lastRect = cards.at(-1)?.getBoundingClientRect();
+    const listStyle = getComputedStyle(rail.querySelector(".site-unavailable-locator-panel__issues"));
 
     return {
       cardCount: cards.length,
+      cardSlotHeight: parseFloat(listStyle.minHeight) + parseFloat(listStyle.rowGap),
       // Trailing slack between the last card and the rail box.
       trailingSlack: lastRect ? Math.round(railRect.bottom - lastRect.bottom) : 0
     };
@@ -1952,9 +1954,10 @@ async function verifyDesktop(page) {
     `the rail must stack the trend card with detail cards: ${JSON.stringify(railLayout)}`
   );
   assert.ok(
-    railLayout.trailingSlack <= 4,
-    `the rail must not end in dead space: ${JSON.stringify(railLayout)}`
+    railLayout.trailingSlack >= -1 && railLayout.trailingSlack < railLayout.cardSlotHeight,
+    `the rail may leave space below a compact panel, but must not waste a full card slot: ${JSON.stringify(railLayout)}`
   );
+  await assertCompactUnavailablePanel(unavailableLocatorPanel, "desktop rail");
 
   const markerA = frame.locator('[data-issue-id="9001"]');
   const markerB = frame.locator('[data-issue-id="9002"]');
@@ -2371,6 +2374,28 @@ async function verifyScaledReplayOverlays(page, evidence, frame) {
   await page.mouse.move(0, 0);
 }
 
+async function assertCompactUnavailablePanel(panel, context) {
+  const geometry = await panel.evaluate(panel => {
+    const list = panel.querySelector(".site-unavailable-locator-panel__issues");
+    const pager = panel.querySelector(".site-unavailable-locator-panel__pager").getBoundingClientRect();
+    const lastCard = list.lastElementChild.getBoundingClientRect();
+    const style = getComputedStyle(panel);
+    return {
+      pagerGap: pager.top - lastCard.bottom,
+      bottomSpace: panel.getBoundingClientRect().bottom - pager.bottom,
+      bottomPadding: parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth),
+      cardHeights: [...list.children].map(card => card.getBoundingClientRect().height),
+      expectedCardHeight: parseFloat(getComputedStyle(list).minHeight)
+    };
+  });
+  assert.ok(geometry.pagerGap >= 0 && geometry.pagerGap <= 16,
+    `${context}: the indicator must sit directly below the last card: ${JSON.stringify(geometry)}`);
+  assert.ok(Math.abs(geometry.bottomSpace - geometry.bottomPadding) <= 1,
+    `${context}: the panel must end after the indicator and its padding: ${JSON.stringify(geometry)}`);
+  assert.ok(geometry.cardHeights.every(height => Math.abs(height - geometry.expectedCardHeight) <= 1),
+    `${context}: sparse pages must retain the regular card height: ${JSON.stringify(geometry)}`);
+}
+
 async function verifyResponsiveWidths(page) {
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
   const viewports = [
@@ -2566,6 +2591,7 @@ async function verifyResponsiveWidths(page) {
       `${viewport.width}px unavailable issue navigation must stay inside the panel`
     );
     assert.equal(facts.locationActionsInsideCards, true, `${viewport.width}px location actions must remain visible inside each issue card`);
+    await assertCompactUnavailablePanel(unavailableLocatorPanel, `${viewport.width}x${viewport.height}`);
     assert.ok(
       facts.unavailablePanelVerticalOverflow <= 1 && facts.unavailableIssuesVerticalOverflow <= 1 && facts.railVerticalOverflow <= 1,
       `${viewport.width}x${viewport.height} unavailable cards must fit their allocated height: ${JSON.stringify(facts)}`
@@ -2623,6 +2649,9 @@ async function verifyResponsiveWidths(page) {
     }
     if (viewport.width === 2560 && viewport.height >= 1256) {
       await unavailableLocatorPanel.screenshot({ path: `${outDir}/unavailable-${viewport.width}x${viewport.height}.png` });
+    }
+    if ((viewport.width === 1920 && viewport.height === 1080) || isFourK) {
+      await unavailableLocatorPanel.screenshot({ path: `${outDir}/unavailable-compact-${viewport.width}x${viewport.height}.png` });
     }
     if (viewport.width === 390) {
       await verifyScaledReplayOverlays(page, evidence, frame);
@@ -2718,6 +2747,7 @@ async function verifyUnavailableCapacityResize(page) {
     });
     assert.ok(geometry.panelOverflow <= 1 && geometry.listOverflow <= 1, JSON.stringify(geometry));
     assert.ok(geometry.cards.every(card => card.height >= 239 && card.readableMessage >= 16 && card.actionInside), JSON.stringify(geometry));
+    await assertCompactUnavailablePanel(panel, `capacity ${capacity}`);
   };
   await page.locator('.site-unavailable-locator-panel[data-unavailable-locator-count="4"]').waitFor();
   await waitForCapacity(2);
@@ -2725,6 +2755,12 @@ async function verifyUnavailableCapacityResize(page) {
   assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9001", "9002"]);
   await panel.getByRole("button", { name: "2번째 페이지", exact: true }).click();
   assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9003", "9004"]);
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "CONNECTED" });
+  await panel.locator('[data-issue-id="9004"]').waitFor({ state: "detached" });
+  await waitForCapacity(2);
+  assert.equal(await panel.locator("[data-issue-id]").count(), 1, "the last page must show its one remaining issue");
+  await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
+  await panel.locator('[data-issue-id="9004"]').waitFor();
 
   // Resize the same page repeatedly: preserve the selected issue and avoid
   // content-driven growth or ResizeObserver feedback as the capacity changes.

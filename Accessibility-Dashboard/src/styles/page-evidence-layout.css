@@ -943,6 +943,16 @@
   flex-direction: column;
 }
 
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel:not(.is-empty) {
+  /* Keep the pager and panel edge beside the actual rows, even on sparse pages.
+     The capacity measurement also includes the free space below this panel. */
+  max-height: calc(
+    var(--site-unavailable-panel-chrome-height, 100vh)
+    + var(--site-unavailable-visible-count, 1) * var(--site-unavailable-issue-height)
+    + (var(--site-unavailable-visible-count, 1) - 1) * 0.75rem
+  );
+}
+
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__empty {
   display: grid;
   flex: 1 1 auto;
