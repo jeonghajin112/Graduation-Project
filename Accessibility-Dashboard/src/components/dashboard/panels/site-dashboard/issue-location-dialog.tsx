@@ -20,7 +20,8 @@ export function IssueLocationDialog({ row, state, onClose }: {
   const replayIssue = toPageReplayIssue(row);
   // The card/replay message is a bounded preview. Details retain the full
   // stored explanation while keeping text-analysis formatting consistent.
-  const description = formatIssueDescription(issue.message, row.analyzerType);
+  const description = formatIssueDescription(issue.message, row.analyzerType, issue.ruleId);
+  const hasLocalizedDescription = row.analyzerType === "RULE_BASED" && description !== issue.message.trim();
   const locator = issue.locator;
   const explanation = getLocatorExplanation(state);
   const pathSteps = locator?.pathSteps.length ? locator.pathSteps : getReplayIssuePathSteps(issue);
@@ -48,6 +49,10 @@ export function IssueLocationDialog({ row, state, onClose }: {
           <section aria-label="문제 설명">
             <h3>문제 설명</h3>
             <p className="site-issue-location-dialog__description">{description}</p>
+            {hasLocalizedDescription && issue.message.trim() ? <details>
+              <summary>검사 엔진 원문 보기</summary>
+              <p className="site-issue-location-dialog__description">{issue.message}</p>
+            </details> : null}
           </section>
           <section className="site-issue-location-dialog__status" aria-label="현재 표시 상태">
             <Info size={18} aria-hidden="true" />

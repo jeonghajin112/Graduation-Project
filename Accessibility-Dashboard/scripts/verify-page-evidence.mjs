@@ -1315,6 +1315,28 @@ async function verifyUnavailableIssueDescription(page) {
     assert.doesNotMatch(aiMessage, /(?:text|flags|suggestions|llm_revision)=|internal-model/);
     await detailPage.keyboard.press("Escape");
     results.push({ aiSuggestionLength: suggestion.length, fullDescription: "PASS" });
+    const rawRuleMessage = "Links must have discernible text\nFix any of the following: Element has no accessible name <img src=x onerror=alert(1)>";
+    await detailPage.route("**/api/results/requests/501/issues", route =>
+      fulfillJson(route, issues.map(issue => issue.id === 9003
+        ? { ...issue, ruleId: "link-name", description: rawRuleMessage, recommendation: null }
+        : issue)));
+    await detailPage.reload({ waitUntil: "domcontentloaded" });
+    await waitForReplayReady(evidence);
+    await waitForUnavailableLocatorCount(evidence, 2);
+    const localizedCard = detailPage.locator('[data-issue-id="9003"]');
+    assert.match(await localizedCard.textContent(), /링크/);
+    assert.doesNotMatch(await localizedCard.textContent(), /Fix any/);
+    await localizedCard.getByRole("button", { name: "문제 상세", exact: true }).click();
+    const ruleExplanation = dialog.getByRole("region", { name: "문제 설명", exact: true });
+    assert.match(await ruleExplanation.locator("p").first().textContent(), /개선 안내/);
+    const original = ruleExplanation.locator("details");
+    assert.equal(await original.getAttribute("open"), null);
+    await original.locator("summary").focus();
+    await detailPage.keyboard.press("Enter");
+    assert.equal(await original.locator("p").textContent(), rawRuleMessage);
+    assert.equal(await original.locator("img").count(), 0, "engine evidence must stay escaped text");
+    await detailPage.keyboard.press("Escape");
+    results.push({ localizedRuleAndOriginalEvidence: "PASS" });
     return results;
   } finally {
     await detailPage.close();
@@ -2843,6 +2865,14 @@ async function verifyUnavailableCapacityResize(page) {
   const waitForCapacity = async capacity => {
     await page.waitForFunction(capacity => document.querySelector('.site-unavailable-locator-panel[data-locator-mode="unavailable"]')
       ?.getAttribute("data-unavailable-page-size") === String(capacity), capacity);
+    // The React capacity attribute can update before the CSS size transition
+    // finishes. Assert the settled geometry, still bounded by Playwright's timeout.
+    await page.waitForFunction(() => {
+      const panel = document.querySelector('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+      const list = panel?.querySelector(".site-unavailable-locator-panel__issues");
+      return panel && list && panel.scrollHeight - panel.clientHeight <= 1
+        && list.scrollHeight - list.clientHeight <= 1;
+    });
     const geometry = await panel.evaluate(panel => {
       const list = panel.querySelector(".site-unavailable-locator-panel__issues");
       return { panelOverflow: panel.scrollHeight - panel.clientHeight, listOverflow: list.scrollHeight - list.clientHeight,

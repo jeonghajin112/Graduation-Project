@@ -1,6 +1,7 @@
 import type { AnalyzerType, IssueLocatorCarouselContext, IssueLocatorPathStep } from "@/types/accessibility-domain";
 
 import { normalizeIssueCode } from "./constants";
+import { localizeRuleDescription } from "./rule-issue-description";
 import { getReplayIssueCarouselContext, getReplayIssuePathSteps } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
 
@@ -289,7 +290,7 @@ export function toPageReplayIssue(row: RecentIssueRow): PageReplayIssue {
     : null;
   const displayMessage = textAnalysis
     ? formatTextAnalysisMessage(textAnalysis)
-    : row.issue.message;
+    : formatIssueDescription(row.issue.message, row.analyzerType, row.issue.ruleId);
 
   return {
     id: row.issue.id,
@@ -482,9 +483,14 @@ function normalizeTextAnalysisText(value: string): string {
 
 // Local details share the legacy grammar, but are not an iframe payload and
 // must retain explanation text beyond the replay's field and total limits.
-export function formatIssueDescription(message: string, analyzerType?: AnalyzerType): string {
+export function formatIssueDescription(message: string, analyzerType?: AnalyzerType, ruleId?: string | null): string {
   const detail = analyzerType === "AI_TEXT" ? parseTextAnalysisMessage(message) : null;
-  return detail ? formatTextAnalysisMessage(detail) : message.trim() || "상세 설명이 없습니다.";
+  if (detail) return formatTextAnalysisMessage(detail);
+  if (analyzerType === "RULE_BASED") {
+    const localized = localizeRuleDescription(message, ruleId);
+    if (localized) return localized;
+  }
+  return message.trim() || "상세 설명이 없습니다.";
 }
 
 function formatTextAnalysisMessage(detail: ReplayTextAnalysisDetail): string {

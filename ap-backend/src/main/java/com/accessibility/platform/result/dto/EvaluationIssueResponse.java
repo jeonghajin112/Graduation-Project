@@ -13,6 +13,7 @@ public record EvaluationIssueResponse(
         String selector,
         String wcagCode,
         IssueLocatorResponse locator,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        String ruleId
 ) {
 }

@@ -45,6 +45,9 @@ public class IssueResult extends BaseTimeEntity {
     @Lob
     private String message;
 
+    @Column(length = 100)
+    private String ruleId;
+
     @Column(nullable = false)
     private boolean resolved;
 
@@ -86,6 +89,10 @@ public class IssueResult extends BaseTimeEntity {
         this.message = message;
         this.resolved = false;
         this.locatorPathSteps = new ArrayList<>();
+    }
+
+    public void applyRuleId(String ruleId) {
+        this.ruleId = ruleId != null && ruleId.matches("[a-z0-9][a-z0-9-]{0,99}") ? ruleId : null;
     }
 
     public void applyLocator(IssueLocator locator) {

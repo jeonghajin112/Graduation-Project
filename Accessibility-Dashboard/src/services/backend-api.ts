@@ -599,6 +599,7 @@ function buildIssueViewModels(
       analysisResultId,
       issueCode: issue.wcagCode ?? issue.module,
       issueTitle: issue.title,
+      ruleId: issue.ruleId ?? null,
       severity: issueSeverityToUiSeverity(issue.severity),
       locationPath: issue.selector ?? "",
       locator: issue.locator ?? null,

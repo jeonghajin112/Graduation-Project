@@ -107,6 +107,7 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                         "kwcag_name":"Alternative text",
                         "severity":"critical",
                         "rules":[{
+                          "axe_rule_id":"button-name",
                           "help":"Add alternative text",
                           "nodes":[{
                             "selector":"button.pay",
@@ -179,6 +180,7 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                 .filter(issue -> issue.module().equals("rule_based"))
                 .findFirst()
                 .orElseThrow();
+        assertThat(ruleIssue.ruleId()).isEqualTo("button-name");
         assertThat(ruleIssue.selector()).isEqualTo("button.pay");
         assertThat(ruleIssue.locator().kind()).isEqualTo("DOM_RECT");
         assertThat(ruleIssue.locator().pathSteps()).hasSize(1);

@@ -316,6 +316,7 @@ public class AiEvaluationIngestionService {
                             text(node, "selector", null),
                             text(rule, "help", "") + "\n" + text(node, "failure_summary", "")
                     );
+                    issue.applyRuleId(text(rule, "axe_rule_id", null));
                     issue.applyLocator(issueLocatorParser.fromRuleNode(node));
                     issues.add(issue);
                 }
@@ -332,6 +333,7 @@ public class AiEvaluationIngestionService {
                             text(node, "selector", null),
                             text(rule, "description", "") + "\n" + text(node, "failure_summary", "")
                     );
+                    issue.applyRuleId(text(rule, "axe_rule_id", null));
                     issue.applyLocator(issueLocatorParser.fromRuleNode(node));
                     issues.add(issue);
                 }

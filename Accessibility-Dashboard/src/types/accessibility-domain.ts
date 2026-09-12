@@ -95,6 +95,7 @@ export type LiveReportSession = {
 };
 
 export type EvaluationIssue = {
+  ruleId?: string | null;
   id: number;
   requestId: number;
   module: EvaluationModule;
@@ -121,6 +122,7 @@ export type AnalysisResult = {
 };
 
 export type IssueResult = {
+  ruleId?: string | null;
   id: number;
   analysisResultId: number;
   issueCode: string;

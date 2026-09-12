@@ -731,6 +731,7 @@ const parseIssueLocator: ApiResponseParser<IssueLocator> = (value, path) => {
 const parseEvaluationIssue: ApiResponseParser<EvaluationIssue> = (value, path) => {
   const fields = readFields(value, path);
   return {
+    ruleId: fields.optional("ruleId", parseNullableString),
     id: fields.required("id", parsePositiveInteger),
     requestId: fields.required("requestId", parsePositiveInteger),
     module: fields.required("module", (field, fieldPath) =>
