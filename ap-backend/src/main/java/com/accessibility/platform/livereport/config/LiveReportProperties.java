@@ -44,6 +44,12 @@ public class LiveReportProperties {
     private int maxCookiesPerSession = 64;
     private int maxCookieBytes = 4096;
     private int maxCookieBytesPerSession = 32 * 1024;
+    /** One-use delivery of explicitly fresh public responses after a viewer redirect. */
+    private int redirectHandoffTtlSeconds = 5;
+    private int maxRedirectHandoffEntries = 64;
+    private int maxRedirectHandoffEntriesPerSession = 4;
+    private long maxRedirectHandoffBytes = 64L * 1024 * 1024;
+    private long maxRedirectHandoffBytesPerSession = 16L * 1024 * 1024;
 
     public int responseLimitBytes(String contentType) {
         String essence = contentType == null

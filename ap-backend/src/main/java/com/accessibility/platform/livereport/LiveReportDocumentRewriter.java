@@ -827,8 +827,8 @@ public class LiveReportDocumentRewriter {
                 pointer-events:none}
                 .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(480px,calc(100vw - 24px));
                 min-height:0;max-height:min(520px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
-                border-radius:14px;background:rgba(255,255,255,.96);color:#101828;box-shadow:0 18px 44px rgba(16,24,40,.25),inset 0 1px rgba(255,255,255,.9);
-                -webkit-backdrop-filter:blur(18px) saturate(160%);backdrop-filter:blur(18px) saturate(160%);pointer-events:auto;
+                border-radius:14px;background:#fff;color:#101828;box-shadow:0 12px 28px rgba(16,24,40,.16);
+                -webkit-backdrop-filter:none;backdrop-filter:none;pointer-events:auto;
                 font:400 13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:left;transform-origin:top left}
                 .ap-live-popover[hidden]{display:none!important}.ap-live-popover *{box-sizing:border-box}
                 .ap-live-popover__toolbar{display:flex;align-items:center;gap:8px;min-height:36px;padding:12px 12px 0}
@@ -940,6 +940,11 @@ public class LiveReportDocumentRewriter {
                   const pendingEvents = [];
                   let marked = [];
                   let currentIssues = [];
+                  const resolvedIssueTargets = new Map();
+                  const markerEntryByIssueId = new Map();
+                  const dirtyTextIssueIds = new Set();
+                  let simpleDocumentLocators = false;
+                  let textLocatorIssues = [];
                   let focusRequestVersion = 0;
                   let locatorTargetsNeedReconciliation = false;
                   let lastFocusedIssueId = null;
@@ -1519,7 +1524,19 @@ public class LiveReportDocumentRewriter {
                       set(value) { nativeTextContent.set.call(this, this instanceof HTMLStyleElement ? runtimeCss(value) : value); }
                     }); } catch (_) {}
                   }
-                  const rewriteRuntimeNode = node => {
+                  const runtimeAttributeNames = ['src','href','action','formaction','poster','data','xlink:href','srcset','style'];
+                  const rewriteRuntimeAttribute = (element, name) => {
+                    const value = nativeGetAttribute.call(element, name);
+                    if (value && (name === 'style' || name === 'srcset' || isUrlAttribute(element, name))) {
+                      writeRuntimeAttribute(element, name, value);
+                    }
+                  };
+                  const rewriteRuntimeStyle = element => {
+                    if (!(element instanceof HTMLStyleElement) || !element.textContent) return;
+                    const rewritten = runtimeCss(element.textContent);
+                    if (rewritten !== element.textContent) nativeTextContent.set.call(element, rewritten);
+                  };
+                  const rewriteRuntimeNode = (node, rewrittenElements) => {
                     if (!(node instanceof Element)) return;
                     const candidates = [node];
                     const descendants = node.querySelectorAll('*');
@@ -1527,31 +1544,50 @@ public class LiveReportDocumentRewriter {
                       candidates.push(descendants[index]);
                     }
                     candidates.forEach(element => {
-                      ['src','href','action','formaction','poster','data','xlink:href','srcset','style'].forEach(name => {
-                        if (!nativeGetAttribute.call(element, name)) return;
-                        const value = nativeGetAttribute.call(element, name);
-                        if (name === 'style' || name === 'srcset' || isUrlAttribute(element, name)) {
-                          writeRuntimeAttribute(element, name, value);
-                        }
-                      });
-                      if (element instanceof HTMLStyleElement && element.textContent) {
-                        const rewritten = runtimeCss(element.textContent);
-                        if (rewritten !== element.textContent) nativeTextContent.set.call(element, rewritten);
-                      }
+                      if (rewrittenElements.has(element)) return;
+                      rewrittenElements.add(element);
+                      runtimeAttributeNames.forEach(name => rewriteRuntimeAttribute(element, name));
+                      rewriteRuntimeStyle(element);
                     });
                   };
                   const runtimeUrlObserver = globalThis.MutationObserver ? new MutationObserver(records => {
+                    const addedRoots = new Set();
+                    const changedAttributes = new Map();
+                    const changedStyles = new Set();
                     records.forEach(record => {
-                      if (record.type === 'childList') record.addedNodes.forEach(rewriteRuntimeNode);
-                      else if (record.type === 'characterData' && record.target.parentElement instanceof HTMLStyleElement) {
-                        rewriteRuntimeNode(record.target.parentElement);
+                      if (record.type === 'childList') {
+                        record.addedNodes.forEach(node => {
+                          if (node instanceof Element) addedRoots.add(node);
+                        });
+                        if (record.target instanceof HTMLStyleElement) changedStyles.add(record.target);
                       }
-                      else if (record.target instanceof Element) rewriteRuntimeNode(record.target);
+                      else if (record.type === 'characterData' && record.target.parentElement instanceof HTMLStyleElement) {
+                        changedStyles.add(record.target.parentElement);
+                      }
+                      else if (record.type === 'attributes' && record.target instanceof Element) {
+                        let names = changedAttributes.get(record.target);
+                        if (!names) changedAttributes.set(record.target, names = new Set());
+                        names.add(record.attributeName);
+                      }
+                    });
+                    // Only inserted subtrees need a descendant walk. Keep independently added
+                    // roots: a nested root may lie beyond its ancestor's 5,000-element limit.
+                    const rewrittenElements = new Set();
+                    addedRoots.forEach(node => rewriteRuntimeNode(node, rewrittenElements));
+                    changedStyles.forEach(element => {
+                      if (!rewrittenElements.has(element)) rewriteRuntimeStyle(element);
+                    });
+                    // Read the final value once per element/attribute in this delivery, including
+                    // removals. A moving container must not rescan its unchanged descendants.
+                    changedAttributes.forEach((names, element) => {
+                      if (!rewrittenElements.has(element)) {
+                        names.forEach(name => rewriteRuntimeAttribute(element, name));
+                      }
                     });
                   }) : null;
                   runtimeUrlObserver?.observe(document.documentElement, {
                     subtree:true, childList:true, characterData:true, attributes:true,
-                    attributeFilter:['src','href','action','formaction','poster','data','xlink:href','srcset','style']
+                    attributeFilter:runtimeAttributeNames
                   });
 
                   // Dynamic public pages frequently hydrate through anonymous same-origin POST
@@ -2034,13 +2070,32 @@ public class LiveReportDocumentRewriter {
                   const handleMarkerMutations = records => {
                       const externalRecords = records.filter(record => !layer.contains(record.target));
                       if (currentIssues.length > 0 && externalRecords.length > 0) {
+                        // Only the known generated grammar can ignore unrelated attributes.
+                        // Structural edits, IDs, arbitrary selectors and Shadow DOM paths retain
+                        // full reconciliation because they can change the first matching target.
+                        if (!simpleDocumentLocators || externalRecords.some(record =>
+                            record.type === 'childList'
+                            || (record.type === 'attributes' && record.attributeName === 'id')
+                            || !['attributes', 'characterData'].includes(record.type))) {
+                          locatorTargetsNeedReconciliation = true;
+                        } else {
+                          const textRecords = externalRecords.filter(record => record.type === 'characterData'
+                            || (record.type === 'attributes'
+                              && ['aria-label', 'title', 'placeholder', 'alt', 'value', 'type'].includes(record.attributeName)));
+                          if (textRecords.length > 0) textLocatorIssues.forEach(issue => {
+                            const previous = resolvedIssueTargets.get(issue.id);
+                            // Missing/reordered text targets can recover somewhere other than
+                            // their last element, so their text dependencies remain conservative.
+                            if (!previous?.element || previous.recovered || textRecords.some(record =>
+                                previous.element.contains(record.target))) dirtyTextIssueIds.add(issue.id);
+                          });
+                        }
                         if (externalRecords.some(record => (
                           record.type === 'childList'
                           || record.type === 'characterData'
                           || (record.type === 'attributes'
                             && !locatorStateOnlyAttributes.has(String(record.attributeName || '').toLowerCase()))
                         ))) {
-                          locatorTargetsNeedReconciliation = true;
                           marked.forEach(entry => {
                             entry.positionAnchor = undefined;
                           });
@@ -2118,24 +2173,27 @@ public class LiveReportDocumentRewriter {
                   // 클러스터: 코너 자리가 겹치는 이웃 요소의 이슈를 한 칩(host)에 모은다
                   const sortIssuesBySeverity = issues => issues.slice().sort((left, right) =>
                     (severityRanks[severityKey(right)] || 0) - (severityRanks[severityKey(left)] || 0) || left.id - right.id);
-                  const clusterIssuesFor = entry => (entry.clusterMembers && entry.clusterMembers.length > 0)
-                    ? sortIssuesBySeverity([...entry.issues, ...entry.clusterMembers.flatMap(member => member.issues)])
+                  const clusterIssuesFor = entry => (entry.clusterMembers && entry.clusterMembers.size > 0)
+                    ? sortIssuesBySeverity([...entry.issues, ...Array.from(entry.clusterMembers).flatMap(member => member.issues)])
                     : entry.issues;
                   const entryForIssue = (host, issue) => {
                     if (!host || !issue) return host;
                     if (host.issues.includes(issue)) return host;
-                    return (host.clusterMembers || []).find(member => member.issues.includes(issue)) || host;
+                    for (const member of host.clusterMembers || []) {
+                      if (member.issues.includes(issue)) return member;
+                    }
+                    return host;
                   };
                   const leaveCluster = entry => {
                     const host = entry.clusterHost;
-                    if (host && host.clusterMembers) host.clusterMembers = host.clusterMembers.filter(member => member !== entry);
+                    if (host && host.clusterMembers) host.clusterMembers.delete(entry);
                     entry.clusterHost = null;
                   };
                   const joinCluster = (host, member) => {
                     leaveCluster(member);
                     member.clusterHost = host;
-                    if (!host.clusterMembers) host.clusterMembers = [];
-                    host.clusterMembers.push(member);
+                    if (!host.clusterMembers) host.clusterMembers = new Set();
+                    host.clusterMembers.add(member);
                   };
                   const groupCategory = issues => {
                     const categories = new Set(issues.map(issue => String(issue.category || 'general')));
@@ -2567,13 +2625,17 @@ public class LiveReportDocumentRewriter {
                   const clear = () => {
                     closePopover();
                     marked = [];
+                    markerEntryByIssueId.clear();
+                    resolvedIssueTargets.clear();
+                    dirtyTextIssueIds.clear();
                     clearMarkerScrollRoots();
                     clearMarkerShadowObservers();
                     layer.replaceChildren(highlight, popover);
                   };
-                  const observeMarkerShadowScrollRoots = element => {
+                  const observeMarkerShadowScrollRoots = (element, requiredRoots) => {
                     for (let current = element; current instanceof Element;) {
                       const root = nativeApply(nativeGetRootNode, current, []);
+                      if (root instanceof ShadowRoot) requiredRoots.add(root);
                       if (root instanceof ShadowRoot && !markerScrollRoots.has(root)) {
                         markerScrollRoots.add(root);
                         nativeApply(nativeAddEventListener, root, [
@@ -2961,15 +3023,9 @@ public class LiveReportDocumentRewriter {
                     return null;
                   };
                   const position = (mode = 'full') => {
-                    if (locatorTargetsNeedReconciliation
+                    if (locatorTargetsNeedReconciliation || dirtyTextIssueIds.size > 0
                         || marked.some(entry => !entry.element?.isConnected)) {
-                      if (reconcileIssueTargets(lastFocusedIssueId)) {
-                        const issueIdToRefocus = lastFocusedIssueId;
-                        if (issueIdToRefocus !== null) {
-                          queueMicrotask(() => { void focusIssue(issueIdToRefocus); });
-                        }
-                        return;
-                      }
+                      if (reconcileIssueTargets(lastFocusedIssueId)) return;
                     }
                     const preserveRootPlacement = mode === 'preserve-root';
                     const documentLeft = globalThis.scrollX;
@@ -3162,7 +3218,7 @@ public class LiveReportDocumentRewriter {
                     const {marker} = entry;
                     if (!marker) return;
                     const issues = clusterIssuesFor(entry);
-                    const clustered = (entry.clusterMembers?.length || 0) > 0;
+                    const clustered = (entry.clusterMembers?.size || 0) > 0;
                     const highest = highestSeverityIssue(issues);
                     const label = marker.querySelector('.ap-live-marker__icon');
                     if (label) renderMarkerLabel(label, highest?.analyzer || issues[0]?.analyzer);
@@ -3181,7 +3237,7 @@ public class LiveReportDocumentRewriter {
                     } else if (count) {
                       count.remove();
                     }
-                    const elementCount = 1 + (entry.clusterMembers?.length || 0);
+                    const elementCount = 1 + (entry.clusterMembers?.size || 0);
                     marker.setAttribute('aria-label', issues.length > 1
                       ? (clustered
                         ? `근처 요소 ${elementCount}곳에서 발견된 접근성 문제 ${issues.length}개. ${issues.slice(0, 3).map(issueLabel).join('. ')}`
@@ -3197,6 +3253,35 @@ public class LiveReportDocumentRewriter {
                       markerPositionFrame = 0;
                       position(scheduledMode);
                     });
+                  };
+                  const issuePathSteps = item => {
+                    const storedSteps = Array.isArray(item?.pathSteps) ? item.pathSteps : [];
+                    return storedSteps.length > 0 ? storedSteps
+                      : (typeof item?.path === 'string' && item.path ? [{context:'DOCUMENT', selector:item.path}] : []);
+                  };
+                  const isSimpleDocumentLocator = issue => {
+                    const steps = issuePathSteps(issue);
+                    if (steps.length !== 1 || String(steps[0]?.context || 'DOCUMENT').toUpperCase() !== 'DOCUMENT'
+                        || typeof steps[0]?.selector !== 'string') return false;
+                    return steps[0].selector.trim().split(/\\s*>\\s*/).every(segment =>
+                      /^(?:[a-zA-Z][\\w-]*(?:#[\\w-]+)?|#[\\w-]+)(?::nth-of-type\\([1-9]\\d*\\))?$/.test(segment));
+                  };
+                  const hasAnalyzedText = issue => issue?.analyzer === 'AI_TEXT'
+                    && isObjectRecord(issue.textAnalysis) && issue.textAnalysis.kind === 'text-analysis'
+                    && typeof issue.textAnalysis.sourceText === 'string';
+                  const createLocatorQueryCache = () => ({single:new WeakMap(), all:new WeakMap(), shadowRoots:new Set()});
+                  const queryLocator = (root, selector, queries, all = false) => {
+                    const roots = all ? queries.all : queries.single;
+                    let selectors = roots.get(root);
+                    if (!selectors) roots.set(root, selectors = new Map());
+                    if (!selectors.has(selector)) {
+                      try {
+                        selectors.set(selector, {value:all ? root.querySelectorAll(selector) : root.querySelector(selector)});
+                      } catch (error) { selectors.set(selector, {error}); }
+                    }
+                    const result = selectors.get(selector);
+                    if (result.error) throw result.error;
+                    return result.value;
                   };
                   const matchesAnalyzedText = (element, issue) => {
                     const detail = issue.textAnalysis;
@@ -3223,7 +3308,7 @@ public class LiveReportDocumentRewriter {
                         && ['button', 'submit', 'reset'].includes(element.type)) candidates.push(element.value);
                     return candidates.some(candidate => normalize(candidate).includes(expected));
                   };
-                  const findReorderedTextTarget = (root, selector, issue) => {
+                  const findReorderedTextTarget = (root, selector, issue, queries) => {
                     const detail = issue.textAnalysis;
                     if (issue.analyzer !== 'AI_TEXT' || !isObjectRecord(detail)
                         || detail.kind !== 'text-analysis' || typeof detail.sourceText !== 'string'
@@ -3235,7 +3320,7 @@ public class LiveReportDocumentRewriter {
                         /^[a-zA-Z][\\w-]*(?:#[\\w-]+)?(?::nth-of-type\\([1-9]\\d*\\))?$/.test(segment))) return null;
                     const structuralSelector = selector.replace(/:nth-of-type\\([1-9]\\d*\\)/g, '');
                     if (structuralSelector === selector) return null;
-                    const candidates = root.querySelectorAll(structuralSelector);
+                    const candidates = queryLocator(root, structuralSelector, queries, true);
                     if (candidates.length > 500) return null;
                     let match = null;
                     for (const candidate of candidates) {
@@ -3246,14 +3331,12 @@ public class LiveReportDocumentRewriter {
                     }
                     return match;
                   };
-                  const resolveIssue = item => {
-                    const storedSteps = Array.isArray(item.pathSteps) ? item.pathSteps : [];
-                    const steps = storedSteps.length > 0
-                      ? storedSteps
-                      : (typeof item.path === 'string' && item.path ? [{context:'DOCUMENT', selector:item.path}] : []);
+                  const resolveIssue = (item, queries = createLocatorQueryCache()) => {
+                    const steps = issuePathSteps(item);
                     if (steps.length === 0) return {element:null, reason:'EMPTY_PATH'};
                     let root = document;
                     let current = null;
+                    let reordered = false;
                     try {
                       for (const [index, step] of steps.entries()) {
                         if (!step || typeof step.selector !== 'string' || !step.selector.trim()) {
@@ -3267,13 +3350,14 @@ public class LiveReportDocumentRewriter {
                           // A document observer does not cross a shadow boundary.
                           // Observe each traversed root even if the target is not mounted yet.
                           observeMarkerShadowRoot(root);
+                          queries.shadowRoots.add(root);
                         } else if (context === 'FRAME') {
                           return {element:null, reason:'FRAME_UNSUPPORTED'};
                         } else return {element:null, reason:'UNSUPPORTED_CONTEXT'};
-                        current = root.querySelector(step.selector);
+                        current = queryLocator(root, step.selector, queries);
                         if (index === steps.length - 1 && (!current || !matchesAnalyzedText(current, item))) {
-                          const recovered = findReorderedTextTarget(root, step.selector, item);
-                          if (recovered) current = recovered;
+                          const recovered = findReorderedTextTarget(root, step.selector, item, queries);
+                          if (recovered) { current = recovered; reordered = true; }
                         }
                         if (!current) return {element:null, reason:'SELECTOR_NOT_FOUND'};
                       }
@@ -3281,59 +3365,131 @@ public class LiveReportDocumentRewriter {
                     // An nth-of-type selector can still resolve after a news card was
                     // replaced. Its old analysis must never label the new content.
                     if (!matchesAnalyzedText(current, item)) return {element:null, reason:'ELEMENT_CONTENT_CHANGED'};
-                    return {element:current, reason:null};
+                    return {element:current, reason:null, recovered:reordered};
                   };
-                  const reconcileIssueTargets = preferredIssueId => {
-                    locatorTargetsNeedReconciliation = false;
+                  const resolveIssueSnapshot = (issueIds = null) => {
+                    const queries = createLocatorQueryCache();
+                    const snapshot = issueIds ? new Map(resolvedIssueTargets) : new Map();
+                    currentIssues.forEach(issue => {
+                      if (!issue || !Number.isSafeInteger(issue.id) || issue.id <= 0
+                          || (issueIds && !issueIds.has(issue.id))) return;
+                      snapshot.set(issue.id, resolveIssue(issue, queries));
+                    });
                     markerShadowObservers.forEach((observer, root) => {
-                      if (!root.host.isConnected) {
-                        observer.disconnect();
-                        markerShadowObservers.delete(root);
+                      if (!root.host.isConnected || (!issueIds && !queries.shadowRoots.has(root))) {
+                        observer.disconnect(); markerShadowObservers.delete(root);
                       }
                     });
-                    if (currentIssues.length === 0) return false;
-                    const currentElementByIssueId = new Map();
-                    marked.forEach(entry => {
-                      entry.issues.forEach(issue => currentElementByIssueId.set(issue.id, entry.element));
+                    markerScrollRoots.forEach(root => {
+                      if (root.host.isConnected) return;
+                      nativeApply(nativeRemoveEventListener, root, ['scroll', scheduleCapturedScrollPosition, {capture:true}]);
+                      markerScrollRoots.delete(root);
                     });
-                    const changed = currentIssues.some(issue => {
-                      if (!issue || !Number.isSafeInteger(issue.id) || issue.id <= 0) return false;
-                      const previousElement = currentElementByIssueId.get(issue.id) || null;
-                      const resolved = resolveIssue(issue);
-                      const resolvedElement = resolved.element || null;
-                      if (!resolvedElement) reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolved.reason});
-                      return resolvedElement !== previousElement;
-                    });
-                    if (!changed) return false;
-                    apply(currentIssues, preferredIssueId);
-                    return true;
+                    return snapshot;
                   };
-                  const apply = (items, selectedIssueId = null) => {
-                    mount(); clear();
-                    focusRequestVersion += 1;
-                    locatorStatusSignatures.clear();
-                    currentIssues = (Array.isArray(items) ? items : []).slice(0, 5000);
-                    locatorTargetsNeedReconciliation = false;
-                    lastFocusedIssueId = isIssueId(selectedIssueId)
-                        && currentIssues.some(issue => issue?.id === selectedIssueId)
-                      ? selectedIssueId : null;
+                  const groupsForSnapshot = snapshot => {
                     const groups = new Map();
                     currentIssues.forEach(item => {
                       if (!item || !Number.isSafeInteger(item.id) || item.id <= 0) return;
-                      const resolved = resolveIssue(item);
-                      const element = resolved.element;
-                      if (!element) {
-                        reportLocatorState(item, {status:'UNAVAILABLE', reason:resolved.reason});
-                        return;
-                      }
+                      const element = snapshot.get(item.id)?.element;
+                      if (!element) return;
                       const group = groups.get(element) || {element, issues:[]};
                       group.issues.push(item);
                       groups.set(element, group);
                     });
+                    return groups;
+                  };
+                  const synchronizeMarkerGroups = (groups, preferredIssueId) => {
+                    const previousGroups = new Map(marked.map(entry => [entry.element, entry]));
+                    marked.forEach(entry => {
+                      if (groups.has(entry.element)) return;
+                      leaveCluster(entry);
+                      entry.clusterMembers.forEach(member => { member.clusterHost = null; });
+                      entry.clusterMembers.clear();
+                      entry.marker.remove();
+                    });
+                    const next = [];
+                    const requiredScrollRoots = new Set();
+                    markerEntryByIssueId.clear();
                     groups.forEach(group => {
-                      group.issues.sort((left, right) => (severityRanks[severityKey(right)] || 0) - (severityRanks[severityKey(left)] || 0) || left.id - right.id);
-                      group.selectedIssueId = group.issues.some(issue => issue.id === selectedIssueId)
-                        ? selectedIssueId : highestSeverityIssue(group.issues)?.id;
+                      const entry = previousGroups.get(group.element) || group;
+                      entry.issues = sortIssuesBySeverity(group.issues);
+                      const selectedIssueId = entry.issues.some(issue => issue.id === preferredIssueId)
+                        ? preferredIssueId : entry.selectedIssueId;
+                      entry.selectedIssueId = clusterIssuesFor(entry).some(issue => issue.id === selectedIssueId)
+                        ? selectedIssueId : highestSeverityIssue(entry.issues)?.id;
+                      if (!entry.marker) createMarkerGroup(entry);
+                      if (!entry.issues.some(issue => String(issue.id) === entry.marker.dataset.issueId)) {
+                        entry.marker.dataset.issueId = String(highestSeverityIssue(entry.issues)?.id || entry.issues[0].id);
+                      }
+                      observeMarkerShadowScrollRoots(entry.element, requiredScrollRoots);
+                      entry.issues.forEach(issue => markerEntryByIssueId.set(issue.id, entry));
+                      next.push(entry);
+                    });
+                    marked = next;
+                    markerScrollRoots.forEach(root => {
+                      if (requiredScrollRoots.has(root)) return;
+                      nativeApply(nativeRemoveEventListener, root, ['scroll', scheduleCapturedScrollPosition, {capture:true}]);
+                      markerScrollRoots.delete(root);
+                    });
+                  };
+                  const reconcileIssueTargets = preferredIssueId => {
+                    const full = locatorTargetsNeedReconciliation || marked.some(entry => !entry.element?.isConnected);
+                    const issueIds = new Set(dirtyTextIssueIds);
+                    if (isIssueId(preferredIssueId)) issueIds.add(preferredIssueId);
+                    if (!full && issueIds.size === 0) return false;
+                    locatorTargetsNeedReconciliation = false;
+                    dirtyTextIssueIds.clear();
+                    const snapshot = resolveIssueSnapshot(full ? null : issueIds);
+                    const changedIssueIds = new Set();
+                    snapshot.forEach((resolved, issueId) => {
+                      if ((resolvedIssueTargets.get(issueId)?.element || null) !== (resolved.element || null)) {
+                        changedIssueIds.add(issueId);
+                        locatorStatusSignatures.delete(issueId);
+                      }
+                      resolvedIssueTargets.set(issueId, resolved);
+                    });
+                    currentIssues.forEach(issue => {
+                      const resolved = snapshot.get(issue?.id);
+                      if (resolved && !resolved.element) reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolved.reason});
+                    });
+                    if (changedIssueIds.size === 0) return false;
+                    // Preserve logical selection across a target replacement. Unaffected marker
+                    // nodes/listeners and open detail stay in place; only changed groups are bound.
+                    const previousOpen = openEntry ? {
+                      issueId:openEntry.selectedIssueId, host:openEntry, target:openTargetEntry,
+                      issues:clusterIssuesFor(openEntry).map(issue => issue.id).join(','), selected:openSelected,
+                      focused:document.activeElement === openEntry.marker
+                    } : null;
+                    focusRequestVersion += 1;
+                    synchronizeMarkerGroups(groupsForSnapshot(snapshot), preferredIssueId);
+                    if (openEntry && (!marked.includes(openEntry) || !openTargetEntry?.element?.isConnected)) closePopover();
+                    position();
+                    if (previousOpen) {
+                      const target = markerEntryByIssueId.get(previousOpen.issueId);
+                      const host = target?.clusterHost || target;
+                      if (host && !host.marker.hidden) {
+                        const issues = clusterIssuesFor(host).map(issue => issue.id).join(',');
+                        if (popover.hidden || host !== previousOpen.host || target !== previousOpen.target
+                            || issues !== previousOpen.issues) {
+                          openPopover(host, previousOpen.issueId, false, previousOpen.selected);
+                        }
+                        if (previousOpen.focused && document.activeElement !== host.marker) {
+                          restoringMarkerFocus = true;
+                          host.marker.focus({preventScroll:true});
+                          queueMicrotask(() => { restoringMarkerFocus = false; });
+                        }
+                      } else if (previousOpen.issueId === lastFocusedIssueId) {
+                        if (!target) showIssueFallback(previousOpen.issueId);
+                        else queueMicrotask(() => { void focusIssue(previousOpen.issueId); });
+                      } else closePopover();
+                    } else if (isIssueId(lastFocusedIssueId) && changedIssueIds.has(lastFocusedIssueId)) {
+                      const issueId = lastFocusedIssueId;
+                      queueMicrotask(() => { void focusIssue(issueId); });
+                    }
+                    return true;
+                  };
+                  const createMarkerGroup = group => {
                       const marker = document.createElement('button');
                       marker.type = 'button'; marker.className = 'ap-live-marker';
                       group.marker = marker;
@@ -3347,8 +3503,7 @@ public class LiveReportDocumentRewriter {
                       group.markerDocumentTop = null;
                       group.markerAnchorDocumentRect = null;
                       group.clusterHost = null;
-                      group.clusterMembers = [];
-                      observeMarkerShadowScrollRoots(group.element);
+                      group.clusterMembers = new Set();
                       marker.dataset.issueId = String(group.selectedIssueId || group.issues[0].id);
                       const highest = highestSeverityIssue(group.issues);
                       const markerIcon = document.createElement('span');
@@ -3380,8 +3535,26 @@ public class LiveReportDocumentRewriter {
                         event.preventDefault(); event.stopPropagation();
                         openPopover(group, group.selectedIssueId, true);
                       });
-                      layer.append(marker); marked.push(group);
+                      layer.append(marker);
+                  };
+                  const apply = (items, selectedIssueId = null) => {
+                    mount(); clear();
+                    focusRequestVersion += 1;
+                    locatorStatusSignatures.clear();
+                    currentIssues = (Array.isArray(items) ? items : []).slice(0, 5000);
+                    simpleDocumentLocators = currentIssues.every(isSimpleDocumentLocator);
+                    textLocatorIssues = currentIssues.filter(hasAnalyzedText);
+                    locatorTargetsNeedReconciliation = false;
+                    lastFocusedIssueId = isIssueId(selectedIssueId)
+                        && currentIssues.some(issue => issue?.id === selectedIssueId)
+                      ? selectedIssueId : null;
+                    const snapshot = resolveIssueSnapshot();
+                    snapshot.forEach((resolved, issueId) => resolvedIssueTargets.set(issueId, resolved));
+                    currentIssues.forEach(issue => {
+                      const resolved = snapshot.get(issue?.id);
+                      if (resolved && !resolved.element) reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolved.reason});
                     });
+                    synchronizeMarkerGroups(groupsForSnapshot(snapshot), selectedIssueId);
                     position();
                   };
                   const activateCarouselState = (element, context) => {
@@ -3453,9 +3626,9 @@ public class LiveReportDocumentRewriter {
                     }
                     lastFocusedIssueId = issueId;
                     if (reconcileIssueTargets(issueId)) requestVersion = focusRequestVersion;
-                    const entry = marked.find(candidate => candidate.issues.some(item => item.id === issueId));
+                    const entry = markerEntryByIssueId.get(issueId);
                     if (!entry) {
-                      reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolveIssue(issue).reason || 'SELECTOR_NOT_FOUND'});
+                      reportLocatorState(issue, {status:'UNAVAILABLE', reason:resolvedIssueTargets.get(issueId)?.reason || 'SELECTOR_NOT_FOUND'});
                       showIssueFallback(issueId);
                       return;
                     }

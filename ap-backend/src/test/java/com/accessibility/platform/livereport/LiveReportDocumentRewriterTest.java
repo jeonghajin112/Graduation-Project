@@ -113,8 +113,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("new NativeMutationObserver");
         assertThat(rewritten).contains("document.addEventListener('click'");
         assertThat(rewritten).contains("location.assign(proxied)");
-        assertThat(rewritten).contains("const storedSteps = Array.isArray(item.pathSteps) ? item.pathSteps : []");
-        assertThat(rewritten).contains("typeof item.path === 'string' && item.path");
+        assertThat(rewritten).contains("reason:'EMPTY_PATH'");
+        assertThat(rewritten).contains("reason:'INVALID_PATH_STEP'");
         assertThat(rewritten).contains("context === 'SHADOW_ROOT'");
         assertThat(rewritten).contains("const isBoundedCarouselContext = value =>");
         assertThat(rewritten).contains("value.slideCount <= 10000 && value.slideIndex < value.slideCount");
@@ -139,10 +139,10 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).doesNotContain("carousel.slide.click(");
         assertThat(rewritten).doesNotContain("carousel.slide.dispatchEvent(");
         assertThat(rewritten).contains("const reconcileIssueTargets = preferredIssueId =>");
-        // Target changes and reason-only changes are exercised against this
-        // generated bridge in verify-live-report-markers.mjs.
-        assertThat(rewritten).contains("const resolved = resolveIssue(issue)");
-        assertThat(rewritten).contains("const resolvedElement = resolved.element || null");
+        // Target identity, query counts and marker reuse are exercised against
+        // this generated bridge in the marker and marker-performance browser tests.
+        assertThat(rewritten).contains("reason:'ELEMENT_CONTENT_CHANGED'");
+        assertThat(rewritten).contains("reason:'SELECTOR_NOT_FOUND'");
         assertThat(rewritten).contains("if (reconcileIssueTargets(issueId)) requestVersion = focusRequestVersion");
         assertThat(rewritten).contains("const locatorStateOnlyAttributes = new Set([");
         assertThat(rewritten).contains("!locatorStateOnlyAttributes.has(String(record.attributeName || '').toLowerCase())");
@@ -404,7 +404,7 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("clearInterval(markerPositionTimer)");
         assertThat(rewritten).contains("cancelAnimationFrame(markerPositionFrame)");
         assertThat(rewritten).contains("const markerScrollRoots = new Set()");
-        assertThat(rewritten).contains("const observeMarkerShadowScrollRoots = element =>");
+        assertThat(rewritten).contains("const observeMarkerShadowScrollRoots = (element, requiredRoots) =>");
         assertThat(rewritten).contains("const parent = composedElementParent(current)");
         assertThat(rewritten).contains("'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}");
         assertThat(rewritten).contains("nativeApply(nativeRemoveEventListener, root");

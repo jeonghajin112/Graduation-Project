@@ -11,6 +11,7 @@ const viteTest = (file, options = {}) => ({
 });
 
 const infrastructure = nodeTest("verify-test-infrastructure.mjs");
+const locatorStateBatching = nodeTest("verify-locator-state-batching.mjs");
 const accessibility = viteTest("verify-accessibility-p0.mjs");
 const dashboardBootAccessibility = viteTest("verify-dashboard-boot-accessibility.mjs");
 const pollingCancel = viteTest("verify-analysis-polling-cancel.mjs");
@@ -56,6 +57,7 @@ const dashboardResponsiveLayout = viteTest("verify-dashboard-responsive-layout.m
 
 const ci = [
   infrastructure,
+  locatorStateBatching,
   accessibility,
   modalAppearance,
   dashboardResponsiveLayout,
@@ -105,7 +107,10 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
   visual: [landingDesign],
   scale: [pageEvidenceScale],
   replay: [
+    locatorStateBatching,
     nodeTest("verify-live-report-markers.mjs", { crossStack: true }),
+    nodeTest("verify-live-report-marker-performance.mjs", { crossStack: true }),
+    nodeTest("verify-live-report-runtime-urls.mjs", { crossStack: true }),
     nodeTest("verify-live-report-boundaries.mjs", { crossStack: true })
   ],
   backend: [

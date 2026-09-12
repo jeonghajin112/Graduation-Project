@@ -30,6 +30,7 @@ public class LiveReportSessionService {
     private final LiveReportProperties properties;
     private final LiveReportUrlSafetyValidator urlSafetyValidator;
     private final Clock clock;
+    private final LiveReportRedirectHandoffStore redirectHandoffs;
     private final Map<UUID, LiveReportSession> sessions = new ConcurrentHashMap<>();
     private final Map<UUID, SessionUsage> usages = new ConcurrentHashMap<>();
     private final Map<UUID, LiveReportCookieJar> cookieJars = new ConcurrentHashMap<>();
@@ -51,6 +52,7 @@ public class LiveReportSessionService {
         this.properties = properties;
         this.urlSafetyValidator = urlSafetyValidator;
         this.clock = clock;
+        this.redirectHandoffs = new LiveReportRedirectHandoffStore(properties, clock);
     }
 
     public LiveReportSession create(long requestId, String targetUrl) {
@@ -115,6 +117,7 @@ public class LiveReportSessionService {
             usages.remove(sessionId);
             cookieJars.remove(sessionId);
             documentUris.remove(sessionId);
+            redirectHandoffs.removeSession(sessionId);
             throw new LiveReportException(HttpStatus.GONE, "Live report session has expired");
         }
         return session;
@@ -209,7 +212,47 @@ public class LiveReportSessionService {
             URI responseUri,
             List<String> setCookieHeaders
     ) {
-        requireCookieJar(session).store(responseUri, setCookieHeaders);
+        LiveReportCookieJar cookieJar = requireCookieJar(session);
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) throw new LiveReportException(HttpStatus.GONE, "Live report session has expired");
+        synchronized (usage) {
+            if (setCookieHeaders != null && !setCookieHeaders.isEmpty()) {
+                usage.cookieRevision++;
+                redirectHandoffs.removeSession(session.id());
+            }
+            cookieJar.store(responseUri, setCookieHeaders);
+        }
+    }
+
+    long cookieRevision(LiveReportSession session) {
+        require(session.id());
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) throw new LiveReportException(HttpStatus.GONE, "Live report session has expired");
+        synchronized (usage) {
+            return usage.cookieRevision;
+        }
+    }
+
+    Instant currentTime() {
+        return clock.instant();
+    }
+
+    Optional<LiveReportFetchService.FetchedResource> takeRedirectResponse(
+            LiveReportSession session, URI uri, LiveReportRedirectHandoffStore.Context context
+    ) {
+        long revision = cookieRevision(session);
+        if (cookieHeader(session, uri).isPresent()) return Optional.empty();
+        return redirectHandoffs.take(session.id(), uri, context, revision);
+    }
+
+    void retainRedirectResponse(
+            LiveReportSession session,
+            LiveReportFetchService.FetchedResource resource,
+            LiveReportRedirectHandoffStore.Context context
+    ) {
+        long revision = cookieRevision(session);
+        if (cookieHeader(session, resource.finalUri()).isPresent()) return;
+        redirectHandoffs.offer(require(session.id()), resource, context, revision);
     }
 
     public void recordDocumentUri(LiveReportSession session, URI documentUri) {
@@ -233,6 +276,7 @@ public class LiveReportSessionService {
                 usages.remove(entry.getKey());
                 cookieJars.remove(entry.getKey());
                 documentUris.remove(entry.getKey());
+                redirectHandoffs.removeSession(entry.getKey());
             }
             return expired;
         });
@@ -277,6 +321,7 @@ public class LiveReportSessionService {
         private final AtomicInteger requests = new AtomicInteger();
         private final Semaphore concurrent;
         private final AtomicLong bytes = new AtomicLong();
+        private long cookieRevision;
 
         private SessionUsage(int maxConcurrentRequests) {
             concurrent = new Semaphore(Math.max(1, maxConcurrentRequests), true);

@@ -12,6 +12,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -147,6 +148,8 @@ public class LiveReportFetchService {
         boolean corsCrossOrigin = false;
         boolean corsAllowed = true;
         ProxyRequest currentRequest = initialRequest;
+        long initialCookieRevision = sessionService.cookieRevision(session);
+        boolean cookieFreeChain = true;
 
         try {
             for (int redirectCount = 0; redirectCount <= properties.getMaxRedirects(); redirectCount++) {
@@ -187,8 +190,11 @@ public class LiveReportFetchService {
                 // browser behavior upstream: a CORS request must neither consume nor
                 // populate the server-side cookie jar for the target origin.
                 if (!crossOriginRequest && !currentRequest.isOptions()) {
-                    sessionService.cookieHeader(session, validated.uri())
-                            .ifPresent(cookie -> requestBuilder.header("Cookie", cookie));
+                    Optional<String> cookie = sessionService.cookieHeader(session, validated.uri());
+                    if (cookie.isPresent()) {
+                        cookieFreeChain = false;
+                        requestBuilder.header("Cookie", cookie.get());
+                    }
                 }
                 safeReferrer(requestReferrer, validated.uri())
                         .ifPresent(referrer -> requestBuilder.header("Referer", referrer));
@@ -199,9 +205,12 @@ public class LiveReportFetchService {
                     // multiply upload traffic outside the per-session byte budget.
                     sessionService.recordResponseBytes(session, currentRequest.body().length);
                 }
+                Instant requestStarted = sessionService.currentTime();
                 LiveReportUpstreamClient.UpstreamResponse response = currentRequest.isPost()
                         ? upstreamClient.send(request, validated.resolvedAddresses(), currentRequest.body())
                         : upstreamClient.send(request, validated.resolvedAddresses());
+                Instant receivedAt = sessionService.currentTime();
+                if (!response.allValues("Set-Cookie").isEmpty()) cookieFreeChain = false;
                 if (!crossOriginRequest && !currentRequest.isOptions()) {
                     sessionService.storeResponseCookies(
                             session,
@@ -284,6 +293,15 @@ public class LiveReportFetchService {
                     throw tooLarge();
                 }
 
+                RedirectReuse redirectReuse = null;
+                if (redirectCount > 0 && "GET".equals(initialRequest.method())
+                        && safeBrowserHeaders.upstreamOrigin() == null && cookieFreeChain
+                        && sessionService.cookieRevision(session) == initialCookieRevision) {
+                    Optional<Instant> freshUntil = LiveReportRedirectHandoffStore.freshUntil(response, requestStarted, receivedAt);
+                    if (freshUntil.isPresent()) {
+                        redirectReuse = new RedirectReuse(freshUntil.get(), safeBrowserHeaders, initialCookieRevision);
+                    }
+                }
                 return new FetchedResource(
                         response.statusCode(),
                         validated.uri(),
@@ -293,7 +311,8 @@ public class LiveReportFetchService {
                                 upstreamSourceOrigin != null,
                                 corsCrossOrigin,
                                 corsAllowed
-                        )
+                        ),
+                        redirectReuse
                 );
             }
         } catch (LiveReportException e) {
@@ -596,7 +615,8 @@ public class LiveReportFetchService {
             URI finalUri,
             String contentType,
             byte[] bytes,
-            CorsEvidence cors
+            CorsEvidence cors,
+            RedirectReuse redirectReuse
     ) {
         public FetchedResource(URI finalUri, String contentType, byte[] bytes) {
             this(200, finalUri, contentType, bytes, CorsEvidence.none());
@@ -604,6 +624,10 @@ public class LiveReportFetchService {
 
         public FetchedResource(int statusCode, URI finalUri, String contentType, byte[] bytes) {
             this(statusCode, finalUri, contentType, bytes, CorsEvidence.none());
+        }
+
+        public FetchedResource(int statusCode, URI finalUri, String contentType, byte[] bytes, CorsEvidence cors) {
+            this(statusCode, finalUri, contentType, bytes, cors, null);
         }
 
         public FetchedResource {
@@ -634,7 +658,13 @@ public class LiveReportFetchService {
         public byte[] bytes() {
             return bytes.clone();
         }
+
+        public int byteLength() {
+            return bytes.length;
+        }
     }
+
+    public record RedirectReuse(Instant freshUntil, LiveReportRequestHeaders headers, long cookieRevision) { }
 
     public record CorsEvidence(boolean originSupplied, boolean crossOrigin, boolean allowed) {
         static CorsEvidence none() {

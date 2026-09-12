@@ -130,6 +130,8 @@ public class LiveReportController {
             return handlePreflight(session, routed.targetUri(), cors, browserRequest);
         }
         LiveReportRequestHeaders browserHeaders = requestHeaders(browserRequest, cors);
+        LiveReportRedirectHandoffStore.Context redirectContext =
+                LiveReportRedirectHandoffStore.requestContext(browserRequest, browserHeaders);
         LiveReportFetchService.FetchedResource fetched = postRequest
                 ? fetchPostBudgeted(
                         session,
@@ -146,16 +148,18 @@ public class LiveReportController {
                         upstreamReferrer,
                         browserHeaders
                 )
-                : fetchBudgeted(
+                : fetchBrowserGetBudgeted(
                         session,
                         routed.targetUri(),
                         upstreamReferrer,
-                        browserHeaders
+                        browserHeaders,
+                        redirectContext
                 );
 
         String requestedViewerUrl = originRoutes.runtimeUrl(session, routed.targetUri());
         String finalViewerUrl = originRoutes.runtimeUrl(session, fetched.finalUri());
         if (!programmaticRequest && !requestedViewerUrl.equals(finalViewerUrl)) {
+            if (redirectContext != null) sessionService.retainRedirectResponse(session, fetched, redirectContext);
             return viewerRedirect(finalViewerUrl, fetched, cors);
         }
         ResponseEntity<byte[]> response = headRequest
@@ -272,6 +276,8 @@ public class LiveReportController {
             return handlePreflight(session, mirrorRequest.targetUri(), cors, browserRequest);
         }
         LiveReportRequestHeaders browserHeaders = requestHeaders(browserRequest, cors);
+        LiveReportRedirectHandoffStore.Context redirectContext =
+                LiveReportRedirectHandoffStore.requestContext(browserRequest, browserHeaders);
         LiveReportFetchService.FetchedResource fetched = postRequest
                 ? fetchPostBudgeted(
                         session,
@@ -287,11 +293,12 @@ public class LiveReportController {
                         upstreamReferrer,
                         browserHeaders
                 )
-                : fetchBudgeted(
+                : fetchBrowserGetBudgeted(
                         session,
                         mirrorRequest.targetUri(),
                         upstreamReferrer,
-                        browserHeaders
+                        browserHeaders,
+                        redirectContext
                 );
         String requestedMirrorUrl = LiveReportMirrorUrl.toRelativeUrl(
                 session.id(),
@@ -304,6 +311,7 @@ public class LiveReportController {
                 fetched.finalUri()
         );
         if (!programmaticRequest && !requestedMirrorUrl.equals(finalMirrorUrl)) {
+            if (redirectContext != null) sessionService.retainRedirectResponse(session, fetched, redirectContext);
             return mirrorRedirect(finalMirrorUrl, fetched, cors);
         }
         ResponseEntity<byte[]> response = headRequest
@@ -697,6 +705,23 @@ public class LiveReportController {
                     browserHeaders
             );
             sessionService.recordResponseBytes(session, resource.bytes().length);
+            return resource;
+        }
+    }
+
+    private LiveReportFetchService.FetchedResource fetchBrowserGetBudgeted(
+            LiveReportSessionService.LiveReportSession session,
+            URI uri,
+            URI referrer,
+            LiveReportRequestHeaders browserHeaders,
+            LiveReportRedirectHandoffStore.Context redirectContext
+    ) {
+        if (redirectContext == null) return fetchBudgeted(session, uri, referrer, browserHeaders);
+        try (LiveReportSessionService.RequestLease ignored = sessionService.acquireRequest(session)) {
+            var retained = sessionService.takeRedirectResponse(session, uri, redirectContext);
+            if (retained.isPresent()) return retained.get();
+            LiveReportFetchService.FetchedResource resource = fetchService.fetch(session, uri, referrer, browserHeaders);
+            sessionService.recordResponseBytes(session, resource.byteLength());
             return resource;
         }
     }

@@ -255,6 +255,7 @@ const replayHtml = `<!doctype html>
         let inboundSequence = 0;
         let outboundSequence = 1;
         let livePort = null;
+        let holdNextConnectAck = false;
         const pendingEvents = [];
         const pendingLocatorStatuses = [];
         window.__releaseLocatorStatuses = (count = pendingLocatorStatuses.length) => {
@@ -263,6 +264,15 @@ const replayHtml = `<!doctype html>
         window.__replayMessages = messages;
         window.__replayOutboundMessages = outboundMessages;
         window.__replayDocumentToken = DOCUMENT_TOKEN;
+        window.__reconnectWithoutAck = () => {
+          livePort?.close();
+          livePort = null;
+          holdNextConnectAck = true;
+          parent.postMessage({
+            source: LIVE_VIEWER_SOURCE, type: "AVAILABLE", protocolVersion: PROTOCOL_VERSION,
+            sessionId: SESSION_ID, documentToken: DOCUMENT_TOKEN + "_replacement"
+          }, "*");
+        };
 
         function send(message) {
           const outbound = { ...message, documentToken: DOCUMENT_TOKEN };
@@ -505,6 +515,11 @@ const replayHtml = `<!doctype html>
             event.ports.length !== 1 ||
             livePort
           ) return;
+          if (holdNextConnectAck) {
+            holdNextConnectAck = false;
+            window.__heldReplayConnect = { challenge: message.challenge, port: event.ports[0] };
+            return;
+          }
           activeChallenge = message.challenge;
           livePort = event.ports[0];
           livePort.onmessage = (portEvent) => {
@@ -1303,6 +1318,99 @@ async function verifyUnavailableIssueDescription(page) {
     return results;
   } finally {
     await detailPage.close();
+  }
+}
+
+async function verifyLocatorBatchReconnect(page) {
+  await installFixture(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
+  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
+  await waitForReplayReady(evidence);
+  await waitForUnavailableLocatorCount(evidence, 2);
+  const preview = evidence.locator(".site-page-evidence-preview");
+  await page.evaluate(() => {
+    const nativeFrame = window.requestAnimationFrame.bind(window);
+    const nativeCancelFrame = window.cancelAnimationFrame.bind(window);
+    const nativeTimer = window.setTimeout.bind(window);
+    const nativeCancelTimer = window.clearTimeout.bind(window);
+    const frames = new Map();
+    const timers = new Map();
+    const allFrames = [];
+    const allTimers = [];
+    let nextId = -1;
+    const facts = { framesCancelled: 0, timersCancelled: 0, counts: [] };
+    window.__locatorReconnectFacts = facts;
+    const target = document.querySelector(".site-page-evidence-preview");
+    const observer = new MutationObserver(() => facts.counts.push(target.dataset.unavailableLocatorCount));
+    observer.observe(target, { attributes: true, attributeFilter: ["data-unavailable-locator-count"] });
+    window.requestAnimationFrame = callback => {
+      const id = nextId--;
+      frames.set(id, callback);
+      allFrames.push(callback);
+      return id;
+    };
+    window.cancelAnimationFrame = id => {
+      if (frames.delete(id)) facts.framesCancelled++;
+      else nativeCancelFrame(id);
+    };
+    window.setTimeout = (callback, delay, ...args) => {
+      if (delay !== 100) return nativeTimer(callback, delay, ...args);
+      const id = nextId--;
+      const invoke = () => callback(...args);
+      timers.set(id, invoke);
+      allTimers.push(invoke);
+      return id;
+    };
+    window.clearTimeout = id => {
+      if (timers.delete(id)) facts.timersCancelled++;
+      else nativeCancelTimer(id);
+    };
+    window.__locatorBatchScheduled = () => allFrames.length > 0 && allTimers.length > 0;
+    window.__fireStaleLocatorBatch = async () => {
+      // Retain callbacks even after cancellation to model a callback already queued
+      // by the browser. These are the actual hook callbacks, not copied batch logic.
+      allFrames.forEach(callback => callback(performance.now()));
+      allTimers.forEach(callback => callback());
+      await new Promise(resolve => nativeTimer(resolve, 30));
+    };
+    window.__restoreLocatorScheduler = () => {
+      window.requestAnimationFrame = nativeFrame;
+      window.cancelAnimationFrame = nativeCancelFrame;
+      window.setTimeout = nativeTimer;
+      window.clearTimeout = nativeCancelTimer;
+      observer.disconnect();
+    };
+  });
+  try {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "UNAVAILABLE" });
+    await page.waitForFunction(() => window.__locatorBatchScheduled());
+    assert.equal(await preview.getAttribute("data-unavailable-locator-count"), "2",
+      "the old port status must still be queued before reconnect");
+    await frame.locator("html").evaluate(() => window.__reconnectWithoutAck());
+    await frame.locator("html").evaluate(() => new Promise((resolve, reject) => {
+      const deadline = performance.now() + 2000;
+      const poll = () => {
+        if (window.__heldReplayConnect) resolve();
+        else if (performance.now() >= deadline) reject(new Error("replacement CONNECT was not received"));
+        else setTimeout(poll, 0);
+      };
+      poll();
+    }));
+    // No ACK or DOCUMENT_LOADING has arrived: cancellation must happen when the
+    // real component replaces the port, before any later lifecycle reset.
+    await page.evaluate(() => window.__fireStaleLocatorBatch());
+    assert.equal(await preview.getAttribute("data-unavailable-locator-count"), "2",
+      "reconnecting must discard queued old-port status while preserving the published snapshot");
+    const facts = await page.evaluate(() => window.__locatorReconnectFacts);
+    assert.ok(facts.framesCancelled >= 1, "port replacement must cancel the pending animation frame");
+    assert.ok(facts.timersCancelled >= 1, "port replacement must cancel the pending fallback timer");
+    assert.ok(!facts.counts.includes("3"), "the stale locator snapshot must never publish during reconnect");
+    return { retainedUnavailableCount: 2, staleUnavailableCountPublished: false,
+      cancelledFrame: facts.framesCancelled > 0, cancelledTimer: facts.timersCancelled > 0 };
+  } finally {
+    await page.evaluate(() => window.__restoreLocatorScheduler());
   }
 }
 
@@ -3022,6 +3130,7 @@ try {
     capacityResize = await verifyUnavailableCapacityResize(page);
   }
   let statusFeedback = null;
+  let locatorBatchReconnect = null;
   if (verificationScope !== "scale") {
     const feedbackPage = await browser.newPage();
     feedbackPage.on("pageerror", (error) => pageErrors.push(error.message));
@@ -3030,11 +3139,18 @@ try {
     } finally {
       await feedbackPage.close();
     }
+    const reconnectPage = await browser.newPage();
+    reconnectPage.on("pageerror", error => pageErrors.push(error.message));
+    try {
+      locatorBatchReconnect = await verifyLocatorBatchReconnect(reconnectPage);
+    } finally {
+      await reconnectPage.close();
+    }
   }
   assert.deepEqual(pageErrors, []);
   apiFixtures.forEach((fixture) => fixture.assertIsolated());
   assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
-  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, responsive, capacityResize, mobile, statusFeedback }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, responsive, capacityResize, mobile, statusFeedback, locatorBatchReconnect }, null, 2));
 } finally {
   await page.close();
   await browser.close();

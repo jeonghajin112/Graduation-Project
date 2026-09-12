@@ -47,6 +47,7 @@ import {
   type ReplayViewportMetrics
 } from "./page-replay-protocol";
 import type { LocatorIssueState, LocatorReport, RecentIssueRow } from "./types";
+import { useBatchedLocatorStates } from "./use-batched-locator-states";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
 type ReplayConnectionState = "loading" | "ready" | "error";
@@ -196,7 +197,7 @@ export function RenderedPageEvidenceCard({
     "request-started"
   );
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const [locatorStates, setLocatorStates] = useState<Map<number, LocatorIssueState>>(() => new Map());
+  const { locatorStates, enqueueLocatorState, resetLocatorStates, cancelPendingLocatorStates } = useBatchedLocatorStates();
   const [replayViewportMetrics, setReplayViewportMetrics] = useState<ReplayViewportMetrics>({
     scale: 1,
     visualWidth: 0
@@ -377,6 +378,7 @@ export function RenderedPageEvidenceCard({
   }
 
   function closeLiveReportPort() {
+    cancelPendingLocatorStates();
     const connection = liveReportPortRef.current;
     if (!connection) {
       return;
@@ -398,6 +400,7 @@ export function RenderedPageEvidenceCard({
       activeFrameKindRef.current === "live" &&
       liveSessionRef.current?.sessionId === sessionId
     ) {
+      cancelPendingLocatorStates();
       const currentRequestId = evaluationRequestIdRef.current;
       const recovery = consumeLiveReportAutomaticRecovery(
         automaticLiveRecoveryRef.current,
@@ -484,6 +487,7 @@ export function RenderedPageEvidenceCard({
   }
 
   function invalidateReplayDocumentSession({ resetRetiredTokens = false } = {}) {
+    resetLocatorStates();
     retireDocumentToken(activeDocumentTokenRef.current);
     retireDocumentToken(pendingDocumentTokenRef.current);
     activeDocumentTokenRef.current = null;
@@ -736,7 +740,7 @@ export function RenderedPageEvidenceCard({
     closeLiveReportPort();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     setFallbackIssueId(null);
-    setLocatorStates(new Map());
+    resetLocatorStates();
     setReplayLoadingPhase(
       effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null
         ? "source-ready"
@@ -762,7 +766,7 @@ export function RenderedPageEvidenceCard({
 
   useLayoutEffect(() => {
     setFallbackIssueId(null);
-    setLocatorStates(new Map());
+    resetLocatorStates();
   }, [replayIssuesSignature]);
 
   useEffect(() => {
@@ -801,7 +805,7 @@ export function RenderedPageEvidenceCard({
       initializedReplayRef.current = null;
       replayOriginSelectionRef.current = null;
       setFallbackIssueId(null);
-      setLocatorStates(new Map());
+      resetLocatorStates();
       if (replacesKnownDocument) {
         setReplayLoadingPhase("source-ready");
       } else {
@@ -830,7 +834,7 @@ export function RenderedPageEvidenceCard({
       initializedReplayRef.current = null;
       replayOriginSelectionRef.current = null;
       setFallbackIssueId(null);
-      setLocatorStates(new Map());
+      resetLocatorStates();
       setReplayLoadingPhase("source-ready");
       setReplayConnectionState("loading");
       clearReplayReadyTimeout();
@@ -937,16 +941,10 @@ export function RenderedPageEvidenceCard({
         return;
       }
 
-      setLocatorStates((current) => {
-        const next: LocatorIssueState = {
-          status: message.status,
-          reason: message.reason,
-          recoverable: message.recoverable
-        };
-        const previous = current.get(message.issueId);
-        if (previous?.status === next.status && previous.reason === next.reason &&
-            previous.recoverable === next.recoverable) return current;
-        return new Map(current).set(message.issueId, next);
+      enqueueLocatorState(message.issueId, {
+        status: message.status,
+        reason: message.reason,
+        recoverable: message.recoverable
       });
     }
   }
@@ -1096,7 +1094,7 @@ export function RenderedPageEvidenceCard({
       closeLiveReportPort();
       invalidateReplayDocumentSession();
       setFallbackIssueId(null);
-      setLocatorStates(new Map());
+      resetLocatorStates();
       setReplayConnectionState("loading");
       connectLiveReportBridge();
       return;
@@ -1124,7 +1122,7 @@ export function RenderedPageEvidenceCard({
     invalidateReplayDocumentSession();
     frameLoadObservedRef.current = true;
     setFallbackIssueId(null);
-    setLocatorStates(new Map());
+    resetLocatorStates();
     setReplayConnectionState("loading");
     armReplayReadyTimeout();
     requestReplayDocumentState();

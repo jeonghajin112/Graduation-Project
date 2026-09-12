@@ -216,6 +216,16 @@ try {
   await clusterMarker.hover();
   const clusterPopover = frame.locator(".ap-live-popover");
   await clusterPopover.waitFor({ state: "visible" });
+  // The viewer and panel use inverse transforms. A backdrop-filter surface can
+  // paint beyond the visible panel in this composition, so keep it opaque.
+  const popoverSurface = await clusterPopover.evaluate(element => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, backdrop: style.backdropFilter,
+      webkitBackdrop: style.getPropertyValue("-webkit-backdrop-filter") };
+  });
+  assert.equal(popoverSurface.background, "rgb(255, 255, 255)");
+  assert.equal(popoverSurface.backdrop, "none");
+  assert.ok(["", "none"].includes(popoverSurface.webkitBackdrop));
   assert.equal(
     await clusterPopover.locator(".ap-live-popover__position").textContent(),
     "총 2개 중 1번째 문제: 중첩 문단 읽기 수준"
