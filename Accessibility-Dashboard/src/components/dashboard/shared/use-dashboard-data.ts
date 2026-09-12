@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { createRequestDeadline } from "@/services/async-cancellation";
 import {
   fetchDashboardViewModel,
   fetchEvaluationRequest,
@@ -353,28 +354,16 @@ export function useDashboardData({
         return waited.aborted ? null : waited.value;
       }
 
-      const loadAbortController = new AbortController();
+      const loadDeadline = createRequestDeadline({
+        signal,
+        timeoutMs: DASHBOARD_OVERVIEW_TIMEOUT_MS,
+        timeoutReason: DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE
+      });
+      const loadAbortController = loadDeadline.controller;
       const loadId = Symbol("dashboard-overview-load");
       const managesLoading = showLoading || inheritedLoading;
-      let didTimeout = false;
       let didCancel = false;
-      const forwardExternalAbort = () => {
-        loadAbortController.abort(signal?.reason);
-      };
-      signal?.addEventListener("abort", forwardExternalAbort, { once: true });
-      const timeoutId = window.setTimeout(() => {
-        didTimeout = true;
-        loadAbortController.abort(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE);
-      }, DASHBOARD_OVERVIEW_TIMEOUT_MS);
-      let resourcesReleased = false;
-      const cleanupLoadResources = () => {
-        if (resourcesReleased) {
-          return;
-        }
-        resourcesReleased = true;
-        window.clearTimeout(timeoutId);
-        signal?.removeEventListener("abort", forwardExternalAbort);
-      };
+      const cleanupLoadResources = loadDeadline.dispose;
       const isCurrentLoad = () => activeLoadRef.current?.id === loadId;
 
       let loadPromise!: Promise<DashboardViewModel | null>;
@@ -415,7 +404,7 @@ export function useDashboardData({
           setDashboardError("");
           return dashboardDataRef.current ?? visibleData;
         } catch (error) {
-          if (didTimeout) {
+          if (loadDeadline.didTimeout()) {
             if (isCurrentLoad()) {
               setDashboardError(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE);
               if (clearOnError) {
@@ -532,25 +521,12 @@ export function useDashboardData({
       }
 
       statusPollInFlight = true;
-      const statusController = new AbortController();
-      let didTimeout = false;
-      const forwardLifecycleAbort = () => {
-        statusController.abort(lifecycleController.signal.reason);
-      };
-      lifecycleController.signal.addEventListener("abort", forwardLifecycleAbort, { once: true });
-      const timeoutId = window.setTimeout(() => {
-        didTimeout = true;
-        statusController.abort();
-      }, DASHBOARD_STATUS_POLL_TIMEOUT_MS);
-      let statusResourcesReleased = false;
-      const releaseStatusResources = () => {
-        if (statusResourcesReleased) {
-          return;
-        }
-        statusResourcesReleased = true;
-        window.clearTimeout(timeoutId);
-        lifecycleController.signal.removeEventListener("abort", forwardLifecycleAbort);
-      };
+      const statusDeadline = createRequestDeadline({
+        signal: lifecycleController.signal,
+        timeoutMs: DASHBOARD_STATUS_POLL_TIMEOUT_MS
+      });
+      const statusController = statusDeadline.controller;
+      const releaseStatusResources = statusDeadline.dispose;
 
       try {
         const outcomes = await Promise.allSettled(
@@ -579,7 +555,7 @@ export function useDashboardData({
       } catch (error) {
         statusController.abort();
         releaseStatusResources();
-        if (!lifecycleController.signal.aborted && (didTimeout || !isAbortError(error))) {
+        if (!lifecycleController.signal.aborted && (statusDeadline.didTimeout() || !isAbortError(error))) {
           // A missing/malformed/stalled status response may mean the request was
           // replaced or removed. Fall back to the authoritative snapshot once;
           // normal successful polls never pay for this full response.

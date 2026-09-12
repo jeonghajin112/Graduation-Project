@@ -13,6 +13,38 @@ export function createAbortError(): DOMException {
   return new DOMException("The operation was aborted.", "AbortError");
 }
 
+/** Owns only the request lifetime; callers retain their recovery/error policy. */
+export function createRequestDeadline({
+  signal,
+  timeoutMs,
+  timeoutReason
+}: {
+  signal?: AbortSignal;
+  timeoutMs: number;
+  timeoutReason?: unknown;
+}) {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const forwardAbort = () => controller.abort(signal?.reason);
+  const dispose = () => {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", forwardAbort);
+    controller.signal.removeEventListener("abort", dispose);
+  };
+  controller.signal.addEventListener("abort", dispose, { once: true });
+  if (signal?.aborted) {
+    forwardAbort();
+  } else {
+    signal?.addEventListener("abort", forwardAbort, { once: true });
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort(timeoutReason);
+    }, timeoutMs);
+  }
+  return { controller, signal: controller.signal, didTimeout: () => timedOut, dispose };
+}
+
 /** Throws an AbortError when the signal is already aborted. */
 export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {

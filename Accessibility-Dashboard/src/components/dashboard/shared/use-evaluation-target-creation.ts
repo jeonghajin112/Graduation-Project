@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
+import { createRequestDeadline } from "@/services/async-cancellation";
 import { API_BASE_URL } from "@/config/api";
 import {
   createEvaluationTargetModel,
@@ -204,23 +205,13 @@ export function useEvaluationTargetCreation({
       const reconcileCheckpoint = async (
         checkpoint: TargetCreateCheckpoint
       ): Promise<number | null> => {
-        const reconcileController = new AbortController();
-        const forwardCallerAbort = () => reconcileController.abort();
-        if (signal?.aborted) {
-          reconcileController.abort();
-        } else {
-          signal?.addEventListener("abort", forwardCallerAbort, { once: true });
-        }
-        const timeoutId = window.setTimeout(
-          () => reconcileController.abort(),
-          TARGET_CREATE_TIMEOUT_MS
-        );
+        const deadline = createRequestDeadline({ signal, timeoutMs: TARGET_CREATE_TIMEOUT_MS });
 
         try {
           return await reconcileWithRetries({
             attempts: TARGET_CREATE_RECONCILE_ATTEMPTS,
             intervalMs: TARGET_CREATE_RECONCILE_INTERVAL_MS,
-            signal: reconcileController.signal,
+            signal: deadline.signal,
             probe: async (reconcileSignal) => {
               const refreshedTargets = await fetchEvaluationTargetsForOrganization(
                 checkpoint.projectId,
@@ -242,13 +233,12 @@ export function useEvaluationTargetCreation({
             }
           });
         } catch (error) {
-          if (reconcileController.signal.aborted && !signal?.aborted) {
+          if (deadline.signal.aborted && !signal?.aborted) {
             return null;
           }
           throw error;
         } finally {
-          window.clearTimeout(timeoutId);
-          signal?.removeEventListener("abort", forwardCallerAbort);
+          deadline.dispose();
         }
       };
 

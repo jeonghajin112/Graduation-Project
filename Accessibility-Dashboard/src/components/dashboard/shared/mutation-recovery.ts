@@ -1,5 +1,5 @@
 import { ApiRequestError } from "@/services/backend-api";
-import { wait } from "@/services/async-cancellation";
+import { createAbortError, createRequestDeadline, wait } from "@/services/async-cancellation";
 import { UserFacingError } from "@/services/user-facing-error";
 
 export const DEFAULT_MUTATION_REQUEST_TIMEOUT_MS = 15_000;
@@ -10,10 +10,6 @@ const DEFINITIVE_MUTATION_REJECTION_STATUSES = new Set([
   400, 401, 402, 403, 404, 405, 406, 407, 410, 411, 413, 414, 415, 416, 417, 418,
   421, 422, 423, 424, 426, 428, 431, 451
 ]);
-
-function abortError(): DOMException {
-  return new DOMException("The operation was aborted.", "AbortError");
-}
 
 export async function runMutationRequestWithDeadline<T>({
   operation,
@@ -27,38 +23,30 @@ export async function runMutationRequestWithDeadline<T>({
   timeoutMs?: number;
 }): Promise<T> {
   if (signal?.aborted) {
-    throw abortError();
+    throw createAbortError();
   }
 
-  const controller = new AbortController();
-  let didTimeout = false;
-  const forwardAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener("abort", forwardAbort, { once: true });
-  const timeoutId = window.setTimeout(() => {
-    didTimeout = true;
-    controller.abort(timeoutMessage);
-  }, timeoutMs);
+  const deadline = createRequestDeadline({ signal, timeoutMs, timeoutReason: timeoutMessage });
 
   try {
-    const result = await operation(controller.signal);
+    const result = await operation(deadline.signal);
     if (signal?.aborted) {
-      throw abortError();
+      throw createAbortError();
     }
-    if (didTimeout) {
+    if (deadline.didTimeout()) {
       throw new UserFacingError(timeoutMessage);
     }
     return result;
   } catch (error) {
     if (signal?.aborted) {
-      throw abortError();
+      throw createAbortError();
     }
-    if (didTimeout) {
+    if (deadline.didTimeout()) {
       throw new UserFacingError(timeoutMessage);
     }
     throw error;
   } finally {
-    window.clearTimeout(timeoutId);
-    signal?.removeEventListener("abort", forwardAbort);
+    deadline.dispose();
   }
 }
 
