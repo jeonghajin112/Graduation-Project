@@ -314,6 +314,33 @@ class LiveReportRedirectHandoffTest {
                 new LiveReportUpstreamClient.UpstreamResponse(200, headers, BODY), NOW, NOW)).isEmpty();
     }
 
+    @Test
+    void postGenerationsRejectLateGetsAndIsolateOtherSessions() throws Exception {
+        Fixture fixture = new Fixture(new LiveReportProperties(), freshHeaders(), Map.of());
+        var context = new LiveReportRedirectHandoffStore.Context(LiveReportRequestHeaders.defaults(), null, null);
+        var beforePost = fixture.fetch.fetch(fixture.session, START, null);
+        fixture.sessions.retainRedirectResponse(fixture.session, beforePost, context);
+        var other = fixture.sessions.create(2, START.toString());
+        fixture.sessions.retainRedirectResponse(other, fixture.fetch.fetch(other, START, null), context);
+        fixture.sessions.beginPost(fixture.session);
+        assertThat(fixture.sessions.takeRedirectResponse(fixture.session, FINAL, context)).isEmpty();
+        assertThat(fixture.sessions.takeRedirectResponse(other, FINAL, context)).isPresent();
+        var duringPost = fixture.fetch.fetch(fixture.session, START, null);
+        fixture.sessions.retainRedirectResponse(fixture.session, duringPost, context);
+        assertThat(fixture.sessions.takeRedirectResponse(fixture.session, FINAL, context)).isEmpty();
+        // A second overlapping POST must keep reuse disabled when the first ends.
+        fixture.sessions.beginPost(fixture.session);
+        fixture.sessions.endPost(fixture.session);
+        fixture.sessions.retainRedirectResponse(fixture.session, fixture.fetch.fetch(fixture.session, START, null), context);
+        assertThat(fixture.sessions.takeRedirectResponse(fixture.session, FINAL, context)).isEmpty();
+        fixture.sessions.endPost(fixture.session);
+        fixture.sessions.retainRedirectResponse(fixture.session, beforePost, context);
+        fixture.sessions.retainRedirectResponse(fixture.session, duringPost, context);
+        assertThat(fixture.sessions.takeRedirectResponse(fixture.session, FINAL, context)).isEmpty();
+        fixture.sessions.retainRedirectResponse(fixture.session, fixture.fetch.fetch(fixture.session, START, null), context);
+        assertThat(fixture.sessions.takeRedirectResponse(fixture.session, FINAL, context)).isPresent();
+    }
+
     private static Map<String, List<String>> freshHeaders() {
         var headers = new HashMap<String, List<String>>();
         headers.put("Content-Type", List.of("text/html; charset=UTF-8"));

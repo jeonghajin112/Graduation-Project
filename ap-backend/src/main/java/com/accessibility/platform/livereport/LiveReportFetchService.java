@@ -96,14 +96,19 @@ public class LiveReportFetchService {
                     "Live report POST requests must remain on the document origin"
             );
         }
-        return fetch(
-                session,
-                initialUri,
-                initialReferrer,
-                browserHeaders,
-                ProxyRequest.post(safeContentType, requestBody),
-                requestOrigin
-        );
+        sessionService.beginPost(session);
+        try {
+            return fetch(
+                    session,
+                    initialUri,
+                    initialReferrer,
+                    browserHeaders,
+                    ProxyRequest.post(safeContentType, requestBody),
+                    requestOrigin
+            );
+        } finally {
+            sessionService.endPost(session);
+        }
     }
 
     public FetchedResource fetchPreflight(

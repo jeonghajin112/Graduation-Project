@@ -240,9 +240,13 @@ public class LiveReportSessionService {
     Optional<LiveReportFetchService.FetchedResource> takeRedirectResponse(
             LiveReportSession session, URI uri, LiveReportRedirectHandoffStore.Context context
     ) {
-        long revision = cookieRevision(session);
-        if (cookieHeader(session, uri).isPresent()) return Optional.empty();
-        return redirectHandoffs.take(session.id(), uri, context, revision);
+        require(session.id());
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) return Optional.empty();
+        synchronized (usage) {
+            if (usage.activePosts > 0 || cookieHeader(session, uri).isPresent()) return Optional.empty();
+            return redirectHandoffs.take(session.id(), uri, context, usage.cookieRevision);
+        }
     }
 
     void retainRedirectResponse(
@@ -250,9 +254,36 @@ public class LiveReportSessionService {
             LiveReportFetchService.FetchedResource resource,
             LiveReportRedirectHandoffStore.Context context
     ) {
-        long revision = cookieRevision(session);
-        if (cookieHeader(session, resource.finalUri()).isPresent()) return;
-        redirectHandoffs.offer(require(session.id()), resource, context, revision);
+        require(session.id());
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) return;
+        synchronized (usage) {
+            if (usage.activePosts > 0 || cookieHeader(session, resource.finalUri()).isPresent()) return;
+            redirectHandoffs.offer(session, resource, context, usage.cookieRevision);
+        }
+    }
+
+    void beginPost(LiveReportSession session) {
+        require(session.id());
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) throw new LiveReportException(HttpStatus.GONE, "Live report session has expired");
+        synchronized (usage) {
+            usage.activePosts++;
+            usage.cookieRevision++;
+            redirectHandoffs.removeSession(session.id());
+        }
+    }
+
+    void endPost(LiveReportSession session) {
+        SessionUsage usage = usages.get(session.id());
+        if (usage == null) return;
+        synchronized (usage) {
+            usage.activePosts--;
+            // Invalidate GETs started both before and during the mutation, even
+            // when the upstream committed a change but its response was lost.
+            usage.cookieRevision++;
+            redirectHandoffs.removeSession(session.id());
+        }
     }
 
     public void recordDocumentUri(LiveReportSession session, URI documentUri) {
@@ -321,7 +352,9 @@ public class LiveReportSessionService {
         private final AtomicInteger requests = new AtomicInteger();
         private final Semaphore concurrent;
         private final AtomicLong bytes = new AtomicLong();
+        // Reuse generation advances on cookie changes and POST boundaries.
         private long cookieRevision;
+        private int activePosts;
 
         private SessionUsage(int maxConcurrentRequests) {
             concurrent = new Semaphore(Math.max(1, maxConcurrentRequests), true);
