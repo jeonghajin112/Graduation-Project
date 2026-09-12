@@ -99,6 +99,10 @@ npm test
 
 ## 실패와 완료 판단
 
+브리지 구조를 변경할 때는 현재 Java 소스에서 생성한 fixture로 replay suite를 실행한다. 마커 성능 회귀에는 위치 이동 중 무관한 요소 교체, 선택 대상 교체·삭제, Escape, 다른 문제 선택, 선택 해제가 포함된다. `verify-page-evidence.mjs`의 full 범위는 한국어 규칙 설명과 키보드로 영어 원문 펼치기, 원문의 HTML 이스케이프도 확인한다.
+
+리다이렉트 캐시 변경은 백엔드의 `LiveReportRedirectHandoffTest`와 `LiveReportPostInvalidationTest`로 검증한다. 중첩 POST, 뒤늦은 GET, 다른 세션 격리와 POST 처리 후 응답 유실을 포함한다. 브리지 설정의 인라인 스크립트 탈출 방지는 `LiveReportBridgeAssetsTest`로 확인한다.
+
 실행마다 `artifacts/frontend-tests/<suite>-<고유값>/`에 `results.json`과 테스트별 stdout·stderr 로그를 저장한다. 실행 폴더가 분리되어 이전 결과나 다른 실행을 덮어쓰지 않는다. 기본 출력은 진행·결과와 실패 로그의 끝부분이며, 전체 출력을 실시간으로 보려면 `--verbose`를 붙인다.
 
 ```powershell

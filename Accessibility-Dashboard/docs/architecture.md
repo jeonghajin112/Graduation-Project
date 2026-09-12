@@ -135,7 +135,18 @@ CV 점수의 `null`은 측정값이 없다는 뜻이며 실제 0점과 구분한
 | viewer URL·origin 설정 | [src/config](../src/config/) |
 | 메시지 변환·검증 | [page-replay-protocol.ts](../src/components/dashboard/panels/site-dashboard/page-replay-protocol.ts) |
 | iframe 연결·위치 상태 | [rendered-page-evidence-card.tsx](../src/components/dashboard/panels/site-dashboard/rendered-page-evidence-card.tsx) |
-| 격리 문서와 브리지 생성 | [LiveReportDocumentRewriter.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportDocumentRewriter.java) |
+| HTML·리소스 URL 변환과 출력 예산 | [LiveReportDocumentRewriter.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportDocumentRewriter.java) |
+| 브리지 설정 직렬화·클래스패스 자산 조립 | [LiveReportBridgeAssets.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportBridgeAssets.java) |
+| 브라우저 연결·요청·관찰자 수명 | [bridge-runtime.js](../../ap-backend/src/main/resources/livereport/bridge-runtime.js) |
+| 요소 탐색·클러스터 소속·팝오버 표시 | [livereport 자산](../../ap-backend/src/main/resources/livereport/)의 `locator-resolver.js`, `marker-clusters.js`, `popover-view.js` |
+
+브리지 모듈은 의존성을 인자로 받는 팩토리로 조립하며, 기존처럼 하나의 인라인 스크립트로 삽입한다. 외부 자산 요청이나 전역 API를 추가하지 않는다. 선택한 문제와 무관한 요소 교체는 진행 중인 위치 이동을 취소하지 않는다. 선택 대상 교체는 다시 탐색하고, Escape·다른 문제 선택·선택 해제는 이전 비동기 처리가 팝오버를 다시 열지 못하도록 한다.
+
+POST 시작과 종료 시 해당 세션의 리다이렉트 본문을 무효화한다. 진행 중인 POST 개수와 세대를 함께 확인해 POST 전·도중 시작한 GET 응답이 뒤늦게 캐시에 들어가지 못하게 한다. 성공 응답이 유실된 경우도 같은 규칙을 적용하며 다른 세션에는 영향을 주지 않는다.
+
+규칙 기반 설명은 [rule-issue-description.ts](../src/components/dashboard/panels/site-dashboard/rule-issue-description.ts)의 한국어 안내를 사용한다. 엔진의 `axe_rule_id`를 nullable `issue_result.rule_id`에 저장해 API의 `ruleId`로 전달한다. 현재 10개 규칙을 지원하며, 과거 데이터는 정확히 일치하는 첫 줄 도움말만 식별한다. 알 수 없는 규칙은 원문을 유지하고, 한국어로 표시한 항목도 상세 화면에서 영어 원문을 펼칠 수 있다. KWCAG 번호만으로 규칙을 추측하지 않는다.
+
+요청 제한시간과 부모 취소 신호의 연결·정리는 [async-cancellation.ts](../src/services/async-cancellation.ts)의 `createRequestDeadline`이 담당한다. 수정 요청, 대시보드 조회·상태 폴링, 페이지 생성 확인이 이를 공유한다. 재시도 여부와 생성·삭제 결과의 불확실성 판단은 각 복구 흐름이 유지한다.
 
 ## 회귀 검증과 보류 항목
 
