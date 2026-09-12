@@ -65,8 +65,8 @@ class LiveReportDocumentRewriterTest {
 
         assertThat(rewritten).doesNotContain("http-equiv=\"Content-Security-Policy\"");
         assertThat(rewritten).doesNotContain("integrity=\"sha256-test\"");
-        assertThat(rewritten).contains("const gatewayOrigin = 'http://localhost:9090'");
-        assertThat(rewritten).contains("const viewerBaseOrigin = 'http://localhost:9090'");
+        assertThat(rewritten).contains("\"gatewayOrigin\":\"http://localhost:9090\"");
+        assertThat(rewritten).contains("\"viewerBaseOrigin\":\"http://localhost:9090\"");
         assertThat(rewritten).contains("overflow-x: hidden !important");
         assertThat(rewritten).contains("@supports (overflow-x: clip)");
         assertThat(rewritten).contains("html::-webkit-scrollbar:horizontal");
@@ -76,8 +76,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains(mirror("https://www.example.com/nested/image.png"));
         assertThat(rewritten).contains(mirror("https://cdn.example.net/app.js"));
         assertThat(rewritten).contains("data-ap-live-bridge=\"true\"");
-        assertThat(rewritten).contains("const nonce = 'test-nonce'");
-        assertThat(rewritten).contains("const bridgeSecret = 'test-bridge-secret'");
+        assertThat(rewritten).contains("\"nonce\":\"test-nonce\"");
+        assertThat(rewritten).contains("\"bridgeSecret\":\"test-bridge-secret\"");
         assertThat(rewritten).contains("const parentSource = 'accessibility-dashboard'");
         assertThat(rewritten).contains("const replaySource = 'accessibility-page-replay'");
         assertThat(rewritten).contains("bridgeScriptElement?.remove()");
@@ -93,7 +93,7 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("type:'EVENT'");
         assertThat(rewritten).contains("data.source !== parentLiveSource || data.type !== 'COMMAND'");
         assertThat(rewritten).doesNotContain("addEventListener('message', event =>");
-        assertThat(rewritten).containsPattern("const documentToken = '[0-9a-f]{32}'");
+        assertThat(rewritten).containsPattern("\"documentToken\":\"[0-9a-f]{32}\"");
         assertThat(rewritten).contains("data.type === 'INIT_ISSUES'");
         assertThat(rewritten).contains("type:'READY'");
         assertThat(rewritten).contains("if (data.type === 'REQUEST_DOCUMENT_STATE')");
@@ -416,7 +416,7 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("runtimeUrlObserver?.observe(document.documentElement");
         assertThat(rewritten).contains("CSSStyleSheet.prototype.insertRule = function(rule, index)");
         assertThat(rewritten).contains("get() { return currentUpstreamBase(); }");
-        assertThat(rewritten).contains("const upstreamDocument = 'https://www.example.com/nested/page'");
+        assertThat(rewritten).contains("\"upstreamDocument\":\"https://www.example.com/nested/page\"");
         assertThat(rewritten).contains("History.prototype.pushState = function(state, unused)");
         assertThat(rewritten).contains("History.prototype.replaceState = function(state, unused)");
         assertThat(rewritten).contains("window.location is intentionally not replaced");
@@ -477,7 +477,7 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("new URL(value).origin === new URL(upstreamDocument).origin");
         assertThat(rewritten).contains("return !essence.startsWith('multipart/')");
         assertThat(rewritten).contains("configured.redirect !== 'follow'");
-        assertThat(rewritten).contains("const maxPostBodyBytes = 262144");
+        assertThat(rewritten).contains("\"maxRequestBodyBytes\":262144");
         assertThat(rewritten).contains("total > maxPostBodyBytes");
         assertThat(rewritten).contains("X-Accessibility-Live-Transport");
         assertThat(rewritten).contains("withTransport(configured, 'fetch'");
@@ -536,8 +536,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains(mirror("https://www.example.com/app/ui/images/small.png"));
         assertThat(rewritten).contains(mirror("https://www.example.com/app/ui/images/large.png"));
         assertThat(rewritten).contains(mirror("https://www.example.com/app/ui/next/page"));
-        assertThat(rewritten).contains("const upstreamBase = 'https://www.example.com/app/ui/'");
-        assertThat(rewritten).contains("const hasExplicitBase = true");
+        assertThat(rewritten).contains("\"upstreamBase\":\"https://www.example.com/app/ui/\"");
+        assertThat(rewritten).contains("\"hasExplicitBase\":true");
         assertThat(rewritten).doesNotContain("ignored.example.net");
     }
 
@@ -786,7 +786,7 @@ class LiveReportDocumentRewriterTest {
 
         assertThat(rewritten).contains(mirror("https://www.example.com/app/logo.png"));
         assertThat(rewritten).doesNotContain("127.0.0.1");
-        assertThat(rewritten).contains("const upstreamBase = 'https://www.example.com/app/index.html'");
+        assertThat(rewritten).contains("\"upstreamBase\":\"https://www.example.com/app/index.html\"");
     }
 
     @Test
@@ -1048,7 +1048,7 @@ class LiveReportDocumentRewriterTest {
     }
 
     private String documentToken(String html) {
-        Matcher matcher = Pattern.compile("const documentToken = '([0-9a-f]{32})'").matcher(html);
+        Matcher matcher = Pattern.compile("\"documentToken\":\"([0-9a-f]{32})\"").matcher(html);
         assertThat(matcher.find()).isTrue();
         return matcher.group(1);
     }

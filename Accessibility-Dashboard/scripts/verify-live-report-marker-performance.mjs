@@ -167,6 +167,50 @@ try {
     }
   };
 
+  for (const change of ["unrelated", "selected", "removed", "escape", "switch", "reset"]) {
+    await runCase(`focus during scrolling: ${change}`, async ({ page, frame, flush, init }) => {
+      await frame.evaluate(() => {
+        document.querySelector("main").innerHTML = '<div id="change" style="position:absolute;left:250px;top:100px;width:300px;height:60px">Other target</div><div id="focused" style="position:absolute;left:250px;top:2000px;width:300px;height:60px">Selected target</div><div style="height:2600px"></div>';
+      });
+      await flush();
+      await init([issue(701, "#change"), issue(702, "#focused")]);
+      await frame.evaluate(change => {
+        window.__changedDuringScroll = false;
+        addEventListener("scroll", () => {
+          window.__changedDuringScroll = true;
+          const target = document.getElementById(change === "selected" || change === "removed" ? "focused" : "change");
+          if (change === "removed") target.remove();
+          else target.replaceWith(target.cloneNode(true));
+          if (change === "escape") document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+          if (change === "switch" || change === "reset") parent.postMessage({ focusTest: change }, "*");
+        }, { once: true });
+      }, change);
+      await page.evaluate(() => {
+        addEventListener("message", event => {
+          if (event.data?.focusTest) window.__sendLiveCommand({
+            source: "accessibility-dashboard", type: "FOCUS_ISSUE",
+            issueId: event.data.focusTest === "switch" ? 701 : null
+          });
+        });
+        window.__sendLiveCommand({ source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 702 });
+      });
+      await frame.waitForFunction(() => window.__changedDuringScroll);
+      await flush();
+      // Settle both the initial layout wait and any replacement/switch retry.
+      await flush();
+      const panel = frame.locator("#ap-live-issue-popover");
+      if (change === "escape" || change === "reset" || change === "removed") {
+        assert.equal(await panel.isVisible(), false);
+        if (change === "removed") assert.ok(await page.evaluate(() => window.__liveEvents.some(
+          event => event.payload?.type === "ISSUE_DETAIL_FALLBACK" && event.payload.issueId === 702)));
+      } else {
+        assert.equal(await panel.isVisible(), true, "selection must survive a target reconciliation");
+        assert.match(await panel.innerText(), new RegExp(`Performance issue ${change === "switch" ? 701 : 702}`));
+      }
+      return { change };
+    });
+  }
+
   for (const count of [100, 1000]) {
     await runCase(`${count} clustered targets have bounded membership work`, async ({ frame, flush, init }) => {
       await frame.evaluate(count => {
