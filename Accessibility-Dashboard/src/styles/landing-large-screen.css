@@ -33,7 +33,6 @@
   .ua-engine__module-top { gap: calc(12 * var(--ua-pixel)); }
   .ua-engine__module-icon { width: calc(36 * var(--ua-pixel)); height: calc(36 * var(--ua-pixel)); border-radius: calc(12 * var(--ua-pixel)); }
   .ua-engine__module-kicker { font-size: calc(0.78 * var(--ua-rem)); }
-  .ua-engine__module-title { font-size: calc(1.2 * var(--ua-rem)); }
   .ua-engine__module-body { margin: calc(4 * var(--ua-pixel)) 0 0; gap: calc(8 * var(--ua-pixel)); }
   .ua-engine__module-body > div { grid-template-columns: calc(64 * var(--ua-pixel)) minmax(0, 1fr); gap: calc(10 * var(--ua-pixel)); }
   .ua-engine__module-body dt { font-size: calc(0.74 * var(--ua-rem)); padding-top: calc(2 * var(--ua-pixel)); }

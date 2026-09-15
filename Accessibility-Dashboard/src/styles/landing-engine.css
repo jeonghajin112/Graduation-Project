@@ -25,7 +25,6 @@
 .ua-engine__module-top .ua-engine__module-kicker { margin: 0 auto 0 0; }
 .ua-engine__module-icon { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; background: color-mix(in srgb, #0071e3 10%, #ffffff); color: #0071e3; }
 .ua-engine__module-kicker { margin-top: 0; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; color: #0071e3; }
-.ua-engine__module-title { margin: 0; font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; word-break: keep-all; }
 .ua-engine__module-body { margin: 4px 0 0; display: flex; flex-direction: column; gap: 8px; }
 .ua-engine__module-body > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; }
 .ua-engine__module-body dt { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.04em; color: #8e8e93; padding-top: 2px; }

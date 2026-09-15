@@ -108,7 +108,7 @@ function App() {
 
   return (
     <ErrorBoundary resetKey={location.pathname} fallback={AppErrorFallback}>
-      <Suspense fallback={<AppRouteFallback />}>
+      <Suspense fallback={location.pathname === "/" ? null : <AppRouteFallback />}>
         <Routes>
           <Route path="/" element={<LandingRoute />} />
           <Route path="/product-preview" element={<DashboardPreviewRoute />} />

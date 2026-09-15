@@ -96,10 +96,10 @@ font:700 9px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;white-space:nowra
 overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .ap-live-popover__tags{display:flex;align-items:center;justify-content:flex-start;gap:6px;min-width:0;margin:0}
 .ap-live-popover__tags .ap-live-popover__severity,.ap-live-popover__tags .ap-live-popover__code{font-size:10px;padding:4px 8px}
-.ap-live-popover__pager{display:inline-flex;align-items:center;gap:4px;margin-left:auto;padding:2px;border-radius:999px;background:#f2f4f7}
+.ap-live-popover__pager{display:inline-flex;align-items:center;gap:8px;margin-left:auto;padding:0;background:transparent}
 .ap-live-popover__pager[hidden]{display:none!important}
 .ap-live-popover__pager-button{all:initial;box-sizing:border-box;width:24px;height:24px;border:0;border-radius:50%;
-background:transparent;color:#475467;display:grid;place-items:center;cursor:pointer;
+background:#f2f4f7;color:#475467;display:grid;place-items:center;cursor:pointer;
 transition:background .15s ease,color .15s ease,box-shadow .15s ease}
 .ap-live-popover__pager-button:not(:disabled):hover{background:#ffffff;color:#101828;box-shadow:0 1px 3px rgba(16,24,40,.18)}
 .ap-live-popover__pager-button:not(:disabled):active{background:#e4e7ec;box-shadow:none}

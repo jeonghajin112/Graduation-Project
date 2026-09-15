@@ -14,7 +14,6 @@ import { RuleVisual, TextVisual, ContrastVisual } from "@/components/landing/lan
 type Module = {
   id: string;
   kicker: string;
-  title: string;
   reads: string;
   judges: string;
   outputs: string;
@@ -28,7 +27,7 @@ const iconProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", s
 const MODULES: readonly Module[] = [
   {
     id: "rule",
-    kicker: "규칙 기반 분석", title: "코드가 말하는 것",
+    kicker: "규칙 기반 분석",
     reads: "실제 브라우저로 연 페이지의 DOM",
     judges: "KWCAG 2.2 검사항목 33개 기준으로 감점",
     outputs: "이슈별 항목 · 심각도 · 요소 위치",
@@ -38,7 +37,7 @@ const MODULES: readonly Module[] = [
   },
   {
     id: "text",
-    kicker: "텍스트 난이도 분석", title: "문장이 읽히는가",
+    kicker: "텍스트 난이도 분석",
     reads: "본문 문장을 형태소 단위로",
     judges: "문장 길이 · 어절 길이 · 어려운 어휘 비율",
     outputs: "쉽게 고쳐 쓴 문장 제안",
@@ -48,7 +47,7 @@ const MODULES: readonly Module[] = [
   },
   {
     id: "contrast",
-    kicker: "시각 명암비 분석", title: "눈에 실제로 보이는가",
+    kicker: "시각 명암비 분석",
     reads: "렌더된 화면의 글자, 이미지 속 글자까지",
     judges: "WCAG 명도 대비 (AA 4.5:1 · 큰 글자 3:1)",
     outputs: "통과하는 색 추천",
@@ -152,9 +151,8 @@ export function LandingEngineSection() {
               <div className="ua-engine__module-text">
                 <div className="ua-engine__module-top">
                   <span className="ua-engine__module-icon">{m.icon}</span>
-                  <span className="ua-engine__module-kicker">{m.kicker}</span>
+                  <span className="ua-engine__module-kicker" id={`ua-engine-${m.id}`}>{m.kicker}</span>
                 </div>
-                <h3 className="ua-engine__module-title" id={`ua-engine-${m.id}`}>{m.title}</h3>
                 <dl className="ua-engine__module-body">
                   <div><dt>읽는 것</dt><dd>{m.reads}</dd></div>
                   <div><dt>판단 기준</dt><dd>{m.judges}</dd></div>
