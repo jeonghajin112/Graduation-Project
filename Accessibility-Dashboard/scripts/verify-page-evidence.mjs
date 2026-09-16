@@ -1455,6 +1455,44 @@ async function verifyDesktop(page) {
 
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   const initialMessage = await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
+  // The scrolled bar overlaps real content and sends its measured height to
+  // the bridge, which keeps source-site fixed navigation below the glass.
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: false });
+    await page.waitForFunction(() => document.querySelector('.site-page-evidence-card')?.dataset.documentScrolled === 'false');
+    const readChrome = () => evidence.evaluate(card => {
+      const bar = card.querySelector('.site-page-evidence-chrome');
+      const viewer = card.querySelector('iframe');
+      return { height: card.getBoundingClientRect().height,
+        barBottom: bar.getBoundingClientRect().bottom, viewerTop: viewer.getBoundingClientRect().top,
+        viewerHeight: viewer.getBoundingClientRect().height,
+        blur: getComputedStyle(bar).backdropFilter };
+    });
+    const initialChrome = await readChrome();
+    assert.equal(initialChrome.blur, 'none');
+    assert.ok(initialChrome.viewerTop >= initialChrome.barBottom - 1, 'initial source navigation must remain exposed');
+    await frame.locator("html").evaluate(() => parent.postMessage({
+      source: "accessibility-page-replay", type: "DOCUMENT_SCROLL",
+      documentToken: window.__replayDocumentToken, isScrolled: true
+    }, "*"));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await evidence.getAttribute('data-document-scrolled'), 'false', 'scroll state must only arrive through the authenticated live port');
+    await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: true });
+    await page.waitForFunction(() => document.querySelector('.site-page-evidence-card')?.dataset.documentScrolled === 'true');
+    const scrolledChrome = await readChrome();
+    assert.match(scrolledChrome.blur, /blur\(20px\)/);
+    assert.ok(scrolledChrome.viewerTop < scrolledChrome.barBottom - 20, 'glass must blur actual rendered content');
+    const insetMessage = await waitForReplayMessage(frame, message => message.type === 'SET_VIEW_SCALE' && message.topInset > 0);
+    assert.ok(Math.abs(insetMessage.topInset - (scrolledChrome.barBottom - scrolledChrome.viewerTop)) < 1,
+      'the bridge must receive the actual covered height');
+    assert.ok(Math.abs(scrolledChrome.height - initialChrome.height) <= 1, `${width}px: title transition changed card height`);
+    await evidence.screenshot({ path: `${outDir}/glass-header-${width}.png` });
+    await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: false });
+    await page.waitForFunction(() => document.querySelector('.site-page-evidence-card')?.dataset.documentScrolled === 'false');
+    assert.equal((await readChrome()).blur, 'none');
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   const documentHeading = evidence.locator(".site-page-evidence-chrome h2");
   assert.equal(await documentHeading.innerText(), "제목 불러오는 중", "neither URLs nor project names may masquerade as document titles");
   for (const title of ["NAVER", "공식 웹사이트 | 온라인 스토어", "상품 상세 · 공식 웹사이트", "", "공식 웹사이트 | 온라인 스토어"]) {

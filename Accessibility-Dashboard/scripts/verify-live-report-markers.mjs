@@ -147,6 +147,118 @@ try {
   );
 
   const titleFrame = page.frameLocator("#viewer");
+  await titleFrame.locator('body').evaluate(body => {
+    const host = document.createElement('div');
+    host.id = 'inset-fixture'; host.style.display = 'contents';
+    host.innerHTML = `<header id="inset-fixed" style="position:fixed;top:0;left:0;width:100%;height:48px;background:white;z-index:9999"><span id="inset-nested" style="position:sticky;top:0;display:block">Fixed navigation</span></header>
+      <header id="inset-sticky" style="position:sticky;top:-1px;height:0;z-index:9998"><div style="position:absolute;top:0;left:0;width:100%;height:48px;background:white">Sticky navigation</div></header>
+      <div id="inset-bottom" style="position:fixed;bottom:0;left:0;height:24px;width:100px">Bottom</div>`;
+    body.prepend(host);
+    window.scrollTo(0, 120);
+  });
+  const setTopInset = async (topInset, scale = 1) => page.evaluate(({topInset, scale}) => {
+    window.__sendLiveCommand({source:'accessibility-dashboard', type:'SET_VIEW_SCALE',
+      documentToken:window.__liveEvents.find(event => event?.type === 'ACK').documentToken,
+      scale, visualWidth:900, topInset});
+  }, {topInset, scale});
+  for (const scale of [1, 0.6419, 0.25]) {
+    await setTopInset(40, scale);
+    await titleFrame.locator('#inset-fixed').evaluate((element, top) => new Promise((resolve, reject) => {
+      const deadline = performance.now() + 3000;
+      const check = () => {
+        if (Math.abs(element.getBoundingClientRect().top - top) < 1) resolve();
+        else if (performance.now() > deadline) reject(new Error(`fixed header did not clear inset: ${element.getBoundingClientRect().top}`));
+        else requestAnimationFrame(check);
+      }; check();
+    }), 40 / scale);
+    const navigation = await titleFrame.locator('body').evaluate(() => ({
+      fixed:document.getElementById('inset-fixed').getBoundingClientRect().top,
+      sticky:document.getElementById('inset-sticky').getBoundingClientRect().top,
+      nested:document.getElementById('inset-nested').getBoundingClientRect().top,
+      bottom:document.getElementById('inset-bottom').getBoundingClientRect().bottom
+    }));
+    assert.ok(Math.abs(navigation.sticky - (40 / scale - 1)) < 1, 'zero-height sticky wrappers with a negative pinning offset must clear the glass');
+    assert.ok(Math.abs(navigation.nested - navigation.fixed) < 1, 'nested navigation must not receive the inset twice');
+    assert.ok(Math.abs(navigation.bottom - 760) < 1, 'bottom controls must not move');
+  }
+  await setTopInset(0);
+  await titleFrame.locator('#inset-fixed').evaluate(element => new Promise((resolve, reject) => {
+    const deadline = performance.now() + 3000;
+    const check = () => {
+      if (element.style.top === '0px') resolve();
+      else if (performance.now() > deadline) reject(new Error('fixed header original position was not restored'));
+      else requestAnimationFrame(check);
+    }; check();
+  }));
+  assert.equal(await titleFrame.locator('#inset-sticky').evaluate(el => el.style.top), '-1px');
+  await titleFrame.locator('#inset-fixture').evaluate(el => { el.remove(); window.scrollTo(0, 0); });
+  await titleFrame.locator('body').evaluate(body => {
+    const host = document.createElement('div');
+    host.id = 'inset-variants'; host.style.display = 'contents';
+    host.innerHTML = `<style>#inset-dynamic.is-fixed {position:fixed;top:8px;left:150px;width:80px;height:20px}
+      @media(max-width:600px){#inset-responsive{position:fixed;top:0;left:300px;width:80px;height:20px}}</style>
+      <nav id="inset-floating" style="position:fixed;top:12px!important;left:70px;width:20px;height:16px">Float</nav>
+      <nav id="inset-row1" style="position:fixed;top:0;left:280px;width:350px;height:48px">First row</nav>
+      <nav id="inset-row2" style="position:fixed;top:48px;left:280px;width:350px;height:32px">Second row</nav>
+      <nav id="inset-dynamic">Dynamic</nav><nav id="inset-responsive">Responsive</nav><nav id="inset-stylesheet-nav">Stylesheet</nav>
+      <nav id="inset-hidden" style="display:none;position:fixed;top:0;left:650px;width:80px;height:20px">Hidden</nav>`;
+    const shadowHost = document.createElement('div');
+    const innerHost = document.createElement('div');
+    shadowHost.attachShadow({mode:'open'}).append(innerHost);
+    innerHost.attachShadow({mode:'open'}).innerHTML = '<nav id="inset-shadow-header" style="position:fixed;top:0;left:0;width:40px;height:16px">Shadow</nav>';
+    host.append(shadowHost);
+    body.prepend(host);
+    window.scrollTo(0,120);
+  });
+  const expectInsetTop = async (selector, top) => titleFrame.locator(selector).evaluate((element, top) => new Promise((resolve,reject) => {
+    const deadline=performance.now()+3000;
+    const check=()=>{
+      if(Math.abs(element.getBoundingClientRect().top-top)<1)resolve();
+      else if(performance.now()>deadline)reject(new Error(`${element.id}: expected top ${top}, got ${element.getBoundingClientRect().top}`));
+      else requestAnimationFrame(check);
+    };check();
+  }),top);
+  await setTopInset(40);
+  await expectInsetTop('#inset-floating',52);
+  await expectInsetTop('#inset-row1',40);
+  await expectInsetTop('#inset-row2',88);
+  await expectInsetTop('#inset-shadow-header',40);
+  await titleFrame.locator('#inset-dynamic').evaluate(el=>el.classList.add('is-fixed'));
+  await expectInsetTop('#inset-dynamic',48);
+  await titleFrame.locator('#inset-hidden').evaluate(el=>el.style.removeProperty('display'));
+  await expectInsetTop('#inset-hidden',40);
+  await titleFrame.locator('#inset-floating').evaluate(el=>el.style.setProperty('top','18px','important'));
+  await expectInsetTop('#inset-floating',58);
+  await titleFrame.locator('#inset-variants').evaluate(el=>{
+    const added=document.createElement('nav');added.id='inset-added';
+    added.style.cssText='position:fixed;top:0;left:800px;width:80px;height:20px';
+    el.append(added);
+  });
+  await expectInsetTop('#inset-added',40);
+  await titleFrame.locator('head').evaluate(head=>{
+    const style=document.createElement('style');style.id='inset-late-stylesheet';
+    style.textContent='#inset-stylesheet-nav{position:fixed;top:0;left:740px;width:50px;height:20px}';
+    head.append(style);
+  });
+  await expectInsetTop('#inset-stylesheet-nav',40);
+  await titleFrame.locator('#inset-shadow-header').evaluate(el=>el.style.top='6px');
+  await expectInsetTop('#inset-shadow-header',46);
+  await page.locator('#viewer').evaluate(el=>el.style.width='500px');
+  await expectInsetTop('#inset-responsive',40);
+  await page.locator('#viewer').evaluate(el=>el.style.width='900px');
+  await setTopInset(0);
+  await expectInsetTop('#inset-floating',18);
+  assert.equal(await titleFrame.locator('#inset-floating').evaluate(el=>el.style.getPropertyPriority('top')),'important');
+  assert.equal(await titleFrame.locator('#inset-row2').evaluate(el=>el.style.top),'48px');
+  assert.equal(await titleFrame.locator('#inset-shadow-header').evaluate(el=>el.style.top),'6px');
+  await titleFrame.locator('#inset-late-stylesheet').evaluate(el=>el.remove());
+  await titleFrame.locator('#inset-variants').evaluate(el=>{el.remove();window.scrollTo(0,0);});
+  for (const [scrollY, isScrolled] of [[0, false], [120, true], [30, true], [0, false]]) {
+    await titleFrame.locator("html").evaluate((_, y) => window.scrollTo(0, y), scrollY);
+    await page.waitForFunction(expected => window.__liveEvents.filter(event =>
+      event?.type === "EVENT" && event.payload?.type === "DOCUMENT_SCROLL").at(-1)?.payload.isScrolled === expected,
+      isScrolled);
+  }
   for (const title of ["홍익대학교 | 공식 홈페이지", "학사 안내 · 홍익대학교", "", "x".repeat(350)]) {
     await titleFrame.locator("html").evaluate((_, value) => { document.title = value; }, title);
     await page.waitForFunction(expected => window.__liveEvents.filter(event =>
@@ -411,6 +523,8 @@ try {
         (previousRect.top + previousRect.bottom) / 2 -
         (nextRect.top + nextRect.bottom) / 2,
       previousBorderRadius: getComputedStyle(previous).borderRadius,
+      pagerBackground: getComputedStyle(previous.parentElement).backgroundColor,
+      previousBackground: getComputedStyle(previous).backgroundColor,
       previousHeight: previousRect.height,
       previousWidth: previousRect.width,
       nextHeight: nextRect.height,
@@ -437,7 +551,9 @@ try {
   assert.ok(Math.abs(topRowLayout.previousHeight - 24) <= 1);
   assert.ok(Math.abs(topRowLayout.nextWidth - 24) <= 1);
   assert.ok(Math.abs(topRowLayout.nextHeight - 24) <= 1);
-  assert.ok(topRowLayout.pagerGap >= 3 && topRowLayout.pagerGap <= 5);
+  assert.ok(topRowLayout.pagerGap >= 7 && topRowLayout.pagerGap <= 9, "pager buttons must stay visibly separated");
+  assert.equal(topRowLayout.pagerBackground, "rgba(0, 0, 0, 0)");
+  assert.equal(topRowLayout.previousBackground, "rgb(242, 244, 247)");
 
   await groupedMarker.focus();
   await page.keyboard.press("Tab");

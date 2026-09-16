@@ -167,6 +167,38 @@ try {
     }
   };
 
+  await runCase('glass navigation discovery stays incremental while scrolling', async ({page,frame,flush,init}) => {
+    await frame.evaluate(()=>{
+      const main=document.querySelector('main');
+      main.innerHTML='<nav id="glass-float" style="position:fixed;top:12px;left:70px;width:20px;height:16px">Menu</nav><div style="height:3000px"></div>';
+      for(let index=0;index<400;index++){
+        const item=document.createElement('span');item.className='inset-scan-probe';item.textContent='Content';main.append(item);
+      }
+      const original=window.getComputedStyle;
+      window.__insetScanVisits=0;
+      window.getComputedStyle=function(element,...args){
+        if(element.classList.contains('inset-scan-probe'))window.__insetScanVisits++;
+        return original.call(this,element,...args);
+      };
+    });
+    await init([]);
+    await page.evaluate(()=>window.__sendLiveCommand({source:'accessibility-dashboard',type:'SET_VIEW_SCALE',
+      documentToken:window.__liveEvents.find(event=>event.type==='ACK').documentToken,scale:1,visualWidth:innerWidth,topInset:40}));
+    await flush();
+    assert.equal(await frame.locator('#glass-float').evaluate(el=>el.getBoundingClientRect().top),52);
+    assert.ok(await frame.evaluate(()=>window.__insetScanVisits)>=400,'initial discovery must include the full document');
+    await frame.evaluate(()=>{window.__insetScanVisits=0;});
+    for(const y of [100,250,400]){
+      await frame.evaluate(y=>scrollTo(0,y),y);await flush();
+    }
+    await frame.locator('#glass-float').evaluate(el=>{el.style.top='18px';});
+    await flush();
+    assert.equal(await frame.locator('#glass-float').evaluate(el=>el.getBoundingClientRect().top),58);
+    const unrelatedStyleReads=await frame.evaluate(()=>window.__insetScanVisits);
+    assert.equal(unrelatedStyleReads,0,'scrolling and a header edit must not rescan unrelated document elements');
+    return {unrelatedStyleReads};
+  });
+
   for (const change of ["unrelated", "selected", "removed", "escape", "switch", "reset"]) {
     await runCase(`focus during scrolling: ${change}`, async ({ page, frame, flush, init }) => {
       await frame.evaluate(() => {

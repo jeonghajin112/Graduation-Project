@@ -18,6 +18,19 @@ import {
 import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
 import type { RecentIssueRow } from "./types";
 
+describe("live document scroll state", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL", documentToken: "live_document", isScrolled: true };
+  it("accepts both scrolled and restored states", () => {
+    expect(parsePageReplayMessage(message)).toEqual(message);
+    expect(parsePageReplayMessage({ ...message, isScrolled: false })).toEqual({ ...message, isScrolled: false });
+  });
+  it.each([{ isScrolled: 1 }, { isScrolled: "true" }, { isScrolled: null }, { documentToken: "" }, { extra: true }])(
+    "rejects malformed scroll events %j", patch => {
+      expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
+    }
+  );
+});
+
 describe("live document titles", () => {
   const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE", documentToken: "live_document", title: "홍익대학교 | 공식 홈페이지" };
   it("accepts document titles and explicitly empty titles", () => {

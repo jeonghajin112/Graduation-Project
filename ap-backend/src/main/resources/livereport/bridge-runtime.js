@@ -76,6 +76,12 @@
   const locatorStatusSignatures = new Map();
   let ready = false;
   let viewScale = 1;
+  let viewTopInset = 0;
+  const insetAnchors = new Map();
+  const insetCandidates = new Set();
+  const insetCandidateRoots = new Set();
+  let insetCandidatesNeedScan = true;
+  let insetStylesDirty = false;
   let healthCheckTimer = 0;
   let healthObserver = null;
   let markerObserver = null;
@@ -203,6 +209,16 @@
   };
   const isObjectRecord = value => value !== null && typeof value === 'object' && !arrayIsArray(value);
   let lastDocumentTitle = null;
+  let lastDocumentScrolled = false;
+  const reportDocumentScroll = (force = false) => {
+    const scrollY = Math.max(0, globalThis.scrollY || 0);
+    // Enter after a short scroll and keep the glass state until the document
+    // returns to the top, including small reverse scrolls.
+    const isScrolled = lastDocumentScrolled ? scrollY > 0 : scrollY * viewScale > 64;
+    if (!force && isScrolled === lastDocumentScrolled) return;
+    lastDocumentScrolled = isScrolled;
+    post({type:'DOCUMENT_SCROLL', isScrolled});
+  };
   let titleObserver = null;
   const reportDocumentTitle = (force = false) => {
     const title = String(document.title || '').replace(/\s+/g, ' ').trim().slice(0, 300);
@@ -227,7 +243,9 @@
     if (payload.type === 'SET_VIEW_SCALE') {
       return payload.documentToken === documentToken
         && numberIsFinite(payload.scale) && payload.scale > 0 && payload.scale <= 1
-        && numberIsFinite(payload.visualWidth) && payload.visualWidth > 0 && payload.visualWidth <= 16384;
+        && numberIsFinite(payload.visualWidth) && payload.visualWidth > 0 && payload.visualWidth <= 16384
+        && (payload.topInset === undefined || (numberIsFinite(payload.topInset)
+          && payload.topInset >= 0 && payload.topInset <= 128));
     }
     if (payload.type !== 'INIT_ISSUES'
         || !arrayIsArray(payload.issues) || payload.issues.length > 10000
@@ -1196,6 +1214,27 @@ const scheduleDocumentHealth = () => {
 };
 const handleMarkerMutations = records => {
     const externalRecords = records.filter(record => !layer.contains(record.target));
+    if (viewTopInset > 0 && externalRecords.length > 0) {
+      const layoutRecords = externalRecords.filter(record => !(record.type === 'attributes'
+        && record.attributeName === 'style' && insetAnchors.has(record.target)
+        && record.target.getAttribute('style') === insetAnchors.get(record.target).appliedStyle));
+      const isStylesheet = node => node instanceof Element && ['STYLE', 'LINK'].includes(node.tagName);
+      if (layoutRecords.some(record => isStylesheet(record.target) || isStylesheet(record.target.parentElement)
+          || (record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].some(isStylesheet)))) {
+        insetCandidatesNeedScan = true;
+        insetStylesDirty = true;
+      }
+      for (const record of layoutRecords) {
+        if (record.type === 'attributes') insetCandidateRoots.add(record.target);
+        if (record.type === 'childList') record.addedNodes.forEach(node => {
+          if (node instanceof Element) insetCandidateRoots.add(node);
+        });
+      }
+      if (layoutRecords.some(record => record.type === 'attributes')) {
+        insetStylesDirty = true;
+      }
+      schedulePosition('preserve-root');
+    }
     if (currentIssues.length > 0 && externalRecords.length > 0) {
       // Only the known generated grammar can ignore unrelated attributes.
       // Structural edits, IDs, arbitrary selectors and Shadow DOM paths retain
@@ -1239,11 +1278,12 @@ const observeMarkerShadowRoot = root => {
 const clearMarkerShadowObservers = () => {
   markerShadowObservers.forEach(observer => observer.disconnect());
   markerShadowObservers.clear();
+  if (viewTopInset > 0) insetCandidatesNeedScan = true;
 };
 const startMarkerObserver = () => {
   if (markerObserver || !NativeMutationObserver) return;
   markerObserver = new NativeMutationObserver(handleMarkerMutations);
-  markerObserver.observe(document.body || document.documentElement, {
+  markerObserver.observe(document.documentElement, {
     childList:true, subtree:true, characterData:true, attributes:true
   });
 };
@@ -1416,6 +1456,122 @@ const fixedContainingBlockFor = element => {
     if (current === document.documentElement) break;
   }
   return null;
+};
+// Index positioned elements when glass activates, then update only changed
+// subtrees. Scroll work visits this small set, including floating/stacked bars
+// that point sampling misses. No source-site names or selectors are required.
+const composedContains = (parent, element) => {
+  for (let current = element; current; current = composedElementParent(current)) {
+    if (current === parent) return true;
+  }
+  return false;
+};
+const refreshInsetCandidates = () => {
+  if (insetCandidatesNeedScan) {
+    insetCandidates.clear();
+    insetCandidateRoots.clear();
+    insetCandidateRoots.add(document.documentElement);
+    insetCandidatesNeedScan = false;
+  }
+  const visit = element => {
+    if (element === layer) return;
+    if (element instanceof HTMLElement) {
+      const position = getComputedStyle(element).position;
+      if (position === 'fixed' || position === 'sticky') insetCandidates.add(element);
+      else insetCandidates.delete(element);
+    }
+    if (element.shadowRoot) {
+      observeMarkerShadowRoot(element.shadowRoot);
+      for (const child of element.shadowRoot.children) visit(child);
+    }
+    for (const child of element.children) visit(child);
+  };
+  const roots = [...insetCandidateRoots].filter(root => root.isConnected);
+  for (const root of roots) {
+    if (!roots.some(other => other !== root && composedContains(other, root))) visit(root);
+  }
+  insetCandidateRoots.clear();
+  for (const element of insetCandidates) {
+    if (!element.isConnected) insetCandidates.delete(element);
+  }
+};
+const restoreInsetAnchor = (element, saved) => {
+  if (element.style.getPropertyValue('top') !== saved.applied) return;
+  if (saved.value) element.style.setProperty('top', saved.value, saved.priority);
+  else element.style.removeProperty('top');
+};
+const updateViewportTopInset = () => {
+  const inset = viewTopInset / viewScale;
+  if (inset === 0 || insetStylesDirty) {
+    insetAnchors.forEach((saved, element) => restoreInsetAnchor(element, saved));
+    insetAnchors.clear();
+    insetStylesDirty = false;
+    if (inset === 0) {
+      insetCandidates.clear();
+      insetCandidateRoots.clear();
+      insetCandidatesNeedScan = true;
+      return;
+    }
+  }
+  refreshInsetCandidates();
+  const candidates = new Set([...insetCandidates, ...insetAnchors.keys()]);
+  const ordered = [...candidates].sort((a, b) => composedContains(a, b) ? -1 : composedContains(b, a) ? 1 : 0);
+  const boxes = new Map();
+  for (const element of ordered) {
+    const saved = insetAnchors.get(element);
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const top = saved?.baseTop ?? finiteCssInset(style.top);
+    const originalRectTop = rect.top - (saved?.offset || 0);
+    const containingBlock = style.position === 'fixed' ? fixedContainingBlockFor(element) : null;
+    const anchored = style.position === 'fixed' ? !containingBlock
+      : style.position === 'sticky' && Math.abs(rect.top - (top + (saved?.offset || 0))) <= 2;
+    if (element.isConnected && anchored && top !== null && top >= -2
+        && rect.width > 0 && style.visibility === 'visible' && originalRectTop >= -2
+        && Math.abs(originalRectTop - top) <= 2) {
+      boxes.set(element, {top, rect, originalRectTop, bottom:originalRectTop + rect.height, containingBlock});
+    }
+  }
+  // Adjacent independent header rows move together, preserving their spacing.
+  const affected = new Set([...boxes].filter(([, box]) => box.originalRectTop < inset).map(([element]) => element));
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const [element, box] of boxes) {
+      if (affected.has(element)) continue;
+      if ([...affected].some(other => {
+        const previous = boxes.get(other);
+        return box.originalRectTop >= previous.originalRectTop && box.originalRectTop < previous.bottom + inset
+          && box.rect.left < previous.rect.right && box.rect.right > previous.rect.left;
+      })) {
+        affected.add(element);
+        expanded = true;
+      }
+    }
+  }
+  for (const element of ordered) {
+    const saved = insetAnchors.get(element);
+    const box = boxes.get(element);
+    const shiftedAncestor = [...insetAnchors.keys()].some(parent => parent !== element && composedContains(parent, element)
+      && (getComputedStyle(element).position === 'sticky'
+        || (box?.containingBlock && composedContains(parent, box.containingBlock))));
+    if (!affected.has(element) || shiftedAncestor) {
+      if (saved) {
+        restoreInsetAnchor(element, saved);
+        insetAnchors.delete(element);
+      }
+      continue;
+    }
+    const {top} = box;
+    const entry = saved || {value:element.style.getPropertyValue('top'),
+      priority:element.style.getPropertyPriority('top'), baseTop:top};
+    const applied = `${Number((top + inset).toFixed(3))}px`;
+    entry.offset = inset;
+    entry.applied = applied;
+    insetAnchors.set(element, entry);
+    if (element.style.getPropertyValue('top') !== applied) element.style.setProperty('top', applied, 'important');
+    entry.appliedStyle = element.getAttribute('style');
+  }
 };
 const verticalStickyIsStuck = (element, style) => {
   const rect = element.getBoundingClientRect();
@@ -1597,7 +1753,7 @@ const scheduleClosePopover = () => {
 };
 let openSelected = false;
 let openTargetEntry = null;
-  const {renderDetailContent, sizePopoverForCluster, positionPopover} = createLivePopoverView({document, popover, popoverTags, popoverDetail, createSeverityBadge, createCodeBadge, textValue, clusterIssuesFor, getState: () => ({openEntry, openTargetEntry, viewScale})});
+  const {renderDetailContent, sizePopoverForCluster, positionPopover} = createLivePopoverView({document, popover, popoverTags, popoverDetail, createSeverityBadge, createCodeBadge, textValue, clusterIssuesFor, getState: () => ({openEntry, openTargetEntry, viewScale, viewTopInset})});
 const renderDetail = (entry, issue, notify = false) => {
   if (!entry || !issue) return;
   entry.selectedIssueId = issue.id;
@@ -1913,12 +2069,13 @@ const targetVisibleInViewport = (element, rect) => (
     const viewportHeight = document.documentElement.clientHeight || innerHeight;
     const margin = markerViewportMargin / viewScale;
     const collisionPadding = markerCollisionGap / 2;
+    const topMargin = margin + viewTopInset / viewScale;
     let footprint = markerFootprint(entry, left, top, collisionPadding);
     if (footprint.right - footprint.left > viewportWidth - margin * 2
-        || footprint.bottom - footprint.top > viewportHeight - margin * 2) return null;
+        || footprint.bottom - footprint.top > viewportHeight - margin - topMargin) return null;
     if (footprint.left < margin) left += margin - footprint.left;
     if (footprint.right > viewportWidth - margin) left -= footprint.right - (viewportWidth - margin);
-    if (footprint.top < margin) top += margin - footprint.top;
+    if (footprint.top < topMargin) top += topMargin - footprint.top;
     if (footprint.bottom > viewportHeight - margin) top -= footprint.bottom - (viewportHeight - margin);
     footprint = markerFootprint(entry, left, top, collisionPadding);
     return {
@@ -2107,7 +2264,7 @@ const targetVisibleInViewport = (element, rect) => (
         markerCollisionGap / 2) : null;
       const margin = markerViewportMargin / viewScale;
       const preservedInsideViewport = preservedFootprint
-        && preservedFootprint.left >= margin && preservedFootprint.top >= margin
+        && preservedFootprint.left >= margin && preservedFootprint.top >= margin + viewTopInset / viewScale
         && preservedFootprint.right <= viewportWidth - margin
         && preservedFootprint.bottom <= viewportHeight - margin;
       return {
@@ -2296,6 +2453,7 @@ const targetVisibleInViewport = (element, rect) => (
       const scheduledMode = pendingMarkerPositionMode;
       pendingMarkerPositionMode = 'preserve-root';
       markerPositionFrame = 0;
+      updateViewportTopInset();
       position(scheduledMode);
     });
   };
@@ -2645,6 +2803,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
       if (ready) {
         post({type:'READY'});
         reportDocumentTitle(true);
+        reportDocumentScroll(true);
         scheduleDocumentHealth();
       }
     }
@@ -2664,6 +2823,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
         && numberIsFinite(data.scale) && data.scale > 0 && data.scale <= 1) {
       if (viewScale !== data.scale) {
         viewScale = data.scale;
+        insetStylesDirty = true;
         marked.forEach(entry => {
           entry.markerOffset = null;
           entry.markerWasVisible = false;
@@ -2672,10 +2832,14 @@ const resolveIssueSnapshot = (issueIds = null) => {
           entry.markerAnchorDocumentRect = null;
         });
       }
+      viewTopInset = data.topInset ?? 0;
       schedulePosition();
     }
   };
-  const scheduleRootScrollPosition = () => schedulePosition('preserve-root');
+  const scheduleRootScrollPosition = () => {
+    reportDocumentScroll();
+    schedulePosition('preserve-root');
+  };
   const scheduleCapturedScrollPosition = event => {
     const target = eventTargetGetter
       ? nativeApply(eventTargetGetter, event, [])
@@ -2691,8 +2855,15 @@ const resolveIssueSnapshot = (issueIds = null) => {
     'scroll', scheduleCapturedScrollPosition, {passive:true,capture:true}
   ]);
   nativeApply(nativeAddEventListener, globalThis, [
-    'resize', () => schedulePosition(), {passive:true}
+    'resize', () => { insetStylesDirty = true; insetCandidatesNeedScan = true; schedulePosition(); }, {passive:true}
   ]);
+  nativeApply(nativeAddEventListener, document, ['load', event => {
+    if (viewTopInset > 0 && event.target instanceof HTMLLinkElement && event.target.rel === 'stylesheet') {
+      insetStylesDirty = true;
+      insetCandidatesNeedScan = true;
+      schedulePosition();
+    }
+  }, true]);
   if (globalThis.ResizeObserver) {
     new ResizeObserver(() => schedulePosition('preserve-root'))
       .observe(document.documentElement);
@@ -2704,10 +2875,14 @@ const resolveIssueSnapshot = (issueIds = null) => {
     }
   }, 1000);
   // Attaching a root to an existing host emits no DOM mutation.
-  // Reuse the normal reconciliation queue; only resolved locator
-  // paths register observers, never unrelated or closed roots.
+  // Reuse the reconciliation queue for locator paths and inset navigation.
+  // Closed roots remain private to their source components.
   const attachShadowForMarkers = function(...args) {
     const root = nativeApply(nativeAttachShadow, this, args);
+    if (root.mode === 'open' && viewTopInset > 0) {
+      insetCandidateRoots.add(this);
+      schedulePosition('preserve-root');
+    }
     if (root.mode === 'open' && currentIssues.length > 0) {
       locatorTargetsNeedReconciliation = true;
       schedulePosition('preserve-root');
@@ -2727,6 +2902,8 @@ const resolveIssueSnapshot = (issueIds = null) => {
     closeLivePort();
   };
   addEventListener('pagehide', event => {
+    insetAnchors.forEach((saved, element) => restoreInsetAnchor(element, saved));
+    insetAnchors.clear();
     post({type:'DOCUMENT_UNLOADING'});
     resetLiveConnection();
     if (documentReadyObserver) {
@@ -2755,6 +2932,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     if (ready) {
       post({type:'READY'});
       reportDocumentTitle(true);
+      reportDocumentScroll(true);
       scheduleDocumentHealth();
     }
     announceBridgeAvailability();
@@ -2767,6 +2945,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     }
     mount(); ready = true; post({type:'READY'});
     reportDocumentTitle(true);
+    reportDocumentScroll(true);
     if (NativeMutationObserver && document.head) {
       titleObserver = new NativeMutationObserver(() => reportDocumentTitle());
       titleObserver.observe(document.head, {childList:true, subtree:true, characterData:true});

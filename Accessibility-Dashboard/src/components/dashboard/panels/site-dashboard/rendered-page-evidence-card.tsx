@@ -193,6 +193,9 @@ export function RenderedPageEvidenceCard({
   targetName
 }: RenderedPageEvidenceCardProps) {
   const [documentTitle, setDocumentTitle] = useState<string | null>(null);
+  const [isDocumentScrolled, setIsDocumentScrolled] = useState(false);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const chromeRef = useRef<HTMLElement>(null);
   const headerTitle = documentTitle === null ? "제목 불러오는 중" : documentTitle || "제목 없음";
   const [frameRevision, setFrameRevision] = useState(0);
   const [failedLiveSessionId, setFailedLiveSessionId] = useState<string | null>(null);
@@ -234,6 +237,7 @@ export function RenderedPageEvidenceCard({
     documentToken: string;
     scale: number;
     visualWidth: number;
+    topInset: number;
   } | null>(null);
   const replayOriginSelectionRef = useRef<{ issueId: number | null } | null>(null);
   const selectedIssueStateRef = useRef(selectedIssueId);
@@ -493,6 +497,7 @@ export function RenderedPageEvidenceCard({
 
   function invalidateReplayDocumentSession({ resetRetiredTokens = false } = {}) {
     setDocumentTitle(null);
+    setIsDocumentScrolled(false);
     resetLocatorStates();
     retireDocumentToken(activeDocumentTokenRef.current);
     retireDocumentToken(pendingDocumentTokenRef.current);
@@ -642,11 +647,13 @@ export function RenderedPageEvidenceCard({
       return;
     }
 
+    const topInset = isDocumentScrolled ? Math.min(128, chromeHeight) : 0;
     const previous = sentReplayViewportRef.current;
     if (
       previous?.documentToken === documentToken
       && Math.abs(previous.scale - replayViewportMetrics.scale) < 0.001
       && Math.abs(previous.visualWidth - replayViewportMetrics.visualWidth) < 0.5
+      && Math.abs(previous.topInset - topInset) < 0.5
     ) {
       return;
     }
@@ -656,12 +663,14 @@ export function RenderedPageEvidenceCard({
       type: "SET_VIEW_SCALE",
       documentToken,
       scale: replayViewportMetrics.scale,
-      visualWidth: replayViewportMetrics.visualWidth
+      visualWidth: replayViewportMetrics.visualWidth,
+      topInset
     });
     sentReplayViewportRef.current = {
       documentToken,
       scale: replayViewportMetrics.scale,
-      visualWidth: replayViewportMetrics.visualWidth
+      visualWidth: replayViewportMetrics.visualWidth,
+      topInset
     };
   }
 
@@ -696,6 +705,16 @@ export function RenderedPageEvidenceCard({
   useEffect(() => {
     setFailedLiveSessionId(null);
   }, [liveSession?.sessionId]);
+
+  useLayoutEffect(() => {
+    const chrome = chromeRef.current;
+    if (!chrome) return;
+    const measure = () => setChromeHeight(chrome.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(chrome);
+    return () => observer.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     const preview = previewRef.current;
@@ -806,6 +825,7 @@ export function RenderedPageEvidenceCard({
       activeDocumentTokenRef.current = null;
       pendingDocumentTokenRef.current = message.documentToken;
       setDocumentTitle(null);
+      setIsDocumentScrolled(false);
       confirmedLiveDocumentTokenRef.current = null;
       readyAwaitingFrameLoadRef.current = null;
       frameLoadObservedRef.current = false;
@@ -834,6 +854,7 @@ export function RenderedPageEvidenceCard({
 
       retireDocumentToken(message.documentToken);
       setDocumentTitle(null);
+      setIsDocumentScrolled(false);
       activeDocumentTokenRef.current = null;
       pendingDocumentTokenRef.current = null;
       confirmedLiveDocumentTokenRef.current = null;
@@ -918,6 +939,11 @@ export function RenderedPageEvidenceCard({
 
     if (message.type === "DOCUMENT_TITLE") {
       setDocumentTitle(message.title);
+      return;
+    }
+
+    if (message.type === "DOCUMENT_SCROLL") {
+      setIsDocumentScrolled(message.isScrolled);
       return;
     }
 
@@ -1037,7 +1063,9 @@ export function RenderedPageEvidenceCard({
     replayConnectionState,
     replayReadyEpoch,
     replayViewportMetrics.scale,
-    replayViewportMetrics.visualWidth
+    replayViewportMetrics.visualWidth,
+    chromeHeight,
+    isDocumentScrolled
   ]);
 
   useEffect(() => {
@@ -1142,8 +1170,10 @@ export function RenderedPageEvidenceCard({
   }
 
   return (
-    <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card">
-      <header className="site-page-evidence-chrome">
+    <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card"
+      data-document-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
+      <header ref={chromeRef} className="site-page-evidence-chrome"
+        data-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
         <PageFavicon key={faviconUrl ?? "fallback"} faviconUrl={faviconUrl} className="site-page-evidence-chrome__icon" />
         <h2 id="site-page-evidence-heading" title={headerTitle}>{headerTitle}</h2>
       </header>

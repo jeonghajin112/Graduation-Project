@@ -35,7 +35,7 @@ function createLivePopoverView({document, popover, popoverTags, popoverDetail, c
     documentLeft = globalThis.scrollX,
     documentTop = globalThis.scrollY
   ) => {
-    const {openEntry, openTargetEntry, viewScale} = getState();
+    const {openEntry, openTargetEntry, viewScale, viewTopInset = 0} = getState();
     if (popover.hidden || !openEntry) return;
     const targetEntry = openTargetEntry?.element?.isConnected ? openTargetEntry : openEntry;
     const rect = targetEntry.element.getBoundingClientRect();
@@ -44,7 +44,7 @@ function createLivePopoverView({document, popover, popoverTags, popoverDetail, c
     const width = popover.offsetWidth * scale;
     const height = popover.offsetHeight * scale;
     const viewportLeft = 12;
-    const viewportTop = 12;
+    const viewportTop = 12 + viewTopInset / viewScale;
     const viewportRight = innerWidth - 12;
     const viewportBottom = innerHeight - 12;
     const markerRect = openEntry.marker && !openEntry.marker.hidden

@@ -140,6 +140,7 @@ export type DashboardToPageReplayMessage =
       documentToken: string;
       scale: number;
       visualWidth: number;
+      topInset?: number;
     };
 
 export type LocatorConnectionStatus =
@@ -152,6 +153,12 @@ export type LocatorConnectionStatus =
 export type LiveDocumentHealthStatus = "EMPTY" | "MEANINGFUL";
 
 export type PageReplayToDashboardMessage =
+  | {
+      source: typeof PAGE_REPLAY_SOURCE;
+      type: "DOCUMENT_SCROLL";
+      documentToken: string;
+      isScrolled: boolean;
+    }
   | {
       source: typeof PAGE_REPLAY_SOURCE;
       type: "DOCUMENT_TITLE";
@@ -562,6 +569,13 @@ function toOptionalBoundedReplayText(
 export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMessage | null {
   if (!isRecord(value) || value.source !== PAGE_REPLAY_SOURCE || typeof value.type !== "string") {
     return null;
+  }
+
+  if (value.type === "DOCUMENT_SCROLL" &&
+      hasExactOwnKeys(value, ["source", "type", "documentToken", "isScrolled"]) &&
+      isDocumentToken(value.documentToken) && typeof value.isScrolled === "boolean") {
+    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL",
+      documentToken: value.documentToken, isScrolled: value.isScrolled };
   }
 
   if (value.type === "DOCUMENT_TITLE" &&
