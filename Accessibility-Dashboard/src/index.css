@@ -3,6 +3,7 @@
 @import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 @import "./styles/theme-tokens.css";
 @import "./styles/dashboard-modals.css";
+@import "./styles/dashboard-selection.css";
 
 @theme inline {
   --color-background: var(--background);
@@ -378,10 +379,12 @@
     backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
   }
 
-  /* Keep the page evidence card flat, without a surrounding highlight or shadow.
-     Same layer, later rule, so it wins the !important tie. */
+  /* The live page fills this shell edge to edge. Only its title bar blurs. */
   .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
+    background: transparent !important;
     box-shadow: none !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   /* Without backdrop-filter the translucent fill alone can drop text contrast. */

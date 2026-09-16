@@ -471,6 +471,7 @@ export const parseEvaluationRequestResponse: ApiResponseParser<EvaluationRequest
   const fields = readFields(value, path);
   return {
     quickAnalysis: fields.optional("quickAnalysis", parseBoolean),
+    failureCode: fields.optional("failureCode", parseNullableString),
     id: fields.required("id", parsePositiveInteger),
     evaluationTargetId: fields.required("evaluationTargetId", parsePositiveInteger),
     status: fields.required("status", (field, fieldPath) =>

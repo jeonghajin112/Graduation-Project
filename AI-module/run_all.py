@@ -1054,10 +1054,10 @@ def main():
         print("  [분석 실패] 현재 실행의 규칙 결과 또는 캡처 메타데이터가 완전하지 않습니다.")
     elif not rule_result_valid:
         print("  [분석 실패] 규칙 기반 결과에 유효한 점수가 없습니다.")
-    elif not capture_metadata_valid:
-        print("  [분석 실패] 현재 요청의 캡처 메타데이터가 유효하지 않습니다.")
     elif not navigation_valid:
         sys.exit(2)
+    elif not capture_metadata_valid:
+        print("  [분석 실패] 현재 요청의 캡처 메타데이터가 유효하지 않습니다.")
 
     # ── Step 2: 텍스트 추출 ──
     # Step 1에서 저장한 result.html을 입력으로 받아서

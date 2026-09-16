@@ -16,11 +16,70 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card {
+  position: relative;
   display: flex;
   min-height: 28rem;
   overflow: hidden;
   padding: 0;
   flex-direction: column;
+}
+
+/* Reserve the bar's actual height in normal flow. Never overlay the source
+   page: its top navigation, fixed headers and issue markers must stay visible. */
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: clamp(2.25rem, 1.75rem + 0.5cqi, 3rem);
+  padding: 0.5rem clamp(0.875rem, 0.65rem + 0.4cqi, 1.5rem);
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--site-divider) 55%, transparent);
+  color: var(--dashboard-text-strong);
+  background: rgb(255 255 255 / 58%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%);
+  -webkit-backdrop-filter: blur(20px) saturate(130%);
+  backdrop-filter: blur(20px) saturate(130%);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome h2 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(0.8125rem, 0.7rem + 0.16cqi, 1rem);
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: -0.015em;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.125em;
+  height: 1.125em;
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-chrome {
+  background: rgb(20 22 26 / 58%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
+}
+
+@media (forced-colors: active) {
+  .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome,
+  .bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-chrome {
+    background: Canvas;
+    border-color: CanvasText;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-retry {
@@ -62,17 +121,18 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 23rem;
-  padding: clamp(0.75rem, 0.625vw, 1.5rem);
+  padding: 0;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-loading,
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-empty {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   gap: 1rem;
   min-height: 21rem;
-  border-radius: var(--dashboard-site-nested-radius);
+  border-radius: 0;
   color: var(--dashboard-text-muted);
   background: var(--site-row-surface);
 }
@@ -154,7 +214,7 @@
   height: clamp(30rem, 62dvh, 50rem);
   overflow: hidden;
   border: 0;
-  border-radius: var(--dashboard-site-nested-radius);
+  border-radius: 0;
   background: #ffffff;
 }
 
@@ -509,6 +569,17 @@
   overflow: visible;
 }
 
+/* Recharts' inner SVG groups can receive pointer focus as well as the chart.
+   Suppress their browser ring; keep a visible ring on keyboard chart entry. */
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart :focus {
+  outline: none;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-chart .recharts-surface:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: 2px;
+}
+
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-empty {
   display: grid;
   flex: 1 1 auto;
@@ -653,7 +724,8 @@
   background: transparent;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-page-information__icon img {
+.bridge-dashboard.dashboard-site-detail .site-page-information__icon img,
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__icon img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -662,6 +734,7 @@
   opacity: 0;
 }
 
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__icon[data-favicon-loaded="true"] img,
 .bridge-dashboard.dashboard-site-detail
   .site-page-information__icon[data-favicon-loaded="true"]
   img {

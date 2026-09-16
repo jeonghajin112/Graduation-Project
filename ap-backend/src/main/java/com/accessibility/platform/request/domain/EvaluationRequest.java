@@ -39,6 +39,10 @@ public class EvaluationRequest extends BaseTimeEntity {
     @Column(nullable = false, length = 20)
     private EvaluationRequestStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 40)
+    private EvaluationFailureCode failureCode;
+
     @Column(length = 500)
     private String requestNote;
 
@@ -54,5 +58,11 @@ public class EvaluationRequest extends BaseTimeEntity {
 
     public void changeStatus(EvaluationRequestStatus status) {
         this.status = status;
+        this.failureCode = null;
+    }
+
+    public void markFailed(EvaluationFailureCode failureCode) {
+        this.status = EvaluationRequestStatus.FAILED;
+        this.failureCode = failureCode;
     }
 }

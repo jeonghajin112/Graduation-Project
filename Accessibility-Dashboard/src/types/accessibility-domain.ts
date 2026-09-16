@@ -29,6 +29,7 @@ export type EvaluationTarget = {
 };
 
 export type EvaluationRequest = {
+  failureCode?: string | null;
   quickAnalysis?: boolean;
   id: number;
   evaluationTargetId: number;

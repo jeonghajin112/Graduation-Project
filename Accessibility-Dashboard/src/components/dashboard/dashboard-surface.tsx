@@ -356,7 +356,8 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               actions={actions ? {
                 onCreateProject: actions.openOrganizationCreateModal,
                 onUpdateProject: actions.handleUpdateOrganizationModel,
-                onDeleteProject: actions.handleDeleteOrganizationModel
+                onDeleteProject: actions.handleDeleteOrganizationModel,
+                onDeletePage: actions.handleDeleteEvaluationTargetModel
               } : null}
               onSelectPage={({ pageId }) => dashboard.goToSite(pageId)}
               quickAnalysisResultsOverride={previewQuickAnalysisResults}

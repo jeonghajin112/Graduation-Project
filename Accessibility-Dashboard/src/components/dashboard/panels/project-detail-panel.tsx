@@ -438,6 +438,7 @@ export function OrganizationModelDetailPanel({
                   </a>
                 ) : row.accessUrl ? (
                   <p
+                    data-copyable
                     className={`dashboard-project-card-url min-w-0 truncate ${
                       isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"
                     }`}

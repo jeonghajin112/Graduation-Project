@@ -146,6 +146,14 @@ try {
     window.__liveEvents.some(event => event?.type === "EVENT" && event.payload?.type === "READY")
   );
 
+  const titleFrame = page.frameLocator("#viewer");
+  for (const title of ["홍익대학교 | 공식 홈페이지", "학사 안내 · 홍익대학교", "", "x".repeat(350)]) {
+    await titleFrame.locator("html").evaluate((_, value) => { document.title = value; }, title);
+    await page.waitForFunction(expected => window.__liveEvents.filter(event =>
+      event?.type === "EVENT" && event.payload?.type === "DOCUMENT_TITLE").at(-1)?.payload.title === expected,
+      title.slice(0, 300));
+  }
+
   const issues = [
     createIssue(107, "#dense-target-3", "세 번째 조밀한 대상", "LOW", "text", "6.4.3"),
     createIssue(101, "#group-target", "적절한 링크 텍스트", "LOW", "text", "6.4.3"),

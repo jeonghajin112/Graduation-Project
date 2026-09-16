@@ -291,6 +291,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     <div className="site-dashboard-layout grid min-h-[31rem] grid-cols-1 items-stretch">
       <div className="site-page-evidence-grid-item">
         <RenderedPageEvidenceCard
+          faviconUrl={evaluationTarget.faviconUrl}
           captureMetadata={captureMetadata}
           errorMessage={resultDetailsErrorMessage ?? liveSessionErrorMessage}
           evaluationRequestId={latestResultRequestId}

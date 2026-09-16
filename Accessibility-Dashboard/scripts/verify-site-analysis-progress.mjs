@@ -207,6 +207,40 @@ try {
   await page.goto(baseUrl + "/projects/1/pages/103", { waitUntil: "domcontentloaded" });
   await assertProgressOnly("failed");
   await progress.getByRole("heading", { name: "분석을 완료하지 못했습니다", exact: true }).waitFor();
+  const failureButton = page.locator("aside").getByRole("button", { name: "검증 페이지 103 분석 실패 이유 보기", exact: true });
+  const reason = page.getByRole("tooltip");
+  const originalUrl = page.url();
+  await failureButton.hover();
+  await reason.waitFor();
+  assert.equal(await reason.innerText(), "분석 실패 · 원인 기록 없음");
+  assert.equal(await failureButton.evaluate(button => getComputedStyle(button).backgroundColor), "rgba(0, 0, 0, 0)");
+  await reason.hover();
+  assert.equal(await reason.isVisible(), true, "the explanation must remain hoverable");
+  await page.keyboard.press("Escape");
+  await reason.waitFor({ state: "detached" });
+  await failureButton.focus();
+  await reason.waitFor();
+  await page.keyboard.press("Enter");
+  assert.equal(page.url(), originalUrl, "failure details must not navigate or rescan");
+  await page.keyboard.press("Escape");
+  await reason.waitFor({ state: "detached" });
+  assert.equal(await failureButton.evaluate(button => document.activeElement === button), true);
+  requests[2].failureCode = "TARGET_PAGE_UNAVAILABLE";
+  requests[2].quickAnalysis = true;
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const failureButtons = page.locator("aside").getByRole("button", { name: "검증 페이지 103 분석 실패 이유 보기", exact: true });
+  await failureButtons.first().waitFor();
+  for (const button of await failureButtons.all()) {
+    assert.equal(await button.evaluate(node => !!node.parentElement.closest("button, a")), false,
+      "project and recent-page failure controls must not be nested inside navigation controls");
+    await button.click();
+    await reason.waitFor();
+    assert.equal(await reason.innerText(), "대상 페이지 접근 실패");
+    await page.locator("main").click({ position: { x: 10, y: 10 } });
+    await reason.waitFor({ state: "detached" });
+  }
+  await failureButtons.first().hover();
+  await reason.screenshot({ path: fileURLToPath(new URL("failure-reason.png", output)) });
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: "PASS", queuedAndRunningAreExclusive: true, completionOpensLatestResult: true,
     independentNavigation: true, rescanBesideDate: true, rescanDuplicateGuard: true, rejectionRetry: true, lostResponseRecovery: true }));

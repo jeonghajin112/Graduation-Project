@@ -1455,6 +1455,13 @@ async function verifyDesktop(page) {
 
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   const initialMessage = await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
+  const documentHeading = evidence.locator(".site-page-evidence-chrome h2");
+  assert.equal(await documentHeading.innerText(), "제목 불러오는 중", "neither URLs nor project names may masquerade as document titles");
+  for (const title of ["NAVER", "공식 웹사이트 | 온라인 스토어", "상품 상세 · 공식 웹사이트", "", "공식 웹사이트 | 온라인 스토어"]) {
+    await sendReplayTestMessage(frame, { type: "DOCUMENT_TITLE", title });
+    await page.waitForFunction(expected => document.querySelector(".site-page-evidence-chrome h2")?.textContent === expected,
+      title || "제목 없음");
+  }
   assert.equal(initialMessage.source, "accessibility-dashboard");
   assert.equal(initialMessage.issues.length, 4);
   assert.deepEqual(initialMessage.issues[0].pathSteps, [{ context: "DOCUMENT", selector: "#search-button" }]);
@@ -1521,6 +1528,17 @@ async function verifyDesktop(page) {
     "the first unavailable issue must be shown on its own"
   );
   assert.match(await unavailablePosition.textContent(), /총 2건 중 1번째 문제/);
+  const copyMessage = unavailableIssueCards.first().locator(".site-unavailable-locator-panel__message");
+  await copyMessage.scrollIntoViewIfNeeded();
+  const copyBounds = await copyMessage.boundingBox();
+  assert.ok(copyBounds);
+  await page.mouse.move(copyBounds.x + 2, copyBounds.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(copyBounds.x + Math.min(copyBounds.width - 4, 130), copyBounds.y + 8, { steps: 12 });
+  await page.mouse.up();
+  assert.ok(await page.evaluate(() => Boolean(window.getSelection()?.toString().trim())), "issue text must be drag-selectable");
+  assert.equal(await unavailableIssueCards.first().getAttribute("data-issue-id"), "9003", "copying text must not paginate the card");
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
   assert.match(await unavailablePosition.getAttribute("class"), /\bsr-only\b/);
   const unavailablePositionBox = await unavailablePosition.boundingBox();
   assert.ok(

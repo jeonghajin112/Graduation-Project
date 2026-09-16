@@ -18,6 +18,19 @@ import {
 import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
 import type { RecentIssueRow } from "./types";
 
+describe("live document titles", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE", documentToken: "live_document", title: "홍익대학교 | 공식 홈페이지" };
+  it("accepts document titles and explicitly empty titles", () => {
+    expect(parsePageReplayMessage(message)).toEqual(message);
+    expect(parsePageReplayMessage({ ...message, title: " " })).toEqual({ ...message, title: "" });
+  });
+  it.each([{ title: "x".repeat(301) }, { title: null }, { title: 42 }, { documentToken: "" }, { extra: true }])(
+    "rejects malformed title events %j", patch => {
+      expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
+    }
+  );
+});
+
 describe("blocked form notifications", () => {
   const message = {
     source: PAGE_REPLAY_SOURCE,

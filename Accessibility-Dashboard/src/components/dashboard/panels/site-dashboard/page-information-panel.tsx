@@ -1,5 +1,5 @@
-import { Globe2, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { PageFavicon } from "./page-favicon";
 
 import { formatDateTime } from "@/components/dashboard/shared/utils";
 import type { EvaluationCaptureMetadataLoadState } from "./use-evaluation-capture-metadata";
@@ -16,39 +16,6 @@ type PageInformationPanelProps = {
   analysisRequestError: string | null;
   onRequestAnalysis?: () => void;
 };
-
-function PageFavicon({ faviconUrl }: { faviconUrl?: string | null }) {
-  const [loadedFaviconUrl, setLoadedFaviconUrl] = useState<string | null>(null);
-  const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
-  const hasLoadedFavicon = Boolean(faviconUrl && loadedFaviconUrl === faviconUrl);
-
-  return (
-    <span
-      className="site-page-information__icon"
-      data-favicon-loaded={hasLoadedFavicon ? "true" : "false"}
-      aria-hidden="true"
-    >
-      {!hasLoadedFavicon ? <Globe2 size={17} strokeWidth={1.8} /> : null}
-      {faviconUrl && failedFaviconUrl !== faviconUrl ? (
-        <img
-          src={faviconUrl}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          referrerPolicy="no-referrer"
-          onLoad={() => {
-            setLoadedFaviconUrl(faviconUrl);
-            setFailedFaviconUrl(null);
-          }}
-          onError={() => {
-            setLoadedFaviconUrl(null);
-            setFailedFaviconUrl(faviconUrl);
-          }}
-        />
-      ) : null}
-    </span>
-  );
-}
 
 export function PageInformationPanel({
   accessUrl,
@@ -98,7 +65,7 @@ export function PageInformationPanel({
         <PageFavicon key={`${accessUrl}:${faviconUrl ?? "fallback"}`} faviconUrl={faviconUrl} />
         <div className="site-page-information__title">
           <strong title={name}>{name}</strong>
-          <a href={accessUrl} target="_blank" rel="noreferrer" title={accessUrl}>
+          <a href={accessUrl} target="_blank" rel="noreferrer" title={accessUrl} draggable={false}>
             {accessUrl}
           </a>
         </div>

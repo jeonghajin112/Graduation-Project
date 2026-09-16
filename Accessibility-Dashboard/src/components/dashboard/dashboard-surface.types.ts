@@ -38,6 +38,7 @@ export type SidebarProjectActions = {
   onCreateProject: () => void;
   onUpdateProject: (input: { projectId: number; name: string; description: string }) => Promise<void>;
   onDeleteProject: (projectId: number) => Promise<void>;
+  onDeletePage: ProjectPageActions["onDeleteEvaluationTargetModel"];
 };
 
 export type ProjectPageActions = {

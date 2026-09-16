@@ -202,6 +202,14 @@
     });
   };
   const isObjectRecord = value => value !== null && typeof value === 'object' && !arrayIsArray(value);
+  let lastDocumentTitle = null;
+  let titleObserver = null;
+  const reportDocumentTitle = (force = false) => {
+    const title = String(document.title || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!force && title === lastDocumentTitle) return;
+    lastDocumentTitle = title;
+    post({type:'DOCUMENT_TITLE', title});
+  };
   const isIssueId = value => numberIsSafeInteger(value) && value > 0;
   const isBoundedCarouselContext = value => value === undefined || value === null || (
     isObjectRecord(value)
@@ -2636,6 +2644,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
       post({type:'DOCUMENT_LOADING'});
       if (ready) {
         post({type:'READY'});
+        reportDocumentTitle(true);
         scheduleDocumentHealth();
       }
     }
@@ -2724,6 +2733,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
       documentReadyObserver.disconnect(); documentReadyObserver = null;
     }
     if (!event.persisted) {
+      if (titleObserver) { titleObserver.disconnect(); titleObserver = null; }
       clearInterval(markerPositionTimer);
       if (markerPositionFrame) cancelAnimationFrame(markerPositionFrame);
       if (markerObserver) {
@@ -2744,6 +2754,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     post({type:'DOCUMENT_LOADING'});
     if (ready) {
       post({type:'READY'});
+      reportDocumentTitle(true);
       scheduleDocumentHealth();
     }
     announceBridgeAvailability();
@@ -2755,6 +2766,11 @@ const resolveIssueSnapshot = (issueIds = null) => {
       documentReadyObserver.disconnect(); documentReadyObserver = null;
     }
     mount(); ready = true; post({type:'READY'});
+    reportDocumentTitle(true);
+    if (NativeMutationObserver && document.head) {
+      titleObserver = new NativeMutationObserver(() => reportDocumentTitle());
+      titleObserver.observe(document.head, {childList:true, subtree:true, characterData:true});
+    }
     startMarkerObserver();
     startDocumentHealth();
     reportDocumentHealth();

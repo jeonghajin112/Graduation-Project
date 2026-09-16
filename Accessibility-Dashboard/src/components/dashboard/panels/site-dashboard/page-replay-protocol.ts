@@ -154,6 +154,12 @@ export type LiveDocumentHealthStatus = "EMPTY" | "MEANINGFUL";
 export type PageReplayToDashboardMessage =
   | {
       source: typeof PAGE_REPLAY_SOURCE;
+      type: "DOCUMENT_TITLE";
+      documentToken: string;
+      title: string;
+    }
+  | {
+      source: typeof PAGE_REPLAY_SOURCE;
       type: "DOCUMENT_LOADING" | "DOCUMENT_UNLOADING" | "READY";
       documentToken: string;
     }
@@ -556,6 +562,14 @@ function toOptionalBoundedReplayText(
 export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMessage | null {
   if (!isRecord(value) || value.source !== PAGE_REPLAY_SOURCE || typeof value.type !== "string") {
     return null;
+  }
+
+  if (value.type === "DOCUMENT_TITLE" &&
+      hasExactOwnKeys(value, ["source", "type", "documentToken", "title"]) &&
+      isDocumentToken(value.documentToken) &&
+      typeof value.title === "string" && value.title.length <= 300) {
+    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE",
+      documentToken: value.documentToken, title: value.title.trim() };
   }
 
   if (

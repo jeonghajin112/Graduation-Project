@@ -6,10 +6,24 @@ import {
   createEvaluationIssuesResponseParser,
   createEvaluationTargetResponseParser,
   parseDashboardOverviewResponse,
+  parseEvaluationRequestResponse,
   parseLiveReportSessionResponse
 } from "./api-contracts";
 
 const validDate = "2024-02-29T23:59:59+18:00";
+
+describe("analysis failure reason compatibility", () => {
+  it.each([undefined, null, "TARGET_PAGE_UNAVAILABLE", "FUTURE_FAILURE_CODE"])(
+    "preserves optional failure code %s without rejecting the request",
+    failureCode => {
+      const request = {
+        ...createValidOverview().evaluationRequests[0], status: "FAILED",
+        ...(failureCode === undefined ? {} : { failureCode })
+      };
+      expect(parseEvaluationRequestResponse(request, "request").failureCode).toBe(failureCode);
+    }
+  );
+});
 
 function createValidOverview(date = validDate) {
   return {

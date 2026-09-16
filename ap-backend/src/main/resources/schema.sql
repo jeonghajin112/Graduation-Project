@@ -29,6 +29,9 @@ ALTER TABLE IF EXISTS issue_result
 ALTER TABLE IF EXISTS issue_result
     ADD COLUMN IF NOT EXISTS rule_id VARCHAR(100);
 
+ALTER TABLE IF EXISTS evaluation_request
+    ADD COLUMN IF NOT EXISTS failure_code VARCHAR(40);
+
 -- An OCR run with no samples or a failed CV run has no measured score. Preserve
 -- historical numeric zeros and leave their new status unknown (NULL).
 ALTER TABLE IF EXISTS score_result

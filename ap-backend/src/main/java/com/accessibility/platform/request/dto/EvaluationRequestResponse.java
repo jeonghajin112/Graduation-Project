@@ -2,6 +2,7 @@ package com.accessibility.platform.request.dto;
 
 import com.accessibility.platform.request.domain.EvaluationRequest;
 import com.accessibility.platform.request.domain.EvaluationRequestStatus;
+import com.accessibility.platform.request.domain.EvaluationFailureCode;
 
 import java.time.LocalDateTime;
 
@@ -15,7 +16,8 @@ public record EvaluationRequestResponse(
     boolean quickAnalysis,
     LocalDateTime requestedAt,
     LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    LocalDateTime updatedAt,
+    EvaluationFailureCode failureCode
 ) {
     public static EvaluationRequestResponse from(EvaluationRequest request) {
         return new EvaluationRequestResponse(
@@ -28,7 +30,8 @@ public record EvaluationRequestResponse(
             request.isQuickAnalysis(),
             request.getRequestedAt(),
             request.getCreatedAt(),
-            request.getUpdatedAt()
+            request.getUpdatedAt(),
+            request.getFailureCode()
         );
     }
 }

@@ -175,6 +175,52 @@ try {
     (element) => document.activeElement === element
   );
   assert.equal(escapeFocusRestored, true);
+
+  // A recent page uses the same deletion contract as the project page, without
+  // navigating on right click or discarding the row when a request fails.
+  let deleteAttempts = 0;
+  await page.route(`**/api/targets/${pageId}/delete`, async (route) => {
+    assert.equal(route.request().method(), "PATCH");
+    deleteAttempts += 1;
+    if (deleteAttempts === 1) {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ success: false, data: null, message: "삭제 테스트 오류" }) });
+      return;
+    }
+    fixture.overview.organizations[0].evaluationTargets = [];
+    fixture.overview.evaluationRequests = [];
+    fixture.overview.resultSummaries = [];
+    fixture.overview.scoreResults = [];
+    await route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ success: true, data: null, message: null }) });
+  });
+  const beforeContextMenuUrl = page.url();
+  await firstRecentPage.click({ button: "right" });
+  assert.equal(page.url(), beforeContextMenuUrl);
+  const recentMenu = page.getByRole("menu", { name: `${fixture.target.name} 관리`, exact: true });
+  await recentMenu.getByRole("menuitem", { name: "삭제", exact: true }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "페이지 삭제", exact: true });
+  await deleteDialog.getByRole("button", { name: "취소", exact: true }).click();
+  assert.equal(deleteAttempts, 0);
+  assert.equal(await firstRecentPage.evaluate((element) => document.activeElement === element), true);
+  await page.keyboard.press("Shift+F10");
+  await recentMenu.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await recentMenu.waitFor({ state: "hidden" });
+  assert.equal(await firstRecentPage.evaluate((element) => document.activeElement === element), true);
+  await page.keyboard.press("Shift+F10");
+  await recentMenu.getByRole("menuitem", { name: "삭제", exact: true }).click();
+  await deleteDialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await deleteDialog.getByText(/페이지 삭제 실패:/).waitFor();
+  assert.equal(await recentPageItems().count(), 1);
+  assert.equal(page.url(), beforeContextMenuUrl);
+  await deleteDialog.getByRole("button", { name: "삭제", exact: true }).click();
+  await page.waitForURL(/\/analyze$/);
+  await deleteDialog.waitFor({ state: "hidden" });
+  assert.equal(deleteAttempts, 2);
+  assert.equal(await recentPageItems().count(), 0);
+  await page.reload({ waitUntil: "networkidle" });
+  assert.equal(await recentPageItems().count(), 0, "deleted pages must stay absent after reload");
   assert.deepEqual(consoleErrors, []);
   assert.deepEqual(pageErrors, []);
   fixture.assertIsolated();

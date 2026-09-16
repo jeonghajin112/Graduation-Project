@@ -24,6 +24,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiEvaluationRunnerServiceTest {
 
+    @Test
+    void classifiesOnlyKnownProcessFailures() {
+        assertThat(AiEvaluationRunnerService.failureCodeForExit(2).name()).isEqualTo("TARGET_PAGE_UNAVAILABLE");
+        assertThat(AiEvaluationRunnerService.failureCodeForExit(3).name()).isEqualTo("INVALID_RESULT");
+        assertThat(AiEvaluationRunnerService.failureCodeForExit(1).name()).isEqualTo("ANALYSIS_FAILED");
+        assertThat(AiEvaluationRunnerService.failureCodeForExit(99).name()).isEqualTo("ANALYSIS_FAILED");
+    }
+
     @TempDir
     Path temporaryDirectory;
 

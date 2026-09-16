@@ -40,7 +40,7 @@ export function IssueLocationDialog({ row, state, onClose }: {
       <article ref={dialogRef} className="dashboard-modal-surface dashboard-modal-surface--split site-issue-location-dialog" role="dialog" aria-modal="true"
         aria-labelledby={headingId} aria-describedby={descriptionId} tabIndex={-1}>
         <header className="site-issue-location-dialog__header">
-          <div><h2 id={headingId} className="dashboard-modal-title">문제 상세</h2><p>{replayIssue.title}</p></div>
+          <div><h2 id={headingId} className="dashboard-modal-title">문제 상세</h2><p data-copyable>{replayIssue.title}</p></div>
           <button type="button" className="dashboard-modal-button dashboard-modal-button--icon" aria-label="문제 상세 닫기" onClick={onClose}>
             <X size={20} aria-hidden="true" />
           </button>
@@ -48,17 +48,17 @@ export function IssueLocationDialog({ row, state, onClose }: {
         <div className="site-issue-location-dialog__body" role="region" aria-label="문제 상세 내용" tabIndex={0}>
           <section aria-label="문제 설명">
             <h3>문제 설명</h3>
-            <p className="site-issue-location-dialog__description">{description}</p>
+            <p data-copyable className="site-issue-location-dialog__description">{description}</p>
             {hasLocalizedDescription && issue.message.trim() ? <details>
               <summary>검사 엔진 원문 보기</summary>
-              <p className="site-issue-location-dialog__description">{issue.message}</p>
+              <p data-copyable className="site-issue-location-dialog__description">{issue.message}</p>
             </details> : null}
           </section>
           <section className="site-issue-location-dialog__status" aria-label="현재 표시 상태">
             <Info size={18} aria-hidden="true" />
             <div>
               <h3>{explanation.label}</h3>
-              <p id={descriptionId}>{explanation.description}</p>
+              <p data-copyable id={descriptionId}>{explanation.description}</p>
             </div>
           </section>
           <section aria-label="분석 당시 요소 경로">
@@ -68,7 +68,7 @@ export function IssueLocationDialog({ row, state, onClose }: {
                 <div className="site-issue-location-dialog__path-content">
                   <span className="site-issue-location-dialog__context">{step.context === "DOCUMENT" ? "문서" : step.context === "FRAME" ? "프레임 내부" : step.context === "SHADOW_ROOT" ? "Shadow DOM 내부" : "기타 영역"}</span>
                   <code>{step.selector || "요소 선택자 없음"}</code>
-                  {step.frameUrl ? <span className="site-issue-location-dialog__url">{step.frameUrl}</span> : null}
+                  {step.frameUrl ? <span data-copyable className="site-issue-location-dialog__url">{step.frameUrl}</span> : null}
                 </div>
               </li>)}
             </ol> : <p>저장된 요소 경로가 없습니다.</p>}
@@ -81,7 +81,7 @@ export function IssueLocationDialog({ row, state, onClose }: {
           <section aria-label="분석 당시 좌표">
             <h3>분석 당시 좌표</h3>
             {hasCoordinates ? <>
-              <dl className="site-issue-location-dialog__coordinates">
+              <dl data-copyable className="site-issue-location-dialog__coordinates">
                 <div><dt>X</dt><dd>{locator.x}</dd></div>
                 <div><dt>Y</dt><dd>{locator.y}</dd></div>
                 <div><dt>너비</dt><dd>{typeof locator.width === "number" ? locator.width : "정보 없음"}</dd></div>

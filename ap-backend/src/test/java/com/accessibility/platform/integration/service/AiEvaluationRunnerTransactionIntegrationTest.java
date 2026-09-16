@@ -47,6 +47,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AiEvaluationRunnerTransactionIntegrationTest {
 
+    @Test
+    void storedFailureReasonIsReturnedByTheRequestApi() throws Exception {
+        Long requestId = new TransactionTemplate(transactionManager).execute(status -> {
+            EvaluationRequest request = createRequest("Page unavailable", "https://example.com/unavailable");
+            request.markFailed(com.accessibility.platform.request.domain.EvaluationFailureCode.TARGET_PAGE_UNAVAILABLE);
+            return request.getId();
+        });
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/requests/{id}", requestId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.failureCode").value("TARGET_PAGE_UNAVAILABLE"));
+    }
+
     @Autowired
     AiEvaluationRunnerService runnerService;
 
@@ -143,6 +156,7 @@ class AiEvaluationRunnerTransactionIntegrationTest {
                 requestRepository.findById(requestId).orElseThrow()
         );
         assertThat(savedRequest.getStatus()).isEqualTo(EvaluationRequestStatus.COMPLETED);
+        assertThat(savedRequest.getFailureCode()).isNull();
         assertThat(scoreResultRepository.findByEvaluationRequestId(requestId)).isPresent();
     }
 

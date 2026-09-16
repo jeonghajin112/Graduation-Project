@@ -369,6 +369,34 @@ class RunAllPipelineTests(unittest.TestCase):
                 self.assertEqual([command[0] for command in commands], ["node"])
                 send_to_backend.assert_not_called()
 
+    def test_browser_error_is_classified_as_navigation_failure_without_ingestion(self):
+        target_url = "https://example.test/fixture"
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            commands = []
+
+            def fake_run_command(command, **kwargs):
+                commands.append(command)
+                write_valid_rule_outputs(output_dir, "chrome-error://chromewebdata/")
+                return True
+
+            with (
+                patch.object(run_all, "OUTPUT_DIR", output_dir),
+                patch.object(run_all, "create_ephemeral_cv_capture_path",
+                             return_value=output_dir / "private-cv-input.png"),
+                patch.object(run_all, "run_command", side_effect=fake_run_command),
+                patch.object(run_all, "send_to_backend") as send_to_backend,
+                patch.object(run_all.atexit, "register"),
+                patch.object(sys, "argv", ["run_all.py", target_url, "36"]),
+                redirect_stdout(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as raised:
+                    run_all.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual([command[0] for command in commands], ["node"])
+        send_to_backend.assert_not_called()
+
     def test_pipeline_uses_current_python_and_completes_with_rule_only_result(self):
         target_url = "https://example.test/fixture"
 

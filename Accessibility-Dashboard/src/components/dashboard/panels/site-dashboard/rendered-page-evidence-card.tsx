@@ -8,6 +8,7 @@ import type {
 } from "@/types/accessibility-domain";
 
 import { formatIssueCodeLabel } from "./constants";
+import { PageFavicon } from "./page-favicon";
 import {
   getEvidenceFrameIdentity,
   getReplaySourceWidth,
@@ -63,6 +64,7 @@ type LiveReportPortConnection = {
 };
 
 type RenderedPageEvidenceCardProps = {
+  faviconUrl?: string | null;
   captureMetadata: EvaluationCaptureMetadata | null;
   errorMessage: string | null;
   evaluationRequestId: number | null;
@@ -174,6 +176,7 @@ function EmptyEvidenceState() {
 }
 
 export function RenderedPageEvidenceCard({
+  faviconUrl,
   captureMetadata,
   errorMessage,
   evaluationRequestId,
@@ -189,6 +192,8 @@ export function RenderedPageEvidenceCard({
   selectedIssueFocusRequestId,
   targetName
 }: RenderedPageEvidenceCardProps) {
+  const [documentTitle, setDocumentTitle] = useState<string | null>(null);
+  const headerTitle = documentTitle === null ? "제목 불러오는 중" : documentTitle || "제목 없음";
   const [frameRevision, setFrameRevision] = useState(0);
   const [failedLiveSessionId, setFailedLiveSessionId] = useState<string | null>(null);
   const [fallbackIssueId, setFallbackIssueId] = useState<number | null>(null);
@@ -487,6 +492,7 @@ export function RenderedPageEvidenceCard({
   }
 
   function invalidateReplayDocumentSession({ resetRetiredTokens = false } = {}) {
+    setDocumentTitle(null);
     resetLocatorStates();
     retireDocumentToken(activeDocumentTokenRef.current);
     retireDocumentToken(pendingDocumentTokenRef.current);
@@ -799,6 +805,7 @@ export function RenderedPageEvidenceCard({
       retireDocumentToken(pendingDocumentTokenRef.current);
       activeDocumentTokenRef.current = null;
       pendingDocumentTokenRef.current = message.documentToken;
+      setDocumentTitle(null);
       confirmedLiveDocumentTokenRef.current = null;
       readyAwaitingFrameLoadRef.current = null;
       frameLoadObservedRef.current = false;
@@ -826,6 +833,7 @@ export function RenderedPageEvidenceCard({
       }
 
       retireDocumentToken(message.documentToken);
+      setDocumentTitle(null);
       activeDocumentTokenRef.current = null;
       pendingDocumentTokenRef.current = null;
       confirmedLiveDocumentTokenRef.current = null;
@@ -905,6 +913,11 @@ export function RenderedPageEvidenceCard({
     }
 
     if (message.documentToken !== activeDocumentTokenRef.current) {
+      return;
+    }
+
+    if (message.type === "DOCUMENT_TITLE") {
+      setDocumentTitle(message.title);
       return;
     }
 
@@ -1129,9 +1142,11 @@ export function RenderedPageEvidenceCard({
   }
 
   return (
-    <article aria-labelledby="site-page-evidence-heading" className="dashboard-card site-page-evidence-card">
-      {/* 제목은 화면에서 숨기고 접근 가능한 이름으로만 남긴다 */}
-      <h2 id="site-page-evidence-heading" className="sr-only">페이지 검사 화면</h2>
+    <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card">
+      <header className="site-page-evidence-chrome">
+        <PageFavicon key={faviconUrl ?? "fallback"} faviconUrl={faviconUrl} className="site-page-evidence-chrome__icon" />
+        <h2 id="site-page-evidence-heading" title={headerTitle}>{headerTitle}</h2>
+      </header>
 
       <div className="site-page-evidence-body">
         {effectiveLoadState === "loading" && (
@@ -1268,9 +1283,9 @@ export function RenderedPageEvidenceCard({
                       {formatIssueCodeLabel(fallbackIssue.code) || "KWCAG"}
                     </span>
                   </div>
-                  <p className="site-page-evidence-fallback-detail__title">{fallbackIssue.title}</p>
+                  <p data-copyable className="site-page-evidence-fallback-detail__title">{fallbackIssue.title}</p>
                   {fallbackIssue.message && (
-                    <p className="site-page-evidence-fallback-detail__message">{fallbackIssue.message}</p>
+                    <p data-copyable className="site-page-evidence-fallback-detail__message">{fallbackIssue.message}</p>
                   )}
                   {fallbackIssue.path && (
                     <code className="site-page-evidence-fallback-detail__path">{fallbackIssue.path}</code>

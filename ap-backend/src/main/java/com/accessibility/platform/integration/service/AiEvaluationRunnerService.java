@@ -2,6 +2,7 @@ package com.accessibility.platform.integration.service;
 
 import com.accessibility.platform.request.domain.EvaluationRequest;
 import com.accessibility.platform.request.domain.EvaluationRequestStatus;
+import com.accessibility.platform.request.domain.EvaluationFailureCode;
 import com.accessibility.platform.request.repository.EvaluationRequestRepository;
 import com.accessibility.platform.score.repository.ScoreResultRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -255,7 +256,7 @@ public class AiEvaluationRunnerService {
                 terminateProcess(process);
                 joinGobbler(outputGobbler);
                 joinGobbler(errorGobbler);
-                markFailedSafely(requestId);
+                markFailedSafely(requestId, EvaluationFailureCode.PROCESS_TIMEOUT);
                 return;
             }
 
@@ -276,11 +277,11 @@ public class AiEvaluationRunnerService {
                     updateStatus(requestId, EvaluationRequestStatus.COMPLETED);
                 } else {
                     log.error("Script exited with 0 but no score result was saved for request {}. Marking as FAILED.", requestId);
-                    markFailedSafely(requestId);
+                    markFailedSafely(requestId, EvaluationFailureCode.INVALID_RESULT);
                 }
             } else {
                 log.error("AI evaluation script failed with non-zero exit code: {}", exitCode);
-                markFailedSafely(requestId);
+                markFailedSafely(requestId, failureCodeForExit(exitCode));
             }
         } finally {
             activeProcess.compareAndSet(process, null);
@@ -443,10 +444,22 @@ public class AiEvaluationRunnerService {
         );
     }
 
+    static EvaluationFailureCode failureCodeForExit(int exitCode) {
+        return switch (exitCode) {
+            case 2 -> EvaluationFailureCode.TARGET_PAGE_UNAVAILABLE;
+            case 3 -> EvaluationFailureCode.INVALID_RESULT;
+            default -> EvaluationFailureCode.ANALYSIS_FAILED;
+        };
+    }
+
     private void markFailedSafely(Long requestId) {
+        markFailedSafely(requestId, EvaluationFailureCode.ANALYSIS_FAILED);
+    }
+
+    private void markFailedSafely(Long requestId, EvaluationFailureCode failureCode) {
         try {
             failureStatusTransactionTemplate.executeWithoutResult(
-                    transactionStatus -> applyStatusUpdate(requestId, EvaluationRequestStatus.FAILED)
+                    transactionStatus -> applyStatusUpdate(requestId, EvaluationRequestStatus.FAILED, failureCode)
             );
         } catch (RuntimeException e) {
             // In particular, never let an afterCommit callback turn an already
@@ -456,6 +469,10 @@ public class AiEvaluationRunnerService {
     }
 
     private void applyStatusUpdate(Long requestId, EvaluationRequestStatus status) {
+        applyStatusUpdate(requestId, status, null);
+    }
+
+    private void applyStatusUpdate(Long requestId, EvaluationRequestStatus status, EvaluationFailureCode failureCode) {
         // Ingestion stores the score and COMPLETED status in one transaction.
         // Lock the row so a late process timeout/exception observes that
         // committed terminal state instead of overwriting it with FAILED.
@@ -478,7 +495,8 @@ public class AiEvaluationRunnerService {
             );
             return;
         }
-        request.changeStatus(status);
+        if (status == EvaluationRequestStatus.FAILED) request.markFailed(failureCode);
+        else request.changeStatus(status);
         requestRepository.save(request);
         log.info("Updated EvaluationRequest {} status to {}", requestId, status);
     }

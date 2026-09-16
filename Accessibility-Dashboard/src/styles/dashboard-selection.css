@@ -1,0 +1,19 @@
+/* App chrome is not document content. Opt useful copy targets back in without
+   cancelling mouse/keyboard events or affecting the inspected iframe page. */
+:where(.bridge-dashboard, .dashboard-modal-layer) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:where(.bridge-dashboard, .dashboard-modal-layer) :is(
+  [data-copyable], input, textarea, [contenteditable="true"], [contenteditable=""],
+  pre, code, a[href^="https://"], a[href^="http://"], a[href^="mailto:"], [role="alert"]
+) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+:where(.bridge-dashboard, .dashboard-modal-layer) :is(button, [role="button"], summary, label) {
+  -webkit-user-select: none;
+  user-select: none;
+}

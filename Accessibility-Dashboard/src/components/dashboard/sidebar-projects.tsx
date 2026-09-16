@@ -17,6 +17,7 @@ import {
 } from "@/services/quick-analysis-registry";
 import type { OrganizationModel, EvaluationRequestModel } from "@/types/accessibility-domain";
 import { PageAnalysisStatus } from "./shared/page-analysis-status";
+import { RecentPageActions } from "./recent-page-actions";
 import { API_BASE_URL } from "@/config/api";
 
 import { PanelMessage } from "./shared/display";
@@ -547,29 +548,31 @@ export function SidebarProjectsSection({
               const analysis = pageAnalysisRequests.get(page.pageId);
 
               return (
-                <button
-                  key={page.pageId}
-                  type="button"
-                  aria-label={contextLabel}
-                  aria-current={isActive ? "page" : undefined}
-                  title={page.systemManaged ? page.pageName : `${page.pageName} · ${page.projectName}`}
-                  onClick={() => {
-                    if (!readOnly && analysis?.status === "COMPLETED") acknowledgeAnalysis(analysis);
-                    onSelectRecentPage(page.pageId);
-                  }}
-                  className={cn(
-                    SIDEBAR_NAV_ITEM_BASE,
-                    "sidebar-tree-child-row relative pr-8",
-                    isActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
-                  )}
-                >
-                  <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
-                    <FileText size={16} aria-hidden="true" />
-                  </span>
-                  <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.pageName}</span>
+                <RecentPageActions key={page.pageId} page={page} onDelete={actions?.onDeletePage}>
+                  <button
+                    type="button"
+                    aria-label={contextLabel}
+                    aria-keyshortcuts={readOnly ? undefined : "Shift+F10"}
+                    aria-current={isActive ? "page" : undefined}
+                    title={page.systemManaged ? page.pageName : `${page.pageName} · ${page.projectName}`}
+                    onClick={() => {
+                      if (!readOnly && analysis?.status === "COMPLETED") acknowledgeAnalysis(analysis);
+                      onSelectRecentPage(page.pageId);
+                    }}
+                    className={cn(
+                      SIDEBAR_NAV_ITEM_BASE,
+                      "sidebar-tree-child-row relative pr-8",
+                      isActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
+                    )}
+                  >
+                    <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
+                      <FileText size={16} aria-hidden="true" />
+                    </span>
+                    <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.pageName}</span>
+                  </button>
                   {!readOnly && <PageAnalysisStatus request={analysis} pageName={page.pageName}
                     acknowledged={analysis !== undefined && acknowledgedAnalyses[page.pageId] === analysis.id} />}
-                </button>
+                </RecentPageActions>
               );
             })
           )}

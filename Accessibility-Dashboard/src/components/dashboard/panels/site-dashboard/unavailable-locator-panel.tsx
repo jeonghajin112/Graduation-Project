@@ -190,6 +190,8 @@ export function UnavailableLocatorPanel({
                 style={style}
                 onClick={(event) => {
                   if (pageCount <= 1 || (event.target as HTMLElement).closest("button")) return;
+                  const selection = window.getSelection();
+                  if (selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
                   const bounds = event.currentTarget.getBoundingClientRect();
                   if (event.clientX - bounds.left < bounds.width / 2) goToPage(pageIndex - 1);
                   else goToPage(pageIndex + 1);
@@ -212,11 +214,11 @@ export function UnavailableLocatorPanel({
                     문제 상세
                   </button>
                 </div>
-                <h4>{replayIssue.title}</h4>
-                <p className="site-unavailable-locator-panel__reason">
+                <h4 data-copyable>{replayIssue.title}</h4>
+                <p data-copyable className="site-unavailable-locator-panel__reason">
                   {getLocatorExplanation(issueStates?.[row.issue.id]).label}
                 </p>
-                <p className="site-unavailable-locator-panel__message">{replayIssue.message}</p>
+                <p data-copyable className="site-unavailable-locator-panel__message">{replayIssue.message}</p>
                 {isRecoverable && onSelectIssue ? (
                   <div className="site-unavailable-locator-panel__actions">
                     <button
