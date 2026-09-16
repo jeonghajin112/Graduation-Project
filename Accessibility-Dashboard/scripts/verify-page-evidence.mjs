@@ -1457,6 +1457,11 @@ async function verifyDesktop(page) {
   const initialMessage = await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
   // The scrolled bar overlaps real content and sends its measured height to
   // the bridge, which keeps source-site fixed navigation below the glass.
+  const glassMediaSession = await page.context().newCDPSession(page);
+  await glassMediaSession.send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-transparency", value: "reduce" }]
+  });
+  assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches), true);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: false });
@@ -1493,6 +1498,8 @@ async function verifyDesktop(page) {
     assert.equal((await readChrome()).blur, 'none');
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  await glassMediaSession.send("Emulation.setEmulatedMedia", { features: [] });
+  await glassMediaSession.detach();
   const documentHeading = evidence.locator(".site-page-evidence-chrome h2");
   assert.equal(await documentHeading.innerText(), "제목 불러오는 중", "neither URLs nor project names may masquerade as document titles");
   for (const title of ["NAVER", "공식 웹사이트 | 온라인 스토어", "상품 상세 · 공식 웹사이트", "", "공식 웹사이트 | 온라인 스토어"]) {
@@ -3124,7 +3131,7 @@ async function verifyEvidenceStatusFeedback(page) {
   const panel = page.locator('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
   const successNotice = page.getByText("모든 문제가 화면에 표시되고 있습니다.", { exact: true });
   const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
-  const captureStatus = page.locator(".site-page-information__capture-status");
+  const captureStatus = page.locator(".site-capture-metadata-status");
   await panel.locator('[role="status"]').filter({ hasText: "문제 위치를 확인할 수 없습니다" }).waitFor();
   assert.equal(await panel.getAttribute("data-locator-check-state"), "error");
   assert.equal(await panel.getAttribute("data-unavailable-locator-count"), null);

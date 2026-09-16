@@ -1,6 +1,6 @@
 import { MonitorOff, RefreshCw } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import type {
   EvaluationCaptureMetadata,
@@ -64,6 +64,8 @@ type LiveReportPortConnection = {
 };
 
 type RenderedPageEvidenceCardProps = {
+  accessUrl: string;
+  headerActions: ReactNode;
   faviconUrl?: string | null;
   captureMetadata: EvaluationCaptureMetadata | null;
   errorMessage: string | null;
@@ -176,6 +178,8 @@ function EmptyEvidenceState() {
 }
 
 export function RenderedPageEvidenceCard({
+  accessUrl,
+  headerActions,
   faviconUrl,
   captureMetadata,
   errorMessage,
@@ -1171,11 +1175,19 @@ export function RenderedPageEvidenceCard({
 
   return (
     <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card"
+      data-loading={effectiveLoadState === "loading" || (effectiveLoadState === "ready" && showsReplayLoadingOverlay)}
       data-document-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
       <header ref={chromeRef} className="site-page-evidence-chrome"
         data-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
-        <PageFavicon key={faviconUrl ?? "fallback"} faviconUrl={faviconUrl} className="site-page-evidence-chrome__icon" />
-        <h2 id="site-page-evidence-heading" title={headerTitle}>{headerTitle}</h2>
+        <div className="site-page-evidence-chrome__identity">
+          <PageFavicon key={faviconUrl ?? "fallback"} faviconUrl={faviconUrl} className="site-page-evidence-chrome__icon" />
+          <h2 id="site-page-evidence-heading" title={headerTitle}>{headerTitle}</h2>
+        </div>
+        <a className="site-page-evidence-chrome__address" href={accessUrl}
+          target="_blank" rel="noreferrer" title={accessUrl} draggable={false}>
+          {accessUrl}
+        </a>
+        {headerActions}
       </header>
 
       <div className="site-page-evidence-body">

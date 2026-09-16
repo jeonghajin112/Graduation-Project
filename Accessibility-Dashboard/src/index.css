@@ -1304,7 +1304,6 @@
 /* Page detail surfaces. */
 .bridge-dashboard.dashboard-site-detail {
   --dashboard-top-height: 0px;
-  --dashboard-site-content-max-width: clamp(80rem, 80vw, 187.5rem);
   --dashboard-site-grid-gap: clamp(0.75rem, 0.8333vw, 1rem);
   --dashboard-site-card-radius: 1.125rem;
   /* Nested content boxes use the 8px control step. */

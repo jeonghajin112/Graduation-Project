@@ -93,9 +93,9 @@ async function readResponsiveRailMetrics(page) {
     const layout = document.querySelector(".site-dashboard-layout");
     const rail = document.querySelector(".site-dashboard-rail");
     const evidence = document.querySelector(".site-page-evidence-grid-item");
-    const card = document.querySelector(".site-page-information");
+    const card = document.querySelector(".site-page-evidence-trend-panel");
     const heading = document.querySelector(".site-rail-card__heading h3");
-    const caption = document.querySelector(".site-page-information__title a");
+    const caption = document.querySelector(".site-page-evidence-chrome__address");
     const metric = document.querySelector(".site-page-evidence-trend-metrics strong");
     const chart = document.querySelector(".site-page-evidence-trend-chart");
     const severityTrack = document.querySelector(".site-rail-severity__track");
@@ -113,8 +113,12 @@ async function readResponsiveRailMetrics(page) {
 
     const layoutStyle = getComputedStyle(layout);
     const cardStyle = getComputedStyle(card);
+    const layoutBounds = layout.getBoundingClientRect();
+    const contentBounds = layout.closest(".dashboard-site-content-zone").getBoundingClientRect();
     return {
       viewportWidth: window.innerWidth,
+      leftGutter: layoutBounds.left - contentBounds.left,
+      rightGutter: contentBounds.right - layoutBounds.right,
       layoutWidth: layout.getBoundingClientRect().width,
       evidenceWidth: evidence.getBoundingClientRect().width,
       railWidth: rail.getBoundingClientRect().width,
@@ -258,8 +262,8 @@ async function installFixture(
   apiFixtures.push(fixture);
 }
 
-async function readPageInformationFaviconPresentation(page) {
-  return page.locator(".site-page-information__icon").evaluate((element) => {
+async function readTitleBarFaviconPresentation(page) {
+  return page.locator(".site-page-evidence-chrome__icon").evaluate((element) => {
     const style = getComputedStyle(element);
     const image = element.querySelector("img");
     const bounds = element.getBoundingClientRect();
@@ -281,7 +285,7 @@ async function readPageInformationFaviconPresentation(page) {
   });
 }
 
-async function verifyPageInformationFaviconPresentation(browser) {
+async function verifyTitleBarFaviconPresentation(browser) {
   const faviconUrl = `${baseUrl}/__test-assets__/page-information-favicon.svg`;
   const missingFaviconUrl = `${baseUrl}/__test-assets__/missing-page-information-favicon.svg`;
   const loadedPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
@@ -295,9 +299,9 @@ async function verifyPageInformationFaviconPresentation(browser) {
   await installFixture(loadedPage, { liveAvailable: false, faviconUrl });
   await loadedPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
   await loadedPage
-    .locator('.site-page-information__icon[data-favicon-loaded="true"]')
+    .locator('.site-page-evidence-chrome__icon[data-favicon-loaded="true"]')
     .waitFor({ timeout: 20_000 });
-  const loaded = await readPageInformationFaviconPresentation(loadedPage);
+  const loaded = await readTitleBarFaviconPresentation(loadedPage);
   await loadedPage.close();
 
   const fallbackPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
@@ -311,11 +315,11 @@ async function verifyPageInformationFaviconPresentation(browser) {
   await fallbackPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
   await fallbackPage.waitForFunction(() => {
     const favicon = document.querySelector(
-      '.site-page-information__icon[data-favicon-loaded="false"]'
+      '.site-page-evidence-chrome__icon[data-favicon-loaded="false"]'
     );
     return favicon && !favicon.querySelector("img");
   });
-  const fallback = await readPageInformationFaviconPresentation(fallbackPage);
+  const fallback = await readTitleBarFaviconPresentation(fallbackPage);
   await fallbackPage.close();
 
   assert.equal(loaded.loaded, "true", "a loaded page favicon must enter the loaded state");
@@ -329,14 +333,8 @@ async function verifyPageInformationFaviconPresentation(browser) {
   assert.equal(loaded.imageFillsContainer, true, "a loaded page favicon must use the full icon area");
 
   assert.equal(fallback.loaded, "false", "a failed page favicon must remain in the fallback state");
-  assert.ok(
-    Number.parseFloat(fallback.borderTopWidth) > 0,
-    "a failed page favicon must retain the fallback tile border"
-  );
-  assert.ok(
-    parseAlpha(fallback.backgroundColor) > 0,
-    "a failed page favicon must retain the fallback tile surface"
-  );
+  assert.equal(fallback.borderTopWidth, "0px", "the title-bar fallback must stay borderless");
+  assert.equal(parseAlpha(fallback.backgroundColor), 0, "the title-bar fallback must stay transparent");
   assert.equal(fallback.fallbackIconCount, 1, "a failed page favicon must retain the globe fallback");
   assert.equal(fallback.imageCount, 0, "a failed page favicon image must be removed");
 
@@ -358,7 +356,7 @@ async function verifyRailWithoutLiveSession(browser) {
 
     const pageInformationCard = page.locator(".site-page-information");
     const severityCard = page.locator(".site-rail-card", { hasText: "심각도 분포" });
-    await pageInformationCard.waitFor({ state: "visible", timeout: 20_000 });
+    assert.equal(await pageInformationCard.count(), 0, "the removed page information card must not render");
     await severityCard.waitFor({ state: "visible", timeout: 20_000 });
 
     assert.equal(
@@ -372,14 +370,14 @@ async function verifyRailWithoutLiveSession(browser) {
       "the removed top-issue shortcut card must not return when the live page is unavailable"
     );
     assert.equal(
-      await pageInformationCard.getByText("Rail Fixture Page", { exact: true }).count(),
-      1,
-      "page identity must remain available when the live page is unavailable"
+      await page.locator(".site-page-evidence-chrome__address").innerText(),
+      target.accessUrl,
+      "the page address must remain available when the live page is unavailable"
     );
     assert.deepEqual(
-      await pageInformationCard.locator(".site-page-information__metadata dt").allTextContents(),
+      await page.locator(".site-page-evidence-chrome .site-page-analysis-actions__metadata dt").allTextContents(),
       ["최근 분석"],
-      "page information must omit target type and capture dimensions"
+      "the title bar must retain the latest analysis date even when the live page is unavailable"
     );
     assert.deepEqual(pageErrors, [], "the live-only error state must render without runtime errors");
 
@@ -419,52 +417,36 @@ try {
   const rail = page.locator(".site-dashboard-rail");
   await rail.waitFor({ state: "visible", timeout: 20_000 });
 
-  // Page identity is always available; severity mounts once result details are ready.
+  // Identity stays in the title bar; severity mounts once result details are ready.
   const pageInformationCard = page.locator(".site-page-information");
   const severityCard = page.locator(".site-rail-card", { hasText: "심각도 분포" });
   const issuesCard = page.locator(".site-rail-card", { hasText: "가장 많이 발견된 항목" });
   const moduleCard = page.locator(".site-rail-card", { hasText: "모듈별 점수" });
-  await pageInformationCard.waitFor({ state: "visible", timeout: 20_000 });
+  assert.equal(await pageInformationCard.count(), 0, "the removed page information card must not render");
   await severityCard.waitFor({ state: "visible", timeout: 20_000 });
   assert.equal(await issuesCard.count(), 0, "the removed top-issue card must not render");
   assert.equal(await moduleCard.count(), 0, "the removed module score card must not render");
 
-  const pageInformation = await pageInformationCard.evaluate((card) => ({
-    name: card.querySelector(".site-page-information__title strong")?.textContent?.trim(),
-    url: card.querySelector(".site-page-information__title a")?.textContent?.trim(),
-    metadata: Array.from(card.querySelectorAll(".site-page-information__metadata > div")).map((row) => ({
-      label: row.querySelector("dt")?.textContent?.trim(),
-      value: row.querySelector("dd")?.textContent?.trim()
-    }))
-  }));
-  assert.deepEqual(
-    pageInformation,
-    {
-      name: "Rail Fixture Page",
-      url: "https://example.com/fixture",
-      metadata: [{ label: "최근 분석", value: "2026-08-11 12:30" }]
-    },
-    "page information must keep only the selected page identity and latest analysis time"
-  );
+  assert.equal(await page.locator(".site-page-evidence-chrome .site-page-analysis-actions__metadata dd").innerText(),
+    "2026-08-11 12:30", "the analysis date must move to the title bar");
   assert.equal(
-    (await evidence.textContent())?.includes("2026-08-11 12:30"),
-    false,
-    "the replay card must not repeat the latest analysis time"
-  );
-  assert.equal(
-    (await pageInformationCard.textContent())?.match(/2026-08-11 12:30/g)?.length,
+    (await evidence.textContent())?.match(/2026-08-11 12:30/g)?.length ?? 0,
     1,
-    "the latest analysis time must appear once in page information"
+    "the replay title bar must show the latest analysis time exactly once"
+  );
+  assert.equal(
+    (await rail.textContent())?.match(/2026-08-11 12:30/g)?.length ?? 0,
+    0,
+    "the rail must not duplicate the latest analysis time from the title bar"
   );
   const railCardOrder = await page.locator(".site-dashboard-rail > *").evaluateAll((cards) =>
     cards.map((card) => card.getAttribute("aria-label") ?? card.textContent?.trim() ?? "")
   );
-  assert.ok(railCardOrder[0]?.includes("페이지 정보"), "page information must lead the rail");
-  assert.ok(railCardOrder[1]?.includes("최근 분석 추이"), "analysis trend must follow page information");
+  assert.ok(railCardOrder[0]?.includes("최근 분석 추이"), "analysis trend must lead the rail");
   const trendCard = page.getByRole("complementary", { name: "최근 분석 추이", exact: true });
   assert.equal(await trendCard.getByRole("heading", { name: "최근 분석 추이", level: 3, exact: true }).isVisible(), true);
   assert.equal(await trendCard.getByText("최근 완료된 분석의 점수와 문제 수", { exact: true }).count(), 0);
-  assert.ok(railCardOrder[2]?.includes("심각도 분포"), "severity distribution must follow the trend");
+  assert.ok(railCardOrder[1]?.includes("심각도 분포"), "severity distribution must follow the trend");
 
   // Severity counts must match the issue list exactly.
   const severityCounts = await page.locator(".site-rail-severity__row").evaluateAll((rows) =>
@@ -589,14 +571,19 @@ try {
 
   // Accessible names must survive: each remaining card is a labelled section.
   const headingCount = await page.locator(".site-rail-card__heading h3").count();
-  assert.equal(headingCount, 4, "each detail card, including the trend and empty unavailable cards, exposes a heading");
+  assert.equal(headingCount, 3, "each detail card, including the trend and empty unavailable cards, exposes a heading");
 
   // The page URL is actionable and keeps a keyboard-visible focus ring.
-  const pageInformationLink = pageInformationCard.locator(".site-page-information__title a");
-  await pageInformationLink.focus();
+  const pageAddress = page.locator(".site-page-evidence-chrome__address");
+  assert.equal(await pageAddress.innerText(), "https://example.com/fixture");
+  assert.equal(await pageAddress.getAttribute("href"), "https://example.com/fixture");
+  assert.equal(await pageAddress.getAttribute("target"), "_blank");
+  assert.equal(await pageAddress.evaluate(element => getComputedStyle(element).userSelect), "text",
+    "the page address must remain selectable for copying");
+  await pageAddress.focus();
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Tab");
-  const focusOutline = await pageInformationLink.evaluate((element) => {
+  const focusOutline = await pageAddress.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       isFocused: element === document.activeElement,
@@ -649,10 +636,13 @@ try {
       + JSON.stringify(fourKRail)
   );
   assert.ok(
-    fourKRail.railWidth / fourKRail.layoutWidth >= 0.21
-      && fourKRail.railWidth / fourKRail.layoutWidth <= 0.24,
-    "the 4K rail must stay balanced with the replay canvas: " + JSON.stringify(fourKRail)
+    Math.abs(fourKRail.railWidth - 672) < 1,
+    "the 4K rail must retain its width while reclaimed margin space expands the live page: " + JSON.stringify(fourKRail)
   );
+  for (const metrics of [fullHdRail, fourKRail]) {
+    assert.ok(Math.abs(metrics.leftGutter - 24) < 1 && Math.abs(metrics.rightGutter - 24) < 1,
+      "page detail must use the available width with balanced compact gutters: " + JSON.stringify(metrics));
+  }
   assert.ok(
     fourKRail.evidenceWidth >= fourKRail.layoutWidth * 0.74,
     "the wider rail must still leave most of the 4K layout to the replay canvas: "
@@ -710,14 +700,13 @@ try {
   await page.screenshot({ path: path.join(outDir, "rail-narrow.png"), fullPage: false });
 
   assert.deepEqual(pageErrors, [], "the page must render without runtime errors");
-  const faviconPresentation = await verifyPageInformationFaviconPresentation(browser);
+  const faviconPresentation = await verifyTitleBarFaviconPresentation(browser);
   const liveUnavailable = await verifyRailWithoutLiveSession(browser);
   apiFixtures.forEach((fixture) => fixture.assertIsolated());
   console.log(JSON.stringify({
     result: "PASS",
     liveUnavailable,
     faviconPresentation,
-    pageInformation,
     severityCounts,
     geometry,
     fullHdRail,

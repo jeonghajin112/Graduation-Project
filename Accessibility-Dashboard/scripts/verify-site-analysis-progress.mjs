@@ -136,7 +136,7 @@ try {
   await page.setViewportSize({ width: 1560, height: 950 });
   // Other pages remain usable while this one is running.
   await page.goto(baseUrl + "/projects/1/pages/102", { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "페이지 정보", exact: true }).waitFor();
+  await page.locator(".site-page-evidence-chrome").waitFor();
   assert.equal(await progress.count(), 0);
   await page.goto(baseUrl + "/recent-pages/101", { waitUntil: "domcontentloaded" });
   await assertProgressOnly("running");
@@ -148,24 +148,26 @@ try {
     throw error;
   });
   assert.equal(await progress.count(), 0);
-  await page.getByRole("heading", { name: "페이지 정보", exact: true }).waitFor();
+  await page.locator(".site-page-evidence-chrome").waitFor();
   await page.locator('.site-page-evidence-preview[data-connection-state="ready"][data-loading-phase="complete"]').waitFor();
   summaries.push({ requestId: 501, totalScore: 80, totalIssueCount: 0, requestedAt: timestamp });
-  const pageInformation = page.getByRole("region", { name: "페이지 정보", exact: true });
-  const rescan = pageInformation.getByRole("button", { name: "재분석", exact: true });
+  const resultNotices = page.locator(".site-result-notices");
+  const pageChrome = page.locator(".site-page-evidence-chrome");
+  assert.equal(await page.getByRole("region", { name: "페이지 정보", exact: true }).count(), 0);
+  const rescan = pageChrome.getByRole("button", { name: "재분석", exact: true });
   await rescan.waitFor();
-  const previousDate = await pageInformation.locator(".site-page-information__metadata dd").innerText();
+  const previousDate = await pageChrome.locator(".site-page-analysis-actions__metadata dd").innerText();
   for (const [name, width, dark] of [["desktop", 1560, false], ["dark", 1560, true], ["mobile", 390, false]]) {
     await page.setViewportSize({ width, height: 950 });
     await page.emulateMedia({ colorScheme: dark ? "dark" : "light", reducedMotion: "reduce" });
     await rescan.scrollIntoViewIfNeeded();
-    const dateBox = await pageInformation.locator(".site-page-information__metadata").boundingBox();
+    const dateBox = await pageChrome.locator(".site-page-analysis-actions__metadata").boundingBox();
     const buttonBox = await rescan.boundingBox();
-    await pageInformation.screenshot({ path: fileURLToPath(new URL(`rescan-${name}.png`, output)) });
+    await pageChrome.screenshot({ path: fileURLToPath(new URL(`rescan-${name}.png`, output)) });
     assert.ok(buttonBox.x >= dateBox.x + dateBox.width &&
       Math.abs(buttonBox.y + buttonBox.height / 2 - dateBox.y - dateBox.height / 2) < 3,
       `the rescan button must sit beside the analysis date at ${name}: ${JSON.stringify({ dateBox, buttonBox })}`);
-    const groupBox = await pageInformation.locator(".site-page-information__analysis-actions").boundingBox();
+    const groupBox = await pageChrome.locator(".site-page-analysis-actions").boundingBox();
     assert.ok(buttonBox.x + buttonBox.width <= groupBox.x + groupBox.width && buttonBox.y >= groupBox.y &&
       buttonBox.y + buttonBox.height <= groupBox.y + groupBox.height,
       "the rescan button must be inside the date's rounded gray container");
@@ -174,17 +176,17 @@ try {
   await page.setViewportSize({ width: 1560, height: 950 });
   await rescan.focus();
   await page.keyboard.press("Enter");
-  await pageInformation.getByRole("alert").waitFor();
+  await resultNotices.getByRole("alert").waitFor();
   assert.equal(await rescan.isEnabled(), true, "a rejected request must allow retry");
   assert.equal(await iframe.count(), 1, "a rejected request must retain the completed result");
-  assert.equal(await pageInformation.locator(".site-page-information__metadata dd").innerText(), previousDate);
+  assert.equal(await pageChrome.locator(".site-page-analysis-actions__metadata dd").innerText(), previousDate);
   // Dispatch within one event loop tick to exercise the synchronous duplicate guard.
   await rescan.evaluate(button => { button.click(); button.click(); });
-  await pageInformation.getByRole("button", { name: "요청 중…", exact: true }).waitFor();
-  assert.equal(await pageInformation.getByRole("button", { name: "요청 중…", exact: true }).isDisabled(), true);
+  await pageChrome.getByRole("button", { name: "요청 중…", exact: true }).waitFor();
+  assert.equal(await pageChrome.getByRole("button", { name: "요청 중…", exact: true }).isDisabled(), true);
   await rescanReceived;
   assert.equal(rescanPosts, 2, "retry and double click must produce only one additional POST");
-  assert.equal(await pageInformation.getByRole("alert").count(), 0);
+  assert.equal(await resultNotices.getByRole("alert").count(), 0);
   resultReads.length = 0;
   releaseRescan();
   await assertProgressOnly("queued");

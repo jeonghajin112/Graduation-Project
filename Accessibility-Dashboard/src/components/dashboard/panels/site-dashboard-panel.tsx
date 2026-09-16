@@ -19,7 +19,7 @@ import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
 import { severityChartItems } from "./site-dashboard/constants";
 import { IssueLocationDialog } from "./site-dashboard/issue-location-dialog";
-import { PageInformationPanel } from "./site-dashboard/page-information-panel";
+import { PageAnalysisActions } from "./site-dashboard/page-analysis-actions";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
 import type { LocatorReport, RecentIssueRow } from "./site-dashboard/types";
@@ -291,6 +291,15 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     <div className="site-dashboard-layout grid min-h-[31rem] grid-cols-1 items-stretch">
       <div className="site-page-evidence-grid-item">
         <RenderedPageEvidenceCard
+          accessUrl={evaluationTarget.accessUrl}
+          headerActions={<PageAnalysisActions
+            analyzedAt={latestAnalyzedAt}
+            isRequestingAnalysis={isRequestingAnalysis}
+            analysisRequestError={analysisRequestError}
+            onRequestAnalysis={!previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted
+              ? handleRequestAnalysis
+              : undefined}
+          />}
           faviconUrl={evaluationTarget.faviconUrl}
           captureMetadata={captureMetadata}
           errorMessage={resultDetailsErrorMessage ?? liveSessionErrorMessage}
@@ -309,20 +318,29 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
         />
       </div>
       <div className="site-dashboard-rail">
-        <PageInformationPanel
-          isRequestingAnalysis={isRequestingAnalysis}
-          analysisRequestError={analysisRequestError}
-          onRequestAnalysis={!previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted
-            ? handleRequestAnalysis
-            : undefined}
-          accessUrl={evaluationTarget.accessUrl}
-          analyzedAt={latestAnalyzedAt}
-          captureMetadataErrorMessage={captureMetadataErrorMessage}
-          captureMetadataLoadState={captureMetadataLoadState}
-          faviconUrl={evaluationTarget.faviconUrl}
-          name={evaluationTarget.name}
-          onRetryCaptureMetadata={retryCaptureMetadata}
-        />
+        {(analysisRequestError || captureMetadataLoadState === "loading" || captureMetadataLoadState === "error") && (
+          <div className="site-result-notices">
+            {analysisRequestError && (
+              <p id="site-analysis-request-error" className="site-result-notice" role="alert">
+                {analysisRequestError}
+              </p>
+            )}
+            {captureMetadataLoadState === "loading" && (
+              <p className="site-capture-metadata-status site-result-notice" role="status">
+                분석 당시 화면 정보를 불러오는 중입니다.
+              </p>
+            )}
+            {captureMetadataLoadState === "error" && (
+              <div className="site-capture-metadata-status site-result-notice" role="alert">
+                <p>분석 당시 화면 정보를 불러오지 못했습니다.</p>
+                {captureMetadataErrorMessage && <p>{captureMetadataErrorMessage}</p>}
+                <button type="button" onClick={retryCaptureMetadata}>
+                  화면 정보 다시 불러오기
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <AnalysisTrendPanel
           evaluationRequests={evaluationRequests}

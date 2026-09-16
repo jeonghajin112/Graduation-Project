@@ -98,14 +98,29 @@ try {
     await verifyLongProjectNames(page, fixture, theme);
 
     await page.goto(`${baseUrl}/projects/${fixture.organization.id}/pages/${fixture.target.id}`, { waitUntil: "networkidle" });
-    await page.locator(".site-page-information").waitFor();
+    await page.locator(".site-page-evidence-chrome").waitFor();
     for (const viewport of viewports) {
       await resize(page, viewport);
-      const title = await page.getByRole("heading", { name: "페이지 정보", exact: true }).boundingBox();
-      const actions = await page.locator(".site-page-information__analysis-actions").boundingBox();
+      const title = await page.locator(".site-page-evidence-chrome h2").boundingBox();
+      const chrome = await page.locator(".site-page-evidence-chrome").boundingBox();
+      const actions = await page.locator(".site-page-evidence-chrome .site-page-analysis-actions").boundingBox();
+      const address = await page.locator(".site-page-evidence-chrome__address").boundingBox();
       assert.ok(title.y < actions.y + actions.height && actions.y < title.y + title.height,
-        `${theme} ${viewport.width}: date and rescan must stay in the heading row`);
+        `${theme} ${viewport.width}: date and rescan must stay in the page title bar`);
       assert.ok(title.x + title.width <= actions.x, "heading and actions must not overlap");
+      assert.ok(actions.x + actions.width <= chrome.x + chrome.width,
+        "the title-bar actions must remain inside the card");
+      assert.ok(Math.abs(address.x + address.width / 2 - chrome.x - chrome.width / 2) < 1,
+        `${theme} ${viewport.width}: the address box must be centered in the title bar`);
+      assert.ok(address.y >= chrome.y && address.y + address.height <= chrome.y + chrome.height,
+        "the address box must remain inside the title bar");
+      if (address.y < actions.y + actions.height && actions.y < address.y + address.height) {
+        assert.ok(title.x + title.width <= address.x && address.x + address.width <= actions.x,
+          "the address must fit between the title and rescan without overlap");
+      } else {
+        assert.ok(address.y >= Math.max(title.y + title.height, actions.y + actions.height),
+          "a narrow title bar must put the address below the title and rescan");
+      }
       await assertNoHorizontalOverflow(page, `detail ${viewport.width}`);
     }
 

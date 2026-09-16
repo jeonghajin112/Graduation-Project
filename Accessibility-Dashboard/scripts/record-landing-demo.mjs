@@ -136,8 +136,8 @@ async function verifyScene(scene) {
     assert.equal(await page.getByRole("dialog", { name: "문제 상세", exact: true }).isVisible(), false,
       "The page-view recording must not open issue details.");
     assert.equal(await page.getByRole("complementary", { name: "최근 분석 추이", exact: true }).isVisible(), true);
-    const pageInformation = page.getByRole("region", { name: "페이지 정보", exact: true });
-    assert.equal(await pageInformation.getByRole("button", { name: "재분석", exact: true }).isEnabled(), true);
+    const pageChrome = page.locator(".site-page-evidence-chrome");
+    assert.equal(await pageChrome.getByRole("button", { name: "재분석", exact: true }).isEnabled(), true);
   } else {
     assert.ok(await page.locator(".dashboard-project-card").count() >= 1, "Overview must contain loaded page cards.");
     assert.ok(await page.locator('.dashboard-project-card [aria-label^="점수 "]:not([aria-label="점수 없음"])').count() >= 1);
@@ -219,7 +219,7 @@ try {
     const phase = document.querySelector(".quick-analysis-progress")?.getAttribute("data-phase");
     // The sidebar can open this page while its request is still running.
     // The URL alone does not mean the analysis has completed.
-    return (location.pathname === resultPath && !!document.querySelector(".site-page-information")) ||
+    return (location.pathname === resultPath && !!document.querySelector(".site-page-evidence-chrome")) ||
       phase === "failed" || phase === "paused";
   }, "/recent-pages/" + target.id, { timeout: 900_000 });
   assert.equal(new URL(page.url()).pathname, "/recent-pages/" + target.id,
