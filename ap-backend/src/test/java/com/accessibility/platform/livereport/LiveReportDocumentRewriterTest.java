@@ -217,7 +217,8 @@ class LiveReportDocumentRewriterTest {
         assertThat(rewritten).contains("marker.setAttribute('aria-controls', popover.id)");
         assertThat(rewritten).contains("const position = (mode = 'full') =>");
         assertThat(rewritten).contains("const schedulePosition = (mode = 'full') =>");
-        assertThat(rewritten).contains("const scheduleRootScrollPosition = () => schedulePosition('preserve-root')");
+        assertThat(rewritten).containsPattern("const scheduleRootScrollPosition = \\(\\) => \\{\\s*"
+                + "reportDocumentScroll\\(\\);\\s*schedulePosition\\('preserve-root'\\);\\s*\\};");
         assertThat(rewritten).contains("const scheduleCapturedScrollPosition = event =>");
         assertThat(rewritten).contains("if (target === document) return");
         assertThat(rewritten).contains("nativeApply(nativeNodeContains, layer, [target])");

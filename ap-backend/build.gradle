@@ -25,6 +25,8 @@ dependencies {
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
 	implementation 'org.apache.httpcomponents.client5:httpclient5'
 	implementation 'org.jsoup:jsoup:1.22.2'
+	implementation 'com.twelvemonkeys.imageio:imageio-webp:3.14.0'
+	implementation 'com.twelvemonkeys.imageio:imageio-bmp:3.14.0'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'com.h2database:h2'
 	annotationProcessor 'org.projectlombok:lombok'

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
+import { getVerifiedFaviconUrl } from "@/services/favicon-url";
 import type {
   EvaluationTargetModel,
   EvaluationRequestModel,
@@ -19,18 +20,6 @@ import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 import { formatDateTime, mapScanStatus } from "../shared/utils";
 
 type ProjectDetailSiteSortKey = "targetType" | "siteName" | "score" | "updatedAt";
-
-function getFallbackFaviconUrl(accessUrl: string): string | null {
-  try {
-    const url = new URL(accessUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    return `${url.origin}/favicon.ico`;
-  } catch {
-    return null;
-  }
-}
 
 function ProjectFavicon({
   faviconUrl,
@@ -154,7 +143,7 @@ export function OrganizationModelDetailPanel({
       targetType: site.targetType,
       name: site.name,
       accessUrl: site.accessUrl,
-      faviconUrl: site.faviconUrl ?? getFallbackFaviconUrl(site.accessUrl),
+      faviconUrl: getVerifiedFaviconUrl(site.faviconUrl),
       status: latestActivityRequest ? mapScanStatus(latestActivityRequest.status) : "미진행",
       totalScore: latestScoreResult?.totalScore ?? null,
       finishedAt: latestScoredRequest?.updatedAt ?? null,
@@ -374,7 +363,7 @@ export function OrganizationModelDetailPanel({
                 type="button"
                 aria-label={`${row.name} 상세 보기`}
                 onClick={() => onSiteClick(row.id)}
-                className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/45"
+                className="absolute inset-0 z-0 cursor-pointer rounded-[inherit] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--dashboard-accent)]"
               />
 
               {!readOnly ? <div className="dashboard-project-card-delete absolute z-10">

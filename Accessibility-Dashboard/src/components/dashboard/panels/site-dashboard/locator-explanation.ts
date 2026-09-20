@@ -9,7 +9,7 @@ export function getLocatorExplanation(state?: LocatorIssueState): { label: strin
     return { label: "화면 밖의 요소", description: "요소는 현재 페이지에 있습니다. 해당 위치로 스크롤해서 확인할 수 있습니다." };
   }
   if (state.status === "HIDDEN_STATE" && state.recoverable) {
-    return { label: "다른 슬라이드의 요소", description: "현재 보이지 않는 슬라이드에 있습니다. ‘해당 장면에서 보기’로 이동할 수 있습니다." };
+    return { label: "다른 슬라이드의 요소", description: "현재 보이지 않는 슬라이드에 있습니다. ‘문제 위치로 이동’을 누르면 해당 슬라이드로 전환됩니다." };
   }
   switch (state.reason) {
     case "EMPTY_PATH":

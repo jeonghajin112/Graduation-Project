@@ -153,6 +153,47 @@ try {
     assert.equal(await page.locator('[data-connection-state="ready"]').count(), 1);
   });
 
+  await runCase("keyboard entry and exit use the authenticated React bridge", 2, async (page, frame) => {
+    await waitReport(page, 2);
+    await page.locator('[data-live-report-focus-guard="forward"]').evaluate(guard => {
+      const before = document.createElement('button'); before.id = 'before-report'; before.textContent = 'Before';
+      guard.before(before);
+      const after = document.createElement('button'); after.id = 'after-report'; after.textContent = 'After';
+      document.querySelector('[data-live-report-focus-guard="backward"]').after(after);
+    });
+    for (const [key, start, end] of [['Tab','before-report','after-report'], ['Shift+Tab','after-report','before-report']]) {
+      await page.locator('#' + start).focus();
+      let reached = false, visitedMarker = false;
+      for (let index = 0; index < 16; index++) {
+        await page.keyboard.press(key);
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        if (await page.locator('#' + end).evaluate(element => element === document.activeElement)) {
+          reached = true; break;
+        }
+        const focused = await frame.evaluate(() => {
+          const active = document.activeElement;
+          return {marker:active.matches('.ap-live-marker'), report:Boolean(active.closest('#ap-live-marker-layer'))};
+        });
+        assert.ok(focused.report, key + ' must remain on report controls until exiting');
+        visitedMarker ||= focused.marker;
+      }
+      assert.ok(reached && visitedMarker, key + ' must visit markers and leave the real React viewer');
+    }
+    assert.equal(await page.locator('#retries').textContent(), '0');
+    await page.locator('#after-report').evaluate(element => element.remove());
+    await page.locator('#before-report').focus();
+    for (let index = 0; index < 16; index++) {
+      await page.keyboard.press('Tab');
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (await page.locator('[data-live-report-focus-guard="backward"]').evaluate(element => element === document.activeElement)) break;
+    }
+    assert.equal(await page.locator('[data-live-report-focus-guard="backward"]').evaluate(element => element === document.activeElement), true,
+      'with no following page control, leave the viewer at the outer boundary');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('iframe').evaluate(element => element === document.activeElement), false,
+      'the page boundary must allow native Tab to leave instead of re-entering the viewer');
+  });
+
   console.log(JSON.stringify({ result: failures.length ? "FAIL" : "PASS", cases: results, failures }, null, 2));
   assert.deepEqual(failures, []);
 } finally {

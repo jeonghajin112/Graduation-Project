@@ -32,17 +32,6 @@
   --site-page-chrome-overlap: var(--site-page-chrome-height);
 }
 
-/* Outline the full loading shell without changing the iframe's fit width. */
-.bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-loading="true"]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  border: 1px solid var(--site-divider);
-  border-radius: inherit;
-  pointer-events: none;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-loading="true"] .site-page-evidence-loading,
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-loading="true"] .site-page-evidence-replay-overlay[role="status"] {
   background: var(--dashboard-card-bg);
@@ -65,7 +54,7 @@
   background: var(--dashboard-card-bg);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  transition: background-color 180ms ease, box-shadow 180ms ease;
+  transition: background-color 180ms ease;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__identity {
@@ -102,7 +91,7 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__address:hover {
-  color: var(--dashboard-accent);
+  color: var(--dashboard-text-secondary);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome__address:focus-visible {
@@ -127,7 +116,7 @@
   position: absolute;
   inset: 0 0 auto;
   background: rgb(255 255 255 / 58%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%), 0 3px 12px rgb(16 24 40 / 8%);
+  box-shadow: none;
   -webkit-backdrop-filter: blur(20px) saturate(130%);
   backdrop-filter: blur(20px) saturate(130%);
 }
@@ -157,7 +146,7 @@
 
 .bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-chrome[data-scrolled="true"] {
   background: rgb(20 22 26 / 58%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
+  box-shadow: none;
 }
 
 /* This title bar keeps the explicitly requested page blur. High-contrast
@@ -311,6 +300,27 @@
   border: 0;
   border-radius: 0;
   background: #ffffff;
+}
+
+.site-report-focus-guard {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.site-report-focus-guard:focus-visible {
+  clip-path: none;
+  width: auto;
+  height: auto;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  padding: 0.5rem;
+  background: var(--dashboard-page-bg);
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -2px;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-replay-frame {
@@ -636,6 +646,10 @@
   padding: clamp(0.625rem, 0.25rem + 0.3cqi, 0.875rem);
   border-radius: var(--dashboard-site-nested-radius);
   background: var(--site-inset-surface);
+}
+
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-trend-metrics > div {
+  background: transparent;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-trend-metrics span {
@@ -1113,13 +1127,21 @@
   min-height: 0;
   gap: 0.5rem;
   padding: clamp(0.875rem, 0.5rem + 0.35cqi, 1.125rem) clamp(0.875rem, 0.5rem + 0.35cqi, 1.125rem);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
   border-radius: 0.875rem;
   background: var(--site-row-surface);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue[data-pageable="true"] {
   cursor: pointer;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -3px;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__meta {
@@ -1170,11 +1192,15 @@
   white-space: nowrap;
 }
 
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__code {
+  color: #101828;
+  background: #ffffff;
+}
+
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue h4 {
-  display: -webkit-box;
+  flex: none;
   min-width: 0;
   margin-top: 0.25rem;
-  overflow: hidden;
   color: var(--dashboard-text-strong);
   font-size: calc(var(--site-rail-body-size) + 0.125rem);
   font-weight: 750;
@@ -1182,23 +1208,17 @@
   line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: keep-all;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__message {
-  display: -webkit-box;
-  flex: 1 1 auto;
+  flex: none;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
   color: var(--dashboard-text-muted);
   font-size: var(--site-rail-caption-size);
   line-height: 1.55;
   overflow-wrap: anywhere;
   word-break: keep-all;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 8;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue-header {
@@ -1223,6 +1243,12 @@
   color: var(--dashboard-text-muted);
   font-size: var(--site-rail-caption-size);
   line-height: 1.4;
+}
+
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__issue h4,
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__reason,
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__message {
+  color: #ffffff;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__actions {
@@ -1325,6 +1351,7 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__pager {
+  position: relative;
   display: flex;
   flex: none;
   min-height: 0.375rem;
@@ -1395,6 +1422,9 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   width: 1.5rem;
   height: 1.5rem;
@@ -1405,11 +1435,15 @@
   border-radius: 50%;
   color: var(--dashboard-text-strong);
   background: transparent;
-  transition: color 0.15s, background-color 0.15s, opacity 0.15s;
+  opacity: 0;
+  pointer-events: none;
+  transition: color 0.15s, background-color 0.15s;
 }
 
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation--previous { left: 0; }
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation--next { right: 0; }
+
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation:disabled {
-  opacity: 0.3;
   cursor: default;
 }
 
@@ -1420,6 +1454,8 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
   outline: 2px solid var(--dashboard-accent);
   outline-offset: 2px;
 }

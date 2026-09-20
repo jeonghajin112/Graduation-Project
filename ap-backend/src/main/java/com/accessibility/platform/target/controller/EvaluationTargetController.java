@@ -46,6 +46,11 @@ public class EvaluationTargetController {
         return ApiResponse.ok(evaluationTargetService.update(id, request));
     }
 
+    @PostMapping("/{id}/favicon/refresh")
+    public ApiResponse<EvaluationTargetResponse> refreshFavicon(@PathVariable Long id) {
+        return ApiResponse.ok(evaluationTargetService.refreshFavicon(id));
+    }
+
     @PatchMapping("/{id}/deactivate")
     public ApiResponse<Void> deactivate(@PathVariable Long id) {
         evaluationTargetService.deactivate(id);

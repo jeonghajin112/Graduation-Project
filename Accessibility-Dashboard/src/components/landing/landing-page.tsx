@@ -81,15 +81,15 @@ const LANDING_CONFIG = {
     {
       id: "report",
       layout: "card",
-      label: "페이지 보기",
+      label: "분석 결과",
       still: `${ASSET_ROOT}/report.webp`,
       clip: `${ASSET_ROOT}/vid/report.mp4`,
       accent: "#0071e3",
       scroll: 1.7,
       linger: 0.3,
-      eyebrow: "실제 페이지",
-      title: "실제 페이지를 그대로 확인하세요.",
-      body: "입력한 사이트를 직접 열어, 익숙한 화면에서 확인할 수 있습니다.",
+      eyebrow: "라이브 리포트",
+      title: "페이지와 분석 결과를 한눈에.",
+      body: "넓어진 페이지 옆에서 점수 추이와 심각도를 확인하세요. 주소와 분석 시각, 재분석은 상단에 모았습니다.",
       tags: []
     },
     {
@@ -111,7 +111,7 @@ const LANDING_CONFIG = {
           action: "enter-app"
         },
         secondary: {
-          label: "페이지 보기",
+          label: "분석 결과 보기",
           href: "#report",
           section: "report"
         }

@@ -43,7 +43,7 @@ function readAcknowledgedAnalyses(): Record<number, number> {
 
 /** Shared selected/hover/focus chrome for project + recent-page sidebar rows (radius via design token, never pill). */
 const SIDEBAR_NAV_ITEM_BASE =
-  "sidebar-tree-row sidebar-nav-link flex w-full min-w-0 items-center rounded-[var(--dashboard-sidebar-item-radius)] border text-left transition focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-[var(--dashboard-accent)]";
+  "sidebar-tree-row sidebar-nav-link flex w-full min-w-0 items-center rounded-[var(--dashboard-sidebar-item-radius)] border text-left transition focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--dashboard-accent)]";
 const SIDEBAR_NAV_ITEM_ACTIVE = "sidebar-nav-link-active border-transparent";
 const SIDEBAR_NAV_ITEM_INACTIVE =
   "border-transparent text-[var(--dashboard-sidebar-muted-text)] hover:border-[var(--dashboard-sidebar-item-hover-border)] hover:bg-[var(--dashboard-sidebar-item-hover-bg)] hover:text-[var(--dashboard-sidebar-hover-text)]";

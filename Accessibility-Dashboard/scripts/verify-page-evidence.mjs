@@ -1282,6 +1282,41 @@ async function verifyUnavailableIssueDescription(page) {
     await detailPage.reload({ waitUntil: "domcontentloaded" });
     await waitForReplayReady(evidence);
     await waitForUnavailableLocatorCount(evidence, 2);
+    const scrollCard = detailPage.locator('.site-unavailable-locator-panel__issue[data-issue-id="9003"]');
+    for (const layout of [
+      { width: 390, height: 668, zoom: 1 },
+      { width: 1920, height: 1080, zoom: 1.5 },
+      { width: 1280, height: 720, zoom: 2 }
+    ]) {
+      await detailPage.setViewportSize({ width: layout.width, height: layout.height });
+      await detailPage.evaluate(zoom => { document.body.style.zoom = String(zoom); }, layout.zoom);
+      assert.equal(await scrollCard.locator('.site-unavailable-locator-panel__message').textContent().then(text => text.trim()),
+        longDescription, "the card must retain the entire explanation, including text past 1600 characters");
+      await scrollCard.focus();
+      await detailPage.keyboard.press("Home");
+      await scrollCard.hover();
+      await detailPage.mouse.wheel(0, 150);
+      await detailPage.waitForFunction(() => document.querySelector('.site-unavailable-locator-panel__issue[data-issue-id="9003"]')?.scrollTop > 0);
+      await detailPage.keyboard.press("End");
+      await detailPage.waitForFunction(() => {
+        const card = document.querySelector('.site-unavailable-locator-panel__issue[data-issue-id="9003"]');
+        return card && card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
+      });
+      const scrollFacts = await scrollCard.evaluate(card => {
+        const message = card.querySelector('.site-unavailable-locator-panel__message');
+        const bounds = card.getBoundingClientRect();
+        const messageBounds = message.getBoundingClientRect();
+        return { overflow: card.scrollWidth - card.clientWidth, endVisible: messageBounds.bottom <= bounds.bottom,
+          scrollable: card.scrollHeight > card.clientHeight, id: card.dataset.issueId };
+      });
+      assert.ok(scrollFacts.scrollable && scrollFacts.endVisible && scrollFacts.overflow <= 1,
+        `the final sentence must be reachable without clipping at ${JSON.stringify(layout)}: ${JSON.stringify(scrollFacts)}`);
+      assert.equal(scrollFacts.id, "9003", "scrolling must not change the issue page");
+      await scrollCard.screenshot({ path: `${outDir}/issue-card-scroll-${layout.width}-${layout.zoom}.png` });
+      await detailPage.keyboard.press("Home");
+    }
+    await detailPage.evaluate(() => { document.body.style.zoom = ""; });
+    await detailPage.setViewportSize({ width: 390, height: 668 });
     await detailPage.locator('[data-issue-id="9003"]').getByRole("button", { name: "문제 상세", exact: true }).click();
     const dialog = detailPage.getByRole("dialog", { name: "문제 상세", exact: true });
     const message = dialog.getByRole("region", { name: "문제 설명", exact: true }).locator("p");
@@ -1501,7 +1536,7 @@ async function verifyDesktop(page) {
   await glassMediaSession.send("Emulation.setEmulatedMedia", { features: [] });
   await glassMediaSession.detach();
   const documentHeading = evidence.locator(".site-page-evidence-chrome h2");
-  assert.equal(await documentHeading.innerText(), "제목 불러오는 중", "neither URLs nor project names may masquerade as document titles");
+  assert.equal(await documentHeading.innerText(), "", "the title stays empty until the real document title arrives");
   for (const title of ["NAVER", "공식 웹사이트 | 온라인 스토어", "상품 상세 · 공식 웹사이트", "", "공식 웹사이트 | 온라인 스토어"]) {
     await sendReplayTestMessage(frame, { type: "DOCUMENT_TITLE", title });
     await page.waitForFunction(expected => document.querySelector(".site-page-evidence-chrome h2")?.textContent === expected,
@@ -1596,7 +1631,8 @@ async function verifyDesktop(page) {
   assert.equal(await nextUnavailableIssue.isDisabled(), false);
   assert.equal((await previousUnavailableIssue.textContent())?.trim(), "");
   assert.equal((await nextUnavailableIssue.textContent())?.trim(), "");
-  assert.match(await previousUnavailableIssue.getAttribute("class"), /\bsr-only\b/, "arrow buttons stay for keyboard and screen readers only");
+  assert.equal(await previousUnavailableIssue.evaluate(element => getComputedStyle(element).opacity), "0",
+    "issue arrows stay hidden until keyboard focus reaches them");
   assert.equal(
     await unavailableLocatorPanel.locator(".site-unavailable-locator-panel__dot").count(),
     2,
@@ -1933,7 +1969,7 @@ async function verifyDesktop(page) {
   );
   assert.match(await hiddenStatePanel.textContent(), /다른 화면 상태의 문제/);
   const beforeHiddenFocusRequest = Number(await evidence.locator(".site-page-evidence-preview").getAttribute("data-focus-request-id"));
-  await hiddenStatePanel.getByRole("button", { name: "해당 장면에서 보기" }).click();
+  await hiddenStatePanel.getByRole("button", { name: "문제 위치로 이동" }).click();
   assert.equal(
     await evidence.locator(".site-page-evidence-preview").getAttribute("data-focus-request-id"),
     String(beforeHiddenFocusRequest + 1),
@@ -2613,9 +2649,10 @@ async function verifyResponsiveWidths(page) {
     await waitForReplayReady(evidence);
     await waitForUnavailableLocatorCount(evidence, 2);
     const isFourK = viewport.width === 3840;
-    const expectedVisibleUnavailableIssueCount = isFourK || viewport.height >= 1256 ? 2 : 1;
+    // Capacity follows measured rail space, including wrapping headings and
+    // chart height; viewport height alone does not determine the number of cards.
     const unavailableLocatorPanel = page.locator(
-      `.site-unavailable-locator-panel[data-visible-issue-count="${expectedVisibleUnavailableIssueCount}"]`
+      '.site-unavailable-locator-panel[data-visible-issue-count]:not([data-visible-issue-count="0"])'
     );
     await unavailableLocatorPanel.waitFor({ state: "visible", timeout: 5000 }).catch(async error => {
       const layout = await page.locator(".site-unavailable-locator-panel").evaluate(panel => {
@@ -2626,6 +2663,22 @@ async function verifyResponsiveWidths(page) {
       });
       throw new Error(`${viewport.width}x${viewport.height}: ${JSON.stringify(layout)}`, { cause: error });
     });
+    const capacity = Number(await unavailableLocatorPanel.getAttribute("data-unavailable-page-size"));
+    assert.ok(Number.isInteger(capacity) && capacity >= 1, "the available page capacity must be positive");
+    const expectedVisibleUnavailableIssueCount = Math.min(2, capacity);
+    const availableSpace = await unavailableLocatorPanel.evaluate(panel => {
+      const list = panel.querySelector('.site-unavailable-locator-panel__issues');
+      const style = getComputedStyle(list);
+      return {
+        available: list.clientHeight + Math.max(0,
+          panel.parentElement.getBoundingClientRect().bottom - panel.getBoundingClientRect().bottom),
+        twoCards: 2 * parseFloat(style.minHeight) + parseFloat(style.rowGap)
+      };
+    });
+    if (expectedVisibleUnavailableIssueCount < 2) {
+      assert.ok(availableSpace.available < availableSpace.twoCards,
+        `pagination must not hide a card that fits: ${JSON.stringify(availableSpace)}`);
+    }
     if (isFourK) {
       assert.equal(
         await unavailableLocatorPanel.getAttribute("data-unavailable-page-size"),
@@ -2915,6 +2968,47 @@ async function verifyResponsiveWidths(page) {
   return results;
 }
 
+async function verifyUnavailableZoomResize(page) {
+  await page.setViewportSize({ width: 1920, height: 980 });
+  await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
+  const evidence = page.getByRole("article", { name: "페이지 검사 화면" });
+  await waitForReplayReady(evidence);
+  const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
+  for (const issue of issues) {
+    await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: issue.id, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
+  }
+  const panel = page.locator('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+  await panel.locator('[data-issue-id]').first().waitFor();
+  await panel.getByRole("button", { name: "2번째 페이지", exact: true }).click();
+  const selectedId = await panel.locator('[data-issue-id]').first().getAttribute('data-issue-id');
+  // Browser zoom changes the CSS viewport. Keep this document mounted while
+  // crossing the compact padding breakpoint, then return to the original size.
+  // Reloading each size would hide the stale measured max-height regression.
+  for (let cycle = 0; cycle < 2; cycle++) {
+    for (const [width, height] of [[1920, 980], [1536, 784], [1280, 653], [1920, 980]]) {
+      await page.setViewportSize({ width, height });
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+        const pager = panel?.querySelector('.site-unavailable-locator-panel__pager');
+        if (!panel || !pager) return false;
+        const style = getComputedStyle(panel);
+        const expected = parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth);
+        const lastCard = panel.querySelector('.site-unavailable-locator-panel__issues')?.lastElementChild;
+        if (!lastCard) return false;
+        const pagerGap = pager.getBoundingClientRect().top - lastCard.getBoundingClientRect().bottom;
+        return panel.scrollHeight - panel.clientHeight <= 1
+          && pagerGap >= 0 && pagerGap <= 16
+          && Math.abs(panel.getBoundingClientRect().bottom - pager.getBoundingClientRect().bottom - expected) <= 1;
+      });
+      await assertCompactUnavailablePanel(panel, `zoom round trip ${cycle}: ${width}x${height}`);
+      assert.equal(await panel.locator(`[data-issue-id="${selectedId}"]`).count(), 1,
+        "zoom round trips must keep the selected issue visible");
+    }
+  }
+  await panel.screenshot({ path: `${outDir}/unavailable-zoom-restored.png` });
+  return { cycles: 2, restoredPadding: true, selectedIssuePreserved: true };
+}
+
 async function verifyUnavailableCapacityResize(page) {
   await page.setViewportSize({ width: 2560, height: 1256 });
   await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
@@ -3158,8 +3252,13 @@ async function verifyEvidenceStatusFeedback(page) {
   assert.equal(await successNotice.count(), 0);
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   await frame.locator("header").waitFor();
+  const identity = evidence.locator(".site-page-evidence-chrome__identity");
+  assert.equal(await identity.isVisible(), false, "favicon and title stay hidden while the page loads");
+  assert.equal(await evidence.getByText("제목 불러오는 중", { exact: true }).count(), 0);
   await frame.locator("html").evaluate(() => window.__sendReplayReady());
   await waitForReplayConnectionState(evidence, "ready");
+  await sendReplayTestMessage(frame, { type: "DOCUMENT_TITLE", title: "로딩을 마친 웹페이지" });
+  await identity.getByRole("heading", { name: "로딩을 마친 웹페이지", exact: true }).waitFor();
   await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
   assert.equal(await panel.getAttribute("data-locator-check-state"), "loading", "ready document must still wait for locator results");
   assert.equal(await successNotice.count(), 0);
@@ -3210,6 +3309,7 @@ try {
     await verifyMetadataBeforeResultDetails(page);
   }
   const desktop = verificationScope === "scale" ? null : await verifyDesktop(page);
+  const zoomResize = await verifyUnavailableZoomResize(page);
   let responsive = null;
   let capacityResize = null;
   let mobile = null;
@@ -3243,7 +3343,7 @@ try {
   assert.deepEqual(pageErrors, []);
   apiFixtures.forEach((fixture) => fixture.assertIsolated());
   assert.deepEqual(chartDimensionWarnings, [], "charts must not render with negative initial dimensions");
-  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, responsive, capacityResize, mobile, statusFeedback, locatorBatchReconnect }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", scope: verificationScope, issueDescription, desktop, zoomResize, responsive, capacityResize, mobile, statusFeedback, locatorBatchReconnect }, null, 2));
 } finally {
   await page.close();
   await browser.close();

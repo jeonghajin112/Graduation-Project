@@ -69,6 +69,7 @@ const pageDetailChunk = findChunkByModule(
   "src/components/dashboard/panels/site-dashboard-panel.tsx"
 );
 const modalChunks = [
+  findChunkByModule("src/components/dashboard/panels/site-dashboard/issue-location-dialog.tsx"),
   findChunkByModule("src/components/dashboard/modals/account-settings-modal.tsx"),
   findChunkByModule("src/components/dashboard/modals/organization-model-create-modal.tsx"),
   findChunkByModule("src/components/dashboard/modals/site-create-modal.tsx")

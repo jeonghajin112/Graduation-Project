@@ -43,7 +43,7 @@ export function SidebarLink({
   );
 
   const baseClass = cn(
-    "sidebar-nav-link reference-sidebar-row reference-sidebar-primary-row group flex w-full items-center rounded-[var(--dashboard-sidebar-item-radius)] border text-left transition focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-[var(--dashboard-accent)]",
+    "sidebar-nav-link reference-sidebar-row reference-sidebar-primary-row group flex w-full items-center rounded-[var(--dashboard-sidebar-item-radius)] border text-left transition focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--dashboard-accent)]",
     link.active
       ? "sidebar-nav-link-active border-transparent bg-transparent text-slate-900"
       : "border-transparent bg-transparent text-[var(--dashboard-sidebar-muted-text)] hover:border-[var(--dashboard-sidebar-item-hover-border)] hover:bg-[var(--dashboard-sidebar-item-hover-bg)] hover:text-[var(--dashboard-sidebar-hover-text)]",

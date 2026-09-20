@@ -18,6 +18,17 @@ import {
 import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
 import type { RecentIssueRow } from "./types";
 
+describe("report keyboard exits", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT", documentToken: "live_document", direction: "forward" };
+  it.each(["forward", "backward"])("accepts a bounded %s exit", direction => {
+    expect(parsePageReplayMessage({ ...message, direction })).toEqual({ ...message, direction });
+  });
+  it.each([{direction: "up"}, {direction: null}, {documentToken: ""}, {selector: "#outside"}])(
+    "rejects malformed focus events %j", patch => {
+      expect(parsePageReplayMessage({...message, ...patch})).toBeNull();
+    });
+});
+
 describe("live document scroll state", () => {
   const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL", documentToken: "live_document", isScrolled: true };
   it("accepts both scrolled and restored states", () => {

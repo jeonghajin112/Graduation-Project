@@ -8,6 +8,7 @@ import {
   resolveTestBaseUrl, resolveTestPort, TEST_HOST
 } from "./frontend-test-runtime.mjs";
 import { runTestProcess } from "./frontend-test-process.mjs";
+import { cleanupTestArtifacts } from "./artifact-retention.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const dashboardDirectory = path.resolve(scriptDirectory, "..");
@@ -174,6 +175,13 @@ async function main() {
     report.completedAt = new Date().toISOString();
     report.notRunCount = suite.length - report.results.length;
     await saveReport();
+  }
+
+  try {
+    const removed = cleanupTestArtifacts(dashboardDirectory, { apply: true });
+    if (removed.length) console.log(`[test:${suiteName}] Removed ${removed.length} expired successful test logs; reports retained.`);
+  } catch (error) {
+    console.warn(`[test:${suiteName}] Artifact cleanup skipped: ${error.message}`);
   }
 
   const passed = report.results.filter((result) => result.status === "passed").length;

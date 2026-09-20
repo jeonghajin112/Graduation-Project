@@ -39,7 +39,8 @@
     "verify:bundle-boundaries": "npm run test:bundle",
     "verify:live-report-markers": "node scripts/run-frontend-tests.mjs --suite replay --test verify-live-report-markers.mjs",
     "verify:landing-design": "node scripts/run-frontend-tests.mjs --suite visual --test verify-landing-design.mjs",
-    "record:landing": "node scripts/record-landing-demo.mjs"
+    "record:landing": "node scripts/record-landing-demo.mjs",
+    "artifacts:clean": "node scripts/clean-artifacts.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

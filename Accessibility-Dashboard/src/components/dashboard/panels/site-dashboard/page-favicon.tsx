@@ -1,7 +1,9 @@
 import { Globe2 } from "lucide-react";
 import { useState } from "react";
+import { getVerifiedFaviconUrl } from "@/services/favicon-url";
 
 export function PageFavicon({ faviconUrl, className }: { faviconUrl?: string | null; className: string }) {
+  faviconUrl = getVerifiedFaviconUrl(faviconUrl);
   const [loadedFaviconUrl, setLoadedFaviconUrl] = useState<string | null>(null);
   const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
   const hasLoadedFavicon = Boolean(faviconUrl && loadedFaviconUrl === faviconUrl);

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 
 import { formatIssueCodeLabel } from "./constants";
 import { getLocatorExplanation } from "./locator-explanation";
-import { toPageReplayIssue } from "./page-replay-protocol";
+import { formatIssueDescription, toPageReplayIssue } from "./page-replay-protocol";
 import type { LocatorCheckState, LocatorIssueState, RecentIssueRow } from "./types";
 
 type UnavailableLocatorPanelProps = {
@@ -33,23 +33,39 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
     const panel = list.closest<HTMLElement>(".site-unavailable-locator-panel");
     const rail = panel?.parentElement;
     if (!panel || !rail) return;
+    const header = panel.querySelector<HTMLElement>(".site-unavailable-locator-panel__header");
+    const pagination = list.parentElement;
+    const pager = panel.querySelector<HTMLElement>(".site-unavailable-locator-panel__pager");
+    if (!header || !pagination || !pager) return;
 
     const measure = () => {
       const style = getComputedStyle(list);
       const minimumCardHeight = Number.parseFloat(style.minHeight);
       const gap = Number.parseFloat(style.rowGap) || 0;
       if (!Number.isFinite(minimumCardHeight) || minimumCardHeight <= 0) return;
+      const panelStyle = getComputedStyle(panel);
+      const paginationStyle = getComputedStyle(pagination);
+      const px = (value: string) => Number.parseFloat(value) || 0;
+      // Measure the chrome independently of the constrained panel height.
+      // Subtracting list height from panel height retains the old max-height
+      // after zoom/resize increases padding, trapping the pager at the edge.
+      const chromeHeight = px(panelStyle.paddingTop) + px(panelStyle.paddingBottom)
+        + px(panelStyle.borderTopWidth) + px(panelStyle.borderBottomWidth)
+        + header.getBoundingClientRect().height
+        + px(paginationStyle.marginTop) + px(paginationStyle.marginBottom)
+        + px(paginationStyle.rowGap) + pager.getBoundingClientRect().height;
+      const chromeValue = `${chromeHeight}px`;
+      if (panel.style.getPropertyValue("--site-unavailable-panel-chrome-height") !== chromeValue) {
+        panel.style.setProperty("--site-unavailable-panel-chrome-height", chromeValue);
+      }
       const panelBounds = panel.getBoundingClientRect();
       // A compact panel leaves unused rail space below it. Include that space
       // when measuring capacity so shrinking the panel does not shrink its pages.
       const remainingRailHeight = panel === rail.lastElementChild && getComputedStyle(rail).alignSelf === "stretch"
         ? Math.max(0, rail.getBoundingClientRect().bottom - panelBounds.bottom)
         : 0;
-      const capacity = Math.max(1, Math.floor((list.clientHeight + remainingRailHeight + gap) / (minimumCardHeight + gap)));
-      const chromeHeight = `${panelBounds.height - list.getBoundingClientRect().height}px`;
-      if (panel.style.getPropertyValue("--site-unavailable-panel-chrome-height") !== chromeHeight) {
-        panel.style.setProperty("--site-unavailable-panel-chrome-height", chromeHeight);
-      }
+      // Allow subpixel layout rounding without losing an otherwise fitting row.
+      const capacity = Math.max(1, Math.floor((panelBounds.height + remainingRailHeight - chromeHeight + gap + 0.5) / (minimumCardHeight + gap)));
       setPageSize(previous => previous === capacity ? previous : capacity);
     };
 
@@ -58,6 +74,8 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
       observer.disconnect();
       observer.observe(list);
       observer.observe(rail);
+      observer.observe(header);
+      observer.observe(pager);
       for (const card of rail.children) observer.observe(card);
       measure();
     };
@@ -187,12 +205,17 @@ export function UnavailableLocatorPanel({
                 className="site-unavailable-locator-panel__issue"
                 data-issue-id={row.issue.id}
                 data-pageable={pageCount > 1 ? "true" : "false"}
+                tabIndex={0}
+                aria-label={`${replayIssue.title} 설명`}
                 style={style}
                 onClick={(event) => {
                   if (pageCount <= 1 || (event.target as HTMLElement).closest("button")) return;
                   const selection = window.getSelection();
                   if (selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
                   const bounds = event.currentTarget.getBoundingClientRect();
+                  // Using the card's scrollbar must not turn the issue page.
+                  const localX = (event.clientX - bounds.left) * event.currentTarget.offsetWidth / bounds.width;
+                  if (localX >= event.currentTarget.clientLeft + event.currentTarget.clientWidth) return;
                   if (event.clientX - bounds.left < bounds.width / 2) goToPage(pageIndex - 1);
                   else goToPage(pageIndex + 1);
                 }}
@@ -218,7 +241,9 @@ export function UnavailableLocatorPanel({
                 <p data-copyable className="site-unavailable-locator-panel__reason">
                   {getLocatorExplanation(issueStates?.[row.issue.id]).label}
                 </p>
-                <p data-copyable className="site-unavailable-locator-panel__message">{replayIssue.message}</p>
+                <p data-copyable className="site-unavailable-locator-panel__message">
+                  {formatIssueDescription(row.issue.message, row.analyzerType, row.issue.ruleId) || "상세 설명이 없습니다."}
+                </p>
                 {isRecoverable && onSelectIssue ? (
                   <div className="site-unavailable-locator-panel__actions">
                     <button
@@ -227,7 +252,7 @@ export function UnavailableLocatorPanel({
                       onClick={() => onSelectIssue(row.issue.id)}
                     >
                       <LocateFixed size={14} strokeWidth={2.2} aria-hidden="true" />
-                      해당 장면에서 보기
+                      문제 위치로 이동
                     </button>
                   </div>
                 ) : null}
@@ -245,7 +270,7 @@ export function UnavailableLocatorPanel({
         >
           <button
             type="button"
-            className="site-unavailable-locator-panel__navigation site-unavailable-locator-panel__navigation--previous sr-only"
+            className="site-unavailable-locator-panel__navigation site-unavailable-locator-panel__navigation--previous"
             aria-label="이전 문제"
             onClick={() => goToPage(pageIndex - 1)}
             disabled={pageStartIndex === 0}
@@ -275,7 +300,7 @@ export function UnavailableLocatorPanel({
           ) : null}
           <button
             type="button"
-            className="site-unavailable-locator-panel__navigation site-unavailable-locator-panel__navigation--next sr-only"
+            className="site-unavailable-locator-panel__navigation site-unavailable-locator-panel__navigation--next"
             aria-label="다음 문제"
             onClick={() => goToPage(pageIndex + 1)}
             disabled={pageEndIndex >= rows.length}

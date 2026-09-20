@@ -5,13 +5,17 @@
  * Set BASE_URL to the running frontend and LANDING_TARGET_ID to an existing page.
  * npm run record:landing -- --stills-only    (review PNGs before encoding)
  * npm run record:landing -- --publish        (replace all four scenes together)
- * npm run record:landing -- --report-only --publish (refresh only the page-view scene)
+ * npm run record:landing -- --report-only --with-findings --publish
+ * Successful video runs remove sequence PNGs; --keep-frames retains them.
+ * Stills-only and failed runs always retain their frames.
  * Requires ffmpeg. New full runs, including --stills-only, start ONE REAL analysis.
  * --resume-results with LANDING_RECORDING_DIR reuses recorded input/progress and
  * opens the service's existing completed result without starting another scan.
  * --resume-analysis reuses recorded input and its still-active request ID.
  * --report-only records the existing live page without starting another scan.
- * The report scene captures only the real page viewport, without opening issue details.
+ * The report scene includes the current header, rendered page and summary rail.
+ * --with-findings also captures a real issue popover; set LANDING_ISSUE_ID to
+ * an issue on the selected page. Inspect the capture before publishing it.
  */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -21,6 +25,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { chromium } from "playwright";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
+import { cleanupRecordingFrames } from "./artifact-retention.mjs";
+import { readReportFrameState, waitForReportFrame, assertSameReportFrame } from "./fixtures/landing-report-readiness.mjs";
 
 const runFile = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,12 +45,17 @@ const reportPath = "/projects/" + project.id + "/pages/" + target.id;
 const overviewPath = "/projects/" + project.id;
 const args = new Set(process.argv.slice(2));
 for (const arg of args) {
-  if (!["--stills-only", "--publish", "--resume-results", "--resume-analysis", "--report-only"].includes(arg)) throw new Error("Unknown option: " + arg);
+  if (!["--stills-only", "--publish", "--resume-results", "--resume-analysis", "--report-only", "--with-findings", "--keep-frames"].includes(arg)) throw new Error("Unknown option: " + arg);
 }
 const stillsOnly = args.has("--stills-only");
 const resumeResults = args.has("--resume-results");
 const resumeAnalysis = args.has("--resume-analysis");
 const reportOnly = args.has("--report-only");
+const withFindings = args.has("--with-findings");
+const findingsIssueId = Number(process.env.LANDING_ISSUE_ID);
+assert.ok(!withFindings || reportOnly, "Use --report-only with --with-findings to preserve the selected issue ID.");
+if (withFindings) assert.ok(Number.isSafeInteger(findingsIssueId) && findingsIssueId > 0,
+  "Set LANDING_ISSUE_ID to an existing issue on the recorded page.");
 assert.ok(!(resumeResults && resumeAnalysis), "Choose one recording resume point.");
 assert.ok(!(reportOnly && (resumeResults || resumeAnalysis)), "Report-only recording does not resume a full recording.");
 assert.ok(!(stillsOnly && args.has("--publish")), "Publishing requires posters and videos together.");
@@ -73,7 +84,8 @@ async function settle(page) {
 
 async function encodeScene(scene, frameDirectory, posterPath) {
   await runFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", posterPath,
-    "-frames:v", "1", "-c:v", "libwebp", "-quality", "90", join(mediaOutput, scene + ".webp")], { windowsHide: true });
+    "-vf", "scale=3840:2160:force_original_aspect_ratio=decrease", "-frames:v", "1", "-c:v", "libwebp", "-quality", "90",
+    join(mediaOutput, scene + ".webp")], { windowsHide: true });
   for (const variant of variants) {
     await runFile("ffmpeg", [
       "-hide_banner", "-loglevel", "error", "-y", "-framerate", String(FPS),
@@ -87,8 +99,11 @@ async function encodeScene(scene, frameDirectory, posterPath) {
 }
 
 const browser = await chromium.launch({ headless: true });
+// A wider 1x report viewport already supplies native 4K pixels. Avoid taking
+// 7K+ intermediate screenshots while the upstream page keeps running.
+const capturePixelRatio = reportOnly && !withFindings ? 1 : 2;
 const context = await browser.newContext({
-  viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 2,
+  viewport: { width: 1920, height: 1080 }, deviceScaleFactor: capturePixelRatio,
   colorScheme: "light", reducedMotion: "no-preference", locale: "ko-KR", timezoneId: "Asia/Seoul",
   serviceWorkers: "block"
 });
@@ -107,15 +122,16 @@ if (previousCapture) {
   }
 }
 const scenes = previousCapture?.scenes.filter(item => (resumeResults ? ["input", "analyze"] : ["input"]).includes(item.scene)) ?? [];
+let findingsCapture = null;
 async function saveManifest() {
   await writeFile(join(output, "capture-manifest.json"), JSON.stringify({
     capturedAt: new Date().toISOString(), sampleData: false,
-    viewport: page.viewportSize(), deviceScaleFactor: 2, framesPerSecond: FPS,
+    viewport: page.viewportSize(), deviceScaleFactor: capturePixelRatio, framesPerSecond: FPS,
     source: "Real running service, real analysis request and live upstream page",
     targetId: target.id, projectId: project.id, targetUrl: target.accessUrl,
     analysisRequestId,
     resultSource: resumeResults || reportOnly ? "Previously completed real analysis stored in the service" : "New real analysis",
-    scenes, variants: stillsOnly ? [] : variants
+    scenes, findings: findingsCapture, variants: stillsOnly ? [] : variants
   }, null, 2));
 }
 
@@ -138,6 +154,11 @@ async function verifyScene(scene) {
     assert.equal(await page.getByRole("complementary", { name: "최근 분석 추이", exact: true }).isVisible(), true);
     const pageChrome = page.locator(".site-page-evidence-chrome");
     assert.equal(await pageChrome.getByRole("button", { name: "재분석", exact: true }).isEnabled(), true);
+    assert.equal(await pageChrome.locator("h2").innerText(),
+      await viewer.locator("html").evaluate(() => document.title.trim()));
+    assert.equal(await pageChrome.getByRole("link").getAttribute("href"), target.accessUrl);
+    assert.equal(await pageChrome.locator(".site-page-analysis-actions__metadata dd").count(), 1);
+    assert.equal(await page.getByRole("complementary", { name: "페이지 정보", exact: true }).count(), 0);
   } else {
     assert.ok(await page.locator(".dashboard-project-card").count() >= 1, "Overview must contain loaded page cards.");
     assert.ok(await page.locator('.dashboard-project-card [aria-label^="점수 "]:not([aria-label="점수 없음"])').count() >= 1);
@@ -152,12 +173,28 @@ async function captureScene(scene, renderFrame, posterFrame = 30, clip) {
   await mkdir(frameDirectory, { recursive: true });
   const posterPath = join(output, scene + ".png");
   const indices = stillsOnly ? [posterFrame] : Array.from({ length: FRAME_COUNT }, (_, i) => i);
+  const reportViewer = scene === 'report' ? page.frameLocator('iframe[data-report-mode="live"]') : null;
+  let documentEpoch;
   for (const frame of indices) {
-    await renderFrame(frame);
-    await settle(page);
-    if (frame === posterFrame) await verifyScene(scene);
     const framePath = join(frameDirectory, String(frame).padStart(4, "0") + ".png");
-    await page.screenshot({ path: framePath, type: "png", ...(clip ? { clip } : {}) });
+    for (let attempt = 0; ; attempt++) {
+      await renderFrame(frame);
+      await settle(page);
+      try {
+        const before = reportViewer ? await waitForReportFrame(page, reportViewer) : null;
+        if (before) {
+          documentEpoch ??= before.documentEpoch;
+          assert.equal(before.documentEpoch, documentEpoch, 'The viewer reloaded; restart the report recording');
+        }
+        if (reportViewer || frame === posterFrame) await verifyScene(scene);
+        await page.screenshot({ path: framePath, type: "png", ...(clip ? { clip } : {}) });
+        if (before) assertSameReportFrame(before, await readReportFrameState(page, reportViewer));
+        break;
+      } catch (error) {
+        if (!reportViewer || attempt >= 2) throw error;
+        console.log(`Retrying report frame ${frame}: ${error.message}`);
+      }
+    }
     if (frame === posterFrame) await copyFile(framePath, posterPath);
   }
   if (!stillsOnly) {
@@ -230,11 +267,19 @@ try {
   assert.equal(completedReceipt.data.status, "COMPLETED",
     "Only the newly completed real analysis may be used for a fresh recording.");
   }
-  // Capture a native-resolution crop of the actual viewer, keeping the app's
-  // sidebar and metrics outside the frame without changing the rendered UI.
-  await page.setViewportSize({ width: 3840, height: 2160 });
+  // Include the complete result layout, excluding only the navigation sidebar.
+  // Resize the browser so the real responsive layout fits the 16:9 media frame.
+  const reportWidth = capturePixelRatio === 1 ? 4320 : 3840;
+  const reportHeight = reportWidth * 9 / 16;
+  await page.setViewportSize({ width: reportWidth, height: reportHeight });
   await page.goto(baseUrl + reportPath, { waitUntil: "domcontentloaded" });
   await page.locator('.site-page-evidence-preview[aria-busy="false"][data-connection-state="ready"]').waitFor({ timeout: 60_000 });
+  await settle(page);
+  const layoutBox = await page.locator(".site-dashboard-layout").boundingBox();
+  assert.ok(layoutBox);
+  await page.setViewportSize({ width: reportWidth,
+    height: Math.ceil(layoutBox.width * 9 / 16 + reportHeight - layoutBox.height) });
+  await settle(page);
   const viewer = page.frameLocator('iframe[data-report-mode="live"]');
   await viewer.locator("html").evaluate(async () => {
     await document.fonts.ready;
@@ -242,10 +287,10 @@ try {
     await Promise.all([...document.images].filter(image => image.getBoundingClientRect().top < innerHeight)
       .map(image => image.decode().catch(() => undefined)));
   });
-  const viewerBox = await page.locator('iframe[data-report-mode="live"]').boundingBox();
-  assert.ok(viewerBox && viewerBox.width * 2 >= 3840, "The actual page crop must provide native 4K pixels.");
-  const reportClip = { x: viewerBox.x, y: viewerBox.y, width: viewerBox.width, height: viewerBox.width * 9 / 16 };
-  assert.ok(reportClip.height <= viewerBox.height, "The real page must contain the entire 16:9 recording region.");
+  const resultBox = await page.locator(".site-dashboard-layout").boundingBox();
+  assert.ok(resultBox && resultBox.width * capturePixelRatio >= 3840, "The result capture must provide native 4K pixels.");
+  const reportClip = { x: resultBox.x, y: resultBox.y, width: resultBox.width, height: resultBox.width * 9 / 16 };
+  assert.ok(Math.abs(reportClip.height - resultBox.height) <= 1, "The full result must fit the recording frame.");
   const maximumScroll = await viewer.locator("html").evaluate(() => document.documentElement.scrollHeight - innerHeight);
   const scrollDistance = Math.min(reportClip.height * 0.72, Math.max(0, maximumScroll));
   await page.mouse.move(1, 1);
@@ -254,7 +299,39 @@ try {
     const progress = Math.max(0, Math.min(1, (frame - 8) / 32));
     const eased = progress * progress * (3 - 2 * progress);
     await viewer.locator("html").evaluate((_, top) => window.scrollTo({ top, behavior: "instant" }), Math.round(scrollDistance * eased));
-  }, 24, reportClip);
+  }, 0, reportClip);
+
+  if (withFindings) {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await settle(page);
+    const card = page.locator(".site-page-evidence-card");
+    const initialBox = await card.boundingBox();
+    assert.ok(initialBox);
+    await page.setViewportSize({ width: 1920,
+      height: Math.ceil(initialBox.width * 9 / 16 + 1080 - initialBox.height) });
+    await viewer.locator("html").evaluate(() => window.scrollTo({ top: 160, behavior: "instant" }));
+    const marker = viewer.locator(`.ap-live-marker[data-issue-id="${findingsIssueId}"]`);
+    await marker.click();
+    const popover = viewer.locator(".ap-live-popover:visible");
+    await popover.waitFor();
+    await settle(page);
+    const cardBox = await card.boundingBox();
+    const popoverBox = await popover.boundingBox();
+    assert.ok(cardBox && popoverBox);
+    const clip = { x: cardBox.x, y: cardBox.y, width: cardBox.width, height: cardBox.width * 9 / 16 };
+    assert.ok(popoverBox.x >= clip.x && popoverBox.y >= clip.y &&
+      popoverBox.x + popoverBox.width <= clip.x + clip.width &&
+      popoverBox.y + popoverBox.height <= clip.y + clip.height,
+      "The complete real issue explanation must be visible in the findings capture.");
+    const posterPath = join(output, "issue-detail.png");
+    await page.mouse.move(1, 1);
+    await page.screenshot({ path: posterPath, clip });
+    findingsCapture = { issueId: findingsIssueId, posterPath, source: page.url(),
+      text: await popover.innerText(), captureRegion: clip, verified: true };
+    if (!stillsOnly) await runFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", posterPath,
+      "-vf", "scale=2560:1440:flags=lanczos", "-frames:v", "1", "-c:v", "libwebp", "-quality", "90",
+      join(mediaOutput, "issue-detail.webp")], { windowsHide: true });
+  }
 
   if (!reportOnly) {
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -274,9 +351,18 @@ try {
         await copyFile(join(mediaOutput, "vid", scene + suffix + ".mp4"), join(destination, "vid", scene + suffix + ".mp4"));
       }
     }
+    if (findingsCapture) await copyFile(join(mediaOutput, "issue-detail.webp"), join(root, "src/assets/landing/issue-detail.webp"));
     console.log("Updated " + scenes.length + " landing posters and " + scenes.length * variants.length + " videos.");
   }
   console.log("Verified capture: " + output);
+  try {
+    const removed = cleanupRecordingFrames(root, output, {
+      completed: true, stillsOnly, keepFrames: args.has("--keep-frames"), scenes
+    });
+    console.log(`Removed ${removed.length} sequence PNGs; posters, videos and capture manifest retained.`);
+  } catch (error) {
+    console.warn(`Recording succeeded; frame cleanup could not finish: ${error.message}`);
+  }
 } catch (error) {
   await page.screenshot({ path: join(output, "capture-error.png") }).catch(() => undefined);
   await writeFile(join(output, "capture-error.txt"), String(error) + "\n" + await page.locator("body").innerText()).catch(() => undefined);

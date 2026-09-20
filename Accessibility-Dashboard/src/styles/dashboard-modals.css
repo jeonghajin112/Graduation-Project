@@ -45,6 +45,7 @@
 }
 
 .dashboard-modal-surface--split { display: flex; flex-direction: column; overflow: hidden; }
+.site-create-modal-scroll:focus-visible { outline: 2px solid var(--modal-focus); outline-offset: -3px; }
 .dashboard-modal-content { padding: 1.5rem; }
 .dashboard-modal-title { color: var(--modal-text); font-size: 1.125rem; font-weight: 600; line-height: 1.5; letter-spacing: -0.015em; }
 .dashboard-modal-description { color: var(--modal-muted); font-size: 0.875rem; line-height: 1.6; overflow-wrap: anywhere; }
@@ -62,7 +63,7 @@
   font-size: 0.875rem;
 }
 .dashboard-modal-input::placeholder { color: var(--modal-muted); }
-.dashboard-modal-input:focus-visible { border-color: var(--modal-focus); outline: 2px solid var(--modal-focus); outline-offset: 2px; box-shadow: none; }
+.dashboard-modal-input:focus-visible { border-color: var(--modal-focus); outline: 2px solid var(--modal-focus); outline-offset: -2px; box-shadow: none; }
 .dashboard-modal-input[aria-invalid="true"] { border-color: var(--modal-error); }
 .dashboard-modal-input[aria-invalid="true"]:focus-visible { outline-color: var(--modal-error); }
 
@@ -118,7 +119,7 @@
 .dashboard-modal-theme-option { min-height: 1.75rem; color: var(--modal-text); }
 .dashboard-modal-theme-option:hover { background: var(--modal-secondary-hover); }
 .dashboard-modal-theme-option[data-selected="true"] { background: var(--modal-text); color: var(--modal-surface); }
-.dashboard-modal-theme-option:focus-within { outline: 2px solid var(--modal-focus); outline-offset: 2px; }
+.dashboard-modal-theme-option:has(input:focus-visible) { outline: 2px solid var(--modal-focus); outline-offset: 2px; }
 
 @media (prefers-reduced-transparency: reduce) {
   .dashboard-modal-layer { background: rgb(0 0 0 / 75%); -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -130,6 +131,6 @@
   .dashboard-modal-button { border: 1px solid ButtonText; }
   .dashboard-modal-input:focus-visible,
   .dashboard-modal-button:focus-visible,
-  .dashboard-modal-theme-option:focus-within { outline-color: Highlight; }
+  .dashboard-modal-theme-option:has(input:focus-visible) { outline-color: Highlight; }
   .dashboard-modal-theme-option[data-selected="true"] { outline: 2px solid Highlight; }
 }

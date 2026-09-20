@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+
+import { ErrorBoundary, isLazyChunkLoadError } from "@/components/shared/error-boundary";
+import { ModalErrorFallback, ModalLoadFallback } from "../shared/modal-load-fallback";
 
 import { getApiErrorMessage, isAbortError } from "@/services/backend-api";
 import { clearSiteCreateRecovery, readSiteCreateRecovery } from "@/services/site-create-recovery-storage";
@@ -18,7 +21,6 @@ import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
 import { severityChartItems } from "./site-dashboard/constants";
-import { IssueLocationDialog } from "./site-dashboard/issue-location-dialog";
 import { PageAnalysisActions } from "./site-dashboard/page-analysis-actions";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
@@ -29,6 +31,9 @@ import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-resu
 import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
 
 import "@/styles/page-evidence-layout.css";
+
+const IssueLocationDialog = lazy(() => import("./site-dashboard/issue-location-dialog")
+  .then(module => ({ default: module.IssueLocationDialog })));
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;
@@ -371,11 +376,25 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
         )}
       </div>
       {locationRow ? (
-        <IssueLocationDialog
-          row={locationRow}
-          state={currentLocatorReport?.issueStates[locationRow.issue.id]}
-          onClose={() => setLocationIssueId(null)}
-        />
+        <ErrorBoundary
+          resetKey={`issue-location:${locationRow.issue.id}`}
+          fallback={({ error, resetErrorBoundary }) => (
+            <ModalErrorFallback
+              isChunkError={isLazyChunkLoadError(error)}
+              onDismiss={() => setLocationIssueId(null)}
+              onRetry={resetErrorBoundary}
+              onReload={() => window.location.reload()}
+            />
+          )}
+        >
+          <Suspense fallback={<ModalLoadFallback />}>
+            <IssueLocationDialog
+              row={locationRow}
+              state={currentLocatorReport?.issueStates[locationRow.issue.id]}
+              onClose={() => setLocationIssueId(null)}
+            />
+          </Suspense>
+        </ErrorBoundary>
       ) : null}
     </div>
   );

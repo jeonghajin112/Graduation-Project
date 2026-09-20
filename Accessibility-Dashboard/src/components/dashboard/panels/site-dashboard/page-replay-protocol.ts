@@ -115,6 +115,11 @@ export type PageReplayIssue = {
 export type DashboardToPageReplayMessage =
   | {
       source: typeof DASHBOARD_REPLAY_SOURCE;
+      type: "FOCUS_REPORT_UI";
+      direction: "forward" | "backward";
+    }
+  | {
+      source: typeof DASHBOARD_REPLAY_SOURCE;
       type: "REQUEST_DOCUMENT_STATE";
     }
   | {
@@ -153,6 +158,12 @@ export type LocatorConnectionStatus =
 export type LiveDocumentHealthStatus = "EMPTY" | "MEANINGFUL";
 
 export type PageReplayToDashboardMessage =
+  | {
+      source: typeof PAGE_REPLAY_SOURCE;
+      type: "REPORT_FOCUS_EXIT";
+      documentToken: string;
+      direction: "forward" | "backward";
+    }
   | {
       source: typeof PAGE_REPLAY_SOURCE;
       type: "DOCUMENT_SCROLL";
@@ -569,6 +580,14 @@ function toOptionalBoundedReplayText(
 export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMessage | null {
   if (!isRecord(value) || value.source !== PAGE_REPLAY_SOURCE || typeof value.type !== "string") {
     return null;
+  }
+
+  if (value.type === "REPORT_FOCUS_EXIT" &&
+      hasExactOwnKeys(value, ["source", "type", "documentToken", "direction"]) &&
+      isDocumentToken(value.documentToken) &&
+      (value.direction === "forward" || value.direction === "backward")) {
+    return { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT",
+      documentToken: value.documentToken, direction: value.direction };
   }
 
   if (value.type === "DOCUMENT_SCROLL" &&

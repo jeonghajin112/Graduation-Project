@@ -6,17 +6,18 @@ import path from "node:path";
 
 import { chromium } from "playwright";
 import { exportLiveReportBrowserFixture } from "./fixtures/live-report-browser-fixture.mjs";
+import { verifyLiveReportKeyboardNavigation } from "./fixtures/live-report-keyboard-checks.mjs";
 
 const sessionId = "6b2d884e-a7f4-4f09-9776-688d08fe8912";
 const bridgeSecret = "test-bridge-secret";
 const challenge = "live_marker_browser_challenge_00000001";
 
-function createParentHtml() {
+function createParentHtml(viewerUrl = "/viewer") {
   return `<!doctype html>
     <html lang="en">
       <head><meta charset="utf-8"><title>Live marker harness</title></head>
       <body style="margin:0">
-        <iframe id="viewer" title="Live report" src="/viewer" style="width:900px;height:760px;border:0"></iframe>
+        <iframe id="viewer" title="Live report" src="${viewerUrl}" style="width:900px;height:760px;border:0"></iframe>
         <script>
           (() => {
             const iframe = document.getElementById("viewer");
@@ -60,6 +61,11 @@ function createParentHtml() {
                   documentToken = incoming.documentToken;
                   window.__liveConnected = true;
                 }
+                if (incoming?.type === "EVENT" && incoming.documentToken === documentToken &&
+                    incoming.payload?.type === "REPORT_FOCUS_EXIT") {
+                  document.getElementById(incoming.payload.direction === "backward"
+                    ? "before-viewer" : "after-viewer")?.focus();
+                }
               };
               port.start();
               iframe.contentWindow.postMessage({
@@ -68,7 +74,7 @@ function createParentHtml() {
                 protocolVersion: 1,
                 bridgeSecret: ${JSON.stringify(bridgeSecret)},
                 challenge: ${JSON.stringify(challenge)}
-              }, location.origin, [channel.port2]);
+              }, new URL(iframe.src).origin, [channel.port2]);
             });
           })();
         <\/script>
@@ -129,7 +135,9 @@ try {
       return;
     }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    response.end(parentHtml);
+    response.end(request.url === "/keyboard"
+      ? createParentHtml(`http://localhost:${server.address().port}/viewer`)
+      : parentHtml);
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -882,6 +890,9 @@ try {
     "unchanged locator states must not be emitted on the periodic layout pass"
   );
 
+  // Site-level smooth scrolling must not make a location command inspect
+  // intermediate coordinates and fall back before the target is reached.
+  await frame.locator("html").evaluate(element => { element.style.scrollBehavior = "smooth"; });
   await page.evaluate(() => window.__sendLiveCommand({
     source: "accessibility-dashboard",
     type: "FOCUS_ISSUE",
@@ -939,6 +950,17 @@ try {
     event?.type === "EVENT" && event.payload?.type === "LOCATOR_STATUS"
       && event.payload.issueId === 203 && event.payload.status === "VISIBLE"
   ));
+  const locationResults = await page.evaluate(() => window.__liveEvents
+    .filter(event => event?.type === "EVENT" && event.payload?.type === "ISSUE_DETAIL_FALLBACK"
+      && [202, 203].includes(event.payload.issueId)));
+  assert.deepEqual(locationResults, [], "smooth site scrolling must not produce a false location failure");
+  const focusedTarget = await frame.locator("#hidden-state-target").evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, viewport: innerHeight };
+  });
+  assert.ok(focusedTarget.top >= 0 && focusedTarget.bottom <= focusedTarget.viewport,
+    `the requested hidden-slide target must finish inside the viewport: ${JSON.stringify(focusedTarget)}`);
+  await frame.locator("html").evaluate(element => { element.style.scrollBehavior = "auto"; });
 
   await page.evaluate(() => window.__sendLiveCommand({
     source: "accessibility-dashboard",
@@ -1644,12 +1666,20 @@ try {
     ).at(-1)?.payload.reason, issue.id), reason, "retrying an unavailable location must preserve its actual failure reason");
   }
 
+  await page.goto(`http://127.0.0.1:${address.port}/keyboard`, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => window.__liveConnected === true);
+  assert.notEqual(new URL(page.url()).origin,
+    new URL(await page.locator('#viewer').getAttribute('src')).origin,
+    "keyboard navigation must work across the real cross-origin iframe boundary");
+  await verifyLiveReportKeyboardNavigation(page, frame, createIssue, rewrittenHtml);
+
   console.log(JSON.stringify({
     result: "PASS",
     bridge: "LiveReportDocumentRewriter",
     markerCount: geometry.length,
     visualMarkerChip: chipStyle,
     groupedIssueCount: 3,
+    keyboardNavigation: "report controls only, bidirectional frame exit",
     locatorStatusCount: locatorEvents.length,
     deterministicLeftRail: true,
     topEdgeScenarios: edgeLayouts.length,

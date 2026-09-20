@@ -16,6 +16,9 @@
   const pageLiveSource = 'accessibility-page-live-report';
   const protocolVersion = 1;
   const expectedParent = parent;
+  // Rewritten child documents have their own transport shim, but keyboard
+  // navigation belongs to the outer viewer connected to the dashboard.
+  const ownsReportKeyboard = expectedParent === top;
   const nativeApply = Reflect.apply;
   const NativeMessagePort = MessagePort;
   const NativeMutationObserver = globalThis.MutationObserver;
@@ -30,6 +33,9 @@
   const nativeAttachShadow = Element.prototype.attachShadow;
   const nativeClosest = Element.prototype.closest;
   const nativeScrollIntoView = Element.prototype.scrollIntoView;
+  const nativeFocus = HTMLElement.prototype.focus;
+  const nativeBlur = HTMLElement.prototype.blur;
+  const nativeWindowFocus = globalThis.focus;
   const nativePortPostMessage = MessagePort.prototype.postMessage;
   const nativePortStart = MessagePort.prototype.start;
   const nativePortClose = MessagePort.prototype.close;
@@ -239,6 +245,7 @@
     if (!isObjectRecord(payload) || payload.source !== parentSource || typeof payload.type !== 'string') return false;
     if (payload.type === 'REQUEST_DOCUMENT_STATE') return true;
     if (payload.type === 'FOCUS_ISSUE') return payload.issueId === null || isIssueId(payload.issueId);
+    if (payload.type === 'FOCUS_REPORT_UI') return payload.direction === 'forward' || payload.direction === 'backward';
     if (payload.type === 'SET_MARKERS_VISIBLE') return typeof payload.markersVisible === 'boolean';
     if (payload.type === 'SET_VIEW_SCALE') {
       return payload.documentToken === documentToken
@@ -996,6 +1003,128 @@ const isReplayUiTarget = target => {
     || nativeApply(nativeNodeContains, layer, [target])
     || nativeApply(nativeNodeContains, popover, [target]);
 };
+// The source owns its focus attributes. Rewriting them can compete forever with
+// roving-tabindex widgets. Only report controls participate in our Tab order.
+const reportTabControls = () => layer.hidden ? [] :
+  Array.from(layer.querySelectorAll('button,[tabindex]')).filter(control =>
+    !control.disabled && control.tabIndex >= 0 && control.getClientRects().length > 0
+      && !control.closest('[hidden]') && getComputedStyle(control).visibility !== 'hidden');
+const moveReportFocus = (direction, from = null) => {
+  const controls = reportTabControls();
+  const index = controls.indexOf(from);
+  const next = index < 0
+    ? (direction === 'backward' ? controls.at(-1) : controls[0])
+    : controls[index + (direction === 'backward' ? -1 : 1)];
+  if (next) nativeApply(nativeFocus, next, [{preventScroll:true}]);
+  else post({type:'REPORT_FOCUS_EXIT', direction});
+};
+// Keyboard events in a child browsing context never bubble here, including
+// opaque/sandboxed frames. After its mouse interaction, park keyboard focus in
+// our own document. Do not cancel the click or mutate the embedded document.
+const sourceFocusAnchor = document.createElement('span');
+sourceFocusAnchor.tabIndex = -1;
+sourceFocusAnchor.setAttribute('aria-label', '리포트 키보드 이동');
+sourceFocusAnchor.style.cssText = 'position:fixed;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;';
+const focusShadowRoots = new WeakMap();
+const childFocusBindings = new Map();
+let nestedFocusPending = false;
+let focusGuardDisposed = false;
+const frameBelongsToViewer = frame => {
+  try {
+    let current = frame;
+    while (current?.isConnected) {
+      if (current.ownerDocument === document) return true;
+      current = current.ownerDocument.defaultView?.frameElement;
+    }
+  } catch (_) { /* A frame may change origin before its load event arrives. */ }
+  return false;
+};
+const pruneChildFocus = () => {
+  for (const [frame, binding] of childFocusBindings) {
+    if (!frameBelongsToViewer(frame)) { binding.dispose(); childFocusBindings.delete(frame); }
+  }
+};
+const bindChildFocus = frame => {
+  let child;
+  try { child = frame.contentDocument; } catch (_) { return; }
+  if (childFocusBindings.get(frame)?.document === child) return;
+  childFocusBindings.get(frame)?.dispose();
+  childFocusBindings.delete(frame);
+  if (!child?.defaultView) return;
+  const childWindow = child.defaultView;
+  const onKey = event => {
+    if (event.key !== 'Tab') return;
+    nativeApply(nativePreventDefault, event, []);
+    nativeApply(nativeStopImmediatePropagation, event, []);
+    moveReportFocus(event.shiftKey ? 'backward' : 'forward');
+  };
+  const onLoad = event => {
+    if (event.target?.tagName === 'IFRAME') bindChildFocus(event.target);
+  };
+  const scan = root => {
+    if (root?.tagName === 'IFRAME') bindChildFocus(root);
+    root.querySelectorAll?.('iframe').forEach(bindChildFocus);
+  };
+  const observer = new NativeMutationObserver(records => {
+    records.forEach(record => record.addedNodes.forEach(scan));
+    pruneChildFocus();
+  });
+  childFocusBindings.set(frame, {document:child, dispose:() => {
+    observer.disconnect();
+    nativeApply(nativeRemoveEventListener, childWindow, ['keydown', onKey, true]);
+    nativeApply(nativeRemoveEventListener, child, ['load', onLoad, true]);
+  }});
+  nativeApply(nativeAddEventListener, childWindow, ['keydown', onKey, true]);
+  nativeApply(nativeAddEventListener, child, ['load', onLoad, true]);
+  observer.observe(child, {childList:true, subtree:true});
+  scan(child);
+};
+const scanChildFocus = root => {
+  if (root?.tagName === 'IFRAME') bindChildFocus(root);
+  root.querySelectorAll?.('iframe').forEach(bindChildFocus);
+};
+const childFocusObserver = new NativeMutationObserver(records => {
+  records.forEach(record => {
+    if (!isReplayUiTarget(record.target)) record.addedNodes.forEach(scanChildFocus);
+  });
+  pruneChildFocus();
+});
+const childFocusLoad = event => { if (event.target?.tagName === 'IFRAME') bindChildFocus(event.target); };
+if (ownsReportKeyboard) {
+  childFocusObserver.observe(document, {childList:true, subtree:true});
+  nativeApply(nativeAddEventListener, document, ['load', childFocusLoad, true]);
+  scanChildFocus(document);
+}
+const activeSourceFrame = () => {
+  let active = document.activeElement;
+  while (active) {
+    const root = active.shadowRoot || focusShadowRoots.get(active);
+    if (!root?.activeElement) break;
+    active = root.activeElement;
+  }
+  return active?.tagName === 'IFRAME' || active?.tagName === 'FRAME' ? active : null;
+};
+const parkNestedFrameFocus = () => {
+  if (nestedFocusPending || focusGuardDisposed) return;
+  nestedFocusPending = true;
+  setTimeout(() => {
+    nestedFocusPending = false;
+    // hasFocus also covers descendants, but is false after leaving the viewer.
+    const childFrame = activeSourceFrame();
+    if (focusGuardDisposed || !document.hasFocus() || !childFrame) return;
+    try {
+      if (childFrame.contentDocument) { bindChildFocus(childFrame); return; }
+    } catch (_) { /* Opaque frames return keyboard focus to the viewer. */ }
+    if (!sourceFocusAnchor.isConnected) document.documentElement.append(sourceFocusAnchor);
+    nativeApply(nativeBlur, childFrame, []);
+    nativeApply(nativeWindowFocus, globalThis, []);
+    nativeApply(nativeFocus, sourceFocusAnchor, [{preventScroll:true}]);
+  }, 0);
+};
+if (ownsReportKeyboard) {
+  nativeApply(nativeAddEventListener, globalThis, ['blur', parkNestedFrameFocus, true]);
+  nativeApply(nativeAddEventListener, document, ['focusin', parkNestedFrameFocus, true]);
+}
 const closestElement = (element, selector) => {
   try { return nativeApply(nativeClosest, element, [selector]); }
   catch (_) { return null; }
@@ -1105,6 +1234,14 @@ const guardReadOnlyInteraction = event => {
   nativeApply(nativeAddEventListener, globalThis, [type, guardReadOnlyInteraction, {capture:true, passive:false}]);
 });
 const guardReadOnlyKeyboard = event => {
+  if (event.key === 'Tab' && ownsReportKeyboard) {
+    nativeApply(nativeStopImmediatePropagation, event, []);
+    if (event.type === 'keydown') {
+      nativeApply(nativePreventDefault, event, []);
+      moveReportFocus(event.shiftKey ? 'backward' : 'forward', document.activeElement);
+    }
+    return;
+  }
   if (event.key !== 'Enter' && event.key !== ' ') return;
   guardReadOnlyInteraction(event);
 };
@@ -2693,7 +2830,9 @@ const resolveIssueSnapshot = (issueIds = null) => {
   const scrollLocatorIntoView = element => {
     try {
       nativeApply(nativeScrollIntoView, element, [
-        {block:'center', inline:'center', behavior:'auto'}
+        // 'auto' inherits the site's smooth scrolling. The subsequent layout
+        // check would see an intermediate position and incorrectly give up.
+        {block:'center', inline:'center', behavior:'instant'}
       ]);
       return true;
     } catch (_) { return false; }
@@ -2798,6 +2937,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     }
   }, true);
   handleLiveCommand = data => {
+    if (data.type === 'FOCUS_REPORT_UI') moveReportFocus(data.direction);
     if (data.type === 'REQUEST_DOCUMENT_STATE') {
       post({type:'DOCUMENT_LOADING'});
       if (ready) {
@@ -2876,9 +3016,11 @@ const resolveIssueSnapshot = (issueIds = null) => {
   }, 1000);
   // Attaching a root to an existing host emits no DOM mutation.
   // Reuse the reconciliation queue for locator paths and inset navigation.
-  // Closed roots remain private to their source components.
+  // Closed roots are retained weakly only for nested keyboard scope detection.
   const attachShadowForMarkers = function(...args) {
     const root = nativeApply(nativeAttachShadow, this, args);
+    focusShadowRoots.set(this, root);
+    if (ownsReportKeyboard) childFocusObserver.observe(root, {childList:true, subtree:true});
     if (root.mode === 'open' && viewTopInset > 0) {
       insetCandidateRoots.add(this);
       schedulePosition('preserve-root');
@@ -2910,6 +3052,14 @@ const resolveIssueSnapshot = (issueIds = null) => {
       documentReadyObserver.disconnect(); documentReadyObserver = null;
     }
     if (!event.persisted) {
+      focusGuardDisposed = true;
+      childFocusObserver.disconnect();
+      nativeApply(nativeRemoveEventListener, document, ['load', childFocusLoad, true]);
+      childFocusBindings.forEach(binding => binding.dispose());
+      childFocusBindings.clear();
+      nativeApply(nativeRemoveEventListener, globalThis, ['blur', parkNestedFrameFocus, true]);
+      nativeApply(nativeRemoveEventListener, document, ['focusin', parkNestedFrameFocus, true]);
+      sourceFocusAnchor.remove();
       if (titleObserver) { titleObserver.disconnect(); titleObserver = null; }
       clearInterval(markerPositionTimer);
       if (markerPositionFrame) cancelAnimationFrame(markerPositionFrame);

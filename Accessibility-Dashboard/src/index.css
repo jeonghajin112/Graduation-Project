@@ -649,6 +649,7 @@
 
   .bridge-dashboard .dashboard-account-menu {
     width: var(--dashboard-account-menu-width);
+    border: 1px solid #cbd5e1;
   }
 
   .bridge-dashboard .dashboard-account-menu-item {
@@ -664,6 +665,7 @@
   }
 
   .bridge-dashboard.theme-dark .dashboard-account-menu {
+    border-color: #52525b;
     background-color: #242424 !important;
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
   }

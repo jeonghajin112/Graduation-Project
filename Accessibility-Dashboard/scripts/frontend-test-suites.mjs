@@ -11,8 +11,11 @@ const viteTest = (file, options = {}) => ({
 });
 
 const infrastructure = nodeTest("verify-test-infrastructure.mjs");
+const artifactRetention = nodeTest("verify-artifact-retention.mjs");
+const favicons = nodeTest("verify-favicons.mjs");
 const locatorStateBatching = nodeTest("verify-locator-state-batching.mjs");
 const accessibility = viteTest("verify-accessibility-p0.mjs");
+const focusVisibility = viteTest("verify-focus-visibility.mjs");
 const dashboardBootAccessibility = viteTest("verify-dashboard-boot-accessibility.mjs");
 const pollingCancel = viteTest("verify-analysis-polling-cancel.mjs");
 const quickAnalysisProgress = viteTest("verify-quick-analysis-progress.mjs");
@@ -52,16 +55,21 @@ const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
 });
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
+const landingReportReadiness = nodeTest("verify-landing-report-readiness.mjs");
 const modalAppearance = viteTest("verify-modal-appearance.mjs");
 const dashboardResponsiveLayout = viteTest("verify-dashboard-responsive-layout.mjs");
 
 const ci = [
   infrastructure,
+  artifactRetention,
+  favicons,
   locatorStateBatching,
   accessibility,
+  focusVisibility,
   modalAppearance,
   dashboardResponsiveLayout,
   landingDesign,
+  landingReportReadiness,
   dashboardBootAccessibility,
   pollingCancel,
   quickAnalysisProgress,

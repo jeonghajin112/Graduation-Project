@@ -1,17 +1,4 @@
-import type { ChartConfig } from "@/components/ui/line-charts-6";
-
 import type { SeverityChartItem } from "./types";
-
-export const chartConfig = {
-  score: {
-    label: "평균 점수",
-    color: "var(--site-score-line-color)"
-  },
-  issueCount: {
-    label: "문제 수",
-    color: "#ff8a00"
-  }
-} satisfies ChartConfig;
 
 export const severityChartItems: SeverityChartItem[] = [
   { key: "CRITICAL", label: "심각", color: "#f35f63" },

@@ -54,7 +54,11 @@ URL 분석과 프로젝트 페이지 등록은 요청 ID가 확인되면 입력 
 
 수동 재시도와 mutation 후 갱신은 이전 요청을 취소한다. 늦게 도착한 응답은 현재 요청의 상태를 덮지 못해야 한다. 갱신 실패 시 기존 snapshot을 유지하면서 오류와 재시도를 제공한다.
 
-현재 생성 흐름에는 일시적으로 오래된 overview가 도착할 때 기존 목록을 유지하는 directory recovery lease가 있다. 단순화하려면 서버 응답 일관성과 동시 삭제 시나리오를 먼저 확인해야 한다. 기존 수명·횟수 제한의 구현은 해당 훅과 회귀 테스트를 기준으로 한다.
+현재 생성 흐름에는 일시적으로 오래된 overview가 도착할 때 기존 목록을 유지하는 directory recovery lease가 있다. [dashboard-recovery.ts](../src/components/dashboard/shared/dashboard-recovery.ts)는 기준 snapshot과 요청 상태의 역행 여부, lease별 불완전 응답 횟수를 판단한다. `useDashboardData`는 lease의 시작·종료와 fetch·polling·React 상태의 수명을 소유한다. 단순화하려면 서버 응답 일관성과 동시 삭제 시나리오를 먼저 확인해야 한다.
+
+overview 전체 비교는 실제 overview 응답을 받을 때만 수행한다. 개별 요청의 정상 진행 상태 polling마다 전체를 직렬화하지 않는다. 요청의 `updatedAt`은 프로젝트 이름·페이지·결과 전체의 변경 버전이 아니므로, 서버가 집계 응답의 revision을 제공하기 전에는 이를 전체 변경 감지값으로 사용하지 않는다.
+
+생성·분석 작업의 제출 잠금, 작업 식별자, AbortController와 언마운트 정리는 [useMutationOperation](../src/components/dashboard/shared/use-mutation-operation.ts)이 함께 소유한다. 취소 후 새 작업이 시작되면 이전 작업의 완료 처리는 새 잠금을 해제하거나 새 요청을 취소할 수 없다. 새로고침 복구 기록과 서버 결과 확인은 각 생성 흐름에 남는다.
 
 ## API 경계
 
@@ -106,6 +110,10 @@ CV 점수의 `null`은 측정값이 없다는 뜻이며 실제 0점과 구분한
 
 현재 외부 페이지를 격리한 viewer를 표시한다. 분석 당시 정적 화면과 동일한 내용임을 보장하지 않으며, 캡처 크기와 locator를 현재 문서에 맞춰 해석한다.
 
+뷰어의 Tab 순서는 이슈 마커와 상세 안내의 조작 요소로 제한한다. 원본의 `tabindex`는 변경하지 않는다. 대시보드의 진입 컨트롤이 인증된 브리지로 `FOCUS_REPORT_UI`를 보내고, 뷰어는 Tab·Shift+Tab을 처리해 현재 표시 중인 리포트 컨트롤로 이동한다. 양 끝에서는 `REPORT_FOCUS_EXIT`를 보내 대시보드가 iframe 앞뒤 컨트롤로 이동시킨다. 활성 문서 토큰을 확인하며, 사용자가 이미 다른 곳으로 이동한 경우 늦은 이탈 메시지는 무시한다. 원본 메뉴의 Tab 처리도 차단하지만 기존에 허용된 마우스 탐색과 스크롤은 유지한다.
+
+Shadow DOM 안에서 시작한 키보드 이벤트도 같은 경로로 처리한다. 접근 가능한 하위 iframe은 문서 로드·교체 시 키보드 리스너를 연결한다. 접근할 수 없는 iframe은 포인터 작업이 끝난 뒤 뷰어의 포커스 대기 위치로 복귀시켜 다음 키보드 이동을 처리한다. 원본 속성을 관찰하며 덮어쓰는 observer는 사용하지 않는다. 실제 rewriter 문서와 React 화면 사이에서 양방향 진입·이탈, 원본 포커스 복원 코드, 클릭 후 이동, 빈 마커 목록을 검증한다.
+
 동적 리소스 주소 변환은 바뀐 요소의 속성만 처리한다. 같은 관찰자 호출에 모인 동일 속성 변경은 마지막 값으로 합치며, 새로 추가된 하위 트리만 탐색한다. 스타일시트 텍스트 변경은 별도로 변환한다. 이 처리 범위는 마커 위치 재탐색과 별개이며, [런타임 URL 회귀](../scripts/verify-live-report-runtime-urls.mjs)에서 주소 변환과 반복 탐색 비용을 검증한다.
 
 마커 대상 탐색은 한 번의 갱신 안에서 같은 문서·Shadow root와 선택자의 조회 결과를 공유한다. 단순한 문서 경로에서는 대상에 영향을 주지 않는 속성 변경의 재탐색을 생략하며, 텍스트 내용 대조가 필요한 문제만 다시 확인한다. 자식 구조·ID 변경이나 복잡한 선택자·프레임·Shadow 경로는 보수적으로 전체 대상을 다시 확인한다. 확인 결과가 달라진 대상의 마커만 교체하고 나머지 마커와 선택 상태는 유지한다. 위치 계산은 별도로 계속 수행하므로 이 최적화를 모든 레이아웃 계산의 제거로 해석하지 않는다.
@@ -116,7 +124,7 @@ CV 점수의 `null`은 측정값이 없다는 뜻이며 실제 0점과 구분한
 
 마커의 상세 팝오버는 불투명한 배경을 사용한다. iframe 축소와 팝오버의 역배율 확대가 겹칠 때 배경 블러가 패널 바깥에 합성되는 현상을 피하기 위해 `backdrop-filter`를 사용하지 않는다. 묶음 문제를 넘길 때의 높이 고정과 글자 크기 보정은 유지한다.
 
-미표시 문제에는 뷰어가 전달한 사유를 표시한다. 카드의 ‘문제 상세’에서는 미리보기에서 잘린 전체 설명과 개선 안내, 분석 당시 요소 경로, 프레임·Shadow DOM 경로, HTML과 좌표를 확인한다. 긴 내용은 대화상자 본문에서 키보드로도 스크롤할 수 있다. 저장된 HTML은 텍스트로만 렌더링하며, 과거 좌표를 현재 페이지의 정확한 위치로 표시하지 않는다.
+미표시 문제에는 뷰어가 전달한 사유를 표시한다. 카드 안에서 전체 설명과 개선 안내를 스크롤하며 읽을 수 있다. ‘문제 상세’ 대화상자는 열 때 지연 로딩하며, 분석 당시 요소 경로, 프레임·Shadow DOM 경로, HTML과 좌표도 제공한다. 카드와 대화상자 본문 모두 키보드로 스크롤할 수 있다. 저장된 HTML은 텍스트로만 렌더링하며, 과거 좌표를 현재 페이지의 정확한 위치로 표시하지 않는다.
 
 위치 확인 경로에서 사용하는 열린 Shadow DOM은 별도로 관찰한다. 늦게 생성된 root·요소, 내용 변경과 제거도 기존 위치 갱신 큐로 처리하고, 이슈 재초기화·host 제거·문서 종료 때 관찰자를 해제한다. 상태가 같더라도 미표시 이유가 달라지면 새 이유를 전달한다.
 
@@ -138,7 +146,8 @@ CV 점수의 `null`은 측정값이 없다는 뜻이며 실제 0점과 구분한
 |---|---|
 | viewer URL·origin 설정 | [src/config](../src/config/) |
 | 메시지 변환·검증 | [page-replay-protocol.ts](../src/components/dashboard/panels/site-dashboard/page-replay-protocol.ts) |
-| iframe 연결·위치 상태 | [rendered-page-evidence-card.tsx](../src/components/dashboard/panels/site-dashboard/rendered-page-evidence-card.tsx) |
+| iframe 연결·문서 수명·위치 상태 | [use-page-evidence-connection.ts](../src/components/dashboard/panels/site-dashboard/use-page-evidence-connection.ts) |
+| 리포트 표시·크기 측정 | [rendered-page-evidence-card.tsx](../src/components/dashboard/panels/site-dashboard/rendered-page-evidence-card.tsx) |
 | HTML·리소스 URL 변환과 출력 예산 | [LiveReportDocumentRewriter.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportDocumentRewriter.java) |
 | 브리지 설정 직렬화·클래스패스 자산 조립 | [LiveReportBridgeAssets.java](../../ap-backend/src/main/java/com/accessibility/platform/livereport/LiveReportBridgeAssets.java) |
 | 브라우저 연결·요청·관찰자 수명 | [bridge-runtime.js](../../ap-backend/src/main/resources/livereport/bridge-runtime.js) |
@@ -152,6 +161,14 @@ POST 시작과 종료 시 해당 세션의 리다이렉트 본문을 무효화�
 
 요청 제한시간과 부모 취소 신호의 연결·정리는 [async-cancellation.ts](../src/services/async-cancellation.ts)의 `createRequestDeadline`이 담당한다. 수정 요청, 대시보드 조회·상태 폴링, 페이지 생성 확인이 이를 공유한다. 재시도 여부와 생성·삭제 결과의 불확실성 판단은 각 복구 흐름이 유지한다.
 
+## 파비콘 표시와 저장
+
+프로젝트 목록과 페이지 상세는 서버가 검증한 `/api/favicons/{sha256}.png|svg`만 표시한다. 외부 URL·누락·캐시 실패는 기본 지구본으로 표시하며 브라우저가 원본 `/favicon.ico`를 다시 내려받지 않는다. 별도 API origin은 공통 API 설정을 따른다.
+
+백엔드는 HTML 256KiB, 아이콘 후보 4개, 후보별 다운로드 64KiB, 요청 5초·전체 조회 10초로 제한한다. 래스터는 실제 디코딩 전 최대 128px를 확인하고 긴 변 최대 64px PNG로 변환한다. 작은 원본은 확대하지 않는다. SVG는 외부 자원·스크립트를 거부하고 64px 표시 크기로 저장한다. 표시 파일은 최대 32KiB, 디스크 캐시는 512개·최대 16MiB이며 재시작 후에도 유지한다. 경로는 `accessibility.favicon.cache-directory`로 지정할 수 있다.
+
+`POST /api/targets/{id}/favicon/refresh`는 분석을 실행하지 않는다. 외부 조회는 DB 트랜잭션 밖에서 수행하고, 조회를 시작한 URL이 여전히 같으며 삭제되지 않은 경우에만 파비콘 필드를 갱신한다. 실패하면 기존 값을 보존한다. 과거 외부 주소나 캐시에서 제거된 아이콘은 이 API로 다시 수집할 수 있다. [파비콘 브라우저 회귀](../scripts/verify-favicons.mjs)는 두 화면의 로딩·실패 표시와 외부 원본 미요청을 검증한다.
+
 ## 회귀 검증과 보류 항목
 
 재분석 실패의 작업 간 격리와 삭제 후 현재 경로 보존은 기본 CI의 [재분석 회귀](../scripts/verify-rescan-recovery-isolation.mjs)와 [삭제 회귀](../scripts/verify-directory-mutation-recovery.mjs)가 검증한다. 대량 이슈와 폼 차단은 실제 React 카드와 Java 문서를 연결하는 [리포트 경계 회귀](../scripts/verify-live-report-boundaries.mjs), Shadow DOM과 이유 변경은 [마커 회귀](../scripts/verify-live-report-markers.mjs)가 검증한다.
@@ -163,3 +180,7 @@ POST 시작과 종료 시 해당 세션의 리다이렉트 본문을 무효화�
 앱·패널·모달의 오류 경계는 해당 범위에서 재시도할 수 있게 한다. 상세 조회 하나의 실패가 다른 자료를 지우지 않아야 한다.
 
 랜딩·대시보드·제품 미리보기, 상세 패널과 모달은 사용 시점에 지연 로딩한다. 정확한 청크와 예산은 [verify-bundle-boundaries.mjs](../scripts/verify-bundle-boundaries.mjs)가 관리한다. 새 분할은 실제 초기 로딩 비용과 사용자 대기 시간을 근거로 결정한다.
+
+추이 차트는 Recharts의 크기 컨테이너와 기존 전용 tooltip을 직접 사용한다. 한 차트에서 사용하지 않던 범용 테마·범례·컨텍스트 계층을 두지 않는다. 상세 패널의 지연 로딩 경계와 그래프 표시·키보드 접근은 유지한다.
+
+랜딩 영상은 화면에 가까운 장면만 내려받고 화면 크기·배율에 따라 해상도를 선택한다. 첫 장면의 세 해상도는 H.264, CRF 26, 최대 8프레임 키프레임 간격, `faststart`로 압축했다. 기존 해상도·프레임 수·길이는 유지해 스크롤 탐색에 사용한다. [랜딩 검증](../scripts/verify-landing-design.mjs)은 초기 1080p 영상 한 개의 전송 예산 3MiB, 각 해상도의 프레임 탐색과 reduced-motion의 영상 미요청을 확인한다.

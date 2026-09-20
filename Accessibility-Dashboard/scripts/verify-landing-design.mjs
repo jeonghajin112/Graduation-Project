@@ -256,7 +256,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   // The report scene spans 4.3–6 viewport heights; inspect its settled midpoint.
   await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "실제 페이지를 그대로 확인하세요."
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
   await settle(page);
   const report = await page.evaluate(() => {
@@ -280,7 +280,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
   });
-  assert.equal(report.title, "실제 페이지를 그대로 확인하세요.", `${label}: report copy did not activate`);
+  assert.equal(report.title, "페이지와 분석 결과를 한눈에.", `${label}: report copy did not activate`);
   assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
   assert.equal(report.cardElementFound, true, `${label}: report card surface is missing`);
   assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
@@ -306,12 +306,12 @@ async function verifyReducedMotionViewport(browser, viewport) {
   );
   assert.deepEqual(
     await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__cta a').allTextContents(),
-    ["새 페이지 분석", "페이지 보기"],
+    ["새 페이지 분석", "분석 결과 보기"],
     `${label}: final actions are missing`
   );
-  await page.getByRole("link", { name: "페이지 보기", exact: true }).click();
+  await page.getByRole("link", { name: "분석 결과 보기", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "실제 페이지를 그대로 확인하세요."
+    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
 
   assert.equal(apiRequestCount, 0, `${label}: landing unexpectedly requested an API`);
@@ -355,6 +355,10 @@ async function verifyDesktopMotionPath(browser) {
   await page.waitForFunction(() => document.querySelectorAll("video").length === 1, null, { timeout: 15_000 });
   assert.equal(await page.locator("video").count(), 1, "initial desktop view must load only the opening clip");
   assert.deepEqual(videoRequests, ["/landing/scroll-world/vid/opening-1080.mp4"]);
+  const openingBytes = await page.evaluate(() => performance.getEntriesByType("resource")
+    .find((entry) => new URL(entry.name).pathname === "/landing/scroll-world/vid/opening-1080.mp4")?.encodedBodySize);
+  assert.ok(openingBytes > 0 && openingBytes <= 3 * 1024 * 1024,
+    `initial desktop video exceeds the 3 MiB media budget: ${openingBytes} bytes`);
 
   const scenes = [];
   for (const scene of refreshedScenes) {
@@ -404,7 +408,7 @@ async function verifyDesktopMotionPath(browser) {
   }
   assert.deepEqual(pageErrors, [], "desktop motion path raised a page error");
   await context.close();
-  return scenes;
+  return { openingBytes, scenes };
 }
 
 async function verifyRefreshedMediaVariants(browser) {
@@ -418,7 +422,7 @@ async function verifyRefreshedMediaVariants(browser) {
       { suffix: "-1440", width: 2560, height: 1440 },
       { suffix: "", width: 3840, height: 2160 }
     ]) {
-      for (const scene of refreshedScenes) {
+      for (const scene of [{ id: "opening" }, ...refreshedScenes]) {
         const path = `/landing/scroll-world/vid/${scene.id}${variant.suffix}.mp4`;
         const facts = await page.evaluate(async (src) => {
           const video = document.createElement("video");
@@ -577,7 +581,7 @@ async function verifyProductPreviewAccountMenu(browser) {
     };
   });
   assert.ok(metrics, "account dropdown metrics missing");
-  assert.equal(metrics.borderTopWidth, "0px", "account dropdown must not render an outer border");
+  assert.equal(metrics.borderTopWidth, "1px", "account dropdown must render a visible outer border");
   assert.ok(metrics.width <= 240, `account dropdown is too wide (${metrics.width}px)`);
   assert.ok(metrics.itemFontSize <= 14, `account dropdown type is too large (${metrics.itemFontSize}px)`);
   assert.ok(metrics.iconWidth <= 20, `account dropdown icon is too large (${metrics.iconWidth}px)`);
@@ -585,6 +589,44 @@ async function verifyProductPreviewAccountMenu(browser) {
     path: `${outDir}/product-preview-account-menu.png`
   });
   await context.close();
+}
+
+async function verifyFindingsStages(browser) {
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
+    const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+      await page.locator('[data-scroll-world-ready="true"]').waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      for (const phase of [0, 1, 2, 3]) {
+        await page.locator(".ua-findings__track").evaluate((track, step) => {
+          const rect = track.getBoundingClientRect();
+          window.scrollTo({ top: scrollY + rect.top + (rect.height - innerHeight) * ((step + 0.2) / 4), behavior: "instant" });
+        }, phase);
+        await page.waitForFunction((step) => {
+          const current = document.querySelector(".ua-findings__steps li[aria-current=step]");
+          return step === 0 ? !current : current === document.querySelectorAll(".ua-findings__steps li")[step - 1];
+        }, phase);
+        const figure = page.locator(".ua-findings__figure");
+        await figure.locator("img").evaluate(image => image.decode());
+        const facts = await figure.evaluate(element => {
+          const image = element.querySelector("img");
+          const rect = element.getBoundingClientRect();
+          return { imageRatio: image.naturalWidth / image.naturalHeight, step: element.dataset.step,
+            withinViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
+            overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+        });
+        assert.equal(facts.step, String(Math.max(0, phase - 1)));
+        assert.ok(Math.abs(facts.imageRatio - 16 / 9) < 0.01, "The current findings capture must fill its 16:9 frame without cropping.");
+        assert.equal(facts.withinViewport, true, `${viewport.width}: findings media escaped the viewport at phase ${phase}`);
+        assert.equal(facts.overflow, false);
+        await figure.screenshot({ path: `${outDir}/findings-${viewport.width}-phase-${phase}.png` });
+      }
+    } finally {
+      await context.close();
+    }
+  }
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -595,6 +637,7 @@ try {
   }
   await verifyMobileHeightOnlyResize(browser);
   await verifyScrollControl(browser);
+  await verifyFindingsStages(browser);
   const scenes = await verifyDesktopMotionPath(browser);
   const variants = await verifyRefreshedMediaVariants(browser);
   await verifyProductPreviewAccountMenu(browser);

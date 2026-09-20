@@ -6,6 +6,8 @@
  * Usage: npm run test:browser
  */
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
@@ -73,6 +75,75 @@ let targets = [target];
 
 const browser = await chromium.launch({ headless: true });
 try {
+  // Exercise the real hook under StrictMode: a late completion from a cancelled
+  // operation must neither unlock nor abort the next operation.
+  const compiled = await build({
+    stdin: {
+      contents: `
+        import React, { StrictMode, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { useMutationOperation } from './src/components/dashboard/shared/use-mutation-operation';
+        function Probe() {
+          const operation = useMutationOperation();
+          useEffect(() => {
+            window.operation = operation;
+            window.mountSignals.push(operation.beginMutationOperation('mount').signal);
+          }, []);
+          return null;
+        }
+        window.mountSignals = [];
+        let root;
+        window.mount = () => {
+          root = createRoot(document.getElementById('root'));
+          root.render(<StrictMode><Probe /></StrictMode>);
+        };
+        window.unmount = () => root.unmount();
+        window.mount();
+      `,
+      resolveDir: fileURLToPath(new URL("../", import.meta.url)),
+      loader: "tsx"
+    },
+    bundle: true, format: "esm", platform: "browser", write: false
+  });
+  const probe = await browser.newPage();
+  await probe.setContent('<div id="root"></div>');
+  await probe.addScriptTag({ type: "module", content: compiled.outputFiles[0].text });
+  await probe.waitForFunction(() => window.mountSignals?.length === 2);
+  assert.deepEqual(await probe.evaluate(() => {
+    const op = window.operation;
+    const strictMode = window.mountSignals.map(signal => signal.aborted);
+    op.cancelMutationOperation();
+    const first = op.beginMutationOperation("first");
+    const duplicate = op.beginMutationOperation("duplicate");
+    op.cancelMutationOperation();
+    const second = op.beginMutationOperation("second");
+    const staleFinished = op.finishMutationOperation(first);
+    const replacementIntact = op.isMutationOperationCurrent(second) &&
+      op.isMutationOperationLocked() && !second.signal.aborted;
+    window.unmount();
+    return {
+      strictMode, duplicate: duplicate === null, cancelled: first.signal.aborted,
+      staleFinished, replacementIntact, unmountAborted: second.signal.aborted,
+      unmountCurrent: op.isMutationOperationCurrent(second),
+      unmountLocked: op.isMutationOperationLocked(),
+      unmountFinished: op.finishMutationOperation(second)
+    };
+  }), {
+    strictMode: [true, false], duplicate: true, cancelled: true,
+    staleFinished: false, replacementIntact: true, unmountAborted: true,
+    unmountCurrent: false, unmountLocked: false, unmountFinished: false
+  });
+  await probe.evaluate(() => window.mount());
+  await probe.waitForFunction(() => window.mountSignals.length === 4);
+  assert.deepEqual(await probe.evaluate(() => {
+    const op = window.operation;
+    op.cancelMutationOperation();
+    const current = op.beginMutationOperation("remounted");
+    const finished = op.finishMutationOperation(current);
+    return { finished, aborted: current.signal.aborted, locked: op.isMutationOperationLocked() };
+  }), { finished: true, aborted: true, locked: false });
+  await probe.close();
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
   await page.route("**/api/**", async (route) => {

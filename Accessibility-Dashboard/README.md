@@ -48,6 +48,18 @@ npm run preview
 
 `npm run test:list`로 테스트를 확인하고 `npm run test:run -- --test <파일>`로 필요한 회귀만 실행할 수 있다. 실행별 결과와 로그는 `artifacts/frontend-tests/`에 저장한다.
 
+## 로컬 녹화·감사 산출물 보관
+
+`npm run record:landing`은 모든 장면의 캡처·인코딩·검증과 요청한 배포용 복사가 성공한 뒤 연속 PNG 프레임만 자동 정리한다. 최종 MP4·WebP, 대표 PNG, 녹화 manifest는 보존한다. `--stills-only`, 실패한 녹화, `--keep-frames`를 지정한 녹화는 프레임을 남긴다. 다시 인코딩할 원본이 필요하면 다음처럼 실행한다.
+
+```powershell
+npm run record:landing -- --report-only --keep-frames
+```
+
+기존 녹화의 재개는 인코딩된 미디어를 재사용하므로 정리 이후에도 가능하다. 작업 도중 실패하면 프레임을 정리하지 않으며, 해당 녹화 폴더의 `.keep` 파일로도 정리를 막을 수 있다. 실제 서비스 연결과 페이지 ID 등 녹화 입력은 [녹화 스크립트](scripts/record-landing-demo.mjs)의 안내를 따른다.
+
+테스트 runner는 오래된 성공 로그에 보관 정책을 자동 적용한다. `npm run artifacts:clean`으로 대상만 확인하고 `-- --apply`를 붙여 수동 적용할 수 있다. 실패 기록·보고서·DB 백업·임시 스크립트의 보존 범위는 [테스트 가이드](docs/testing.md)를 참고한다. 별도로 만든 감사용 ZIP·빌드 복사본은 이 명령의 대상이 아니므로 작업 종료 후 필요한 자료를 선별해 정리한다.
+
 ## 개발 문서
 
 - [문서 색인](docs/README.md)

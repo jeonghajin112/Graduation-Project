@@ -12,6 +12,7 @@ import com.accessibility.platform.target.repository.EvaluationTargetRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.List;
 import java.util.Objects;
@@ -71,6 +72,15 @@ public class EvaluationTargetService {
                 faviconUrl
         );
         return EvaluationTargetResponse.from(target);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public EvaluationTargetResponse refreshFavicon(Long id) {
+        String originalUrl = getTarget(id).getAccessUrl();
+        faviconService.findFaviconUrl(originalUrl).ifPresent(url ->
+                evaluationTargetRepository.updateFaviconIfUrlUnchanged(id, originalUrl, url, TargetStatus.DELETED));
+        return EvaluationTargetResponse.from(evaluationTargetRepository.findWithOrganizationById(id)
+                .orElseThrow(ResourceNotFoundException::new));
     }
 
     @Transactional

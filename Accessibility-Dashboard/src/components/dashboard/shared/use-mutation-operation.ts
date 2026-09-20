@@ -1,13 +1,7 @@
-import { useCallback } from "react";
-
-import { useCancellationScope } from "./use-cancellation-scope";
-import {
-  useExclusiveOperation,
-  type ExclusiveOperationId
-} from "./use-exclusive-operation";
+import { useCallback, useEffect, useRef } from "react";
 
 export type MutationOperation = {
-  id: ExclusiveOperationId;
+  id: symbol;
   signal: AbortSignal;
 };
 
@@ -16,52 +10,59 @@ export type MutationOperation = {
  * and mounted/current-operation guard.
  */
 export function useMutationOperation() {
-  const { beginScope, cancelScope } = useCancellationScope();
-  const {
-    beginOperation,
-    cancelOperation,
-    finishOperation,
-    isOperationCurrent,
-    isOperationLocked
-  } = useExclusiveOperation();
+  const isMountedRef = useRef(false);
+  const activeOperationRef = useRef<{ id: symbol; controller: AbortController } | null>(null);
+
+  const cancelMutationOperation = useCallback(() => {
+    const active = activeOperationRef.current;
+    activeOperationRef.current = null;
+    active?.controller.abort();
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      cancelMutationOperation();
+    };
+  }, [cancelMutationOperation]);
 
   const beginMutationOperation = useCallback(
     (label: string): MutationOperation | null => {
-      const id = beginOperation(label);
-      if (id === null) {
+      if (activeOperationRef.current !== null) {
         return null;
       }
-      return { id, signal: beginScope() };
+      const active = { id: Symbol(label), controller: new AbortController() };
+      activeOperationRef.current = active;
+      return { id: active.id, signal: active.controller.signal };
     },
-    [beginOperation, beginScope]
+    []
   );
-
-  const cancelMutationOperation = useCallback(() => {
-    cancelOperation();
-    cancelScope();
-  }, [cancelOperation, cancelScope]);
 
   const finishMutationOperation = useCallback(
     (operation: MutationOperation): boolean => {
-      const didFinish = finishOperation(operation.id);
-      if (didFinish) {
-        cancelScope();
-      }
-      return didFinish;
+      // A cancelled operation may finish after its replacement has started.
+      // Only the current owner may release the lock and abort its requests.
+      if (activeOperationRef.current?.id !== operation.id) return false;
+      cancelMutationOperation();
+      return isMountedRef.current;
     },
-    [cancelScope, finishOperation]
+    [cancelMutationOperation]
   );
 
   const isMutationOperationCurrent = useCallback(
-    (operation: MutationOperation): boolean => isOperationCurrent(operation.id),
-    [isOperationCurrent]
+    (operation: MutationOperation): boolean =>
+      isMountedRef.current && activeOperationRef.current?.id === operation.id,
+    []
   );
+
+  const isMutationOperationLocked = useCallback(() => activeOperationRef.current !== null, []);
 
   return {
     beginMutationOperation,
     cancelMutationOperation,
     finishMutationOperation,
     isMutationOperationCurrent,
-    isMutationOperationLocked: isOperationLocked
+    isMutationOperationLocked
   };
 }

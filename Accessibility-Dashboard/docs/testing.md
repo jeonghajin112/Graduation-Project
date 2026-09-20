@@ -105,6 +105,10 @@ npm test
 
 실행마다 `artifacts/frontend-tests/<suite>-<고유값>/`에 `results.json`과 테스트별 stdout·stderr 로그를 저장한다. 실행 폴더가 분리되어 이전 결과나 다른 실행을 덮어쓰지 않는다. 기본 출력은 진행·결과와 실패 로그의 끝부분이며, 전체 출력을 실시간으로 보려면 `--verbose`를 붙인다.
 
+실행 종료 시 오래된 성공 실행의 로그만 자동 정리한다. 보관 기준은 [artifact-retention.mjs](../scripts/artifact-retention.mjs)의 `AUDIT_RETENTION`이며, 기본적으로 suite별 최근 성공 10회와 최근 14일을 모두 보존한다. `results.json`은 계속 남기고, 실패·중단·실행 중·불완전한 결과와 실행 폴더에 `.keep` 파일이 있는 기록은 정리하지 않는다. 보고서에 등록되지 않은 파일, 스크립트, DB 백업, 기존 수동 감사 폴더도 자동 삭제하지 않는다.
+
+`npm run artifacts:clean`은 같은 기준의 삭제 예정 목록과 용량만 보여 주며, `npm run artifacts:clean -- --apply`로 적용한다. 보관 정책의 회귀 검증은 `npm run test:run -- --test verify-artifact-retention.mjs`로 실행한다.
+
 ```powershell
 npm run test:run -- --test verify-sidebar-route-selection.mjs --verbose
 ```

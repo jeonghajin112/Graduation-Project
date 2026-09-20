@@ -286,17 +286,17 @@ async function readTitleBarFaviconPresentation(page) {
 }
 
 async function verifyTitleBarFaviconPresentation(browser) {
-  const faviconUrl = `${baseUrl}/__test-assets__/page-information-favicon.svg`;
-  const missingFaviconUrl = `${baseUrl}/__test-assets__/missing-page-information-favicon.svg`;
+  const faviconUrl = `/api/favicons/${"a".repeat(64)}.svg`;
+  const missingFaviconUrl = `/api/favicons/${"b".repeat(64)}.svg`;
   const loadedPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
-  await loadedPage.route("**/__test-assets__/page-information-favicon.svg", (route) =>
+  await installFixture(loadedPage, { liveAvailable: false, faviconUrl });
+  await loadedPage.route(`**${faviconUrl}`, (route) =>
     route.fulfill({
       status: 200,
       contentType: "image/svg+xml",
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#0071e3"/></svg>'
     })
   );
-  await installFixture(loadedPage, { liveAvailable: false, faviconUrl });
   await loadedPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
   await loadedPage
     .locator('.site-page-evidence-chrome__icon[data-favicon-loaded="true"]')
@@ -305,13 +305,13 @@ async function verifyTitleBarFaviconPresentation(browser) {
   await loadedPage.close();
 
   const fallbackPage = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
-  await fallbackPage.route("**/__test-assets__/missing-page-information-favicon.svg", (route) =>
-    route.fulfill({ status: 404, contentType: "text/plain", body: "missing" })
-  );
   await installFixture(fallbackPage, {
     liveAvailable: false,
     faviconUrl: missingFaviconUrl
   });
+  await fallbackPage.route(`**${missingFaviconUrl}`, (route) =>
+    route.fulfill({ status: 404, contentType: "text/plain", body: "missing" })
+  );
   await fallbackPage.goto(baseUrl + "/projects/1/pages/101", { waitUntil: "domcontentloaded" });
   await fallbackPage.waitForFunction(() => {
     const favicon = document.querySelector(

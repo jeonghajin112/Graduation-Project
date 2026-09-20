@@ -1,14 +1,11 @@
 import { useMemo } from "react";
-import { Area, ComposedChart, XAxis, YAxis } from "recharts";
-
-import { ChartContainer, ChartTooltip } from "@/components/ui/line-charts-6";
+import { Area, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type {
   EvaluationRequestModel,
   EvaluationResultSummary,
   ScoreResult
 } from "@/types/accessibility-domain";
 
-import { chartConfig } from "./constants";
 import type { ScoreChartItem } from "./types";
 import { formatDateLabel, formatShortDate } from "./utils";
 
@@ -111,47 +108,49 @@ export function AnalysisTrendPanel({
       <p className="sr-only">{chartSummary}</p>
 
       {data.length > 0 ? (
-        <ChartContainer config={chartConfig} className="site-page-evidence-trend-chart">
-          <ComposedChart
-            data={data}
-            margin={{ top: 10, right: 12, bottom: 0, left: 12 }}
-            accessibilityLayer
-          >
-            <defs>
-              <linearGradient id="site-trend-score-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--site-score-line-color)" stopOpacity={0.14} />
-                <stop offset="100%" stopColor="var(--site-score-line-color)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <XAxis
-              dataKey="slot"
-              hide
-            />
-            <YAxis
-              yAxisId="score"
-              hide
-              domain={[-5, 100]}
-            />
-            {/* Score only. The issue count is still reported in the metrics row,
-                the tooltip and the screen-reader summary, so dropping the bar
-                series removes a duplicate reading rather than information. */}
-            <Area
-              yAxisId="score"
-              type="monotone"
-              dataKey="score"
-              stroke="var(--site-score-line-color)"
-              strokeWidth={2.25}
-              fill="url(#site-trend-score-fill)"
-              // Points appear on hover only: no dot is painted at rest, and
-              // activeDot draws one under the cursor. Verified that the tooltip
-              // and the active point still fire with dots disabled.
-              dot={false}
-              activeDot={<TrendActiveDot />}
-              isAnimationActive={false}
-            />
-            <ChartTooltip cursor={false} content={<AnalysisTrendTooltip />} />
-          </ComposedChart>
-        </ChartContainer>
+        <div data-slot="chart" className="site-page-evidence-trend-chart flex aspect-video justify-center text-xs">
+          <ResponsiveContainer minWidth={0} minHeight={0} initialDimension={{ width: 1, height: 1 }}>
+            <ComposedChart
+              data={data}
+              margin={{ top: 10, right: 12, bottom: 0, left: 12 }}
+              accessibilityLayer
+            >
+              <defs>
+                <linearGradient id="site-trend-score-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--site-score-line-color)" stopOpacity={0.14} />
+                  <stop offset="100%" stopColor="var(--site-score-line-color)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis
+                dataKey="slot"
+                hide
+              />
+              <YAxis
+                yAxisId="score"
+                hide
+                domain={[-5, 100]}
+              />
+              {/* Score only. The issue count is still reported in the metrics row,
+                  the tooltip and the screen-reader summary, so dropping the bar
+                  series removes a duplicate reading rather than information. */}
+              <Area
+                yAxisId="score"
+                type="monotone"
+                dataKey="score"
+                stroke="var(--site-score-line-color)"
+                strokeWidth={2.25}
+                fill="url(#site-trend-score-fill)"
+                // Points appear on hover only: no dot is painted at rest, and
+                // activeDot draws one under the cursor. Verified that the tooltip
+                // and the active point still fire with dots disabled.
+                dot={false}
+                activeDot={<TrendActiveDot />}
+                isAnimationActive={false}
+              />
+              <Tooltip cursor={false} content={<AnalysisTrendTooltip />} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
       ) : (
         <div className="site-page-evidence-trend-empty" role="status">
           완료된 분석 기록이 쌓이면 추이를 확인할 수 있어요.

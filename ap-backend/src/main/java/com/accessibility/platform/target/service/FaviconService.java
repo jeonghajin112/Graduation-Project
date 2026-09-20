@@ -1,10 +1,13 @@
 package com.accessibility.platform.target.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.PreDestroy;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -19,13 +22,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.*;
 
 @Slf4j
 @Service
@@ -33,51 +35,79 @@ public class FaviconService {
 
     private static final int MAX_REDIRECTS = 4;
     private static final int MAX_HTML_BYTES = 256 * 1024;
+    private static final int TARGET_ICON_SIZE = 64;
+    private static final int MAX_ICON_SIZE = 128;
+    // Small ICOs can contain uncompressed pixels: SKKU's 120px icon is ~60KB.
+    // Keep the dimension limit as well as a bounded download allowance.
+    private static final int MAX_ICON_BYTES = 64 * 1024;
+    private static final int MAX_ICON_REQUESTS = 4;
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(5);
-    private static final Pattern LINK_TAG_PATTERN = Pattern.compile("<link\\b[^>]*>", Pattern.CASE_INSENSITIVE);
-    private static final Pattern ATTRIBUTE_PATTERN = Pattern.compile(
-            "([\\w:-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))",
-            Pattern.CASE_INSENSITIVE
-    );
     private static final Pattern CHARSET_PATTERN = Pattern.compile(
             "charset\\s*=\\s*[\"']?([^\\s;\"']+)",
             Pattern.CASE_INSENSITIVE
     );
 
     private final HttpClient httpClient;
+    private final FaviconCache cache;
+    private final ExecutorService lookups = new ThreadPoolExecutor(0, 4, 30, TimeUnit.SECONDS,
+            new SynchronousQueue<>(), Thread.ofPlatform().daemon().name("favicon-lookup-", 0).factory());
+    private static final Duration LOOKUP_TIMEOUT = Duration.ofSeconds(10);
 
     public FaviconService() {
+        this(new FaviconCache(null));
+    }
+
+    @Autowired
+    public FaviconService(FaviconCache cache) {
         this(HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(3))
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .build());
+                .build(), cache);
     }
 
     FaviconService(HttpClient httpClient) {
-        this.httpClient = httpClient;
+        this(httpClient, new FaviconCache(null));
     }
 
+    FaviconService(HttpClient httpClient, FaviconCache cache) {
+        this.httpClient = httpClient;
+        this.cache = cache;
+    }
+
+    @PreDestroy
+    public void close() { lookups.shutdownNow(); }
+
     /**
-     * Reads a public web page and resolves its declared favicon URL.
+     * Reads a public web page and caches a small decoded favicon, returning its local API path.
      * Failure is deliberately non-fatal because a favicon is optional metadata.
      */
     public Optional<String> findFaviconUrl(String pageUrl) {
+        Future<Optional<String>> lookup;
+        long deadline = System.nanoTime() + LOOKUP_TIMEOUT.toNanos();
+        try { lookup = lookups.submit(() -> lookup(pageUrl, deadline)); }
+        catch (RejectedExecutionException busy) { return Optional.empty(); }
+        try { return lookup.get(LOOKUP_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS); }
+        catch (InterruptedException interrupted) {
+            lookup.cancel(true);
+            Thread.currentThread().interrupt();
+        } catch (TimeoutException timeout) { lookup.cancel(true); }
+        catch (ExecutionException failed) { log.debug("Favicon lookup failed", failed.getCause()); }
+        return Optional.empty();
+    }
+
+    private Optional<String> lookup(String pageUrl, long deadline) {
         URI initialUri = parseHttpUri(pageUrl).orElse(null);
         if (initialUri == null || !isPublicHttpUri(initialUri)) {
             return Optional.empty();
         }
 
         try {
-            HtmlPage page = fetchHtml(initialUri);
+            HtmlPage page = fetchHtml(initialUri, deadline);
             if (page == null) {
                 return Optional.empty();
             }
 
-            URI faviconUri = extractFaviconUri(page.uri(), page.html());
-            if (faviconUri == null || !isPublicHttpUri(faviconUri)) {
-                return Optional.empty();
-            }
-            return Optional.of(withoutFragment(faviconUri).toASCIIString());
+            return findVerifiedIcon(page, deadline);
         } catch (IOException e) {
             log.debug("Could not fetch favicon metadata from {}: {}", pageUrl, e.getMessage());
         } catch (InterruptedException e) {
@@ -90,27 +120,110 @@ public class FaviconService {
     }
 
     URI extractFaviconUri(URI pageUri, String html) {
-        List<FaviconCandidate> candidates = new ArrayList<>();
-        Matcher linkMatcher = LINK_TAG_PATTERN.matcher(html);
+        return faviconCandidates(pageUri, html).stream()
+                .findFirst().map(FaviconCandidate::uri).orElse(null);
+    }
 
-        while (linkMatcher.find()) {
-            Map<String, String> attributes = parseAttributes(linkMatcher.group());
-            String rel = attributes.getOrDefault("rel", "").toLowerCase(Locale.ROOT);
-            String href = attributes.get("href");
+    private List<FaviconCandidate> faviconCandidates(URI pageUri, String html) {
+        List<FaviconCandidate> candidates = new ArrayList<>();
+        for (Element link : Jsoup.parse(html).select("link[rel][href]")) {
+            String rel = link.attr("rel").toLowerCase(Locale.ROOT);
+            String href = link.attr("href");
             int priority = priority(rel);
 
             if (priority >= 0 && href != null && !href.isBlank()) {
                 resolveHttpUri(pageUri, href).ifPresent(uri ->
-                        candidates.add(new FaviconCandidate(uri, priority, candidates.size()))
+                        candidates.add(new FaviconCandidate(uri, priority, declaredSize(link.attr("sizes")), candidates.size()))
                 );
             }
         }
 
-        return candidates.stream()
-                .min(Comparator.comparingInt(FaviconCandidate::priority)
-                        .thenComparingInt(FaviconCandidate::order))
-                .map(FaviconCandidate::uri)
-                .orElseGet(() -> defaultFaviconUri(pageUri));
+        URI fallback = defaultFaviconUri(pageUri);
+        if (fallback != null && candidates.stream().noneMatch(candidate -> candidate.uri().equals(fallback))) {
+            candidates.add(new FaviconCandidate(fallback, 2, 0, candidates.size()));
+        }
+        return candidates.stream().filter(candidate -> candidate.size() <= MAX_ICON_SIZE)
+                .sorted(Comparator.comparingInt((FaviconCandidate candidate) -> sizeRank(candidate.size()))
+                        .thenComparingInt(FaviconCandidate::priority).thenComparingInt(FaviconCandidate::order))
+                .toList();
+    }
+
+    // Prefer the smallest adequate icon, then unknown dimensions, then smaller fallbacks.
+    private static int sizeRank(int size) {
+        if (size >= TARGET_ICON_SIZE) return size - TARGET_ICON_SIZE;
+        if (size == 0) return MAX_ICON_SIZE;
+        return MAX_ICON_SIZE * 2 - size;
+    }
+
+    private static int declaredSize(String sizes) {
+        int largest = 0;
+        for (String token : sizes.toLowerCase(Locale.ROOT).trim().split("\\s+")) {
+            if (token.equals("any")) return TARGET_ICON_SIZE;
+            if (!token.matches("[0-9]{1,6}x[0-9]{1,6}")) continue;
+            String[] dimensions = token.split("x");
+            int width = Integer.parseInt(dimensions[0]);
+            int height = Integer.parseInt(dimensions[1]);
+            if (width > 0 && height > 0) largest = Math.max(largest, Math.max(width, height));
+        }
+        return largest;
+    }
+
+    private Optional<String> findVerifiedIcon(HtmlPage page, long deadline) throws InterruptedException, IOException {
+        FaviconImage smallerFallback = null;
+        int fallbackSize = 0;
+        int attempts = 0;
+        var visited = new java.util.HashSet<URI>();
+        for (FaviconCandidate candidate : faviconCandidates(page.uri(), page.html())) {
+            if (System.nanoTime() >= deadline || Thread.currentThread().isInterrupted()) break;
+            URI uri = withoutFragment(candidate.uri());
+            if (!visited.add(uri)) continue;
+            if (attempts++ >= MAX_ICON_REQUESTS) break;
+            try {
+                IconFile icon = fetchIcon(uri, deadline);
+                if (icon == null) continue;
+                FaviconImage image = FaviconImage.validate(icon.bytes());
+                if (image == null) continue;
+                int size = image.size();
+                if (size >= TARGET_ICON_SIZE) return Optional.of(cache.store(image));
+                if (size > fallbackSize) {
+                    smallerFallback = image;
+                    fallbackSize = size;
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // A broken or oversized candidate must not hide another usable icon.
+            }
+        }
+        return smallerFallback == null ? Optional.empty() : Optional.of(cache.store(smallerFallback));
+    }
+
+    private IconFile fetchIcon(URI initialUri, long deadline) throws IOException, InterruptedException {
+        URI uri = initialUri;
+        for (int redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
+            if (!isPublicHttpUri(uri)) return null;
+            var request = HttpRequest.newBuilder(uri).timeout(REQUEST_TIMEOUT)
+                    .header("Accept", "image/*")
+                    .header("User-Agent", "Mozilla/5.0 (compatible; Accessibility-Dashboard/1.0)")
+                    .GET().build();
+            var response = FaviconDownload.get(httpClient, request, MAX_ICON_BYTES, false, deadline);
+                if (isRedirect(response.statusCode())) {
+                    String location = response.headers().firstValue("Location").orElse(null);
+                    if (location == null || redirects == MAX_REDIRECTS) return null;
+                    uri = uri.resolve(location);
+                    continue;
+                }
+                if (response.statusCode() < 200 || response.statusCode() >= 300
+                        || response.headers().firstValueAsLong("Content-Length").orElse(0) > MAX_ICON_BYTES) return null;
+                byte[] bytes = response.body();
+                return bytes.length > MAX_ICON_BYTES ? null : new IconFile(withoutFragment(uri), bytes);
+        }
+        return null;
+    }
+
+    static int iconSize(byte[] bytes) {
+        try {
+            FaviconImage image = FaviconImage.validate(bytes);
+            return image == null ? 0 : image.size();
+        } catch (IOException | RuntimeException invalid) { return 0; }
     }
 
     boolean isPublicHttpUri(URI uri) {
@@ -137,7 +250,7 @@ public class FaviconService {
         }
     }
 
-    private HtmlPage fetchHtml(URI initialUri) throws IOException, InterruptedException {
+    private HtmlPage fetchHtml(URI initialUri, long deadline) throws IOException, InterruptedException {
         URI currentUri = initialUri;
 
         for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
@@ -148,16 +261,11 @@ public class FaviconService {
             HttpRequest request = HttpRequest.newBuilder(currentUri)
                     .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "text/html,application/xhtml+xml")
-                    .header("User-Agent", "Accessibility-Dashboard/1.0 favicon-fetcher")
+                    .header("User-Agent", "Mozilla/5.0 (compatible; Accessibility-Dashboard/1.0)")
                     .GET()
                     .build();
 
-            HttpResponse<InputStream> response = httpClient.send(
-                    request,
-                    HttpResponse.BodyHandlers.ofInputStream()
-            );
-
-            try (InputStream body = response.body()) {
+            HttpResponse<byte[]> response = FaviconDownload.get(httpClient, request, MAX_HTML_BYTES, true, deadline);
                 if (isRedirect(response.statusCode())) {
                     String location = response.headers().firstValue("Location").orElse(null);
                     if (location == null || redirectCount == MAX_REDIRECTS) {
@@ -178,14 +286,13 @@ public class FaviconService {
                     return null;
                 }
 
-                byte[] bytes = body.readNBytes(MAX_HTML_BYTES + 1);
+                byte[] bytes = response.body();
                 if (bytes.length > MAX_HTML_BYTES) {
                     byte[] truncated = new byte[MAX_HTML_BYTES];
                     System.arraycopy(bytes, 0, truncated, 0, MAX_HTML_BYTES);
                     bytes = truncated;
                 }
                 return new HtmlPage(currentUri, new String(bytes, charset(contentType)));
-            }
         }
         return null;
     }
@@ -211,18 +318,6 @@ public class FaviconService {
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
-    }
-
-    private Map<String, String> parseAttributes(String tag) {
-        Map<String, String> attributes = new HashMap<>();
-        Matcher matcher = ATTRIBUTE_PATTERN.matcher(tag);
-        while (matcher.find()) {
-            String value = matcher.group(2) != null ? matcher.group(2)
-                    : matcher.group(3) != null ? matcher.group(3)
-                    : matcher.group(4);
-            attributes.put(matcher.group(1).toLowerCase(Locale.ROOT), value);
-        }
-        return attributes;
     }
 
     private int priority(String rel) {
@@ -253,19 +348,9 @@ public class FaviconService {
     }
 
     private URI withoutFragment(URI uri) {
-        try {
-            return new URI(
-                    uri.getScheme(),
-                    uri.getRawUserInfo(),
-                    uri.getHost(),
-                    uri.getPort(),
-                    uri.getRawPath(),
-                    uri.getRawQuery(),
-                    null
-            );
-        } catch (URISyntaxException e) {
-            return uri;
-        }
+        String raw = uri.toString();
+        int fragment = raw.indexOf('#');
+        return fragment < 0 ? uri : URI.create(raw.substring(0, fragment));
     }
 
     private Charset charset(String contentType) {
@@ -326,6 +411,9 @@ public class FaviconService {
     private record HtmlPage(URI uri, String html) {
     }
 
-    private record FaviconCandidate(URI uri, int priority, int order) {
+    private record FaviconCandidate(URI uri, int priority, int size, int order) {
+    }
+
+    private record IconFile(URI uri, byte[] bytes) {
     }
 }

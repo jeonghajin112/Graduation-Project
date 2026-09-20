@@ -3,9 +3,9 @@ import issueDetailImage from "@/assets/landing/issue-detail.webp";
 import "@/styles/landing-findings.css";
 
 const STEPS = [
-  { title: "위치를 찾고", body: "마커가 가리키는 요소를 확인하세요. 문제를 페이지 안에서 바로 찾을 수 있습니다.", caption: "문제가 있는 요소를 페이지 위에서 확인합니다." },
+  { title: "위치를 찾고", body: "마커가 가리키는 요소를 확인하세요. 가까이 모인 문제는 숫자로 표시되어 하나씩 살펴볼 수 있습니다.", caption: "문제가 있는 요소를 페이지 위에서 확인합니다." },
   { title: "이유를 이해하고", body: "문제가 된 내용과 접근성 항목을 함께 읽고, 어떤 기준으로 판단했는지 살펴보세요.", caption: "실제 분석 문장과 접근성 항목을 함께 살펴봅니다." },
-  { title: "개선 방향을 정하세요", body: "개선 안내를 바탕으로 수정할 부분을 정하세요. 항목에 따라 문장 수정 예시와 색상 추천도 제공됩니다.", caption: "링크 길이 52글자와 기준 30글자를 비교한 개선 안내입니다." }
+  { title: "개선 방향을 정하세요", body: "개선 안내를 바탕으로 수정할 부분을 정하세요. 항목에 따라 문장 수정 예시와 색상 추천도 제공됩니다.", caption: "분석한 링크의 길이와 권장 기준을 비교한 개선 안내입니다." }
 ] as const;
 
 export function LandingFindingsSection() {
@@ -89,8 +89,8 @@ export function LandingFindingsSection() {
         </div>
         <figure className="ua-findings__figure" id="ua-findings-view" data-step={Math.max(0, activeStep)}>
           <div className="ua-findings__viewport">
-          <img src={issueDetailImage} width="2296" height="2050" loading="lazy" decoding="async"
-            alt="실제 홍익대학교 페이지에서 조각전공 전시 링크가 심각도 색상의 테두리로 강조되고, 설명창에 링크 텍스트 52글자와 기준 30글자가 표시된 분석 결과" />
+          <img src={issueDetailImage} width="2560" height="1440" loading="lazy" decoding="async"
+            alt="최신 라이브 리포트의 상단바 아래, 홍익대학교 페이지의 링크가 강조되고 문제 설명창에 분석 문장과 링크 길이 개선 기준이 표시된 화면" />
           </div>
           <figcaption className="ua-findings__caption">{phase === 0 ? "실제 페이지에서 확인한 접근성 분석 결과" : STEPS[activeStep].caption}</figcaption>
         </figure>
