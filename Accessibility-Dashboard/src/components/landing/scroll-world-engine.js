@@ -72,13 +72,16 @@ export function mountScrollWorld(container, config, options = {}) {
   const smallMQ = window.matchMedia('(max-width: 860px)');
   const isNarrow = () => smallMQ.matches;
   const isMobile = () => coarse || isNarrow();
-  // Resolution tiers: pick ONE clip variant per visit from the viewport's device pixels, so an FHD
-  // screen gets a 1080p file (crisp) instead of downscaling a 4K master by 2-4x (blurry). Config:
-  //   clipVariants: [{ maxDevicePx: 2100, suffix: '-1080' }, { maxDevicePx: 3000, suffix: '-1440' }]
-  // A clip URL 'x.mp4' becomes 'x-1080.mp4' etc.; no match = the master file as written.
-  const devicePx = Math.round(Math.max(window.innerWidth, 320) * (window.devicePixelRatio || 1));
-  const VARIANT = (config.clipVariants || []).slice().sort((p, q) => p.maxDevicePx - q.maxDevicePx).find(v => devicePx <= v.maxDevicePx);
-  const tierUrl = (url) => (url && VARIANT && VARIANT.suffix) ? url.replace(/(\.[a-z0-9]+)(\?.*)?$/i, VARIANT.suffix + '$1$2') : url;
+  // Select once when each clip loads. Full-screen 16:9 media must also cover
+  // tall viewports; scene-specific tiers can preserve finer photographic detail.
+  const tierUrl = (url, scene) => {
+    const width = Math.max(window.innerWidth, 320,
+      scene.layout === 'card' ? 0 : window.innerHeight * 16 / 9);
+    const devicePx = Math.ceil(width * (window.devicePixelRatio || 1));
+    const variant = (scene.clipVariants || config.clipVariants || []).slice()
+      .sort((p, q) => p.maxDevicePx - q.maxDevicePx).find(v => devicePx <= v.maxDevicePx);
+    return (url && variant?.suffix) ? url.replace(/(\.[a-z0-9]+)(\?.*)?$/i, variant.suffix + '$1$2') : url;
+  };
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const saveData = Boolean(connection && connection.saveData);
   const useStaticMedia = () => reduce || saveData || (isMobile() && config.mobileVideo === false);
@@ -106,7 +109,7 @@ export function mountScrollWorld(container, config, options = {}) {
   const SEGMENTS = [];
   SECTIONS.forEach((s, i) => {
     const dive = { kind: 'dive', si: i, clip: s.clip, clipM: s.clipMobile, still: s.still, stillM: s.stillMobile, layout: s.layout || 'full',
-                   accent: s.accent, w: s.scroll || DIVE_W, linger: s.linger || 0 };
+                   clipVariants: s.clipVariants, accent: s.accent, w: s.scroll || DIVE_W, linger: s.linger || 0 };
     SEGMENTS.push(dive);
     s._seg = dive;
     // A connector is optional: if connectors[i] is falsy, the two dives simply
@@ -278,16 +281,25 @@ export function mountScrollWorld(container, config, options = {}) {
   // (where the copy peaks) and moves quicker near the seams. L=0 linear, L=1 full
   // mid-scene pause. f(0)=0, f(1)=1 always, so seam frames are untouched.
   const lingerEase = (x, L) => { L = clamp(L); const c = x - 0.5; return (1 - L) * x + L * (4 * c * c * c + 0.5); };
-  let vh = window.innerHeight, totalW = 0, activeIndex = -1, ticking = false, endedState = false;
+  let vh = window.innerHeight, scrollUnit = vh, totalW = 0, activeIndex = -1, ticking = false, endedState = false;
   let laidOutW = window.innerWidth;   // width the current layout was computed at (see onResize)
 
   function layout() {
     vh = window.innerHeight;
+    // Display size and scroll distance are independent on tall desktop viewports.
+    scrollUnit = Math.min(vh, config.maxScrollHeight || vh);
     laidOutW = window.innerWidth;
     let off = 0;
-    SEGMENTS.forEach(s => { s.start = off * vh; off += s.w; s.end = off * vh; });
+    SEGMENTS.forEach(s => { s.start = off * scrollUnit; off += s.w; s.end = off * scrollUnit; });
     totalW = off;
-    track.style.height = (totalW * vh + vh) + 'px';   // +1vh so the last flight completes
+    track.style.height = (totalW * scrollUnit + vh) + 'px';
+    track.replaceChildren(...SECTIONS.map((section, index) => {
+      const marker = el('div', 'sw-snap-point');
+      marker.dataset.landingSnap = section.id || String(index);
+      const seg = section._seg;
+      marker.style.top = (index === 0 ? 0 : seg.start + (seg.end - seg.start) * 0.5) + 'px';
+      return marker;
+    }));
     read();
   }
 
@@ -333,7 +345,7 @@ export function mountScrollWorld(container, config, options = {}) {
         return;
       }
       // Serve the lighter mobile encode on phones when one was provided.
-      const url = tierUrl((isMobile() && s.clipM) ? s.clipM : s.clip);
+      const url = tierUrl((isMobile() && s.clipM) ? s.clipM : s.clip, s);
       const controller = new AbortController();
       abortControllers.add(controller);
       fetch(url, { signal: controller.signal }).then(r => r.ok ? r.blob() : Promise.reject(new Error('404')))
@@ -366,13 +378,13 @@ export function mountScrollWorld(container, config, options = {}) {
   function read() {
     if (destroyed) return;
     const y = window.scrollY || window.pageYOffset;
-    const fade = CROSSFADE * vh;
+    const fade = CROSSFADE * scrollUnit;
     let ci = 0;
     for (let i = 0; i < NSEG; i++) if (y >= SEGMENTS[i].start) ci = i;
 
     for (let i = 0; i < NSEG; i++) {
       const s = SEGMENTS[i];
-      if (y > s.start - 0.9 * vh && y < s.end + 0.9 * vh) loadClip(s);
+      if (y > s.start - 0.9 * scrollUnit && y < s.end + 0.9 * scrollUnit) loadClip(s);
       const local = clamp((y - s.start) / (s.end - s.start), 0, 1);
       s.target = s.linger ? lingerEase(local, s.linger) : local;
       if (s.kind === 'dive' && s.layout === 'card') {
@@ -425,7 +437,7 @@ export function mountScrollWorld(container, config, options = {}) {
     // band (filmEnd) they become position:absolute at exactly that document offset, so the
     // final scene scrolls away with the page and whatever follows the mount container
     // (a normal section) continues directly beneath it. Reversible on scroll-up.
-    const filmEnd = totalW * vh;
+    const filmEnd = totalW * scrollUnit;
     const ended = y >= filmEnd;
     if (ended !== endedState) {
       endedState = ended;
@@ -627,28 +639,28 @@ function injectCSS() {
   .sw-nav__item{min-height:44px;font:inherit;font-size:.82rem;color:var(--sw-ink-soft);border:0;background:transparent;cursor:pointer;padding:7px 14px;border-radius:999px;transition:color .25s,background .25s;}
   .sw-nav__item:hover{color:var(--sw-ink);} .sw-nav__item.is-active{color:#fff;background:var(--sw-accent);}
   .sw-nav__item--link{display:inline-flex;align-items:center;text-decoration:none;}
-  .sw-topcta{display:inline-flex;min-height:44px;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:.9rem;color:#fff;background:var(--sw-accent);padding:10px 20px;border-radius:999px;white-space:nowrap;transition:transform .2s ease,box-shadow .2s ease;}
-  .sw-topcta:hover{transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb,var(--sw-accent) 26%,transparent);}
+  .sw-topcta{display:inline-flex;min-height:44px;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:.9rem;color:#fff;background:var(--sw-accent);padding:10px 20px;border-radius:999px;white-space:nowrap;transition:background-color .2s ease;}
+  .sw-topcta:hover{background:var(--primary-hover);}
   .sw-stage{position:fixed;inset:0;z-index:10;inline-size:100vw;inline-size:100dvw;block-size:100vh;block-size:100dvh;max-inline-size:none;margin:0;pointer-events:none;}
   .sw-scene{position:absolute;inset:0;inline-size:100%;block-size:100%;overflow:hidden;opacity:0;will-change:opacity;}
   .sw-scene.is-card{background:#fff;}
-  .sw-copylayer::before{transition:opacity .5s;} .sw-root.sw-card-active .sw-copylayer::before{opacity:0;}
   .sw-scene__video,.sw-scene__still{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;object-fit:cover;object-position:center 42%;}
   .sw-scene__still{will-change:transform;} .sw-scene.has-clip .sw-scene__still{opacity:0;} .sw-scene__video{z-index:1;}
   .sw-copylayer{position:fixed;inset:0;z-index:20;pointer-events:none;}
-  .sw-copylayer::before{content:"";position:absolute;inset:0;width:min(58vw,780px);background:linear-gradient(90deg,var(--sw-bg) 0%,color-mix(in srgb,var(--sw-bg) 82%,transparent) 34%,color-mix(in srgb,var(--sw-bg) 40%,transparent) 62%,transparent 100%);}
   .sw-copy{position:absolute;left:clamp(18px,5vw,64px);top:50%;transform:translateY(-50%);width:min(42vw,clamp(380px,24vw,460px));opacity:0;will-change:opacity,transform;}
   .sw-copy__num{font-family:ui-monospace,Menlo,monospace;font-size:.74rem;letter-spacing:.12em;color:var(--sw-ink-soft);}
   .sw-copy__eyebrow{display:block;margin-top:18px;font-family:var(--sw-font-display);font-weight:700;font-size:.8rem;letter-spacing:.16em;text-transform:uppercase;color:var(--sw-accent);}
   .sw-copy__title{font-family:var(--sw-font-display);font-weight:700;color:var(--sw-ink);font-size:clamp(2rem,1.5rem + 1.667vw,3.5rem);line-height:1.03;margin:12px 0 0;letter-spacing:-.01em;text-shadow:0 2px 20px color-mix(in srgb,var(--sw-bg) 70%,transparent);}
   .sw-copy__body{margin-top:18px;font-size:clamp(1rem,1.25vw,1.14rem);line-height:1.55;color:color-mix(in srgb,var(--sw-ink) 78%,var(--sw-ink-soft));max-width:40ch;text-shadow:0 1px 12px color-mix(in srgb,var(--sw-bg) 90%,transparent);}
   .sw-copy__title,.sw-copy__body{word-break:keep-all;overflow-wrap:break-word;}
+  #sw-section-opening{top:72%;right:5vw;width:auto;max-width:none;}
+  #sw-section-opening .sw-copy__title{color:#fff;font-size:min(6vw,clamp(3.375rem,2.52rem + 2.8005vw,5.85rem));white-space:nowrap;text-shadow:none;}
   .sw-copy__tags{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 0;padding:0;}
   .sw-copy__tags li{font-size:.82rem;font-weight:600;color:#fff;padding:7px 14px;border-radius:999px;background:var(--sw-ink);border:1px solid var(--sw-ink);}
   .sw-copy__cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px;pointer-events:auto;}
-  .sw-btn{display:inline-flex;min-height:48px;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:.95rem;padding:13px 24px;border-radius:999px;transition:transform .2s,box-shadow .2s;}
-  .sw-btn--primary{color:#fff;background:var(--sw-accent);} .sw-btn--primary:hover{transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb,var(--sw-accent) 26%,transparent);}
-  .sw-btn--ghost{color:var(--sw-ink);border:1.5px solid color-mix(in srgb,var(--sw-ink) 25%,transparent);} .sw-btn--ghost:hover{transform:translateY(-2px);}
+  .sw-btn{display:inline-flex;min-height:48px;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:.95rem;padding:13px 24px;border-radius:999px;transition:background-color .2s;}
+  .sw-btn--primary{color:#fff;background:var(--sw-accent);} .sw-btn--primary:hover{background:var(--primary-hover);}
+  .sw-btn--ghost{color:var(--sw-ink);border:1.5px solid color-mix(in srgb,var(--sw-ink) 25%,transparent);}
   .sw-route{--sw-route-progress:0;position:fixed;right:clamp(8px,2.1vw,26px);top:50%;z-index:40;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;padding:12px 0;}
   .sw-root.sw-ended .sw-route{opacity:0;pointer-events:none;}
   .sw-route{transition:opacity .25s;}
@@ -662,6 +674,7 @@ function injectCSS() {
   .sw-hint.is-top i{transform:rotate(180deg);}
   @keyframes sw-scroll-down{0%,100%{transform:translateY(-2px)}50%{transform:translateY(3px)}}
   .sw-track{position:relative;z-index:1;width:100%;pointer-events:none;}
+  .sw-snap-point{position:absolute;left:0;width:1px;height:1px;pointer-events:none;}
   @media (min-width:861px) and (max-width:1279px){
     .sw-copy{width:min(40vw,clamp(380px,24vw,460px));}
   }
@@ -673,11 +686,11 @@ function injectCSS() {
     .sw-brand__mark{width:clamp(24px,min(1.25vw,2.22vh),40px);height:clamp(28px,min(1.46vw,2.6vh),46px);border-radius:clamp(7px,min(.37vw,.65vh),12px) clamp(7px,min(.37vw,.65vh),12px) clamp(10px,min(.53vw,.93vh),17px) clamp(10px,min(.53vw,.93vh),17px);}
     .sw-brand__name,.sw-wordmark{font-size:clamp(1.1rem,min(.92vw,1.63vh),1.65rem);}
     .sw-topcta{min-height:clamp(44px,min(2.3vw,4.1vh),72px);font-size:clamp(.9rem,min(.75vw,1.35vh),1.3rem);padding-block:clamp(10px,min(.53vw,.93vh),17px);padding-inline:clamp(20px,min(1.05vw,1.85vh),34px);}
-    .sw-copylayer::before{width:min(58vw,clamp(780px,40.625vw,1300px));}
     .sw-copy{left:clamp(64px,3.333vw,128px);width:min(42vw,clamp(460px,24vw,880px));}
     .sw-copy__num{font-size:clamp(.74rem,min(.62vw,1.1vh),1.2rem);}
     .sw-copy__eyebrow{margin-top:clamp(18px,min(.94vw,1.67vh),30px);font-size:clamp(.8rem,min(.63vw,1.2vh),1.25rem);}
     .sw-copy__title{font-size:clamp(3.5rem,min(2.9vw,5.2vh),6rem);margin-top:clamp(12px,min(.63vw,1.12vh),20px);}
+    #sw-section-opening .sw-copy__title{font-size:clamp(5.85rem,min(4.875vw,8.73vh),10.05rem);}
     .sw-copy__body{margin-top:clamp(18px,min(.95vw,1.7vh),30px);font-size:clamp(1.14rem,min(.95vw,1.7vh),1.75rem);}
     .sw-copy__tags{gap:clamp(8px,min(.42vw,.74vh),14px);margin-top:clamp(24px,min(1.25vw,2.22vh),40px);}
     .sw-copy__tags li{font-size:clamp(.82rem,min(.68vw,1.22vh),1.25rem);padding-block:clamp(7px,min(.37vw,.65vh),12px);padding-inline:clamp(14px,min(.73vw,1.3vh),24px);}
@@ -687,14 +700,18 @@ function injectCSS() {
     .sw-route::before,.sw-route::after{top:clamp(30px,min(1.57vw,2.78vh),50px);bottom:clamp(30px,min(1.57vw,2.78vh),50px);width:clamp(3px,min(.16vw,.28vh),6px);}
     .sw-route__dot{width:clamp(44px,min(2.3vw,4.1vh),72px);height:clamp(44px,min(2.3vw,4.1vh),72px);}
   }
+  @media (min-width:3000px) and (min-height:1600px){
+    #sw-section-opening{top:84%;}
+  }
   @media (max-width:860px){
     .sw-nav{display:none;}
-    .sw-copylayer::before{width:100%;height:60%;top:auto;bottom:0;background:linear-gradient(0deg,var(--sw-bg) 8%,color-mix(in srgb,var(--sw-bg) 70%,transparent) 46%,transparent 100%);}
     /* Anchor copy to the bottom, clear of the home indicator / collapsing URL bar.
        dvh + env() are progressive: browsers that lack them keep the vh fallback line. */
     .sw-copy{left:clamp(18px,5vw,64px);right:calc(clamp(18px,5vw,64px) + 44px + env(safe-area-inset-right));top:auto;bottom:clamp(64px,14vh,120px);transform:none;width:auto;max-width:560px;}
     .sw-copy{bottom:calc(clamp(56px,12dvh,110px) + env(safe-area-inset-bottom));}
     .sw-copy__title{font-size:clamp(1.9rem,7.5vw,2.7rem);}
+    #sw-section-opening{top:auto;bottom:calc(48px + env(safe-area-inset-bottom));}
+    #sw-section-opening .sw-copy__title{font-size:min(6vw,3.75rem);}
     .sw-copy__body{max-width:none;font-size:clamp(.98rem,3.6vw,1.1rem);} .sw-scene__video,.sw-scene__still{object-position:center 46%;}
     .sw-hint{bottom:calc(20px + env(safe-area-inset-bottom));}
     .sw-route{gap:16px;right:calc(6px + env(safe-area-inset-right));}

@@ -6,10 +6,10 @@ import {
   type ScrollWorldConfig
 } from "@/components/landing/scroll-world-engine.js";
 import { LandingEngineSection } from "@/components/landing/landing-engine-section";
-import { LandingMessageSection } from "@/components/landing/landing-message-section";
 import { LandingFindingsSection } from "@/components/landing/landing-findings-section";
 import { LandingFaqSection } from "@/components/landing/landing-faq-section";
 import { LandingFooter } from "@/components/landing/landing-footer";
+import { mountLandingSnap } from "@/components/landing/landing-scroll-snap";
 
 import "@/styles/landing-large-screen.css";
 
@@ -26,6 +26,7 @@ const LANDING_CONFIG = {
   showSectionNumbers: false,
   mobileVideo: false,
   diveScroll: 1.4,
+  maxScrollHeight: 1080,
   connScroll: 0.9,
   crossfade: 0.08,
   atmosphere: false,
@@ -43,13 +44,13 @@ const LANDING_CONFIG = {
       id: "opening",
       label: "시작",
       still: `${ASSET_ROOT}/opening.webp`,
-      clip: `${ASSET_ROOT}/vid/opening.mp4`,
+      clip: `${ASSET_ROOT}/vid/opening.mp4?v=20260920-quality`,
+      // 전체 화면의 사진 질감을 보존하도록 일반 데스크톱도 4K 원본을 사용한다.
+      clipVariants: [],
       accent: "#0071e3",
       scroll: 1.6,
       linger: 0.3,
-      eyebrow: "통합형 웹 접근성 평가 플랫폼",
       title: "복잡한 웹 접근성, 이제 한눈에.",
-      body: "코드부터 문장, 화면까지. 누구에게나 편한 웹을 만드세요.",
       tags: []
     },
     {
@@ -62,7 +63,7 @@ const LANDING_CONFIG = {
       scroll: 1.3,
       linger: 0.2,
       title: "확인할 페이지 주소를 입력하세요",
-      body: "URL을 넣고 분석 시작을 누르면 UNI ACCESS가 페이지를 직접 엽니다.",
+      body: "URL을 입력하고 분석을 시작하면, 페이지의 접근성 문제를 확인할 수 있습니다.",
       tags: ["URL 입력", "자동 렌더링"]
     },
     {
@@ -82,8 +83,8 @@ const LANDING_CONFIG = {
       id: "report",
       layout: "card",
       label: "분석 결과",
-      still: `${ASSET_ROOT}/report.webp`,
-      clip: `${ASSET_ROOT}/vid/report.mp4`,
+      still: `${ASSET_ROOT}/report.webp?v=09127860`,
+      clip: `${ASSET_ROOT}/vid/report.mp4?v=09127860`,
       accent: "#0071e3",
       scroll: 1.7,
       linger: 0.3,
@@ -140,20 +141,24 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
 
     window.scrollTo({ top: 0, behavior: "auto" });
 
-    return mountScrollWorld(root, LANDING_CONFIG, {
+    const unmountWorld = mountScrollWorld(root, LANDING_CONFIG, {
       subscribeScroll: (listener) => scrollY.on("change", listener),
       onEnterApp: () => {
         window.scrollTo({ top: 0, behavior: "auto" });
         onEnterAppRef.current();
       }
     });
+    const unmountSnap = mountLandingSnap();
+    return () => {
+      unmountSnap();
+      unmountWorld();
+    };
   }, [scrollY]);
 
   return (
     <>
       <div ref={rootRef} className="uni-scroll-world" data-landing-root />
       {/* 스크롤 필름이 끝난 뒤 이어지는 일반 섹션 */}
-      <LandingMessageSection />
       <LandingFindingsSection />
       <LandingEngineSection />
       <LandingFaqSection />

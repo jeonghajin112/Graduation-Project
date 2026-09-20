@@ -21,6 +21,7 @@ import { RecentPageActions } from "./recent-page-actions";
 import { API_BASE_URL } from "@/config/api";
 
 import { PanelMessage } from "./shared/display";
+import { preventAccidentalSubmit } from "./shared/form-keyboard";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
 
 const PROJECT_MENU_WIDTH = 132;
@@ -194,7 +195,7 @@ export function SidebarProjectsSection({
     setDeleteError("");
   };
 
-  const editDialogRef = useDialogAccessibility({
+  const editDialogRef = useDialogAccessibility<HTMLFormElement>({
     isOpen: editingProject !== null,
     onClose: closeEdit,
     closeDisabled: isSaving
@@ -583,8 +584,14 @@ export function SidebarProjectsSection({
         ? createPortal(
             <div className="dashboard-modal-layer">
               <div className="absolute inset-0" onClick={closeEdit} aria-hidden="true" />
-              <article
+              <form
                 ref={editDialogRef}
+                noValidate
+                onKeyDown={preventAccidentalSubmit}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!isSaving) void handleSave();
+                }}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="sidebar-project-edit-title"
@@ -624,17 +631,14 @@ export function SidebarProjectsSection({
                     취소
                   </button>
                   <button
-                    type="button"
+                    type="submit"
                     disabled={isSaving}
-                    onClick={() => {
-                      void handleSave();
-                    }}
                     className="dashboard-modal-button dashboard-modal-button--primary"
                   >
                     {isSaving ? "저장 중..." : "저장"}
                   </button>
                 </div>
-              </article>
+              </form>
             </div>,
             document.body
           )

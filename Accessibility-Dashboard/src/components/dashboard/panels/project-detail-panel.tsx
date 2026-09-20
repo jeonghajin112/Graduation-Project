@@ -332,7 +332,7 @@ export function OrganizationModelDetailPanel({
           onClick={actions?.onOpenCreateSiteModal}
           disabled={readOnly}
           title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
-          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-[#0066cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"
+          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"
         >
           페이지 추가
         </button>

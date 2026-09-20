@@ -226,6 +226,7 @@ export function RenderedPageEvidenceCard({
   return (
     <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card"
       data-loading={isPageLoading}
+      data-connection-error={effectiveLoadState === "error" || (effectiveLoadState === "ready" && replayConnectionState === "error")}
       data-document-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
       <header ref={chromeRef} className="site-page-evidence-chrome"
         data-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>

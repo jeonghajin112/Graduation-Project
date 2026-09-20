@@ -99,9 +99,10 @@ async function encodeScene(scene, frameDirectory, posterPath) {
 }
 
 const browser = await chromium.launch({ headless: true });
-// A wider 1x report viewport already supplies native 4K pixels. Avoid taking
-// 7K+ intermediate screenshots while the upstream page keeps running.
-const capturePixelRatio = reportOnly && !withFindings ? 1 : 2;
+// Capture the ordinary desktop layout at higher pixel density. Enlarging the
+// CSS viewport to obtain 4K pixels activates a different, disproportionately
+// small summary rail when the recording is displayed on the landing page.
+const capturePixelRatio = 3;
 const context = await browser.newContext({
   viewport: { width: 1920, height: 1080 }, deviceScaleFactor: capturePixelRatio,
   colorScheme: "light", reducedMotion: "no-preference", locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -109,7 +110,17 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 const pageErrors = [];
-page.on("pageerror", error => pageErrors.push(error.message));
+const upstreamWarnings = [];
+page.on("pageerror", error => {
+  // Hongik's URL named jquery-2.2.4.min.js currently serves jQuery 3.7.1,
+  // which its own Bootstrap 3 rejects. Preserve this verified upstream error
+  // in the manifest; all app/bridge and other script errors still fail capture.
+  const knownUpstreamMismatch = new URL(target.accessUrl).hostname === "www.hongik.ac.kr"
+    && error.message === "Bootstrap's JavaScript requires jQuery version 1.9.1 or higher, but lower than version 3"
+    && /bootstrap\.min\.js/.test(error.stack || "");
+  if (knownUpstreamMismatch) upstreamWarnings.push(error.message);
+  else pageErrors.push(error.message);
+});
 const previousCapture = resumeResults || resumeAnalysis ? JSON.parse(await readFile(join(output, "capture-manifest.json"), "utf8")) : null;
 let analysisRequestId = previousCapture?.analysisRequestId ?? null;
 if (previousCapture) {
@@ -131,7 +142,7 @@ async function saveManifest() {
     targetId: target.id, projectId: project.id, targetUrl: target.accessUrl,
     analysisRequestId,
     resultSource: resumeResults || reportOnly ? "Previously completed real analysis stored in the service" : "New real analysis",
-    scenes, findings: findingsCapture, variants: stillsOnly ? [] : variants
+    scenes, findings: findingsCapture, upstreamWarnings, variants: stillsOnly ? [] : variants
   }, null, 2));
 }
 
@@ -145,6 +156,7 @@ async function verifyScene(scene) {
     assert.equal(await page.locator('.quick-analysis-progress[data-phase="running"]').count(), 1);
     assert.match(await page.locator('.quick-analysis-step[aria-current="step"]').innerText(), /접근성 검사/);
   } else if (scene === "report") {
+    assert.equal(page.viewportSize().width, 1920, "Record the normal desktop layout, not an ultrawide layout.");
     assert.equal(await page.locator('.site-page-evidence-preview[aria-busy="false"][data-connection-state="ready"]').count(), 1);
     const viewer = page.frameLocator('iframe[data-report-mode="live"]');
     assert.ok(await viewer.locator("body").innerText(), "The live upstream page must contain real content.");
@@ -159,6 +171,14 @@ async function verifyScene(scene) {
     assert.equal(await pageChrome.getByRole("link").getAttribute("href"), target.accessUrl);
     assert.equal(await pageChrome.locator(".site-page-analysis-actions__metadata dd").count(), 1);
     assert.equal(await page.getByRole("complementary", { name: "페이지 정보", exact: true }).count(), 0);
+    const layout = await page.locator('.site-dashboard-layout').evaluate(element => {
+      const rail = element.querySelector('.site-dashboard-rail');
+      const heading = rail?.querySelector('h3');
+      return { railRatio: rail.getBoundingClientRect().width / element.getBoundingClientRect().width,
+        headingSize: parseFloat(getComputedStyle(heading).fontSize) };
+    });
+    assert.ok(layout.railRatio >= 0.19 && layout.railRatio <= 0.3 && layout.headingSize >= 14,
+      `The recording must retain the desktop rail proportions and readable type: ${JSON.stringify(layout)}`);
   } else {
     assert.ok(await page.locator(".dashboard-project-card").count() >= 1, "Overview must contain loaded page cards.");
     assert.ok(await page.locator('.dashboard-project-card [aria-label^="점수 "]:not([aria-label="점수 없음"])').count() >= 1);
@@ -269,7 +289,7 @@ try {
   }
   // Include the complete result layout, excluding only the navigation sidebar.
   // Resize the browser so the real responsive layout fits the 16:9 media frame.
-  const reportWidth = capturePixelRatio === 1 ? 4320 : 3840;
+  const reportWidth = 1920;
   const reportHeight = reportWidth * 9 / 16;
   await page.setViewportSize({ width: reportWidth, height: reportHeight });
   await page.goto(baseUrl + reportPath, { waitUntil: "domcontentloaded" });

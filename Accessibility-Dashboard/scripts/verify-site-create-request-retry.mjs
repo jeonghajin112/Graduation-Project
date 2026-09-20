@@ -303,7 +303,7 @@ try {
 
   await dialog.getByLabel("페이지 이름", { exact: true }).fill(target.name);
   await dialog.getByLabel("페이지 주소", { exact: true }).fill("javascript:alert(document.domain)");
-  await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
+  await dialog.getByLabel("페이지 이름", { exact: true }).press("Enter");
   await dialog
     .getByRole("alert")
     .filter({ hasText: "올바른 페이지 주소를 입력해주세요" })
@@ -311,7 +311,7 @@ try {
   assert.equal(observed.targetPosts, 0, "unsafe URL schemes must be rejected before POST");
 
   await dialog.getByLabel("페이지 주소", { exact: true }).fill(target.accessUrl);
-  await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
+  await dialog.getByLabel("페이지 주소", { exact: true }).press("Enter");
 
   await dialog.getByText(/페이지 등록 완료 · 분석 시작 전/).waitFor();
   assert.equal(await dialog.getByLabel("페이지 이름", { exact: true }).inputValue(), target.name);

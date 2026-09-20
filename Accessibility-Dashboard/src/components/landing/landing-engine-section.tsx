@@ -13,47 +13,42 @@ import { RuleVisual, TextVisual, ContrastVisual } from "@/components/landing/lan
 
 type Module = {
   id: string;
-  kicker: string;
-  reads: string;
-  judges: string;
-  outputs: string;
+  title: string;
+  description: readonly [string, string];
   facts: readonly string[];
-  icon: JSX.Element;
   visual: () => JSX.Element;
 };
-
-const iconProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
 const MODULES: readonly Module[] = [
   {
     id: "rule",
-    kicker: "규칙 기반 분석",
-    reads: "실제 브라우저로 연 페이지의 DOM",
-    judges: "KWCAG 2.2 검사항목 33개 기준으로 감점",
-    outputs: "이슈별 항목 · 심각도 · 요소 위치",
-    facts: ["axe-core", "대체 텍스트 · 제목 구조 · 버튼 레이블", "숨은 캐러셀 슬라이드까지 검사"],
+    title: "규칙 기반 분석",
+    description: [
+      "이미지 설명, 제목 구조, 버튼 이름처럼 페이지를 이용하는 데 필요한 요소를 검사해요.",
+      "발견한 문제의 위치와 심각도를 보여주고, 무엇을 고쳐야 하는지 안내해요."
+    ],
+    facts: ["대체 텍스트 · 버튼 이름", "문제 위치 표시"],
     visual: RuleVisual,
-    icon: (<svg {...iconProps} aria-hidden="true"><path d="M8 4 4 12l4 8" /><path d="m16 4 4 8-4 8" /><path d="m14 4-4 16" /></svg>),
   },
   {
     id: "text",
-    kicker: "텍스트 난이도 분석",
-    reads: "본문 문장을 형태소 단위로",
-    judges: "문장 길이 · 어절 길이 · 어려운 어휘 비율",
-    outputs: "쉽게 고쳐 쓴 문장 제안",
-    facts: ["25어절 · 4.5자 · 40% 기준", "위치 의존 표현 탐지", "규칙 + GPT-4o-mini"],
+    title: "텍스트 난이도 분석",
+    description: [
+      "문장 길이와 어려운 낱말을 살펴 읽기 부담스러운 문장을 찾아요.",
+      "내용을 더 쉽게 이해할 수 있도록 길고 복잡한 문장을 짧고 쉬운 표현으로 바꿔 제안해요."
+    ],
+    facts: ["문장 길이 · 어휘 난이도", "쉬운 표현 제안"],
     visual: TextVisual,
-    icon: (<svg {...iconProps} aria-hidden="true"><path d="M4 6h16" /><path d="M4 12h10" /><path d="M4 18h13" /></svg>),
   },
   {
     id: "contrast",
-    kicker: "시각 명암비 분석",
-    reads: "렌더된 화면의 글자, 이미지 속 글자까지",
-    judges: "WCAG 명도 대비 (AA 4.5:1 · 큰 글자 3:1)",
-    outputs: "통과하는 색 추천",
-    facts: ["KWCAG 5.4.3", "이미지 · 캔버스 텍스트 포함", "화면 이미지는 분석 후 즉시 삭제"],
+    title: "시각 명암비 분석",
+    description: [
+      "글자와 배경의 명암비를 확인해 잘 구분되지 않는 내용을 찾아요.",
+      "이미지 속 글자도 함께 살펴보고, 명암비 기준에 맞는 색 조합을 추천해요."
+    ],
+    facts: ["이미지 속 글자 포함", "색 조합 추천"],
     visual: ContrastVisual,
-    icon: (<svg {...iconProps} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none" /></svg>),
   },
 ];
 
@@ -136,12 +131,11 @@ export function LandingEngineSection() {
   }, [active]);
 
   return (
+    <>
     <section className={`ua-engine${inView ? " is-live" : ""}${staticMode ? " is-static" : ""}`} id="engine" aria-labelledby="ua-engine-title" ref={sectionRef}>
       <div className="ua-engine__inner">
         <header className="ua-engine__head">
-          <span className="ua-engine__eyebrow">분석 엔진</span>
           <h2 className="ua-engine__title" id="ua-engine-title">세 개의 분석기가 한 페이지를 세 번 읽습니다</h2>
-          <p className="ua-engine__lead">주소 하나를 넣으면 코드, 문장, 화면 세 관점에서 검사하고 결과를 하나의 총점으로 합칩니다. 규칙으로 잡히는 것만 보지 않고, 사람이 실제로 읽고 볼 수 있는지까지 봅니다.</p>
         </header>
 
         <div className="ua-engine__modules">
@@ -149,23 +143,24 @@ export function LandingEngineSection() {
             <article className="ua-engine__module" key={m.id} aria-labelledby={`ua-engine-${m.id}`}>
               <div className="ua-engine__module-media"><m.visual /></div>
               <div className="ua-engine__module-text">
-                <div className="ua-engine__module-top">
-                  <span className="ua-engine__module-icon">{m.icon}</span>
-                  <span className="ua-engine__module-kicker" id={`ua-engine-${m.id}`}>{m.kicker}</span>
-                </div>
-                <dl className="ua-engine__module-body">
-                  <div><dt>읽는 것</dt><dd>{m.reads}</dd></div>
-                  <div><dt>판단 기준</dt><dd>{m.judges}</dd></div>
-                  <div><dt>남기는 것</dt><dd>{m.outputs}</dd></div>
-                </dl>
-                <ul className="ua-engine__facts">{m.facts.map((f) => <li key={f}>{f}</li>)}</ul>
+                <h3 className="ua-engine__module-title" id={`ua-engine-${m.id}`}>
+                  {m.title}
+                </h3>
+                {m.description.map(paragraph => (
+                  <p className="ua-engine__module-description" key={paragraph}>{paragraph}</p>
+                ))}
+                <ul className="ua-engine__facts" aria-label={`${m.title} 핵심 특징`}>
+                  {m.facts.map(fact => <li key={fact}>{fact}</li>)}
+                </ul>
               </div>
             </article>
           ))}
         </div>
       </div>
 
-      <div className="ua-engine__process" ref={processRef} role="region" aria-labelledby="ua-process-title">
+    </section>
+    <section className={`ua-engine ua-engine--process${staticMode ? " is-static" : ""}`} id="process" aria-labelledby="ua-process-title">
+      <div className="ua-engine__process" ref={processRef}>
         <div className="ua-engine__stage">
           <header className="ua-engine__head ua-engine__head--process">
             <span className="ua-engine__eyebrow">분석 과정</span>
@@ -205,5 +200,6 @@ export function LandingEngineSection() {
       </div>
 
     </section>
+    </>
   );
 }

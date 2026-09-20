@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { preventAccidentalSubmit } from "../shared/form-keyboard";
 import { throwIfAborted } from "@/services/async-cancellation";
 import { getApiErrorMessage, isAbortError } from "@/services/backend-api";
 import {
@@ -152,7 +153,7 @@ export function SiteCreateModal({
   const recoveryRawValueRef = useRef<string | null>(null);
   const discardLockRef = useRef(false);
   const scrollRegionRef = useRef<HTMLDivElement | null>(null);
-  const dialogRef = useDialogAccessibility({
+  const dialogRef = useDialogAccessibility<HTMLFormElement>({
     isOpen,
     onClose,
     closeDisabled: isSubmittingSite
@@ -453,8 +454,14 @@ export function SiteCreateModal({
         }}
       />
 
-      <article
+      <form
         ref={dialogRef}
+        noValidate
+        onKeyDown={preventAccidentalSubmit}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!isSubmittingSite && !isRecoveryBlocked) void handleAddSite();
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="site-create-title"
@@ -558,13 +565,10 @@ export function SiteCreateModal({
             </Button>
 
             <Button
-              type="button"
+              type="submit"
               size="sm"
               disabled={isSubmittingSite || isRecoveryBlocked}
               aria-busy={isSubmittingSite}
-              onClick={() => {
-                void handleAddSite();
-              }}
               className="dashboard-modal-button dashboard-modal-button--primary"
             >
               {isSubmittingSite
@@ -581,7 +585,7 @@ export function SiteCreateModal({
             </Button>
           </div>
         </div>
-      </article>
+      </form>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { ArrowRight, Loader2, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { API_BASE_URL } from "@/config/api";
+import { preventAccidentalSubmit } from "../shared/form-keyboard";
 import {
   fetchDashboardViewModel,
   fetchEvaluationRequest,
@@ -606,6 +607,8 @@ export function QuickAnalyzePanel({
                     }
                   }}
                   onKeyDown={(event) => {
+                    preventAccidentalSubmit(event);
+                    if (event.defaultPrevented) return;
                     if (event.key === "Enter" && canSubmit) {
                       event.preventDefault();
                       void handleSubmit();
@@ -630,7 +633,7 @@ export function QuickAnalyzePanel({
                 onClick={() => {
                   void handleSubmit();
                 }}
-                className="quick-analyze-submit inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-not-allowed disabled:bg-[#3a3a3c] disabled:text-[#8e8e93] sm:w-auto sm:min-w-[7.5rem]"
+                className="quick-analyze-submit inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-[#3a3a3c] disabled:text-[#8e8e93] sm:w-auto sm:min-w-[7.5rem]"
               >
                 {isBusy && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
                 <span>{isBusy ? "분석 중..." : "분석 시작"}</span>
@@ -652,7 +655,7 @@ export function QuickAnalyzePanel({
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc]"
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
                 >
                   다시 시도
                 </button>
@@ -668,7 +671,7 @@ export function QuickAnalyzePanel({
                   onClick={() => {
                     void handleSubmit();
                   }}
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-[#0066cc] disabled:cursor-wait disabled:opacity-60"
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-wait disabled:opacity-60"
                 >
                   {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
                 </button>

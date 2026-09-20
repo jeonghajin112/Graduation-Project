@@ -1,8 +1,8 @@
 .ua-findings { position: relative; z-index: 45; background: #f5f5f7; color: #1c222b; font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 .ua-findings__inner { box-sizing: border-box; max-width: none; margin: 0 auto; padding: clamp(64px, 7vw, 112px) max(20px, 4vw) clamp(80px, 9vw, 144px); }
 .ua-findings__head { margin: 0; }
-.ua-findings h2 { margin: 0; font-size: clamp(30px, 3vw, 52px); font-weight: 750; line-height: 1.13; letter-spacing: -.05em; word-break: keep-all; }
-.ua-findings h2 span { color: #0071e3; }
+.ua-findings__head h2 { margin: 0; font-size: clamp(30px, 3vw, 52px); font-weight: 750; line-height: 1.13; letter-spacing: -.05em; word-break: keep-all; }
+.ua-findings__head h2 span { color: #0071e3; }
 .ua-findings__body { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); align-items: center; gap: clamp(24px, 3vw, 64px); }
 .ua-findings__steps { display: grid; gap: 10px; margin: 0 0 32px; padding: 0; list-style: none; }
 .ua-findings__steps li { position: relative; border-radius: 16px; transition: background .3s, box-shadow .3s; }
@@ -41,8 +41,9 @@
 
 
 /* Keep the actual page and its explanation together during three scroll stages. */
-.ua-findings__track { min-height: 400svh; }
-.ua-findings__body { position: sticky; top: 0; box-sizing: border-box; min-height: 100svh; padding-block: 80px 72px; }
+.ua-findings__track { position: relative; min-height: calc(100svh + min(420svh, 4536px)); }
+.ua-findings__snap-point { position: absolute; top: calc((100% - 100svh) * var(--snap-progress)); left: 0; width: 1px; height: 1px; pointer-events: none; }
+.ua-findings__body { position: relative; box-sizing: border-box; min-height: 100svh; padding-block: 80px 72px; }
 .ua-findings__figure { width: min(100%, 54vw, 1040px, calc((100svh - 160px) * 16 / 9)); justify-self: end; }
 @media (max-width: 900px) {
   .ua-findings__body { justify-content: center; gap: 18px; }
@@ -79,3 +80,21 @@
 .ua-findings__body[data-phase="steps"] .ua-findings__head { opacity: 0; transform: translateY(-24px); visibility: hidden; }
 .ua-findings__body[data-phase="steps"] .ua-findings__steps { opacity: 1; transform: none; visibility: visible; transition-delay: .12s; }
 @media (max-width: 900px) { .ua-findings__copy { min-height: 320px; } }
+
+/* Carry the same word from the centered message into the report headline. */
+.ua-findings__inner { padding-block: 0; }
+.ua-findings__stage { position: sticky; top: 0; display: grid; min-height: 100svh; }
+.ua-findings__message, .ua-findings__body { grid-area: 1 / 1; min-width: 0; }
+.ua-findings__message { z-index: 2; opacity: var(--message-opacity, 1); pointer-events: none; }
+.ua-findings__message .ua-message { min-height: 100%; height: 100%; padding-inline: 0; background: transparent; }
+.ua-findings__body { opacity: var(--findings-opacity, 0); }
+.ua-findings__stage[data-scene="message"] .ua-findings__body { visibility: hidden; }
+.ua-findings__stage[data-scene="findings"] .ua-findings__message { visibility: hidden; }
+.ua-message__word, .ua-findings__target-word { display: inline-block; }
+.ua-findings__stage[data-scene="handoff"] .ua-message__word,
+.ua-findings__stage[data-scene="handoff"] .ua-findings__target-word { opacity: 0; }
+.ua-findings__moving-word { position: absolute; z-index: 3; visibility: hidden; pointer-events: none; font-weight: 750; white-space: nowrap; transform-origin: top left; will-change: transform; }
+.ua-findings__stage[data-scene="handoff"] .ua-findings__moving-word { visibility: visible; }
+@media (prefers-reduced-motion: reduce), (max-width: 900px) {
+  .ua-findings__moving-word { display: none; }
+}

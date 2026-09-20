@@ -115,7 +115,16 @@ try {
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === "/api/organizations"
   );
-  await dialog.getByRole("button", { name: "생성", exact: true }).click();
+  const nameInput = dialog.getByLabel("프로젝트 이름", { exact: true });
+  for (const properties of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+    const cancelled = await nameInput.evaluate((input, properties) => {
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...properties });
+      input.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, properties);
+    assert.equal(cancelled, true, "IME confirmation and held Enter must not submit");
+  }
+  await nameInput.press("Enter");
   const postResponse = await withTimeout(postResponsePromise, 5_000, "organization POST");
   await postResponse.finished();
   await withTimeout(firstRefreshMissedProject.promise, 5_000, "organization refresh without project");

@@ -12,6 +12,8 @@ export type ScrollWorldSection = {
   stillMobile?: string;
   clip?: string;
   clipMobile?: string;
+  /** 이 장면의 해상도 선택 기준. 생략하면 전역 clipVariants를 사용한다. */
+  clipVariants?: { maxDevicePx: number; suffix: string }[];
   layout?: "full" | "card";
   accent?: string;
   scroll?: number;
@@ -42,6 +44,8 @@ export type ScrollWorldConfig = {
   /** 해상도 등급: 뷰포트 디바이스 픽셀 폭이 maxDevicePx 이하이면 클립 파일명에 suffix 를 붙여 로드 */
   clipVariants?: { maxDevicePx: number; suffix: string }[];
   diveScroll?: number;
+  /** Cap the scroll unit independently of the displayed viewport height. */
+  maxScrollHeight?: number;
   connScroll?: number;
   crossfade?: number;
   atmosphere?: boolean;

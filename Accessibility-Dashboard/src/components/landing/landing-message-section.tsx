@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import "@/styles/landing-message.css";
 
-export function LandingMessageSection() {
+export function LandingMessageSection({ wordRef }: { wordRef?: RefObject<HTMLSpanElement> }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -28,7 +28,7 @@ export function LandingMessageSection() {
         className="ua-message__title"
       >
         <span className="ua-message__line ua-message__line--first">
-          어디가 문제인지.
+          어디가 <span ref={wordRef} className="ua-message__word">문제</span>인지.
         </span>{" "}
         <span className="ua-message__line ua-message__line--second">
           왜 바꿔야 하는지.

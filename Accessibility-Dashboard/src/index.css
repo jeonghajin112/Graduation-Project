@@ -13,6 +13,7 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -35,6 +36,7 @@
   --popover: #ffffff;
   --popover-foreground: #1d1d1f;
   --primary: #0071e3; /* action */
+  --primary-hover: #0066cc;
   --primary-foreground: #ffffff; /* on-action */
   --secondary: #f1f5f9;
   --secondary-foreground: #1d1d1f;

@@ -55,6 +55,8 @@ const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
 });
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
+const landingScrollSnap = viteTest("verify-landing-scroll-snap.mjs");
+const landingMediaQuality = viteTest("verify-landing-media-quality.mjs");
 const landingReportReadiness = nodeTest("verify-landing-report-readiness.mjs");
 const modalAppearance = viteTest("verify-modal-appearance.mjs");
 const dashboardResponsiveLayout = viteTest("verify-dashboard-responsive-layout.mjs");
@@ -69,6 +71,8 @@ const ci = [
   modalAppearance,
   dashboardResponsiveLayout,
   landingDesign,
+  landingScrollSnap,
+  landingMediaQuality,
   landingReportReadiness,
   dashboardBootAccessibility,
   pollingCancel,
@@ -112,7 +116,7 @@ export const FRONTEND_TEST_SUITES = Object.freeze({
   ci,
   browser,
   recovery: [quickRecovery],
-  visual: [landingDesign],
+  visual: [landingDesign, landingMediaQuality, landingScrollSnap],
   scale: [pageEvidenceScale],
   replay: [
     locatorStateBatching,

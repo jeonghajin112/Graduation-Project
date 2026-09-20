@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import { PanelMessage } from "../shared/display";
+import { preventAccidentalSubmit } from "../shared/form-keyboard";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 
 export function OrganizationModelCreateModal({
@@ -35,7 +36,7 @@ export function OrganizationModelCreateModal({
   const hasRecovery = hasPendingOrganizationCreate || isRecoveryBlocked;
   const nameInputRef = useRef<HTMLInputElement>(null);
   const previousHasRecoveryRef = useRef(hasRecovery);
-  const dialogRef = useDialogAccessibility({
+  const dialogRef = useDialogAccessibility<HTMLFormElement>({
     isOpen,
     onClose,
     closeDisabled: isSubmitting
@@ -68,8 +69,14 @@ export function OrganizationModelCreateModal({
           }
         }}
       />
-      <article
+      <form
         ref={dialogRef}
+        noValidate
+        onKeyDown={preventAccidentalSubmit}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!isSubmitting && !isRecoveryBlocked) void onSubmit();
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="organization-create-title"
@@ -136,12 +143,9 @@ export function OrganizationModelCreateModal({
           </Button>
           {!isRecoveryBlocked && (
             <Button
-              type="button"
+              type="submit"
               size="sm"
               disabled={isSubmitting}
-              onClick={() => {
-                void onSubmit();
-              }}
               className="dashboard-modal-button dashboard-modal-button--primary"
             >
               {hasPendingOrganizationCreate
@@ -154,7 +158,7 @@ export function OrganizationModelCreateModal({
             </Button>
           )}
         </div>
-      </article>
+      </form>
     </div>,
     document.body
   );

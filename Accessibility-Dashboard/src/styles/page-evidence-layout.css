@@ -32,6 +32,17 @@
   --site-page-chrome-overlap: var(--site-page-chrome-height);
 }
 
+/* Keep the failed viewer's full boundary visible without shifting its size. */
+.bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-connection-error="true"]::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border: 1px solid var(--site-divider);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-loading="true"] .site-page-evidence-loading,
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-loading="true"] .site-page-evidence-replay-overlay[role="status"] {
   background: var(--dashboard-card-bg);
@@ -844,7 +855,7 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-analysis-actions__rescan:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--dashboard-accent) 88%, #000000);
+  background: var(--primary-hover);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-analysis-actions__rescan:focus-visible {

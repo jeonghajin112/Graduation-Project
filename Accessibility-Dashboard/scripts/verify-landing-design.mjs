@@ -66,6 +66,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
   await page.locator('[data-scroll-world-ready="true"]').waitFor();
   await page.locator("#ua-hero-title").waitFor();
   await page.evaluate(() => document.fonts.ready);
+  await page.waitForFunction(() => [...document.querySelectorAll('.sw-scene__still')]
+    .every(image => image.complete && image.naturalWidth > 0));
   await settle(page);
 
   const facts = await page.evaluate(() => {
@@ -91,6 +93,9 @@ async function verifyReducedMotionViewport(browser, viewport) {
     const wordmark = document.querySelector(".sw-wordmark,.sw-brand__name");
     const topCta = document.querySelector(".sw-topcta");
     const titleStyle = title ? getComputedStyle(title) : null;
+    const titleRange = document.createRange();
+    if (title) titleRange.selectNodeContents(title);
+    const titleLines = [...titleRange.getClientRects()];
     const rootStyle = root ? getComputedStyle(root) : null;
     const topbarRect = topbar?.getBoundingClientRect();
     const rect = (element) => {
@@ -120,6 +125,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
       topNavCount: document.querySelectorAll(".sw-nav").length,
       titleFontSize: titleStyle ? Number.parseFloat(titleStyle.fontSize) : 0,
       titleColor: titleStyle?.color,
+      titleLineCount: titleLines.length,
+      titleWithinViewport: titleLines.every(line => line.left >= 0 && line.right <= innerWidth && line.top >= 0 && line.bottom <= innerHeight),
       rootBackground: rootStyle?.backgroundColor,
       stageRect: rect(stage),
       openingPosterRect: rect(openingPoster),
@@ -177,7 +184,9 @@ async function verifyReducedMotionViewport(browser, viewport) {
     `${label}: opening media does not cover the visual viewport`
   );
   assert.equal(facts.rootBackground, "rgb(245, 245, 247)", `${label}: landing canvas token changed`);
-  assert.notEqual(facts.titleColor, "rgb(0, 0, 0)", `${label}: title must use off-black ink`);
+  assert.equal(facts.titleColor, "rgb(255, 255, 255)", `${label}: opening title must stay white`);
+  assert.equal(facts.titleLineCount, 1, `${label}: opening title must stay on one line`);
+  assert.equal(facts.titleWithinViewport, true, `${label}: opening title is clipped`);
   assert.ok(facts.tagStyles.length > 0, `${label}: landing tags are missing`);
   for (const tagStyle of facts.tagStyles) {
     assert.deepEqual(
@@ -187,18 +196,20 @@ async function verifyReducedMotionViewport(browser, viewport) {
     );
   }
   if (viewport.width >= 3840 && viewport.height >= 2000) {
-    assert.ok(facts.titleFontSize >= 90 && facts.titleFontSize <= 100, `${label}: 4K title scale is out of bounds`);
-    assert.ok(facts.copyWidth >= 840 && facts.copyWidth <= 900, `${label}: 4K copy measure is out of bounds`);
+    assert.ok(facts.titleFontSize >= 155 && facts.titleFontSize <= 165, `${label}: 4K title scale is out of bounds`);
+    assert.ok(facts.copyWidth >= viewport.width * 0.9, `${label}: opening needs room for its single-line title`);
     assert.ok(facts.topCtaHeight >= 68, `${label}: 4K primary action did not scale`);
     assert.ok(facts.wordmarkFontSize >= 25, `${label}: 4K wordmark did not scale`);
   } else if (viewport.width >= 2500 && viewport.height >= 1200) {
-    assert.ok(facts.titleFontSize >= 68 && facts.titleFontSize <= 80, `${label}: QHD title scale is out of bounds`);
-    assert.ok(facts.copyWidth >= 600 && facts.copyWidth <= 660, `${label}: QHD copy measure is out of bounds`);
+    assert.ok(facts.titleFontSize >= 115 && facts.titleFontSize <= 130, `${label}: QHD title scale is out of bounds`);
+    assert.ok(facts.copyWidth >= viewport.width * 0.9, `${label}: opening needs room for its single-line title`);
     assert.ok(facts.topCtaHeight >= 50, `${label}: QHD primary action did not scale`);
     assert.ok(facts.wordmarkFontSize >= 21, `${label}: QHD wordmark did not scale`);
   } else {
     assert.ok(
-      facts.titleFontSize >= 30 && facts.titleFontSize <= 58,
+      viewport.width <= 860
+        ? facts.titleFontSize >= 18 && facts.titleFontSize <= 52
+        : facts.titleFontSize >= 60 && facts.titleFontSize <= 84,
       `${label}: title scale is out of bounds (${facts.titleFontSize}px)`
     );
   }
@@ -253,8 +264,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(focus.offset, "3px", `${label}: CTA focus separation must be 3px`);
   assert.notEqual(focus.style, "none", `${label}: CTA focus outline is missing`);
 
-  // The report scene spans 4.3–6 viewport heights; inspect its settled midpoint.
-  await page.evaluate(() => window.scrollTo(0, innerHeight * 5.15));
+  // Scroll distance is capped at the FHD unit even when media fills a taller viewport.
+  await page.evaluate(() => window.scrollTo(0, Math.min(innerHeight, 1080) * 5.15));
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
@@ -300,7 +311,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   );
   assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
 
-  await page.evaluate(() => window.scrollTo(0, innerHeight * 6.75));
+  await page.evaluate(() => window.scrollTo(0, Math.min(innerHeight, 1080) * 6.75));
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
   );
@@ -354,11 +365,12 @@ async function verifyDesktopMotionPath(browser) {
   await page.locator('[data-scroll-world-ready="true"]').waitFor();
   await page.waitForFunction(() => document.querySelectorAll("video").length === 1, null, { timeout: 15_000 });
   assert.equal(await page.locator("video").count(), 1, "initial desktop view must load only the opening clip");
-  assert.deepEqual(videoRequests, ["/landing/scroll-world/vid/opening-1080.mp4"]);
+  assert.deepEqual(videoRequests, ["/landing/scroll-world/vid/opening.mp4"]);
   const openingBytes = await page.evaluate(() => performance.getEntriesByType("resource")
-    .find((entry) => new URL(entry.name).pathname === "/landing/scroll-world/vid/opening-1080.mp4")?.encodedBodySize);
-  assert.ok(openingBytes > 0 && openingBytes <= 3 * 1024 * 1024,
-    `initial desktop video exceeds the 3 MiB media budget: ${openingBytes} bytes`);
+    .find((entry) => new URL(entry.name).pathname === "/landing/scroll-world/vid/opening.mp4")?.encodedBodySize);
+  // The full-screen opening uses 4K on every desktop, within a bounded transfer budget.
+  assert.ok(openingBytes > 0 && openingBytes <= 8 * 1024 * 1024,
+    `initial desktop video exceeds the 8 MiB media budget: ${openingBytes} bytes`);
 
   const scenes = [];
   for (const scene of refreshedScenes) {
@@ -591,6 +603,64 @@ async function verifyProductPreviewAccountMenu(browser) {
   await context.close();
 }
 
+async function verifyMessageHandoff(browser) {
+  const context = await browser.newContext({ viewport: { width: 1740, height: 980 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+    await page.locator('[data-scroll-world-ready="true"]').waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    const scrollToProgress = async (progress, scene) => {
+      await page.locator(".ua-findings__track").evaluate((track, fraction) => {
+        const rect = track.getBoundingClientRect();
+        scrollTo({ top: scrollY + rect.top + (rect.height - innerHeight) * fraction, behavior: "instant" });
+      }, progress);
+      await page.waitForFunction(expected => document.querySelector(".ua-findings__stage")?.dataset.scene === expected, scene);
+      await settle(page);
+    };
+    await scrollToProgress(0.06, "message");
+    await page.locator(".ua-message.is-visible").waitFor();
+    await page.waitForTimeout(1400); // Let the existing three-line entrance finish.
+    await scrollToProgress(0.18, "handoff");
+    const midpoint = await page.evaluate(() => {
+      const source = document.querySelector(".ua-message__word");
+      const target = document.querySelector(".ua-findings__target-word");
+      const moving = document.querySelector(".ua-findings__moving-word");
+      return { sourceX: source.getBoundingClientRect().left, targetX: target.getBoundingClientRect().left,
+        movingX: moving.getBoundingClientRect().left, movingVisible: getComputedStyle(moving).visibility,
+        sourceOpacity: getComputedStyle(source).opacity, targetOpacity: getComputedStyle(target).opacity };
+    });
+    assert.ok(midpoint.targetX < midpoint.movingX && midpoint.movingX < midpoint.sourceX, "The shared word must travel left between the two headings.");
+    assert.equal(midpoint.movingVisible, "visible");
+    assert.equal(midpoint.sourceOpacity, "0", "The moving word must not duplicate its source.");
+    assert.equal(midpoint.targetOpacity, "0", "The moving word must not duplicate its destination.");
+    await page.screenshot({ path: `${outDir}/message-handoff-midpoint.png` });
+    await scrollToProgress(0.279, "handoff");
+    const alignment = await page.evaluate(() => {
+      const moving = document.querySelector(".ua-findings__moving-word").getBoundingClientRect();
+      const target = document.querySelector(".ua-findings__target-word").getBoundingClientRect();
+      return Math.max(...["left", "top", "width", "height"].map(key => Math.abs(moving[key] - target[key])));
+    });
+    assert.ok(alignment < 1, `The arriving word must align with the next heading (${alignment}px).`);
+    await scrollToProgress(0.32, "findings");
+    assert.equal(await page.locator(".ua-findings__body").getAttribute("aria-hidden"), "false");
+    await scrollToProgress(0.18, "handoff");
+    await scrollToProgress(0.06, "message");
+    assert.equal(await page.locator(".ua-findings__message").getAttribute("aria-hidden"), "false");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await scrollToProgress(0.2, "findings");
+    assert.equal(await page.locator(".ua-findings__moving-word").isVisible(), false);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await scrollToProgress(0.06, "message");
+    await scrollToProgress(0.2, "findings");
+    assert.equal(await page.locator(".ua-findings__moving-word").isVisible(), false);
+    await page.screenshot({ path: `${outDir}/message-handoff-mobile.png` });
+  } finally {
+    await context.close();
+  }
+}
+
 async function verifyFindingsStages(browser) {
   for (const viewport of [{ width: 390, height: 844 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }]) {
     const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
@@ -602,7 +672,7 @@ async function verifyFindingsStages(browser) {
       for (const phase of [0, 1, 2, 3]) {
         await page.locator(".ua-findings__track").evaluate((track, step) => {
           const rect = track.getBoundingClientRect();
-          window.scrollTo({ top: scrollY + rect.top + (rect.height - innerHeight) * ((step + 0.2) / 4), behavior: "instant" });
+          window.scrollTo({ top: scrollY + rect.top + (rect.height - innerHeight) * (0.28 + 0.72 * ((step + 0.2) / 4)), behavior: "instant" });
         }, phase);
         await page.waitForFunction((step) => {
           const current = document.querySelector(".ua-findings__steps li[aria-current=step]");
@@ -637,6 +707,7 @@ try {
   }
   await verifyMobileHeightOnlyResize(browser);
   await verifyScrollControl(browser);
+  await verifyMessageHandoff(browser);
   await verifyFindingsStages(browser);
   const scenes = await verifyDesktopMotionPath(browser);
   const variants = await verifyRefreshedMediaVariants(browser);
