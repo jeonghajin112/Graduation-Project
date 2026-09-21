@@ -165,6 +165,12 @@ async function verifyScene(scene) {
       "The page-view recording must not open issue details.");
     assert.equal(await page.getByRole("complementary", { name: "최근 분석 추이", exact: true }).isVisible(), true);
     const pageChrome = page.locator(".site-page-evidence-chrome");
+    const chromeSurface = await pageChrome.evaluate(element => {
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, blur: style.backdropFilter };
+    });
+    assert.equal(chromeSurface.blur, "none", "The landing recording must use the opaque report header.");
+    assert.match(chromeSurface.background, /^rgb\(/, "The recorded header must not show the source page through it.");
     assert.equal(await pageChrome.getByRole("button", { name: "재분석", exact: true }).isEnabled(), true);
     assert.equal(await pageChrome.locator("h2").innerText(),
       await viewer.locator("html").evaluate(() => document.title.trim()));
@@ -331,6 +337,16 @@ try {
       height: Math.ceil(initialBox.width * 9 / 16 + 1080 - initialBox.height) });
     await viewer.locator("html").evaluate(() => window.scrollTo({ top: 160, behavior: "instant" }));
     const marker = viewer.locator(`.ap-live-marker[data-issue-id="${findingsIssueId}"]`);
+    // Offscreen markers are hidden by the bridge. Bring the source content into
+    // view before clicking instead of relying on locator.click to scroll it.
+    const scan = await viewer.locator("html").evaluate(() => ({
+      step: Math.max(200, innerHeight / 2), max: document.documentElement.scrollHeight - innerHeight
+    }));
+    for (let top = 160; top <= scan.max + scan.step; top += scan.step) {
+      await viewer.locator("html").evaluate((_, y) => window.scrollTo({ top: y, behavior: "instant" }), Math.min(top, scan.max));
+      await waitForReportFrame(page, viewer);
+      if (await marker.isVisible()) break;
+    }
     await marker.click();
     const popover = viewer.locator(".ap-live-popover:visible");
     await popover.waitFor();

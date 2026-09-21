@@ -27,7 +27,7 @@
 }
 
 /* The bridge reserves this overlap for fixed/sticky source navigation while
-   ordinary document content can pass behind the glass. */
+   ordinary document content can pass behind the opaque title bar. */
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-card[data-document-scrolled="true"] {
   --site-page-chrome-overlap: var(--site-page-chrome-height);
 }
@@ -126,10 +126,7 @@
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome[data-scrolled="true"] {
   position: absolute;
   inset: 0 0 auto;
-  background: rgb(255 255 255 / 58%);
   box-shadow: none;
-  -webkit-backdrop-filter: blur(20px) saturate(130%);
-  backdrop-filter: blur(20px) saturate(130%);
 }
 
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome h2 {
@@ -155,13 +152,7 @@
   color: var(--dashboard-text-muted);
 }
 
-.bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-chrome[data-scrolled="true"] {
-  background: rgb(20 22 26 / 58%);
-  box-shadow: none;
-}
-
-/* This title bar keeps the explicitly requested page blur. High-contrast
-   forced colors still use a solid system surface for legibility. */
+/* Use system colors for the opaque title bar in high-contrast mode. */
 @media (forced-colors: active) {
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome[data-scrolled],
   .bridge-dashboard.dashboard-site-detail.theme-dark .site-page-evidence-chrome[data-scrolled] {

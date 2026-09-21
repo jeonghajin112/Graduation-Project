@@ -1491,9 +1491,9 @@ async function verifyDesktop(page) {
   const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
   const initialMessage = await waitForReplayMessage(frame, (message) => message.type === "INIT_ISSUES");
   // The scrolled bar overlaps real content and sends its measured height to
-  // the bridge, which keeps source-site fixed navigation below the glass.
-  const glassMediaSession = await page.context().newCDPSession(page);
-  await glassMediaSession.send("Emulation.setEmulatedMedia", {
+  // the bridge, which keeps source-site fixed navigation below the opaque title bar.
+  const chromeMediaSession = await page.context().newCDPSession(page);
+  await chromeMediaSession.send("Emulation.setEmulatedMedia", {
     features: [{ name: "prefers-reduced-transparency", value: "reduce" }]
   });
   assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-transparency: reduce)").matches), true);
@@ -1507,7 +1507,8 @@ async function verifyDesktop(page) {
       return { height: card.getBoundingClientRect().height,
         barBottom: bar.getBoundingClientRect().bottom, viewerTop: viewer.getBoundingClientRect().top,
         viewerHeight: viewer.getBoundingClientRect().height,
-        blur: getComputedStyle(bar).backdropFilter };
+        blur: getComputedStyle(bar).backdropFilter,
+        background: getComputedStyle(bar).backgroundColor };
     });
     const initialChrome = await readChrome();
     assert.equal(initialChrome.blur, 'none');
@@ -1521,20 +1522,22 @@ async function verifyDesktop(page) {
     await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: true });
     await page.waitForFunction(() => document.querySelector('.site-page-evidence-card')?.dataset.documentScrolled === 'true');
     const scrolledChrome = await readChrome();
-    assert.match(scrolledChrome.blur, /blur\(20px\)/);
-    assert.ok(scrolledChrome.viewerTop < scrolledChrome.barBottom - 20, 'glass must blur actual rendered content');
+    assert.equal(scrolledChrome.blur, 'none');
+    assert.equal(scrolledChrome.background, initialChrome.background, 'scrolling must keep the opaque header surface');
+    assert.match(scrolledChrome.background, /^rgb\(/, 'header background must be fully opaque');
+    assert.ok(scrolledChrome.viewerTop < scrolledChrome.barBottom - 20, 'scrolled content must stay behind the title bar');
     const insetMessage = await waitForReplayMessage(frame, message => message.type === 'SET_VIEW_SCALE' && message.topInset > 0);
     assert.ok(Math.abs(insetMessage.topInset - (scrolledChrome.barBottom - scrolledChrome.viewerTop)) < 1,
       'the bridge must receive the actual covered height');
     assert.ok(Math.abs(scrolledChrome.height - initialChrome.height) <= 1, `${width}px: title transition changed card height`);
-    await evidence.screenshot({ path: `${outDir}/glass-header-${width}.png` });
+    await evidence.screenshot({ path: `${outDir}/opaque-header-${width}.png` });
     await sendReplayTestMessage(frame, { type: "DOCUMENT_SCROLL", isScrolled: false });
     await page.waitForFunction(() => document.querySelector('.site-page-evidence-card')?.dataset.documentScrolled === 'false');
     assert.equal((await readChrome()).blur, 'none');
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await glassMediaSession.send("Emulation.setEmulatedMedia", { features: [] });
-  await glassMediaSession.detach();
+  await chromeMediaSession.send("Emulation.setEmulatedMedia", { features: [] });
+  await chromeMediaSession.detach();
   const documentHeading = evidence.locator(".site-page-evidence-chrome h2");
   assert.equal(await documentHeading.innerText(), "", "the title stays empty until the real document title arrives");
   for (const title of ["NAVER", "공식 웹사이트 | 온라인 스토어", "상품 상세 · 공식 웹사이트", "", "공식 웹사이트 | 온라인 스토어"]) {
