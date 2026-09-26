@@ -36,11 +36,10 @@ export function IssueLocationDialog({ row, state, onClose }: {
   );
 }
 
-export function IssueLocationContent({ row, state, descriptionId, savedResult = false }: {
+function IssueLocationContent({ row, state, descriptionId }: {
   row: RecentIssueRow;
   state?: LocatorIssueState;
   descriptionId?: string;
-  savedResult?: boolean;
 }) {
   const issue = row.issue;
   // The card/replay message is a bounded preview. Details retain the full
@@ -48,9 +47,7 @@ export function IssueLocationContent({ row, state, descriptionId, savedResult = 
   const description = formatIssueDescription(issue.message, row.analyzerType, issue.ruleId);
   const hasLocalizedDescription = row.analyzerType === "RULE_BASED" && description !== issue.message.trim();
   const locator = issue.locator;
-  const explanation = savedResult && !state
-    ? { label: "현재 위치 미확인", description: "현재 페이지에서의 위치는 확인되지 않았습니다. 아래에 저장된 분석 당시 정보를 참고해 주세요." }
-    : getLocatorExplanation(state);
+  const explanation = getLocatorExplanation(state);
   const pathSteps = locator?.pathSteps.length ? locator.pathSteps : getReplayIssuePathSteps(issue);
   const coordinateSpace = locator?.coordinateSpace;
   const coordinateLabel = coordinateSpace === "DOCUMENT_CSS_PX"

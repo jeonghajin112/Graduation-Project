@@ -1,6 +1,6 @@
 import { clearSiteCreateRecovery, readSiteCreateRecovery } from "@/services/site-create-recovery-storage";
 import { UserFacingError } from "@/services/user-facing-error";
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 
 import { ErrorBoundary, isLazyChunkLoadError } from "@/components/shared/error-boundary";
 import { ModalErrorFallback, ModalLoadFallback } from "../shared/modal-load-fallback";
@@ -36,8 +36,6 @@ import "@/styles/page-evidence-layout.css";
 
 const IssueLocationDialog = lazy(() => import("./site-dashboard/issue-location-dialog")
   .then(module => ({ default: module.IssueLocationDialog })));
-const AllIssuesDialog = lazy(() => import("./site-dashboard/all-issues-dialog")
-  .then(module => ({ default: module.AllIssuesDialog })));
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;
@@ -219,9 +217,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
   );
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const [locationIssueId, setLocationIssueId] = useState<number | null>(null);
-  const [allIssuesOpen, setAllIssuesOpen] = useState(false);
-  const allIssuesButtonRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => { setLocationIssueId(null); setAllIssuesOpen(false); }, [latestResultRequestId, evaluationTarget.id]);
+  useEffect(() => { setLocationIssueId(null); }, [latestResultRequestId, evaluationTarget.id]);
   const [selectedIssueFocusRequestId, setSelectedIssueFocusRequestId] = useState(0);
   const [locatorReport, setLocatorReport] = useState<LocatorReport | null>(null);
   const handleLocatorReportChange = useCallback((next: LocatorReport) => {
@@ -368,9 +364,6 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
         {showsRailDetailCards && (
           <>
             <SeverityDistributionPanel issues={latestIssues}>
-              <button ref={allIssuesButtonRef} type="button" className="dashboard-modal-button" onClick={() => setAllIssuesOpen(true)}>
-                전체 문제 {latestIssues.length.toLocaleString("ko-KR")}개
-              </button>
               {liveSessionLoadState === "error" && <p className="site-result-notice" role="status">
                 현재 페이지에 연결하지 못했습니다. 저장된 분석 결과를 표시합니다.
               </p>}
@@ -393,17 +386,6 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
           </>
         )}
       </div>
-      {allIssuesOpen && showsRailDetailCards ? (
-        <ErrorBoundary resetKey={`all-issues:${latestResultRequestId}`} fallback={({ error, resetErrorBoundary }) => (
-          <ModalErrorFallback isChunkError={isLazyChunkLoadError(error)} onDismiss={() => setAllIssuesOpen(false)}
-            onRetry={resetErrorBoundary} onReload={() => window.location.reload()} />
-        )}>
-          <Suspense fallback={<ModalLoadFallback />}>
-            <AllIssuesDialog key={latestResultRequestId} rows={replayIssueRows} issueStates={currentLocatorReport?.issueStates}
-              onClose={() => setAllIssuesOpen(false)} returnFocusRef={allIssuesButtonRef} />
-          </Suspense>
-        </ErrorBoundary>
-      ) : null}
       {locationRow ? (
         <ErrorBoundary
           resetKey={`issue-location:${locationRow.issue.id}`}

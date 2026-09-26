@@ -35,35 +35,16 @@ try {
       throw new Error(`Unexpected API request: ${pathname}`);
     });
     await page.goto(`${baseUrl}/projects/1/pages/101`, { waitUntil: "domcontentloaded" });
-    const open = page.getByRole("button", { name: `전체 문제 ${count.toLocaleString("ko-KR")}개`, exact: true });
-    await open.waitFor({ timeout: 10000 }).catch(async error => { console.log(await page.locator("body").innerText()); throw error; });
     await page.getByText(/최신 재분석에 실패했습니다/).waitFor();
     await page.getByText(/현재 페이지에 연결하지 못했습니다. 저장된 분석 결과를 표시합니다/).waitFor();
     const trend = page.locator(".site-page-evidence-trend-panel");
     assert.match(await trend.innerText(), /미확인/);
     assert.equal(await trend.locator('[data-slot="chart"]').count(), 1, "real zero is a measured score");
-    await open.focus();
-    await page.keyboard.press("Enter");
-    const dialog = page.getByRole("dialog", { name: `전체 문제 ${count.toLocaleString("ko-KR")}개`, exact: true });
-    await dialog.waitFor();
-    const list = dialog.getByRole("list", { name: "전체 문제 목록" });
-    if (count === 0) {
-      await dialog.getByText("저장된 문제가 없습니다.", { exact: true }).waitFor();
-    } else {
-      assert.equal(await list.getByRole("listitem").count(), Math.min(count, 25));
-      if (count > 25) await dialog.getByRole("button", { name: "마지막", exact: true }).click();
-      await list.getByRole("button", { name: new RegExp(`저장된 문제 ${count} 문제 상세$`) }).click();
-      await dialog.getByText(`전체 설명 ${count}`, { exact: false }).waitFor();
-      assert.equal(await page.getByRole("dialog").count(), 1, "details must not create a nested modal");
-      assert.equal(await page.evaluate(() => window.untrusted), undefined, "stored HTML stays text");
-      assert.equal(await dialog.getByRole("region", { name: "선택한 문제 상세" }).evaluate(el => el === document.activeElement), true);
-    }
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached" });
-    assert.equal(await open.evaluate(el => el === document.activeElement), true, "restore focus to the opener");
+    assert.equal(await page.getByRole("button", { name: /^전체 문제 / }).count(), 0,
+      "the removed all-issues entry must not appear");
     assert.deepEqual(errors, []);
     await page.close();
-    console.log(`PASS saved results independent of live session: ${count} issues`);
+    console.log(`PASS saved result notices and no all-issues entry: ${count} issues`);
   }
   for (const records of [0, 1, 7]) {
     const page = await browser.newPage();
