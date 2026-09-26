@@ -410,6 +410,10 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
             {dashboard.menu === "analyze" || isSiteDetailView ? (
               <h1 className="sr-only">{dashboard.headerTitle}</h1>
             ) : null}
+            {(dashboard.pausedStatusCount ?? 0) > 0 && <div className="site-result-notice" role="status">
+              {dashboard.pausedStatusCount}개 분석의 상태를 계속 확인하지 못해 자동 조회를 잠시 중지했습니다. 분석 실패나 삭제가 확정된 것은 아닙니다.
+              <button type="button" className="dashboard-modal-button" onClick={dashboard.retryStatusChecks}>분석 상태 다시 확인</button>
+            </div>}
             {dashboard.dashboardError.length > 0 ? (
               <article
                 role="alert"
@@ -439,6 +443,7 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               <Suspense fallback={<RoutePanelFallback />}>
                 {dashboard.menu === "analyze" && (
                   <QuickAnalyzePanel
+                    supportsIdempotency={dashboard.dashboardData?.analysisProtocolVersion === 1}
                     isDarkMode={dashboard.isDarkMode}
                     {...(actions
                       ? { onAnalysisAccepted: actions.handleQuickAnalysisAccepted }

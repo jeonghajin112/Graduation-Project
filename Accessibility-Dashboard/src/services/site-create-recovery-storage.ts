@@ -15,6 +15,7 @@ export const SITE_URL_MAX_LENGTH = 500;
 const ID_LIST_MAX_LENGTH = 10_000;
 
 type SiteCreateRecoveryBase = {
+  analysisKey?: string;
   version: 1;
   attemptId: string;
   apiScope: string;
@@ -127,6 +128,7 @@ function normalizePersistedSiteCreateAttempt(
       ? normalizeSiteCreateAccessUrl(value.accessUrl)
       : "";
   const previousTargetIds = normalizeIdList(value.previousTargetIds);
+  if (value.analysisKey !== undefined && (typeof value.analysisKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.analysisKey))) return null;
   if (
     value.version !== 1 ||
     typeof value.attemptId !== "string" ||
@@ -145,6 +147,8 @@ function normalizePersistedSiteCreateAttempt(
   }
 
   const base: SiteCreateRecoveryBase = {
+    ...(typeof value.analysisKey === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.analysisKey)
+      ? { analysisKey: value.analysisKey } : {}),
     version: 1,
     attemptId: value.attemptId,
     apiScope: API_BASE_URL,

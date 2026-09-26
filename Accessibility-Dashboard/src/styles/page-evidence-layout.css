@@ -168,6 +168,37 @@
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome { transition: none; }
 }
 
+.site-all-issues-dialog__content {
+  overflow: auto;
+  min-height: 0;
+  padding: 1.25rem;
+  display: grid;
+  gap: 1rem;
+}
+.site-all-issues-dialog__list {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+}
+.site-all-issues-dialog__list button {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.site-all-issues-dialog__pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.site-all-issues-dialog .site-issue-location-dialog__body {
+  max-height: none;
+  overflow: visible;
+}
+
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-retry {
   display: flex;
   align-items: center;

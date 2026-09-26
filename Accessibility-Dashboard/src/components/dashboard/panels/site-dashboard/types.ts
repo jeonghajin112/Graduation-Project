@@ -6,7 +6,7 @@ export type ScoreChartItem = {
   date: string;
   label: string;
   score: number;
-  issueCount: number;
+  issueCount: number | null;
   isPlaceholder?: boolean;
 };
 

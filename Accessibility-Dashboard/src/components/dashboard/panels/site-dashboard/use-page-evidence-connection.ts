@@ -38,8 +38,9 @@ import {
   type PageReplayToDashboardMessage,
   type ReplayViewportMetrics
 } from "./page-replay-protocol";
-import type { LocatorIssueState, LocatorReport, RecentIssueRow } from "./types";
+import type { LocatorReport, RecentIssueRow } from "./types";
 import { useBatchedLocatorStates } from "./use-batched-locator-states";
+import { buildLocatorReport } from "./locator-report";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
 type ReplayConnectionState = "loading" | "ready" | "error";
@@ -166,44 +167,19 @@ export function usePageEvidenceConnection({
   const selectedVisibleIssueId = selectedIssueId !== null && replayIssueIds.has(selectedIssueId)
     ? selectedIssueId
     : null;
+  const reportIssueIds = useMemo(() => replayIssues.map(issue => issue.id), [replayIssues]);
+  const reportIssueIdsSignature = useMemo(() => reportIssueIds.join(","), [reportIssueIds]);
   const locatorReport = useMemo<LocatorReport>(() => {
     const connected = effectiveLoadState === "ready" && replayConnectionState === "ready";
     const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : replayIssues.length;
-    const issueStates: Record<number, LocatorIssueState> = {};
-    const unavailableIssueIds: number[] = [];
-    const recoverableHiddenIssueIds: number[] = [];
-    if (connected) replayIssues.forEach((issue, index) => {
-      const state: LocatorIssueState | undefined = index >= issueLimit
-        ? { status: "UNAVAILABLE", reason: "ISSUE_LIMIT_EXCEEDED" }
-        : locatorStates.get(issue.id);
-      if (!state) return;
-      issueStates[issue.id] = state;
-      if (state.status === "HIDDEN_STATE" && state.recoverable === true) {
-        recoverableHiddenIssueIds.push(issue.id);
-      } else if (state.status === "UNAVAILABLE" || state.status === "HIDDEN_STATE") {
-        unavailableIssueIds.push(issue.id);
-      }
-    });
-    return {
-      requestId: evaluationRequestId,
-      issueIdsSignature: replayIssues.map((issue) => issue.id).join(","),
-      state: effectiveLoadState === "error" ||
-        (effectiveLoadState === "ready" && replayConnectionState === "error")
-        ? "error"
-        : connected && replayIssues.every((issue, index) =>
-            index >= issueLimit || locatorStates.has(issue.id))
-          ? "ready"
-          : "loading",
-      unavailableIssueIds,
-      recoverableHiddenIssueIds,
-      issueStates
-    };
-  }, [effectiveLoadState, replayConnectionState, evaluationRequestId, replayIssues, activeFrameKind,
-    locatorStates]);
+    return buildLocatorReport({ requestId: evaluationRequestId, issueIds: reportIssueIds,
+      issueIdsSignature: reportIssueIdsSignature, issueLimit, connected, states: locatorStates,
+      failed: effectiveLoadState === "error" || (effectiveLoadState === "ready" && replayConnectionState === "error") });
+  }, [effectiveLoadState, replayConnectionState, evaluationRequestId, reportIssueIds, reportIssueIdsSignature, activeFrameKind, locatorStates]);
   const unavailableLocatorCount = locatorReport.unavailableIssueIds.length;
   const recoverableHiddenLocatorCount = locatorReport.recoverableHiddenIssueIds.length;
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     onLocatorReportChange(locatorReport);
   }, [onLocatorReportChange, locatorReport]);
 

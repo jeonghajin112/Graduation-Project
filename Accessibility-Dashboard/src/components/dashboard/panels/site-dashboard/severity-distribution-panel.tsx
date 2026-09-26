@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 
 import type { IssueResultModel } from "@/types/accessibility-domain";
 
@@ -6,6 +6,7 @@ import { severityChartItems } from "./constants";
 
 type SeverityDistributionPanelProps = {
   issues: IssueResultModel[];
+  children?: ReactNode;
 };
 
 const MIN_VISIBLE_BAR_PERCENT = 5;
@@ -25,7 +26,7 @@ export function getSeverityBarHeightPercent(count: number, total: number): numbe
  * with the markers drawn on the page. Per-severity counts stay out of the
  * resting view and surface in the segment tooltip on hover or focus.
  */
-export function SeverityDistributionPanel({ issues }: SeverityDistributionPanelProps) {
+export function SeverityDistributionPanel({ issues, children }: SeverityDistributionPanelProps) {
   // 범례에는 비율만 보이고, 건수는 막대 조각의 툴팁에서만 보인다.
   const rows = useMemo(() => {
     const countByKey = new Map(severityChartItems.map((item) => [item.key, 0]));
@@ -53,7 +54,7 @@ export function SeverityDistributionPanel({ issues }: SeverityDistributionPanelP
   const total = issues.length;
 
   if (total === 0) {
-    return null;
+    return children ? <section className="site-rail-card">{children}</section> : null;
   }
 
   const segments = rows.filter((row) => row.count > 0);
@@ -103,6 +104,7 @@ export function SeverityDistributionPanel({ issues }: SeverityDistributionPanelP
           </li>
         ))}
       </ul>
+      {children}
     </section>
   );
 }

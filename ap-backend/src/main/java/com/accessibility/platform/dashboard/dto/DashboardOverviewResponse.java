@@ -12,6 +12,8 @@ public record DashboardOverviewResponse(
         List<DashboardScoreResponse> scoreResults,
         List<DashboardLatestIssueCountsResponse> latestIssueCounts
 ) {
+    public int getAnalysisProtocolVersion() { return 1; }
+
     public DashboardOverviewResponse {
         organizations = List.copyOf(organizations);
         evaluationRequests = List.copyOf(evaluationRequests);

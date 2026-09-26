@@ -363,6 +363,8 @@ export function mountScrollWorld(container, config, options = {}) {
           // painted — on iOS a seeked-but-never-played muted video stays blank, so
           // hiding the still on metadata alone would flash an empty scene.
           v.addEventListener('seeked', () => { s.el.classList.add('has-clip'); }, { once: true });
+          v.addEventListener('seeked', scheduleScrub);
+          v.addEventListener('loadeddata', scheduleScrub);
           v.addEventListener('loadeddata', () => { try { v.pause(); } catch (e) {} if (userReady) primeVideo(v); });
           s.el.appendChild(v); s.video = v; s.hasClip = true;
           if (s.layout === 'card') applyCard(s);
@@ -485,10 +487,17 @@ export function mountScrollWorld(container, config, options = {}) {
     }
     if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
     ticking = false;
+    scheduleScrub();
+  }
+
+  function scheduleScrub() {
+    if (!destroyed && !useStaticMedia() && !document.hidden && !rafId) rafId = requestAnimationFrame(raf);
   }
 
   function raf() {
+    rafId = 0;
     if (destroyed) return;
+    let moving = false;
     const eps = isMobile() ? 0.02 : 0.008;   // coarser seek step on phones = fewer decodes
     for (let i = 0; i < NSEG; i++) {
       const s = SEGMENTS[i];
@@ -499,11 +508,14 @@ export function mountScrollWorld(container, config, options = {}) {
       if (s.video.seeking) continue;
       if (!s.visible && Math.abs(s.cur - s.target) < 0.002) continue;
       s.cur += (s.target - s.cur) * (reduce ? 1 : 0.18);
+      if (Math.abs(s.target - s.cur) < 0.0005) s.cur = s.target;
+      else moving = true;
       const dur = s.video.duration || 1;
       const t = clamp(s.cur, 0, 0.999) * dur;
       if (Math.abs(s.video.currentTime - t) > eps) { try { s.video.currentTime = t; } catch (e) {} }
     }
-    rafId = requestAnimationFrame(raf);
+    // A decoder in flight wakes us through seeked. Stable clips need no polling.
+    if (moving) scheduleScrub();
   }
 
   // iOS needs a user gesture before a muted video will decode/paint reliably. On the
@@ -549,9 +561,14 @@ export function mountScrollWorld(container, config, options = {}) {
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', layout);
   window.addEventListener('load', layout);
+  function onVisibilityChange() {
+    if (document.hidden) { cancelAnimationFrame(rafId); rafId = 0; }
+    else read();
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange);
   layout();
   container.dataset.scrollWorldReady = 'true';
-  if (!useStaticMedia()) rafId = requestAnimationFrame(raf);
+  scheduleScrub();
 
   return () => {
     destroyed = true;
@@ -566,6 +583,7 @@ export function mountScrollWorld(container, config, options = {}) {
     window.removeEventListener('resize', onResize);
     window.removeEventListener('orientationchange', layout);
     window.removeEventListener('load', layout);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     SEGMENTS.forEach(segment => {
       if (!segment.video) return;
       try { segment.video.pause(); } catch (error) {}

@@ -10,6 +10,7 @@ export type StoredRecovery<T> = {
   rawValue: string;
   value: T;
 };
+export type RecoveryWriteFailure = "invalid" | "changed" | "quota" | "unavailable";
 
 export function isRecoveryTimestampStale(
   startedAt: number,
@@ -80,24 +81,29 @@ export function writeSessionRecoveryIfUnchanged<T>(
   storageKey: string,
   value: T,
   normalize: (value: unknown) => T | null,
-  expectedRawValue: string | null
+  expectedRawValue: string | null,
+  onFailure?: (reason: RecoveryWriteFailure) => void
 ): StoredRecovery<T> | null {
   try {
     const normalizedValue = normalize(value);
     if (normalizedValue === null) {
+      onFailure?.("invalid");
       return null;
     }
     if (window.sessionStorage.getItem(storageKey) !== expectedRawValue) {
+      onFailure?.("changed");
       return null;
     }
 
     const rawValue = JSON.stringify(normalizedValue);
     window.sessionStorage.setItem(storageKey, rawValue);
     if (window.sessionStorage.getItem(storageKey) !== rawValue) {
+      onFailure?.("unavailable");
       return null;
     }
     return { rawValue, value: normalizedValue };
-  } catch {
+  } catch (error) {
+    onFailure?.(error instanceof Error && error.name === "QuotaExceededError" ? "quota" : "unavailable");
     return null;
   }
 }

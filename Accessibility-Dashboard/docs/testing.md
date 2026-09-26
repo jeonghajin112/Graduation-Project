@@ -60,6 +60,12 @@ npm run test:run -- --suite scale
 
 재분석 복구는 기본 CI의 `verify-rescan-recovery-isolation.mjs`에서 접수 전 실패·취소, 확정 거절, 응답 유실과 다른 작업의 저장값 보존을 함께 확인한다.
 
+새 분석 계약은 `verify-analysis-protocol.mjs`에서 10,001개 이력, 빠른 분석·재분석의 접수 전후 응답 유실, 동일 키 복구, 배치 상태 조회와 장기 미확인 요청의 수동 복구를 확인한다. 실제 서버의 동시 접수·키 충돌·HTTP 계약은 백엔드 `AnalysisSubmissionIntegrationTest`가 검증한다. 서버 계약 버전을 제공하지 않는 fixture는 기존 복구 경로를 계속 검사한다.
+
+`verify-result-hardening.mjs`는 라이브 연결 실패 상태에서 0·1·5,000·5,001·10,001개 저장 문제의 마지막 항목까지 열람하고, 상세 포커스·HTML 이스케이프·차트의 자료 없음과 실제 0개를 확인한다. `verify-landing-idle.mjs`는 영상의 정지 상태와 스크롤 후 재개·정지에서 RAF 호출을 측정한다.
+
+`node scripts/measure-locator-report.mjs`는 실제 보고 집계 함수를 500·5,000개 입력으로 측정하는 보조 벤치마크다. React 렌더링이나 전체 뷰어 비용 측정으로 해석하지 않는다. 화면 동작은 page evidence의 full·scale과 실제 rewriter를 사용하는 replay suite로 검증한다.
+
 라이브 리포트의 React–Java 경계는 replay suite의 `verify-live-report-boundaries.mjs`로 검사한다. 실제 rewriter 문서를 사용해 5,000개 전송 한도의 앞뒤와 10,001개 입력, 초과 문제의 상세 열람, 후속 선택 명령, 폼 차단 후 연결 유지를 확인한다. Shadow DOM 갱신과 미표시 이유 변경은 같은 suite의 marker 회귀가 담당한다.
 
 ## Fixture와 실제 서버

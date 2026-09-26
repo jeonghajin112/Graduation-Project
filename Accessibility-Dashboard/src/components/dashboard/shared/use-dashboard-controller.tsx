@@ -35,6 +35,8 @@ export function useDashboardController({
     trackEvaluationRequest,
     dashboardData,
     dashboardError,
+    pausedStatusCount,
+    retryStatusChecks,
     endDirectoryRecovery,
     isDashboardLoading,
     loadDashboard
@@ -352,6 +354,8 @@ export function useDashboardController({
       organizationCreateForm.canDiscardOrganizationCreateRecovery,
     dashboardData,
     dashboardError,
+    pausedStatusCount,
+    retryStatusChecks,
     goBackToProject,
     goToProject,
     goToProjectsRoot,

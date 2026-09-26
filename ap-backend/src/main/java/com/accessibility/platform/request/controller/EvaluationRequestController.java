@@ -5,6 +5,7 @@ import com.accessibility.platform.request.dto.EvaluationRequestCreateRequest;
 import com.accessibility.platform.request.dto.EvaluationRequestResponse;
 import com.accessibility.platform.request.dto.EvaluationRequestStatusUpdateRequest;
 import com.accessibility.platform.request.service.EvaluationRequestService;
+import com.accessibility.platform.request.service.AnalysisSubmissionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -19,15 +20,33 @@ import com.accessibility.platform.request.dto.EvaluateUrlRequest;
 public class EvaluationRequestController {
 
     private final EvaluationRequestService evaluationRequestService;
+    private final AnalysisSubmissionService analysisSubmissionService;
 
     @PostMapping
-    public ApiResponse<EvaluationRequestResponse> create(@Valid @RequestBody EvaluationRequestCreateRequest request) {
-        return ApiResponse.ok(evaluationRequestService.create(request));
+    public ApiResponse<EvaluationRequestResponse> create(@Valid @RequestBody EvaluationRequestCreateRequest request,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key) {
+        return ApiResponse.ok(analysisSubmissionService.create(request, key));
     }
 
     @PostMapping("/evaluate")
-    public ApiResponse<EvaluationRequestResponse> evaluateUrl(@Valid @RequestBody EvaluateUrlRequest request) {
-        return ApiResponse.ok(evaluationRequestService.createForUrl(request));
+    public ApiResponse<EvaluationRequestResponse> evaluateUrl(@Valid @RequestBody EvaluateUrlRequest request,
+            @RequestHeader(name = "Idempotency-Key", required = false) String key) {
+        return ApiResponse.ok(analysisSubmissionService.evaluate(request, key));
+    }
+
+    @GetMapping("/attempts/{key}")
+    public ApiResponse<EvaluationRequestResponse> findAttempt(@PathVariable String key) {
+        return ApiResponse.ok(analysisSubmissionService.find(key));
+    }
+
+    @GetMapping("/statuses")
+    public ApiResponse<List<com.accessibility.platform.request.dto.EvaluationRequestStatusEntry>> statuses(@RequestParam List<Long> ids) {
+        return ApiResponse.ok(evaluationRequestService.findStatuses(ids));
+    }
+
+    @GetMapping("/active")
+    public ApiResponse<List<EvaluationRequestResponse>> active(@RequestParam Long targetId) {
+        return ApiResponse.ok(evaluationRequestService.findActiveForTarget(targetId));
     }
 
     @GetMapping

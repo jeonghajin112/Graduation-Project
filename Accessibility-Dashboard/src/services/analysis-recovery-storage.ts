@@ -6,7 +6,7 @@ import {
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
-import type { RecoveryRead } from "@/services/recovery-storage";
+import type { RecoveryRead, RecoveryWriteFailure } from "@/services/recovery-storage";
 
 export const QUICK_ANALYSIS_STORAGE_KEY =
   "accessibility-dashboard.quick-analysis-attempt.v1";
@@ -21,7 +21,7 @@ export function clearAnalysisRecoveryStorage(): void {
 const ATTEMPT_ID_MAX_LENGTH = 100;
 const URL_MAX_LENGTH = 4096;
 const STATUS_MAX_LENGTH = 100;
-const REQUEST_IDS_MAX_LENGTH = 10_000;
+export const REQUEST_IDS_MAX_LENGTH = 10_000;
 
 type PersistedAttemptBase = {
   attemptId: string;
@@ -36,6 +36,7 @@ export type PersistedQuickAnalysisAttempt = PersistedAttemptBase & {
     | {
         phase: "posting" | "reconciling";
         knownRequestIds: number[];
+        serverKey?: true;
       }
     | {
         phase: "request";
@@ -138,10 +139,11 @@ function normalizeQuickAnalysisAttempt(
     url: value.url
   };
   if (value.phase === "posting" || value.phase === "reconciling") {
+    if (value.serverKey !== undefined && (value.serverKey !== true || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base.attemptId))) return null;
     const knownRequestIds = normalizeRequestIds(value.knownRequestIds);
     return knownRequestIds === null
       ? null
-      : { ...common, phase: value.phase, knownRequestIds };
+      : { ...common, phase: value.phase, knownRequestIds, ...(value.serverKey === true ? { serverKey: true as const } : {}) };
   }
   if (value.phase === "request" && isPositiveSafeInteger(value.requestId)) {
     const targetId = value.targetId === null
@@ -196,13 +198,15 @@ export function readQuickAnalysisRecovery(
 
 export function writeQuickAnalysisAttempt(
   attempt: PersistedQuickAnalysisAttempt,
-  expectedRawValue: string | null
+  expectedRawValue: string | null,
+  onFailure?: (reason: RecoveryWriteFailure) => void
 ): StoredQuickAnalysisAttempt | null {
   const stored = writeSessionRecoveryIfUnchanged(
     QUICK_ANALYSIS_STORAGE_KEY,
     attempt,
     normalizeQuickAnalysisAttempt,
-    expectedRawValue
+    expectedRawValue,
+    onFailure
   );
   if (stored === null) {
     return null;

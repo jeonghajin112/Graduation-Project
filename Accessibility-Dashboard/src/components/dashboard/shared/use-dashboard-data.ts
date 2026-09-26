@@ -3,11 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRequestDeadline } from "@/services/async-cancellation";
 import {
   fetchDashboardViewModel,
-  fetchEvaluationRequest,
   getApiErrorMessage,
   isAbortError
 } from "@/services/backend-api";
 import type { DashboardViewModel, EvaluationRequestModel } from "@/types/accessibility-domain";
+import { type RequestPollObservation } from "./request-poll-policy";
 
 import {
   createDirectoryRecoveryLease,
@@ -105,6 +105,14 @@ export function useDashboardData({
   const directoryRecoveryRef = useRef<DirectoryRecovery | null>(null);
   // Confirmed POST/status responses remain visible while the overview catches up.
   const [trackedRequests, setTrackedRequests] = useState<Record<number, EvaluationRequestModel>>({});
+  const pollObservations = useRef(new Map<number, RequestPollObservation>());
+  const [pausedStatusCount, setPausedStatusCount] = useState(0);
+  const [statusRetryRevision, setStatusRetryRevision] = useState(0);
+  const retryStatusChecks = useCallback(() => {
+    pollObservations.current.clear();
+    setPausedStatusCount(0);
+    setStatusRetryRevision(revision => revision + 1);
+  }, []);
   const trackEvaluationRequest = useCallback((request: EvaluationRequestModel) => {
     setTrackedRequests((current) => {
       const previous = current[request.id];
@@ -330,75 +338,40 @@ export function useDashboardData({
     activeRequestKey ? activeRequestKey.split(",").map(Number) : [], [activeRequestKey]);
 
   useEffect(() => {
+    const activeIds = new Set(activeEvaluationRequestIds);
+    for (const id of pollObservations.current.keys()) if (!activeIds.has(id)) pollObservations.current.delete(id);
+    const updatePausedCount = () => setPausedStatusCount([...pollObservations.current.values()].filter(value => value.paused && !value.removed).length);
+    updatePausedCount();
     if (activeEvaluationRequestIds.length === 0) {
       return;
     }
 
     const lifecycleController = new AbortController();
-    let statusPollInFlight = false;
-
-    const refreshOverview = async () => {
-      await loadDashboard({
-        background: true,
-        refreshAfterInFlight: true,
-        signal: lifecycleController.signal
-      });
-    };
-
-    const pollActiveRequestStatuses = async () => {
-      if (
-        statusPollInFlight ||
-        lifecycleController.signal.aborted ||
-        document.visibilityState === "hidden"
-      ) {
-        return;
-      }
-
-      statusPollInFlight = true;
-      const statusDeadline = createRequestDeadline({
-        signal: lifecycleController.signal,
-        timeoutMs: DASHBOARD_STATUS_POLL_TIMEOUT_MS
-      });
-      const statusController = statusDeadline.controller;
-      const releaseStatusResources = statusDeadline.dispose;
-
-      try {
-        const outcomes = await Promise.allSettled(
-          activeEvaluationRequestIds.map((requestId) =>
-            fetchEvaluationRequest(requestId, statusController.signal)
-          )
-        );
-        releaseStatusResources();
-        if (lifecycleController.signal.aborted) return;
-        const requests = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
-        for (const request of requests) trackEvaluationRequest(request);
-        if (
-          outcomes.some((outcome) => outcome.status === "rejected") ||
-          requests.some(
-            (request) => request.status === "COMPLETED" || request.status === "FAILED"
-          ) ||
-          // An accepted page may not be in the first overview yet. Retry its
-          // directory entry while it is queued so the recent tab can appear.
-          requests.some((request) =>
-            !dashboardDataRef.current?.organizations.some((organization) =>
-              organization.evaluationTargets.some((target) => target.id === request.evaluationTargetId))
-          )
-        ) {
-          await refreshOverview();
+    let poller: Promise<() => void> | null = null;
+    const pollActiveRequestStatuses = () => {
+      if (lifecycleController.signal.aborted || document.visibilityState === "hidden") return;
+      poller ??= import("./dashboard-status-poller").then(({ createDashboardStatusPoller }) =>
+        createDashboardStatusPoller({
+          activeEvaluationRequestIds,
+          observations: pollObservations.current,
+          getDashboard: () => dashboardDataRef.current,
+          signal: lifecycleController.signal,
+          timeoutMs: DASHBOARD_STATUS_POLL_TIMEOUT_MS,
+          loadDashboard,
+          trackEvaluationRequest,
+          forgetRequest: id => setTrackedRequests(current => {
+            const next = { ...current };
+            delete next[id];
+            return next;
+          }),
+          updatePausedCount
+        }));
+      void poller.then(poll => poll()).catch(() => {
+        poller = null;
+        if (!lifecycleController.signal.aborted) {
+          setDashboardError("상태 확인 기능을 불러오지 못했습니다. 다음 조회 때 다시 시도합니다.");
         }
-      } catch (error) {
-        statusController.abort();
-        releaseStatusResources();
-        if (!lifecycleController.signal.aborted && (statusDeadline.didTimeout() || !isAbortError(error))) {
-          // A missing/malformed/stalled status response may mean the request was
-          // replaced or removed. Fall back to the authoritative snapshot once;
-          // normal successful polls never pay for this full response.
-          await refreshOverview();
-        }
-      } finally {
-        releaseStatusResources();
-        statusPollInFlight = false;
-      }
+      });
     };
 
     const intervalId = window.setInterval(
@@ -411,18 +384,21 @@ export function useDashboardData({
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (statusRetryRevision > 0) pollActiveRequestStatuses();
 
     return () => {
       lifecycleController.abort();
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeEvaluationRequestIds, loadDashboard, trackEvaluationRequest]);
+  }, [activeEvaluationRequestIds, loadDashboard, trackEvaluationRequest, statusRetryRevision]);
 
   return {
     dashboardData: visibleDashboardData,
     trackEvaluationRequest,
     dashboardError,
+    pausedStatusCount,
+    retryStatusChecks,
     beginDirectoryRecovery,
     endDirectoryRecovery,
     isDashboardLoading,

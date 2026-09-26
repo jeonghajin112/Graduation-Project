@@ -16,22 +16,7 @@ export function IssueLocationDialog({ row, state, onClose }: {
   const headingId = useId();
   const descriptionId = useId();
   const dialogRef = useDialogAccessibility({ isOpen: true, onClose });
-  const issue = row.issue;
   const replayIssue = toPageReplayIssue(row);
-  // The card/replay message is a bounded preview. Details retain the full
-  // stored explanation while keeping text-analysis formatting consistent.
-  const description = formatIssueDescription(issue.message, row.analyzerType, issue.ruleId);
-  const hasLocalizedDescription = row.analyzerType === "RULE_BASED" && description !== issue.message.trim();
-  const locator = issue.locator;
-  const explanation = getLocatorExplanation(state);
-  const pathSteps = locator?.pathSteps.length ? locator.pathSteps : getReplayIssuePathSteps(issue);
-  const coordinateSpace = locator?.coordinateSpace;
-  const coordinateLabel = coordinateSpace === "DOCUMENT_CSS_PX"
-    ? "문서 왼쪽 위 기준 · CSS px"
-    : coordinateSpace === "SCREENSHOT_PX"
-      ? "분석 이미지 왼쪽 위 기준 · 이미지 px"
-      : "좌표 기준을 확인할 수 없음";
-  const hasCoordinates = typeof locator?.x === "number" && typeof locator.y === "number";
 
   return createPortal(
     <div className="dashboard-modal-layer" onClick={event => {
@@ -45,6 +30,37 @@ export function IssueLocationDialog({ row, state, onClose }: {
             <X size={20} aria-hidden="true" />
           </button>
         </header>
+        <IssueLocationContent row={row} state={state} descriptionId={descriptionId} />
+      </article>
+    </div>, document.body
+  );
+}
+
+export function IssueLocationContent({ row, state, descriptionId, savedResult = false }: {
+  row: RecentIssueRow;
+  state?: LocatorIssueState;
+  descriptionId?: string;
+  savedResult?: boolean;
+}) {
+  const issue = row.issue;
+  // The card/replay message is a bounded preview. Details retain the full
+  // stored explanation while keeping text-analysis formatting consistent.
+  const description = formatIssueDescription(issue.message, row.analyzerType, issue.ruleId);
+  const hasLocalizedDescription = row.analyzerType === "RULE_BASED" && description !== issue.message.trim();
+  const locator = issue.locator;
+  const explanation = savedResult && !state
+    ? { label: "현재 위치 미확인", description: "현재 페이지에서의 위치는 확인되지 않았습니다. 아래에 저장된 분석 당시 정보를 참고해 주세요." }
+    : getLocatorExplanation(state);
+  const pathSteps = locator?.pathSteps.length ? locator.pathSteps : getReplayIssuePathSteps(issue);
+  const coordinateSpace = locator?.coordinateSpace;
+  const coordinateLabel = coordinateSpace === "DOCUMENT_CSS_PX"
+    ? "문서 왼쪽 위 기준 · CSS px"
+    : coordinateSpace === "SCREENSHOT_PX"
+      ? "분석 이미지 왼쪽 위 기준 · 이미지 px"
+      : "좌표 기준을 확인할 수 없음";
+  const hasCoordinates = typeof locator?.x === "number" && typeof locator.y === "number";
+
+  return (
         <div className="site-issue-location-dialog__body" role="region" aria-label="문제 상세 내용" tabIndex={0}>
           <section aria-label="문제 설명">
             <h3>문제 설명</h3>
@@ -92,7 +108,5 @@ export function IssueLocationDialog({ row, state, onClose }: {
           </section>
           <p className="site-issue-location-dialog__note">분석 시점에 저장된 정보로, 현재 페이지와 다를 수 있습니다.</p>
         </div>
-      </article>
-    </div>, document.body
   );
 }

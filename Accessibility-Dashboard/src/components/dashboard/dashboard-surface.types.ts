@@ -18,6 +18,8 @@ import type { SiteDashboardPreviewEvidence } from "./panels/site-dashboard-panel
 export type DashboardView = {
   dashboardData: DashboardViewModel | null;
   dashboardError: string;
+  pausedStatusCount?: number;
+  retryStatusChecks?: () => void;
   headerTitle: string;
   isDashboardLoading: boolean;
   isDarkMode: boolean;

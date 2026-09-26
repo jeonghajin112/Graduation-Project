@@ -38,6 +38,17 @@ export function selectLatestEvaluationRequest(
   return latestRequest;
 }
 
+// Submission order is distinct from result/status recency: an old job may
+// receive a late status update after a newer attempt has already failed.
+export function selectLatestAnalysisAttempt(requests: readonly EvaluationRequestModel[]): EvaluationRequestModel | null {
+  return requests.reduce<EvaluationRequestModel | null>((latest, request) => {
+    if (!latest) return request;
+    const left = toComparableTimestamp(request.requestedAt);
+    const right = toComparableTimestamp(latest.requestedAt);
+    return left > right || (left === right && request.id > latest.id) ? request : latest;
+  }, null);
+}
+
 export function buildLatestEvaluationRequestByTargetId(
   requests: readonly EvaluationRequestModel[],
   eligibleRequestIds?: ReadonlySet<number>

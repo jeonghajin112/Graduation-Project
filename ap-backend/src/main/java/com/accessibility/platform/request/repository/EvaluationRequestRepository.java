@@ -14,6 +14,10 @@ import java.util.Optional;
 
 public interface EvaluationRequestRepository extends JpaRepository<EvaluationRequest, Long> {
     List<EvaluationRequest> findByEvaluationTargetId(Long evaluationTargetId);
+    @Query("select request from EvaluationRequest request join fetch request.evaluationTarget target join fetch target.organization where request.id in :ids")
+    List<EvaluationRequest> findStatusRequests(@Param("ids") List<Long> ids);
+    List<EvaluationRequest> findByEvaluationTargetIdAndStatusIn(Long evaluationTargetId,
+            List<com.accessibility.platform.request.domain.EvaluationRequestStatus> statuses);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select request from EvaluationRequest request where request.id = :id")

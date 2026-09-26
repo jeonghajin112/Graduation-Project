@@ -112,6 +112,28 @@ public class EvaluationRequestService {
         return EvaluationRequestResponse.from(getRequest(id));
     }
 
+    public List<EvaluationRequestResponse> findActiveForTarget(Long targetId) {
+        evaluationTargetService.getTarget(targetId);
+        return evaluationRequestRepository.findByEvaluationTargetIdAndStatusIn(targetId,
+                List.of(com.accessibility.platform.request.domain.EvaluationRequestStatus.PENDING,
+                        com.accessibility.platform.request.domain.EvaluationRequestStatus.IN_PROGRESS))
+                .stream().map(EvaluationRequestResponse::from).toList();
+    }
+
+    public List<com.accessibility.platform.request.dto.EvaluationRequestStatusEntry> findStatuses(List<Long> ids) {
+        if (ids.isEmpty() || ids.size() > 100 || ids.stream().anyMatch(id -> id == null || id <= 0)
+                || ids.stream().distinct().count() != ids.size()) throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        var found = evaluationRequestRepository.findStatusRequests(ids).stream().collect(java.util.stream.Collectors.toMap(EvaluationRequest::getId, value -> value));
+        return ids.stream().map(id -> {
+            var request = found.get(id);
+            if (request == null) return new com.accessibility.platform.request.dto.EvaluationRequestStatusEntry(id, "NOT_FOUND", null);
+            var target = request.getEvaluationTarget();
+            if (target.getStatus() != TargetStatus.ACTIVE || target.getOrganization().getStatus() != OrganizationStatus.ACTIVE)
+                return new com.accessibility.platform.request.dto.EvaluationRequestStatusEntry(id, "REMOVED", null);
+            return new com.accessibility.platform.request.dto.EvaluationRequestStatusEntry(id, "FOUND", EvaluationRequestResponse.from(request));
+        }).toList();
+    }
+
     @Transactional
     public EvaluationRequestResponse updateStatus(Long id, EvaluationRequestStatusUpdateRequest request) {
         EvaluationRequest evaluationRequest = evaluationRequestRepository.findByIdForUpdate(id)

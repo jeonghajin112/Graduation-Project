@@ -56,7 +56,7 @@ function describeValueType(value: unknown): string {
   return typeof value;
 }
 
-function failContract(value: unknown, path: string, expected: string): never {
+export function failContract(value: unknown, path: string, expected: string): never {
   throw new ApiContractValidationError({
     fieldPath: path,
     expected,
@@ -83,7 +83,7 @@ type ContractFields = {
   optional<T>(key: string, parser: ApiResponseParser<T>): T | undefined;
 };
 
-function readFields(value: unknown, path: string): ContractFields {
+export function readFields(value: unknown, path: string): ContractFields {
   const record = parseRecord(value, path);
   const parseField = <T>(key: string, parser: ApiResponseParser<T>): T =>
     parser(readRequired(record, key, path), `${path}.${key}`);
@@ -211,7 +211,7 @@ function parsePositiveFiniteNumber(value: unknown, path: string): number {
   return parsed;
 }
 
-function parsePositiveInteger(value: unknown, path: string): number {
+export function parsePositiveInteger(value: unknown, path: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
     return failContract(value, path, "양의 정수");
   }
@@ -261,7 +261,7 @@ function parseDateTime(value: unknown, path: string): string {
   return parsed;
 }
 
-function parseEnumValue<const Values extends readonly string[]>(
+export function parseEnumValue<const Values extends readonly string[]>(
   value: unknown,
   path: string,
   values: Values
@@ -272,7 +272,7 @@ function parseEnumValue<const Values extends readonly string[]>(
   return value as Values[number];
 }
 
-function parseArray<T>(value: unknown, path: string, itemParser: ApiResponseParser<T>): T[] {
+export function parseArray<T>(value: unknown, path: string, itemParser: ApiResponseParser<T>): T[] {
   if (!Array.isArray(value)) {
     return failContract(value, path, "배열");
   }
@@ -674,7 +674,9 @@ export const parseDashboardOverviewResponse: ApiResponseParser<DashboardOverview
     evaluationRequests,
     resultSummaries,
     scoreResults,
-    latestIssueCounts
+    latestIssueCounts,
+    ...(fields.optional("analysisProtocolVersion", parseNonNegativeInteger) !== undefined
+      ? { analysisProtocolVersion: fields.optional("analysisProtocolVersion", parseNonNegativeInteger) } : {})
   };
 };
 

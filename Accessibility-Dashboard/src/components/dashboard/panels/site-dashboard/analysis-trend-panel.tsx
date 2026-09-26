@@ -54,7 +54,7 @@ export function AnalysisTrendPanel({
           date,
           label: formatShortDate(date),
           score: Math.round(score * 10) / 10,
-          issueCount: summary?.totalIssueCount ?? 0
+          issueCount: summary?.totalIssueCount ?? null
         } satisfies ScoreChartItem;
       })
       .filter((item): item is ScoreChartItem => item !== null)
@@ -82,7 +82,7 @@ export function AnalysisTrendPanel({
   const completedCount = data.filter((item) => !item.isPlaceholder).length;
   const latest = completedCount > 0 ? data[data.length - 1] : null;
   const chartSummary = latest
-    ? `최근 ${completedCount}회 분석 기준. 최신 점수 ${formatScore(latest.score)}점, 문제 ${latest.issueCount}건.`
+    ? `최근 ${completedCount}회 분석 기준. 최신 점수 ${formatScore(latest.score)}점, ${latest.issueCount === null ? "문제 수 미확인" : `문제 ${latest.issueCount}건`}.`
     : "완료된 분석 기록이 없어 추이 차트를 표시할 수 없습니다.";
 
   return (
@@ -99,15 +99,15 @@ export function AnalysisTrendPanel({
           </div>
           <div>
             <span>문제 수</span>
-            <strong>{latest.issueCount}</strong>
-            <small>건</small>
+            <strong>{latest.issueCount ?? "—"}</strong>
+            <small>{latest.issueCount === null ? "미확인" : "건"}</small>
           </div>
         </div>
       ) : null}
 
       <p className="sr-only">{chartSummary}</p>
 
-      {data.length > 0 ? (
+      {completedCount > 0 ? (
         <div data-slot="chart" className="site-page-evidence-trend-chart flex aspect-video justify-center text-xs">
           <ResponsiveContainer minWidth={0} minHeight={0} initialDimension={{ width: 1, height: 1 }}>
             <ComposedChart
@@ -176,7 +176,7 @@ function AnalysisTrendTooltip({ active, payload }: {
       <p>{formatDateLabel(item.date)}</p>
       <dl>
         <div><dt>점수</dt><dd>{formatScore(item.score)}점</dd></div>
-        <div><dt>문제 수</dt><dd>{item.issueCount}건</dd></div>
+        <div><dt>문제 수</dt><dd>{item.issueCount === null ? "미확인" : `${item.issueCount}건`}</dd></div>
       </dl>
     </div>
   );

@@ -54,6 +54,7 @@ const pageEvidenceScale = viteTest("verify-page-evidence.mjs", {
   label: "verify-page-evidence.mjs (scale)"
 });
 const siteDashboardRail = viteTest("verify-site-dashboard-rail.mjs");
+const resultHardening = viteTest("verify-result-hardening.mjs");
 const landingDesign = viteTest("verify-landing-design.mjs");
 const landingScrollSnap = viteTest("verify-landing-scroll-snap.mjs");
 const landingMediaQuality = viteTest("verify-landing-media-quality.mjs");
@@ -72,6 +73,7 @@ const ci = [
   dashboardResponsiveLayout,
   landingDesign,
   landingScrollSnap,
+  viteTest("verify-landing-idle.mjs"),
   landingMediaQuality,
   landingReportReadiness,
   dashboardBootAccessibility,
@@ -80,6 +82,7 @@ const ci = [
   quickAnalysisPlacement,
   siteAnalysisProgress,
   dashboardStatusPolling,
+  viteTest("verify-analysis-protocol.mjs"),
   apiResponseValidation,
   dashboardRequestBudget,
   directoryRecoveryLeases,
@@ -98,6 +101,7 @@ const ci = [
   siteCreateRequestRetry,
   siteCreateAccessibilityGuards,
   pageEvidenceCore,
+  resultHardening,
   siteDashboardRail
 ];
 

@@ -4,6 +4,7 @@ import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 import {
   buildLatestEvaluationRequestByTargetId,
   compareEvaluationRequestRecency,
+  selectLatestAnalysisAttempt,
   selectLatestEvaluationRequest
 } from "./evaluation-request-selection";
 
@@ -12,6 +13,14 @@ function request(id: number, evaluationTargetId: number, updatedAt: string): Eva
 }
 
 describe("evaluation request selection", () => {
+  it("keeps submission order independent of late updates to older results", () => {
+    const oldSuccess = { ...request(1, 101, "2026-09-26T12:00:00Z"), requestedAt: "2026-09-24T00:00:00Z" };
+    const newFailure = { ...request(2, 101, "2026-09-25T00:00:00Z"), status: "FAILED" as const };
+    expect(selectLatestEvaluationRequest([newFailure, oldSuccess])).toBe(oldSuccess);
+    expect(selectLatestAnalysisAttempt([oldSuccess, newFailure])).toBe(newFailure);
+    expect(selectLatestAnalysisAttempt([])).toBeNull();
+    expect(selectLatestAnalysisAttempt([request(1, 101, ""), request(2, 101, "")])?.id).toBe(2);
+  });
   it("returns no request for empty input or an empty eligible set", () => {
     expect(selectLatestEvaluationRequest([])).toBeNull();
     expect(buildLatestEvaluationRequestByTargetId([]).size).toBe(0);

@@ -9,7 +9,6 @@ import {
   createOrganizationResponseParser,
   parseDashboardOverviewResponse,
   parseEvaluationRequestsResponse,
-  parseEvaluationRequestResponse,
   parseLiveReportSessionResponse,
   parseOrganizationResponse,
   parseVoidResponse,
@@ -307,7 +306,7 @@ function parseSuccessfulResponse<T>({
   }
 }
 
-async function apiRequest<T>(
+export async function apiRequest<T>(
   path: string,
   parser: ApiResponseParser<T>,
   { method = "GET", body, headers: extraHeaders, cache, signal, optionalStatuses = [] }: ApiRequestOptions = {}
@@ -728,38 +727,6 @@ export async function deleteEvaluationTargetModel({
   });
 }
 
-export async function requestEvaluationTargetRescan(
-  targetId: number,
-  signal?: AbortSignal
-): Promise<number | null> {
-  const response = await apiRequest(
-    "/requests",
-    createEvaluationRequestResponseParser({ expectedTargetId: targetId }),
-    {
-    method: "POST",
-    body: {
-      evaluationTargetId: targetId,
-      requestNote: "다시 스캔 요청"
-    },
-    signal
-    }
-  );
-  return response.id;
-}
-
-export async function startUrlEvaluation(url: string, signal?: AbortSignal): Promise<EvaluationRequestModel> {
-  const evaluationRequest = await apiRequest(
-    "/requests/evaluate",
-    parseEvaluationRequestResponse,
-    {
-    method: "POST",
-    body: { url },
-    signal
-    }
-  );
-  return evaluationRequest;
-}
-
 export async function fetchEvaluationRequest(
   requestId: number,
   signal?: AbortSignal
@@ -808,6 +775,7 @@ export async function fetchDashboardViewModel(signal?: AbortSignal): Promise<Das
   const visibleRequestIds = new Set(visibleRequests.map((request) => request.id));
 
   return {
+    ...(overview.analysisProtocolVersion !== undefined ? { analysisProtocolVersion: overview.analysisProtocolVersion } : {}),
     organizations: buildOrganizationsFromApi(
       organizations,
       evaluationTargets,

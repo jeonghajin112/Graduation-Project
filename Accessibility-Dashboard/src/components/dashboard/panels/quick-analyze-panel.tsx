@@ -1,3 +1,4 @@
+import { fetchAnalysisAttempt, startUrlEvaluation } from "@/services/analysis-protocol-api";
 import { ArrowRight, Loader2, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,12 +9,12 @@ import {
   fetchEvaluationRequest,
   getApiErrorMessage,
   isAbortError,
-  startUrlEvaluation
 } from "@/services/backend-api";
 import {
   clearQuickAnalysisAttempt,
   readQuickAnalysisRecovery,
   writeQuickAnalysisAttempt,
+  REQUEST_IDS_MAX_LENGTH,
   type PersistedQuickAnalysisAttempt
 } from "@/services/analysis-recovery-storage";
 
@@ -52,6 +53,7 @@ type QuickAnalysisCheckpoint = QuickAnalysisCheckpointBase & (
   | {
       kind: "reconciling";
       knownRequestIds: number[];
+      serverKey?: true;
     }
   | {
       kind: "request";
@@ -170,7 +172,8 @@ function checkpointFromPersistedQuickAnalysisAttempt(
   return {
     ...common,
     kind: "reconciling",
-    knownRequestIds: attempt.knownRequestIds
+    knownRequestIds: attempt.knownRequestIds,
+    serverKey: attempt.serverKey
   };
 }
 
@@ -206,7 +209,8 @@ function persistedAttemptFromQuickAnalysisCheckpoint(
   return {
     ...common,
     phase: "reconciling",
-    knownRequestIds: checkpoint.knownRequestIds
+    knownRequestIds: checkpoint.knownRequestIds,
+    serverKey: checkpoint.serverKey
   };
 }
 
@@ -239,10 +243,12 @@ function findReconciledQuickAnalysisRequest(
 }
 
 export function QuickAnalyzePanel({
+  supportsIdempotency = false,
   isDarkMode,
   onAnalysisAccepted,
   readOnly
 }: {
+  supportsIdempotency?: boolean;
   isDarkMode: boolean;
 } & (
   | { readOnly: true; onAnalysisAccepted?: never }
@@ -291,9 +297,18 @@ export function QuickAnalyzePanel({
     const attempt = "kind" in checkpoint
       ? persistedAttemptFromQuickAnalysisCheckpoint(checkpoint)
       : checkpoint;
-    const stored = writeQuickAnalysisAttempt(attempt, expectedRawValue);
+    let failureMessage = QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE;
+    const stored = writeQuickAnalysisAttempt(attempt, expectedRawValue, reason => {
+      failureMessage = reason === "quota"
+        ? "브라우저 저장 공간이 부족해 분석 복구 정보를 저장하지 못했습니다. 저장 공간을 확보한 뒤 다시 확인해 주세요."
+        : reason === "unavailable"
+          ? "브라우저 저장소에 접근하지 못해 분석 복구 정보를 저장하지 못했습니다. 브라우저 저장 공간과 설정을 확인해 주세요."
+          : reason === "changed"
+            ? "다른 화면에서 분석 복구 정보가 변경되었습니다. 현재 접수 상태를 다시 확인해 주세요."
+            : "분석 복구 정보의 형식이나 저장 한도를 확인할 수 없습니다. 현재 접수 상태를 다시 확인해 주세요.";
+    });
     if (stored === null) {
-      return false;
+      throw new UserFacingError(failureMessage);
     }
     checkpointRawValueRef.current = stored.rawValue;
     return true;
@@ -384,7 +399,7 @@ export function QuickAnalyzePanel({
         // Capture the request baseline before POST. If the POST response is
         // lost, later attempts can recover exactly one new request for this URL
         // without sending the mutation again.
-        const baseline = await runQuickAnalysisRequestWithTimeout({
+        const baseline = supportsIdempotency ? null : await runQuickAnalysisRequestWithTimeout({
           signal,
           timeoutMessage: "분석을 준비하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
           operation: (requestSignal) =>
@@ -396,7 +411,10 @@ export function QuickAnalyzePanel({
 
         const attemptId = window.crypto.randomUUID();
         const startedAt = Date.now();
-        const knownRequestIds = baseline.evaluationRequests.map((request) => request.id);
+        const knownRequestIds = baseline?.evaluationRequests.map((request) => request.id) ?? [];
+        if (knownRequestIds.length > REQUEST_IDS_MAX_LENGTH) {
+          throw new UserFacingError("분석 이력이 복구 저장 한도 10,000건을 초과했습니다. 서버의 새 접수 기능이 적용된 뒤 다시 시도해 주세요.");
+        }
         const postingAttempt: PersistedQuickAnalysisAttempt = {
           version: 1,
           attemptId,
@@ -404,6 +422,7 @@ export function QuickAnalyzePanel({
           startedAt,
           url: normalized,
           phase: "posting",
+          serverKey: supportsIdempotency ? true : undefined,
           knownRequestIds
         };
         if (!persistCheckpoint(postingAttempt, null)) {
@@ -415,6 +434,7 @@ export function QuickAnalyzePanel({
           { kind: "reconciling" }
         > = {
           kind: "reconciling",
+          serverKey: supportsIdempotency ? true : undefined,
           attemptId,
           startedAt,
           url: normalized,
@@ -428,7 +448,7 @@ export function QuickAnalyzePanel({
             signal,
             timeoutMessage: "분석을 시작하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
-              startUrlEvaluation(normalized, requestSignal),
+              startUrlEvaluation(normalized, requestSignal, supportsIdempotency ? attemptId : undefined),
             accept: (created) => {
               const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
                 attemptId,
@@ -478,6 +498,16 @@ export function QuickAnalyzePanel({
           intervalMs: QUICK_ANALYSIS_RECONCILE_INTERVAL_MS,
           signal,
           probe: async (requestSignal) => {
+            if (reconcilingCheckpoint.serverKey) {
+              const request = await runQuickAnalysisRequestWithTimeout({
+                signal: requestSignal,
+                timeoutMessage: "분석 접수 결과를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
+                operation: async probeSignal => await fetchAnalysisAttempt(reconcilingCheckpoint.attemptId, probeSignal)
+                  ?? await startUrlEvaluation(reconcilingCheckpoint.url, probeSignal, reconcilingCheckpoint.attemptId)
+              });
+              return request && isActiveOperation()
+                ? requestCheckpointFromResponse(normalized, request, reconcilingCheckpoint) : null;
+            }
             const reconciledData = await runQuickAnalysisRequestWithTimeout({
               signal: requestSignal,
               timeoutMessage: "분석 진행 상태를 확인하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",

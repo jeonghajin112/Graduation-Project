@@ -1,11 +1,11 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { clearSiteCreateRecovery, readSiteCreateRecovery } from "@/services/site-create-recovery-storage";
+import { UserFacingError } from "@/services/user-facing-error";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ErrorBoundary, isLazyChunkLoadError } from "@/components/shared/error-boundary";
 import { ModalErrorFallback, ModalLoadFallback } from "../shared/modal-load-fallback";
 
 import { getApiErrorMessage, isAbortError } from "@/services/backend-api";
-import { clearSiteCreateRecovery, readSiteCreateRecovery } from "@/services/site-create-recovery-storage";
-import { UserFacingError } from "@/services/user-facing-error";
 import type {
   AnalysisResult,
   EvaluationCaptureMetadata,
@@ -16,7 +16,8 @@ import type {
   ScoreResult
 } from "@/types/accessibility-domain";
 
-import { selectLatestEvaluationRequest } from "@/services/evaluation-request-selection";
+import { selectLatestAnalysisAttempt, selectLatestEvaluationRequest } from "@/services/evaluation-request-selection";
+import { formatDateTime } from "../shared/utils";
 import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
@@ -29,11 +30,14 @@ import { UnavailableLocatorPanel } from "./site-dashboard/unavailable-locator-pa
 import { useEvaluationCaptureMetadata } from "./site-dashboard/use-evaluation-capture-metadata";
 import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
 import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
+import { sameLocatorReport } from "./site-dashboard/locator-report";
 
 import "@/styles/page-evidence-layout.css";
 
 const IssueLocationDialog = lazy(() => import("./site-dashboard/issue-location-dialog")
   .then(module => ({ default: module.IssueLocationDialog })));
+const AllIssuesDialog = lazy(() => import("./site-dashboard/all-issues-dialog")
+  .then(module => ({ default: module.AllIssuesDialog })));
 
 type SiteDashboardPanelProps = {
   evaluationTarget: EvaluationTargetModel;
@@ -58,7 +62,7 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
   );
   const running = requests.find((request) => request.status === "IN_PROGRESS");
   const queued = requests.find((request) => request.status === "PENDING");
-  const latest = selectLatestEvaluationRequest(requests);
+  const latest = selectLatestAnalysisAttempt(requests);
   const failedWithoutResult = latest?.status === "FAILED" &&
     !requests.some((request) => request.status === "COMPLETED");
 
@@ -153,6 +157,8 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     targetEvaluationRequests.filter((request) => request.status === "COMPLETED")
   );
   const latestResultRequestId = latestResultRequest?.id ?? null;
+  const latestAttempt = selectLatestAnalysisAttempt(targetEvaluationRequests);
+  const showsPreviousResult = !previewEvidence && latestAttempt?.status === "FAILED" && latestResultRequest !== null;
   const {
     analysisResults,
     errorMessage: resultDetailsErrorMessage,
@@ -213,13 +219,15 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
   );
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const [locationIssueId, setLocationIssueId] = useState<number | null>(null);
-  useEffect(() => { setLocationIssueId(null); }, [latestResultRequestId, evaluationTarget.id]);
+  const [allIssuesOpen, setAllIssuesOpen] = useState(false);
+  const allIssuesButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { setLocationIssueId(null); setAllIssuesOpen(false); }, [latestResultRequestId, evaluationTarget.id]);
   const [selectedIssueFocusRequestId, setSelectedIssueFocusRequestId] = useState(0);
   const [locatorReport, setLocatorReport] = useState<LocatorReport | null>(null);
   const handleLocatorReportChange = useCallback((next: LocatorReport) => {
     // Pending detail hooks may return new empty arrays on each render. Do not
     // let an equivalent child report start another parent/child update cycle.
-    setLocatorReport((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+    setLocatorReport((current) => sameLocatorReport(current, next) ? current : next);
   }, []);
   const latestIssueSignature = latestIssues.map((issue) => issue.id).join(",");
   const currentLocatorReport = locatorReport?.requestId === latestResultRequestId &&
@@ -323,8 +331,11 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
         />
       </div>
       <div className="site-dashboard-rail">
-        {(analysisRequestError || captureMetadataLoadState === "loading" || captureMetadataLoadState === "error") && (
+        {(showsPreviousResult || analysisRequestError || captureMetadataLoadState === "loading" || captureMetadataLoadState === "error") && (
           <div className="site-result-notices">
+            {showsPreviousResult && <p className="site-result-notice" role="status">
+              최신 재분석에 실패했습니다. {formatDateTime(latestAnalyzedAt)} 분석의 이전 성공 결과를 표시하고 있습니다.
+            </p>}
             {analysisRequestError && (
               <p id="site-analysis-request-error" className="site-result-notice" role="alert">
                 {analysisRequestError}
@@ -356,7 +367,14 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
 
         {showsRailDetailCards && (
           <>
-            <SeverityDistributionPanel issues={latestIssues} />
+            <SeverityDistributionPanel issues={latestIssues}>
+              <button ref={allIssuesButtonRef} type="button" className="dashboard-modal-button" onClick={() => setAllIssuesOpen(true)}>
+                전체 문제 {latestIssues.length.toLocaleString("ko-KR")}개
+              </button>
+              {liveSessionLoadState === "error" && <p className="site-result-notice" role="status">
+                현재 페이지에 연결하지 못했습니다. 저장된 분석 결과를 표시합니다.
+              </p>}
+            </SeverityDistributionPanel>
             <UnavailableLocatorPanel
               mode="recoverable"
               checkState={locatorCheckState}
@@ -375,6 +393,17 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
           </>
         )}
       </div>
+      {allIssuesOpen && showsRailDetailCards ? (
+        <ErrorBoundary resetKey={`all-issues:${latestResultRequestId}`} fallback={({ error, resetErrorBoundary }) => (
+          <ModalErrorFallback isChunkError={isLazyChunkLoadError(error)} onDismiss={() => setAllIssuesOpen(false)}
+            onRetry={resetErrorBoundary} onReload={() => window.location.reload()} />
+        )}>
+          <Suspense fallback={<ModalLoadFallback />}>
+            <AllIssuesDialog key={latestResultRequestId} rows={replayIssueRows} issueStates={currentLocatorReport?.issueStates}
+              onClose={() => setAllIssuesOpen(false)} returnFocusRef={allIssuesButtonRef} />
+          </Suspense>
+        </ErrorBoundary>
+      ) : null}
       {locationRow ? (
         <ErrorBoundary
           resetKey={`issue-location:${locationRow.issue.id}`}
