@@ -357,7 +357,7 @@ const targetStatuses = ["ACTIVE", "INACTIVE", "DELETED"] as const;
 const requestStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"] as const;
 const issueModules = ["rule_based", "text_difficulty", "cv_visual"] as const;
 const issueSeverities = ["CRITICAL", "SERIOUS", "MODERATE", "MINOR"] as const;
-const issueExclusionReasons = ["AD", "DYNAMIC"] as const;
+const issueExclusionReasons = ["AD", "DYNAMIC", "POPUP"] as const;
 
 export const parseOrganizationResponse: ApiResponseParser<Organization> = (value, path) => {
   const fields = readFields(value, path);

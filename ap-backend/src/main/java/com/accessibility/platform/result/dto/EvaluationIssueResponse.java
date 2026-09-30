@@ -15,7 +15,7 @@ public record EvaluationIssueResponse(
         IssueLocatorResponse locator,
         LocalDateTime createdAt,
         String ruleId,
-        // AD or DYNAMIC for findings in regions that are reported but not scored.
+        // AD, DYNAMIC or POPUP for findings that are reported but not scored.
         String exclusionReason
 ) {
 }

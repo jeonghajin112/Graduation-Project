@@ -124,7 +124,8 @@ def load_excluded_regions(path: Optional[str]) -> List[Dict[str, Any]]:
         return []
     valid = []
     for region in regions if isinstance(regions, list) else []:
-        if not isinstance(region, dict) or region.get("reason") not in ("AD", "DYNAMIC"):
+        # POPUP: run_all.py가 레이어 팝업 이미지를 따로 검사할 때 이미지 전체를 넘긴다.
+        if not isinstance(region, dict) or region.get("reason") not in ("AD", "DYNAMIC", "POPUP"):
             continue
         values = [region.get(key) for key in ("x", "y", "width", "height")]
         if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values) and values[2] > 0 and values[3] > 0:
@@ -310,7 +311,7 @@ class CVRunner:
     
     def _excluded_violations(self, image_path: str, texts: List[Dict],
                              regions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """제외 영역 글자의 명암비 위반. 사유(AD/DYNAMIC)를 붙이고 점수에는 쓰지 않는다."""
+        """제외 영역 글자의 명암비 위반. 사유(AD/DYNAMIC/POPUP)를 붙이고 점수에는 쓰지 않는다."""
         if not texts:
             return []
         violations = self.contrast_analyzer.analyze_screenshot(image_path, texts)["violations"]

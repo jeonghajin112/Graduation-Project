@@ -26,7 +26,9 @@
  *   2단계 - WCAG 태그 기반 폴백 (wcagToKwcag 사용):
  *       1단계에서 못 찾은 경우, axe-core 결과에 포함된 WCAG 태그 번호로
  *       KWCAG 항목을 찾음 (재현율 우선, 정밀도는 1단계보다 낮음)
- *       예: WCAG 태그 'wcag412' → WCAG '4.1.2' → KWCAG '8.1.1', '8.2.1'
+ *       예: WCAG 태그 'wcag244' → WCAG '2.4.4' → KWCAG '6.4.3'
+ *       (한 WCAG 번호가 여러 KWCAG 항목에 걸리면 mapping.js의 FALLBACK_PRIMARY로
+ *        대표 항목 하나만 씀 — 예: 4.1.2 → 8.2.1. 2026-09-28, 이중 감점 방지)
  *
  *   매핑 불가 (unmapped):
  *       두 단계 모두 실패한 경우, WCAG 기준 정보를 보존하여
@@ -113,7 +115,8 @@ function extractWcagIds(tags) {
  *   → 1단계에서 바로 ['5.1.1'] 반환 (axeRuleToKwcag에 등록되어 있으므로)
  *
  *   resolveKwcagIds('unknown-rule', ['wcag412'])
- *   → 1단계 실패 → 2단계에서 WCAG '4.1.2' 추출 → ['8.1.1', '8.2.1'] 반환
+ *   → 1단계 실패 → 2단계에서 WCAG '4.1.2' 추출 → ['8.2.1'] 반환
+ *     (2026-09-28 전에는 ['8.1.1', '8.2.1']이 반환돼 이중 감점됐음)
  *
  *   resolveKwcagIds('unknown-rule', ['best-practice'])
  *   → 1단계 실패 → 2단계에서도 WCAG 번호 없음 → [] 반환 (unmapped)

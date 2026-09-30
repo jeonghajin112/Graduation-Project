@@ -470,7 +470,7 @@ def get_direct_text(tag) -> str:
     return clean_text(''.join(parts))
 
 
-def extract_texts(html: str) -> dict:
+def extract_texts(html: str, popup_layer: bool = False) -> dict:
     """
     HTML 문자열에서 텍스트를 추출하고 종류별로 분류하는 메인 함수.
 
@@ -486,6 +486,9 @@ def extract_texts(html: str) -> dict:
 
     Args:
       html: 렌더링된 HTML 문자열 (run.js의 page.content() 출력)
+      popup_layer: True면 run.js가 따로 저장한 레이어 팝업 문서(result_popup.html)로 보고
+        role="dialog"·modal/popup class·id 제거 규칙을 끈다. 팝업 문구 자체가 분석
+        대상이기 때문이다. display:none·aria-hidden 제거는 그대로 적용한다.
 
     Returns:
       {
@@ -570,6 +573,11 @@ def extract_texts(html: str) -> dict:
         # aria-hidden="true" 체크
         if el.get('aria-hidden') == 'true':
             to_remove.append(el)
+            continue
+
+        # 아래 모달/팝업 규칙은 본문 문서에만 적용한다. 팝업 문서에서는 팝업 문구가
+        # 분석 대상이므로 건너뛴다(run.js가 팝업을 닫기 전에 따로 저장한 문서).
+        if popup_layer:
             continue
 
         # role="dialog" (모달/팝업)
@@ -699,20 +707,23 @@ def main():
 
     실행 후 콘솔에 추출 결과 요약을 출력.
     """
-    if len(sys.argv) < 2:
-        print('사용법: python text_extractor.py <HTML파일> [출력파일.json]')
+    # --popup-layer: run.js가 저장한 레이어 팝업 문서(result_popup.html)를 추출
+    popup_layer = '--popup-layer' in sys.argv[1:]
+    args = [arg for arg in sys.argv[1:] if arg != '--popup-layer']
+    if len(args) < 1:
+        print('사용법: python text_extractor.py <HTML파일> [출력파일.json] [--popup-layer]')
         print('예시:   python text_extractor.py result.html')
         sys.exit(1)
 
-    html_path = sys.argv[1]
+    html_path = args[0]
     if not os.path.exists(html_path):
         print(f'오류: 파일을 찾을 수 없습니다: {html_path}')
         sys.exit(1)
 
     # 출력 파일명 결정: 지정하지 않으면 입력 파일명에서 확장자를 _text.json으로 변경
     # 예: result.html → result_text.json
-    if len(sys.argv) >= 3:
-        output_path = sys.argv[2]
+    if len(args) >= 2:
+        output_path = args[1]
     else:
         output_path = html_path.rsplit('.', 1)[0] + '_text.json'
 
@@ -721,7 +732,7 @@ def main():
         html = f.read()
 
     # 추출 실행
-    result = extract_texts(html)
+    result = extract_texts(html, popup_layer=popup_layer)
 
     # JSON 저장 (ensure_ascii=False: 한국어가 유니코드 이스케이프 없이 저장됨)
     with open(output_path, 'w', encoding='utf-8') as f:

@@ -87,7 +87,7 @@ function locationLabel(status: ReportLocationStatus, state?: LocatorIssueState):
   }
 }
 
-const exclusionLabels: Record<IssueExclusionReason, string> = { AD: "광고", DYNAMIC: "동적 영역" };
+const exclusionLabels: Record<IssueExclusionReason, string> = { AD: "광고", DYNAMIC: "동적 영역", POPUP: "레이어 팝업" };
 
 function contextLabel(context: string): string {
   return context === "FRAME" ? "프레임 내부" : context === "SHADOW_ROOT" ? "Shadow DOM 내부" : "문서";
@@ -583,7 +583,8 @@ function ExcludedIssues({ rows, expanded, onToggle }: {
       </h3>
       <p className="site-final-report__lead">
         광고와 다시 불러올 때마다 내용이 바뀌는 영역(뉴스·상품 추천 등)은 사이트의 고정 콘텐츠가 아니어서
-        점수와 문제 수에서 뺐습니다. 고정 배너와 슬라이드 배너는 그대로 검사합니다.
+        점수와 문제 수에서 뺐습니다. 처음 접속할 때 본문을 가리는 레이어 팝업은 따로 검사한 뒤 닫고 본문을
+        평가했으며, 팝업의 문제도 여기에 모았습니다. 고정 배너와 슬라이드 배너는 그대로 검사합니다.
       </p>
       <div id="site-final-report-excluded-list" className="site-final-report__excluded-list" hidden={!expanded}>
         {expanded && (

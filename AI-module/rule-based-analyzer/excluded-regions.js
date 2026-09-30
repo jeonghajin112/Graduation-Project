@@ -7,15 +7,23 @@
 //   DYNAMIC content that differed between two loads of the page (news, product
 //           and recommendation feeds). Site carousels are content the site owns
 //           and are handled by carousel-audit.js, so they are never DYNAMIC.
+//   POPUP   a layer popup that covered the page on arrival. popup-layers.js
+//           scans it while open, then closes it before the page is analyzed.
 // Stable banners and ordinary content stay in the analysis.
 
+const { POPUP_ATTRIBUTE } = require('./popup-layers');
+
 const EXCLUDED_REGION_ATTRIBUTE = 'data-ua-excluded-region';
-const EXCLUSION_REASONS = Object.freeze(['AD', 'DYNAMIC']);
+const EXCLUSION_REASONS = Object.freeze(['AD', 'DYNAMIC', 'POPUP']);
 
 const AD_ELEMENT_SELECTORS = [
   'ins.adsbygoogle', '[data-ad-slot]', '[data-ad-client]', '[data-google-query-id]',
   '[id^="google_ads_iframe"]', '[id$="_tgtLREC"]', '[aria-label="광고"]', '[aria-label="Advertisement" i]',
 ];
+// Ads drawn in the page itself (not in an iframe) that announce themselves in
+// their accessible name, like Naver's headline ad image alt="[광고]멤버십 …".
+// The link around such an image is the ad, so the link is marked.
+const AD_LABEL_SELECTOR = 'img[alt^="[광고]"], [aria-label^="[광고]"]';
 const AD_FRAME_SOURCE = [
   'doubleclick\\.net', 'googlesyndication\\.com', 'googleadservices\\.com', 'adservice\\.google',
   'adnxs\\.com', 'criteo\\.', 'taboola\\.com', 'outbrain\\.com',
@@ -39,7 +47,8 @@ const STABLE_CONTROL_SELECTOR = [
 // regions and returns their document rectangles. Both modes share one key
 // function so the two loads are compared with the same identity.
 function inspectRegions({
-  mode, attribute, adSelectors, adFrameSource, changedKeys, minChangedShare, maxPageShare, stableControlSelector,
+  mode, attribute, popupAttribute, adSelectors, adLabelSelector, adFrameSource, changedKeys, minChangedShare,
+  maxPageShare, stableControlSelector,
 }) {
   const body = document.body;
   if (!body) return mode === 'collect' ? {} : [];
@@ -92,6 +101,7 @@ function inspectRegions({
   };
   const adFrame = new RegExp(adFrameSource, 'i');
   for (const element of body.querySelectorAll(adSelectors.join(','))) mark(element, 'AD');
+  for (const element of body.querySelectorAll(adLabelSelector)) mark(element.closest('a[href]') || element, 'AD');
   for (const frame of body.querySelectorAll('iframe')) {
     if (adFrame.test(`${frame.getAttribute('src') || ''} ${frame.getAttribute('name') || ''}`)) mark(frame, 'AD');
   }
@@ -138,7 +148,9 @@ function inspectRegions({
   };
   for (const element of changedElements) {
     // Site carousels rotate by design; carousel-audit.js checks every slide.
-    if (element.closest('[data-ua-audit-slide-index]') || element.closest(`[${attribute}]`)) continue;
+    // A closed layer popup is reported as POPUP, not as changing content.
+    if (element.closest('[data-ua-audit-slide-index]') || element.closest(`[${attribute}]`)
+        || element.closest(`[${popupAttribute}]`)) continue;
     let region = element;
     for (let parent = element.parentElement; parent && parent !== body; parent = parent.parentElement) {
       if (parent.closest('[data-ua-audit-slide-index]')
@@ -168,7 +180,9 @@ function inspectRegions({
 const inspectionOptions = (mode, changedKeys = []) => ({
   mode,
   attribute: EXCLUDED_REGION_ATTRIBUTE,
+  popupAttribute: POPUP_ATTRIBUTE,
   adSelectors: AD_ELEMENT_SELECTORS,
+  adLabelSelector: AD_LABEL_SELECTOR,
   adFrameSource: AD_FRAME_SOURCE,
   changedKeys,
   minChangedShare: DYNAMIC_CONTAINER_MIN_CHANGED_SHARE,
@@ -234,14 +248,16 @@ async function partitionAxeResultsByRegion(page, axeResults) {
     const first = Array.isArray(node.target) ? node.target[0] : null;
     return Array.isArray(first) ? first[0] : first;
   }));
-  const reasons = await page.evaluate(({ attribute, targets }) => targets.map((nodes) => nodes.map((selector) => {
+  const reasons = await page.evaluate(({ attribute, popupAttribute, targets }) => targets.map((nodes) => nodes.map((selector) => {
     if (typeof selector !== 'string') return null;
     try {
-      return document.querySelector(selector)?.closest(`[${attribute}]`)?.getAttribute(attribute) || null;
+      const element = document.querySelector(selector);
+      if (element?.closest(`[${popupAttribute}]`)) return 'POPUP';
+      return element?.closest(`[${attribute}]`)?.getAttribute(attribute) || null;
     } catch {
       return null;
     }
-  })), { attribute: EXCLUDED_REGION_ATTRIBUTE, targets })
+  })), { attribute: EXCLUDED_REGION_ATTRIBUTE, popupAttribute: POPUP_ATTRIBUTE, targets })
     .catch(() => targets.map((nodes) => nodes.map(() => null)));
 
   const emptyResults = () => ({ ...axeResults, violations: [], passes: [], incomplete: [], inapplicable: [] });
@@ -261,7 +277,22 @@ async function partitionAxeResultsByRegion(page, axeResults) {
   return { included, excluded };
 }
 
+// Adds the violations found by scanning the open popups (before they were
+// closed) to the POPUP group, skipping nodes the page scan already placed there.
+function addPopupViolations(excluded, popupResults) {
+  if (!popupResults) return excluded;
+  const group = excluded.POPUP;
+  const seen = new Set(group.violations.flatMap((rule) =>
+    rule.nodes.map((node) => `${rule.id}|${JSON.stringify(node.target)}`)));
+  for (const rule of popupResults.violations || []) {
+    const nodes = rule.nodes.filter((node) => !seen.has(`${rule.id}|${JSON.stringify(node.target)}`));
+    if (nodes.length > 0) group.violations.push({ ...rule, nodes });
+  }
+  return excluded;
+}
+
 module.exports = {
+  addPopupViolations,
   EXCLUDED_REGION_ATTRIBUTE,
   EXCLUSION_REASONS,
   changedContentKeys,

@@ -48,7 +48,7 @@ public interface IssueResultRepository extends JpaRepository<IssueResult, Long> 
         long getCriticalIssueCount();
     }
 
-    // Findings in advertising or changing regions (exclusionReason set) are
+    // Findings in advertising, changing or popup regions (exclusionReason set) are
     // reported separately and never counted.
     @Query("""
             select count(issue.id) as totalIssueCount,

@@ -14,7 +14,9 @@
              → 코드상으로 문제없어도 "내용이 어려워서 이해 못하는" 경우를 잡아냄
 
 [종합 점수 산출 방식 — Jo(2016) 국어 이독성 공식 기반]
-  GL(Grade Level) = 4.874 - 0.591 × A - 9.201 × B³
+  GL(Grade Level) = 4.874 + 0.591 × A - 9.201 × B³
+    (2026-09-27 수정: 문장 길이 항의 부호를 원 논문대로 +로 고침. 예전 코드는
+     -였기 때문에 문장이 길수록 오히려 쉽다고 계산되었음.)
     A  = 평균 문장 길이 (어절 수)
     B  = 쉬운 단어 비율 (국립국어원 학습용 어휘 A+B등급 / 전체 명사)
     GL = 학년 수준 (낮을수록 쉬움, 높을수록 어려움)
@@ -71,7 +73,19 @@ EASY_GRADES = {'A', 'B'}  # 쉬운 단어 기준: 논문의 5,000개 목록 역�
 # 1. MeCab 래퍼 (형태소 분석 인터페이스)
 # ─────────────────────────────────────────
 
-_tagger = MeCab.Tagger('-r C:/mecab/etc/mecabrc -d C:/mecab/share/mecab-ko-dic')
+try:
+    if os.name == 'nt':
+        _tagger = MeCab.Tagger('-r C:/mecab/etc/mecabrc -d C:/mecab/share/mecab-ko-dic')
+    else:
+        # Mac Homebrew paths for mecab-ko-dic
+        if os.path.exists('/opt/homebrew/lib/mecab/dic/mecab-ko-dic'):
+            _tagger = MeCab.Tagger('-r /opt/homebrew/etc/mecabrc -d /opt/homebrew/lib/mecab/dic/mecab-ko-dic')
+        elif os.path.exists('/usr/local/lib/mecab/dic/mecab-ko-dic'):
+            _tagger = MeCab.Tagger('-r /usr/local/etc/mecabrc -d /usr/local/lib/mecab/dic/mecab-ko-dic')
+        else:
+            _tagger = MeCab.Tagger()
+except Exception:
+    _tagger = MeCab.Tagger()
 
 
 def parse_morphemes(text):
@@ -103,15 +117,32 @@ def extract_nouns(text):
 
 THRESHOLD_SENTENCE_LENGTH = 25  # 플래그 기준 (25어절 이상이면 인지 부담 높음)
 
+# ── 문장 분리 보정: 숫자 사이의 마침표는 문장 구분자가 아님 ──
+# 기존 정규식 r'[.!?。]\s*'는 '.' 뒤에 공백이 0개여도 매칭되므로
+# "3.5%", "2026.06.22", "5.3.3" 같은 소수점/버전 표기가 전부
+# 별도 문장으로 쪼개져 평균 문장 길이(A 변수)가 실제보다 부풀려지는
+# 문제가 있었다. 공공기관 텍스트에는 수수료(%), 날짜, 조항 번호 등
+# 숫자.숫자 표기가 매우 흔하므로 실사용 시 영향이 큼.
+# → 분리 전에 숫자 사이의 마침표를 임시 문자로 치환해 보호한다.
+_DECIMAL_POINT = re.compile(r'(?<=\d)\.(?=\d)')
+_DECIMAL_PLACEHOLDER = ''  # 유니코드 사설 영역(private use area) 문자 — 실제 텍스트와 충돌 안 함
+
+
+def _protect_decimal_points(text):
+    """숫자.숫자 형태의 마침표를 문장 분리에서 보호하기 위해 임시 치환."""
+    return _DECIMAL_POINT.sub(_DECIMAL_PLACEHOLDER, text)
+
 
 def calc_avg_sentence_length(text):
     """
     평균 문장 길이(어절 수)를 계산. Jo(2016) 공식의 A 변수.
     반환: (평균 어절 수, 전체 어절 수)
     """
-    sentences = re.split(r'[.!?。]\s*', text)
+    protected = _protect_decimal_points(text)
+    sentences = re.split(r'[.!?。]+\s*', protected)
     # '저는 학생입니다. 반갑습니다!' → ['저는 학생입니다', '반갑습니다', '']
-    sentences = [s.strip() for s in sentences if s.strip()]
+    # '수수료는 3.5%입니다.' → ['수수료는 3.5%입니다']  (보정 전에는 '3'과 '5%입니다'로 잘못 분리됨)
+    sentences = [s.replace(_DECIMAL_PLACEHOLDER, '.').strip() for s in sentences if s.strip()]
     if not sentences:
         return 0.0, 0
     total_eojeols = sum(len(s.split()) for s in sentences)
@@ -136,12 +167,17 @@ def calc_easy_word_ratio(text):
     """
     쉬운 단어 비율(B)을 계산. Jo(2016) 공식의 B 변수.
     쉬운 단어 = 국립국어원 A+B등급.
-    명사 5개 미만이면 신뢰도 낮으므로 None 반환.
-    반환: (쉬운 단어 비율, 쉬운 명사 목록, 전체 명사 목록, 등급별 상세)
+    명사 5개 미만이면 비율(ratio) 자체는 통계적으로 신뢰할 수 없으므로 None을
+    반환한다 — 이 기준(5개)은 그대로 유지.
+    다만 등급별 상세(grade_detail)와 전체 명사 목록은 명사 개수와 무관하게
+    항상 계산해서 반환한다. GL 공식(비율 기반)은 못 돌리더라도, 짧은 텍스트에
+    "어려운 단어가 하나라도 있는지" 같은 개별 단어 기준의 보조 판정에 쓰기 위함
+    (2026-09-23: 짧은 paragraph가 통째로 검사망을 빠져나가는 문제 보완).
+    반환: (쉬운 단어 비율 또는 None, 쉬운 명사 목록, 전체 명사 목록, 등급별 상세)
     """
     nouns = extract_nouns(text)
-    if len(nouns) < 5:
-        return None, [], nouns, {}
+    if not nouns:
+        return None, [], [], {}
 
     grade_detail = {}
     for n in nouns:
@@ -149,6 +185,11 @@ def calc_easy_word_ratio(text):
         grade_detail.setdefault(g, []).append(n)
 
     easy_nouns = [n for n in nouns if get_word_grade(n) in EASY_GRADES]
+
+    if len(nouns) < 5:
+        # 표본 부족 — ratio/GL 계산에는 안 쓰지만 등급 정보는 그대로 반환
+        return None, easy_nouns, nouns, grade_detail
+
     ratio = len(easy_nouns) / len(nouns)
     # 쉬운 명사 비율 = 쉬운 명사 수 / 전체 명사 수
     return round(ratio, 3), easy_nouns, nouns, grade_detail
@@ -198,14 +239,20 @@ def calc_gl_score(avg_sentence_len, easy_word_ratio):
     """
     Jo(2016) 국어 이독성 공식으로 학년 수준(GL)을 계산.
 
-    GL = 4.874 - 0.591 × A - 9.201 × B³
-      A = 평균 문장 길이 (어절 수)
-      B = 쉬운 단어 비율 (0.0~1.0)
+    GL = 4.874 + 0.591 × A - 9.201 × B³
+      A = 평균 문장 길이 (어절 수)  → 길수록 GL 상승(어려움)
+      B = 쉬운 단어 비율 (0.0~1.0)  → 높을수록 GL 하락(쉬움)
+
+    [2026-09-27 수정] 예전 코드는 `4.874 - 0.591*A - ...`로 A 항의 부호가
+    원 논문과 반대였다. 그 결과 문장이 길수록 점수가 내려가고, 평균 문장 길이가
+    약 6.55어절만 넘어도 난이도 점수가 항상 0이 되었으며, 난이도 점수의 이론적
+    최댓값이 약 35.2점에 묶여 있었다. 원 논문 공식으로 고쳐 0~100 전 구간이
+    나올 수 있게 됨.
 
     GL 해석: 낮을수록 쉬움. 일반적으로 1~12 범위.
     음수 GL = 매우 쉬운 텍스트 (단문 + 쉬운 단어).
     """
-    gl = 4.874 - (0.591 * avg_sentence_len) - (9.201 * (easy_word_ratio ** 3))
+    gl = 4.874 + (0.591 * avg_sentence_len) - (9.201 * (easy_word_ratio ** 3))
     return round(gl, 2)
 
 
@@ -220,7 +267,24 @@ def gl_to_difficulty_score(gl):
     return round(max(0.0, min(100.0, score)), 1)
 
 
+# [기준값 이력]
+# - 6월 설계값: 40점
+# - 2026-09-23: 10점으로 하향. 당시 공식(GL = 4.874 - 0.591×A - 9.201×B³)은 A 항
+#   부호가 뒤집혀 있어 난이도 점수 상한이 약 35.2점이었고, 40점은 절대 도달 불가능한
+#   값이었기 때문(paragraph 534개 실측 최댓값 24.5).
+# - 2026-09-27: 공식 부호를 원 논문대로 고치면서 상한 문제가 사라졌으므로 원래 설계값
+#   40점(GL 약 5.4 = 초등 5학년 수준)으로 복원. 10점을 그대로 두면 고친 공식에서는
+#   평범한 문단도 거의 전부 걸린다(예: 평균 10어절·쉬운 단어 60% → 70.9점).
+#   고친 공식으로 실제 사이트를 다시 돌려 분포를 보고 필요하면 재조정할 것.
 THRESHOLD_DIFFICULTY_SCORE = 40  # 이 점수 이상이면 수정 제안 필요
+
+# 명사 5개 미만(비율/GL 계산 생략 대상)인 텍스트에서, 어려운 단어(C/D등급)가
+# 몇 개 이상이면 "어려운 어휘 포함" 보조 플래그를 붙일지의 기준.
+# 1로 두면 어려운 단어가 하나만 있어도 걸림 — 급식 메뉴 코드, 행정 용어 약어처럼
+# 짧지만 어려운 파편 텍스트를 잡기 위한 의도적으로 민감한 값.
+# D등급은 "국립국어원 목록에 없는 단어"라 고유명사·신조어까지 걸릴 수 있으므로,
+# 실제 사이트에 돌려보고 과탐지가 많으면 이 값을 2 이상으로 올릴 것.
+SHORT_TEXT_MIN_HARD_NOUNS = 1
 
 
 # ─────────────────────────────────────────
@@ -231,6 +295,8 @@ THRESHOLD_DIFFICULTY_SCORE = 40  # 이 점수 이상이면 수정 제안 필요
 #--------------------------------------------------------------------------
 #    paragraph           Jo(2016) 공식 전체 + 위치 의존 탐지
 #                        (문장 길이 + 쉬운 단어 비율 → GL → difficulty_score)
+#                        단, 명사 5개 미만이면 비율/GL은 생략하고 "어려운 단어가
+#                        하나라도 있는가"만 개별 단어 기준으로 보조 판정(2026-09-23)
 #
 #    button              글자수 > 20이면 플래그 + 위치 의존 탐지
 #    link                글자수 > 30이면 플래그 + 위치 의존 탐지
@@ -319,17 +385,31 @@ def analyze_block(block):
                     f'(어려운 단어 {hard_pct}%, C등급+미등재 기준)')
 
         else:
-            # 명사 5개 미만 — 어휘 분석 생략, 문장 길이만 적용
+            # 명사 5개 미만 — 비율/GL 계산은 생략(기준 유지)하되,
+            # 있는 명사 중 어려운 단어가 하나라도 있으면 개별 단어 기준으로 보조 판정.
+            # (짧은 파편 텍스트가 "명사 5개 미만"이라는 이유만으로 검사망을
+            #  통째로 빠져나가던 문제 보완 — 2026-09-23)
             if avg_sent_len >= THRESHOLD_SENTENCE_LENGTH:
                 result['flags'].append(
                     f'문장 길이 과다: 평균 {avg_sent_len:.1f}어절 (기준: {THRESHOLD_SENTENCE_LENGTH}어절)')
+
+            hard_nouns_short = [n for n in all_nouns if get_word_grade(n) in ('C', 'D')]
+            if len(hard_nouns_short) >= SHORT_TEXT_MIN_HARD_NOUNS:
+                result['metrics']['grade_detail'] = grade_detail
+                result['metrics']['total_noun_count'] = len(all_nouns)
+                result['flags'].append(
+                    f'어려운 어휘 포함(표본 부족): 명사 {len(all_nouns)}개 중 어려운 단어 '
+                    f'{len(hard_nouns_short)}개({", ".join(hard_nouns_short[:5])}) — '
+                    f'표본이 적어 비율 대신 개별 단어 기준으로 판정')
 
         loc_deps = detect_location_dependency(text)
         if loc_deps:
             result['flags'].extend(loc_deps)
 
+        short_hard_vocab = any('어려운 어휘 포함(표본 부족)' in f for f in result['flags'])
+
         if (result['difficulty_score'] is not None
-                and result['difficulty_score'] >= THRESHOLD_DIFFICULTY_SCORE) or loc_deps:
+                and result['difficulty_score'] >= THRESHOLD_DIFFICULTY_SCORE) or loc_deps or short_hard_vocab:
             result['needs_suggestion'] = True
 
     # ── button, link, label, form_guide, heading: 길이 + 위치 의존 ──
@@ -424,7 +504,7 @@ def analyze(input_path, output_path=None):
             },
             'readability': {
                 'avg_gl_score': avg_gl,
-                'formula': 'Jo(2016): GL = 4.874 - 0.591×A - 9.201×B³',
+                'formula': 'Jo(2016): GL = 4.874 + 0.591×A - 9.201×B³',
                 'vocab_source': '국립국어원 학습용 어휘 등급 A+B등급(2888개) = 쉬운 단어',
             },
             'total_analyzed': len(results),

@@ -49,6 +49,8 @@
     result_cv.json              ← 임시 PNG를 분석한 CV 결과(입력 경로 미포함)
     cv_excluded_regions.json    ← CV에 넘기는 광고·동적 영역(스크린샷 px), 있을 때만
     result_cv_anchors.json      ← CV 캡처 시점의 요소 위치·선택자·내용 서명 (CV 위반을 요소에 연결)
+    result_popup.html           ← 레이어 팝업이 있을 때 run.js가 닫기 전에 저장한 팝업 내용
+    result_popup_text*.json     ← 팝업 텍스트 추출·난이도 결과 (POPUP, 점수 제외)
     ★result_final.json          ← 최종 통합 결과 (백엔드가 받는 파일)
 """
 
@@ -95,6 +97,10 @@ RUN_OUTPUT_FILES = [
     "result_ocr.json",
     "result_final.json",
     "result_artifact.json",
+    # Layer popups (run.js saves their text before closing them)
+    "result_popup.html",
+    "result_popup_text.json",
+    "result_popup_text_difficulty.json",
 ]
 
 # Remove the obsolete persistent screenshot from older runs. The current
@@ -150,6 +156,19 @@ def cleanup_ephemeral_cv_capture(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError as error:
         print(f"  [CV] 임시 이미지 정리 실패: {error}")
+
+def popup_cv_capture_path(cv_capture_path: Path, index: int) -> Path:
+    """run.js가 레이어 팝업 index의 CV 이미지를 저장하는 경로 (popup-layers.js와 같은 규칙)."""
+    return cv_capture_path.with_name(f"{cv_capture_path.stem}-popup-{index}.png")
+
+
+def cleanup_popup_cv_captures(cv_capture_path: Path) -> None:
+    """이번 실행의 레이어 팝업 CV 임시 이미지를 지운다."""
+    for path in cv_capture_path.parent.glob(f"{cv_capture_path.stem}-popup-*.png"):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            print(f"  [CV] 팝업 임시 이미지 정리 실패: {error}")
 
 # Google Vision API 서비스 계정 키의 기존 로컬 fallback 경로.
 # GOOGLE_APPLICATION_CREDENTIALS가 있으면 환경 변수를 우선하고, 둘 다
@@ -975,7 +994,6 @@ def build_final_result(url, rule_result, difficulty_result,
         "url": url,
         "analyzed_at": datetime.now().isoformat(),
         "elapsed_seconds": elapsed,
-        "platform_version": "1.0.0",
         "request_id": request_id,
         "capture_metadata": capture_metadata_payload(capture_metadata),
 
@@ -1097,6 +1115,184 @@ def cv_excluded_regions(rule_result: Any, capture_metadata: Any) -> List[Dict[st
     return converted
 
 
+# ── 레이어 팝업 ─────────────────────────────────────────────────────────────
+# run.js는 접속 직후 본문을 가리는 레이어 팝업을 찾아 열린 상태로 따로 검사하고
+# (규칙 기반 위반은 excluded_violations의 POPUP 그룹), 텍스트 문서와 CV 이미지를
+# 저장한 뒤 팝업을 닫고 본문을 분석한다. 여기서는 그 팝업 텍스트와 이미지도
+# 본문과 같은 엔진으로 검사해 exclusion_reason/reason = "POPUP"으로 붙인다.
+# 팝업은 행사·공지 기간에만 떠서 점수에 넣으면 측정일마다 점수가 흔들리므로
+# 세 모듈 모두 검사는 하되 점수(page_score, CV 통과율)에는 넣지 않는다.
+POPUP_REASON = "POPUP"
+
+
+def popup_layers_of(rule_result: Any) -> List[Dict[str, Any]]:
+    """run.js가 metadata.popup_layers에 남긴 레이어 팝업 목록 (좌표가 유효한 것만)."""
+    metadata = rule_result.get("metadata") if isinstance(rule_result, dict) else None
+    layers = metadata.get("popup_layers") if isinstance(metadata, dict) else None
+    valid = []
+    for layer in layers if isinstance(layers, list) else []:
+        if not isinstance(layer, dict) or not isinstance(layer.get("index"), int) or isinstance(layer.get("index"), bool):
+            continue
+        values = [finite_numeric_score(layer.get(key)) for key in ("x", "y", "width", "height")]
+        if None in values:
+            continue
+        valid.append(layer)
+    return valid
+
+
+def tag_popup_text_blocks(blocks: Any) -> List[Dict[str, Any]]:
+    """
+    팝업 문서에서 나온 난이도 결과 블록에 POPUP 사유를 붙인다.
+    팝업 문서의 selector는 본문 페이지의 요소를 가리키지 않으므로 지운다.
+    """
+    tagged = []
+    for block in blocks if isinstance(blocks, list) else []:
+        if not isinstance(block, dict):
+            continue
+        copy = {key: value for key, value in block.items() if key not in ("selector", "locator")}
+        copy["exclusion_reason"] = POPUP_REASON
+        tagged.append(copy)
+    return tagged
+
+
+def merge_popup_text_blocks(difficulty_result: Any, suggestion_result: Any,
+                            popup_blocks: List[Dict[str, Any]]):
+    """
+    팝업 텍스트 블록을 난이도·수정 제안 결과의 results 뒤에 붙인다.
+    meta(page_score, flagged_count 등)는 본문만으로 계산된 값을 그대로 둔다.
+    """
+    if not popup_blocks:
+        return difficulty_result, suggestion_result
+
+    def with_blocks(result):
+        if not isinstance(result, dict) or not isinstance(result.get("results"), list):
+            return result
+        return {**result, "results": result["results"] + popup_blocks}
+
+    return with_blocks(difficulty_result), with_blocks(suggestion_result)
+
+
+def analyze_popup_text(popup_html: Path) -> List[Dict[str, Any]]:
+    """팝업 문서의 텍스트를 본문과 같은 추출기·난이도 엔진으로 검사한다."""
+    popup_text = OUTPUT_DIR / "result_popup_text.json"
+    popup_difficulty = OUTPUT_DIR / "result_popup_text_difficulty.json"
+    if not run_command(
+        [sys.executable, str(TEXT_LEVEL_DIR / "text_extractor.py"), str(popup_html),
+         str(popup_text), "--popup-layer"],
+        cwd=str(OUTPUT_DIR),
+        description="레이어 팝업 텍스트 추출",
+    ) or not popup_text.is_file():
+        return []
+    if not run_command(
+        [sys.executable, str(TEXT_LEVEL_DIR / "difficulty_engine.py"), str(popup_text)],
+        cwd=str(OUTPUT_DIR),
+        description="레이어 팝업 난이도 분석",
+    ):
+        return []
+    result = load_json(popup_difficulty)
+    return tag_popup_text_blocks(result.get("results") if isinstance(result, dict) else None)
+
+
+def popup_cv_violations(layer: Dict[str, Any], violations: Any, scale: float) -> List[Dict[str, Any]]:
+    """
+    팝업 이미지 기준 CV 위반 좌표를 본문 CV 결과와 같은 좌표계(스크린샷 px)로 옮기고
+    POPUP 사유를 붙인다. 규칙 엔진이 팝업 검사에서 이미 찾은 명도 대비 요소와
+    겹치는 위반은 뺀다(본문의 drop_cv_violations_covered_by_rules와 같은 기준).
+    """
+    left = finite_numeric_score(layer.get("x")) or 0.0
+    top = finite_numeric_score(layer.get("y")) or 0.0
+    boxes = []
+    for box in layer.get("color_contrast_boxes") or []:
+        values = [finite_numeric_score(box.get(key)) if isinstance(box, dict) else None
+                  for key in ("x", "y", "width", "height")]
+        if None not in values and values[2] > 0 and values[3] > 0:
+            boxes.append(values)
+    moved = []
+    for violation in violations if isinstance(violations, list) else []:
+        location = violation.get("location") if isinstance(violation, dict) else None
+        values = [finite_numeric_score(location.get(key)) for key in ("x", "y", "width", "height")] \
+            if isinstance(location, dict) else [None]
+        if None in values:
+            continue
+        x, y, width, height = values
+        # 팝업 이미지는 CSS px 배율로 찍힌다. 문서 좌표 = 팝업 위치 + 이미지 안 좌표.
+        doc_x, doc_y = left + x, top + y
+        area = width * height
+        if area > 0 and any(
+            max(0.0, min(doc_x + width, bx + bw) - max(doc_x, bx))
+            * max(0.0, min(doc_y + height, by + bh) - max(doc_y, by))
+            >= area * CV_RULE_OVERLAP_THRESHOLD
+            for bx, by, bw, bh in boxes
+        ):
+            continue
+        moved.append({
+            **violation,
+            "location": {**location, "x": doc_x * scale, "y": doc_y * scale,
+                         "width": width * scale, "height": height * scale},
+            "reason": POPUP_REASON,
+        })
+    return moved
+
+
+def cv_command(image_path: Path, output_path: Path, regions_path: Optional[Path] = None) -> List[str]:
+    """cv_runner.py 실행 명령 (자격증명은 환경 변수 우선, 없으면 로컬 키 파일)."""
+    command = [sys.executable, str(CV_ANALYZER_DIR / "cv_runner.py"), str(image_path)]
+    configured_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if configured_credentials:
+        command.extend(["--credentials", configured_credentials])
+    elif VISION_CREDENTIALS.is_file():
+        command.extend(["--credentials", str(VISION_CREDENTIALS)])
+    command.extend(["--output", str(output_path)])
+    if regions_path is not None:
+        command.extend(["--excluded-regions", str(regions_path)])
+    return command
+
+
+def analyze_popup_cv(layers: List[Dict[str, Any]], cv_capture_path: Path,
+                     capture_metadata: Any) -> List[Dict[str, Any]]:
+    """
+    팝업마다 run.js가 찍은 이미지를 CV 분석기로 검사한다. 이미지 전체를 POPUP 제외
+    영역으로 넘겨 모든 글자가 통과율 표본이 아닌 제외 위반으로만 나오게 한다.
+    OCR 중간 파일이 본문 결과를 덮지 않도록 임시 폴더에서 실행하고 이미지는 바로 지운다.
+    """
+    scale = finite_numeric_score(capture_metadata.get("deviceScaleFactor")) if isinstance(capture_metadata, dict) else None
+    if scale is None or scale <= 0:
+        scale = 1.0
+    violations = []
+    for layer in layers:
+        image = popup_cv_capture_path(cv_capture_path, layer["index"])
+        try:
+            if not image.is_file() or image.stat().st_size == 0:
+                continue
+            with tempfile.TemporaryDirectory(prefix="uniaccess-cv-popup-") as directory:
+                work = Path(directory)
+                regions = work / "popup_region.json"
+                regions.write_text(json.dumps([{
+                    "reason": POPUP_REASON, "x": 0, "y": 0, "width": 10 ** 6, "height": 10 ** 6,
+                }]), encoding="utf-8")
+                output = work / "result_cv_popup.json"
+                if not run_command(cv_command(image, output, regions), cwd=str(work),
+                                   description=f"레이어 팝업 {layer['index']} CV 분석"):
+                    continue
+                result = load_json(output)
+                excluded = result.get("excluded_violations") if isinstance(result, dict) else None
+                violations.extend(popup_cv_violations(layer, excluded, scale))
+        finally:
+            try:
+                image.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return violations
+
+
+def merge_popup_cv_violations(cv_result: Any, violations: List[Dict[str, Any]]) -> Any:
+    """팝업 CV 위반을 CV 결과의 excluded_violations 뒤에 붙인다. 통과율은 그대로 둔다."""
+    if not violations or not isinstance(cv_result, dict):
+        return cv_result
+    existing = cv_result.get("excluded_violations")
+    return {**cv_result, "excluded_violations": (existing if isinstance(existing, list) else []) + violations}
+
+
 def run_cv_from_ephemeral_capture(capture_path: Path,
                                   excluded_regions: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Run the existing CV analyzer, then always delete its private PNG input."""
@@ -1188,6 +1384,7 @@ def main():
     # unexpected exception or early sys.exit before Step 5.
     cv_capture_path = create_ephemeral_cv_capture_path()
     atexit.register(cleanup_ephemeral_cv_capture, cv_capture_path)
+    atexit.register(cleanup_popup_cv_captures, cv_capture_path)
 
     total_steps = 7
 
@@ -1374,6 +1571,19 @@ def main():
         cv_anchors_path = OUTPUT_DIR / "result_cv_anchors.json"
         if is_fresh_nonempty_file(cv_anchors_path, step1_started_ns):
             cv_result = attach_cv_locators(cv_result, load_json(cv_anchors_path), capture_metadata)
+
+    # 레이어 팝업의 텍스트·CV 검사 (POPUP 사유, 점수 제외). 규칙 기반 검사는 run.js가 이미 함.
+    popup_layers = popup_layers_of(rule_result) if step1_ok else []
+    if popup_layers:
+        print(f"  레이어 팝업 {len(popup_layers)}개: 텍스트·CV도 따로 검사합니다 (점수 제외).")
+        popup_html = OUTPUT_DIR / "result_popup.html"
+        if difficulty_result is not None and popup_html.is_file():
+            difficulty_result, suggestion_result = merge_popup_text_blocks(
+                difficulty_result, suggestion_result, analyze_popup_text(popup_html))
+        if cv_result is not None and not cv_result_is_not_measured(cv_result):
+            cv_result = merge_popup_cv_violations(
+                cv_result, analyze_popup_cv(popup_layers, cv_capture_path, capture_metadata))
+    cleanup_popup_cv_captures(cv_capture_path)
 
     total_score = calculate_total_score(rule_result, difficulty_result, cv_result)
 

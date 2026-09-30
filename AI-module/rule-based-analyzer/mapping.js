@@ -164,7 +164,18 @@ const kwcagItems = {
     module: '규칙기반',
     weight: 'medium',
     severity: 'major',      // 키보드 사용자 탐색 효율 저하
-    axeRules: ['bypass', 'skip-link'],
+    // landmark-one-main: 2026-09-16 규칙기반 1차 개선 때 추가.
+    //   WAVE/Lighthouse 교차검증에서 발견된 계통적 누락 규칙 — axe-core에서
+    //   'best-practice' 태그만 붙어 있어 run.js의 withTags() 범위 밖이었던 것이
+    //   원인으로 확인됨(run.js에서 강제 활성화). main 랜드마크가 없으면
+    //   스크린리더 사용자가 반복 영역(헤더/내비게이션)을 건너뛸 기준점이
+    //   없어지므로 2.4.1(Bypass Blocks) 취지와 가장 가깝다고 판단해 이 항목에
+    //   매핑함.
+    //   (참고: 같은 교차검증에서 같이 발견된 meta-viewport 누락은 원인이 다름 —
+    //   그 규칙은 tags에 wcag2aa/wcag144가 있어 원래도 스캔 범위 안이었고
+    //   unmapped로 이미 잡히고 있었음. 즉 이번 개선 대상이 아니며, 왜 그 1개
+    //   사이트에서만 놓쳤는지는 별도로 확인 필요 — run.js 주석 참고)
+    axeRules: ['bypass', 'skip-link', 'landmark-one-main'],
   },
   '6.4.2': {
     name: '제목 제공',
@@ -303,7 +314,15 @@ const kwcagItems = {
     module: '규칙기반',
     weight: 'high',
     severity: 'minor',      // 파싱 오류, 브라우저가 대부분 보정
-    axeRules: ['aria-valid-attr', 'aria-valid-attr-val', 'aria-roles', 'duplicate-id', 'aria-required-attr'],
+    // 2026-09-27 수정: 'aria-valid-attr-val'(오타) → 'aria-valid-attr-value'(axe-core 실제 규칙 이름).
+    //   오타 때문에 1단계 직접 매핑이 안 되고 WCAG 태그 폴백으로 8.1.1·8.2.1 양쪽에 이중 감점되던 문제 해결.
+    // 2026-09-28 추가: WCAG 4.1.2 규칙 중 "ARIA 속성·역할이 규격에 맞는가"(문법 오류 성격)인 것 7개.
+    //   예전에는 직접 매핑이 없어 폴백으로 8.1.1·8.2.1 양쪽에서 이중 감점됐음(아래 FALLBACK_PRIMARY 설명 참고).
+    axeRules: [
+      'aria-valid-attr', 'aria-valid-attr-value', 'aria-roles', 'duplicate-id', 'aria-required-attr',
+      'aria-allowed-attr', 'aria-prohibited-attr', 'aria-conditional-attr', 'aria-deprecated-role',
+      'aria-roledescription', 'aria-braille-equivalent', 'duplicate-id-aria',
+    ],
   },
   '8.2.1': {
     name: '웹 애플리케이션 접근성 준수',
@@ -312,8 +331,25 @@ const kwcagItems = {
     module: '규칙기반',
     weight: 'medium',
     severity: 'major',      // ARIA 위젯 역할/상태 미제공 → 보조기기 조작 곤란
-    axeRules: ['aria-command-name', 'aria-meter-name', 'aria-progressbar-name', 'aria-toggle-field-name'],
+    // 2026-09-28 추가: WCAG 4.1.2 규칙 중 "보조기기가 요소의 이름·역할·상태를 알 수 있는가"인 것 9개.
+    //   aria-hidden-focus가 대표 사례 — 서울시에서 39개 요소가 8.1.1·8.2.1에 이중 감점돼 -221점이 나왔음.
+    //   aria-hidden-body는 WCAG 1.3.1 태그도 있어 5.3.1(표의 구성)까지 삼중 감점되던 것을 여기 하나로 모음.
+    axeRules: [
+      'aria-command-name', 'aria-meter-name', 'aria-progressbar-name', 'aria-toggle-field-name',
+      'button-name', 'summary-name', 'aria-tab-name', 'aria-tooltip-name', 'frame-title', 'frame-title-unique',
+      'aria-hidden-focus', 'aria-hidden-body', 'nested-interactive',
+    ],
   },
+};
+
+// ── 폴백 대표 항목 (2026-09-28 추가) ──
+// WCAG 4.1.2는 8.1.1과 8.2.1 두 항목의 wcag 목록에 모두 들어 있다. 그래서 직접 매핑(axeRules)에
+// 없는 4.1.2 규칙이 폴백으로 들어오면 두 항목에서 동시에 깎였다(요소 1개당 1.5 + 2 = 3.5점).
+// 알려진 규칙은 위 axeRules에 하나씩 배정했고, 앞으로 axe-core에 새 4.1.2 규칙이 생겨도
+// 이중 감점이 되지 않도록 폴백에서는 대표 항목 하나만 쓴다.
+// kwcagItems의 wcag 목록(매핑 테이블 v2의 대응 관계)은 그대로 두고, 폴백 계산에만 적용한다.
+const FALLBACK_PRIMARY = {
+  '4.1.2': '8.2.1',
 };
 
 // ── axe-core 규칙 ID → KWCAG 직접 매핑 (빌드) ──
@@ -338,6 +374,12 @@ for (const [kwcagId, item] of Object.entries(kwcagItems)) {
       wcagToKwcag[wcagId] = [];
     }
     wcagToKwcag[wcagId].push(kwcagId);
+  }
+}
+// 한 WCAG 번호가 여러 KWCAG 항목에 걸리는 경우, 폴백에서는 대표 항목 하나만 남긴다 (이중 감점 방지)
+for (const [wcagId, primary] of Object.entries(FALLBACK_PRIMARY)) {
+  if (wcagToKwcag[wcagId]) {
+    wcagToKwcag[wcagId] = [primary];
   }
 }
 

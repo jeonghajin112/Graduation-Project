@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Getter
 @Entity
@@ -101,12 +102,19 @@ public class IssueResult extends BaseTimeEntity {
     }
 
     /**
-     * AD or DYNAMIC when the finding was inside an advertising region or a region
-     * whose content changed between two loads. Such findings are kept for the
-     * report but excluded from scores and issue counts.
+     * Reasons a finding is reported but kept out of scores and issue counts:
+     * AD (advertising region), DYNAMIC (content that changed between two loads)
+     * and POPUP (a layer popup that covered the page and was closed before the
+     * page was analyzed).
      */
+    public static final Set<String> EXCLUSION_REASONS = Set.of("AD", "DYNAMIC", "POPUP");
+
+    public static boolean isExclusionReason(String reason) {
+        return reason != null && EXCLUSION_REASONS.contains(reason);
+    }
+
     public void applyExclusion(String reason) {
-        this.exclusionReason = "AD".equals(reason) || "DYNAMIC".equals(reason) ? reason : null;
+        this.exclusionReason = isExclusionReason(reason) ? reason : null;
     }
 
     public void applyRuleId(String ruleId) {

@@ -27,6 +27,13 @@ const pages = {
   // A security check that keeps the original URL and HTTP 200.
   '/challenge': [200, `<!doctype html><html lang="en"><head><title>Verify you are human</title></head><body>
     <main><h1>Verify you are human</h1><p>Automated access detected. Complete the CAPTCHA security check to continue.</p></main></body></html>`],
+  // Cloudflare's interstitial keeps the original URL and HTTP 200.
+  '/cloudflare-wait': [200, `<!doctype html><html lang="en"><head><title>Just a moment...</title></head><body>
+    <main><h1>www.example.go.kr</h1><p>Checking if the site connection is secure</p>
+    <p>www.example.go.kr needs to review the security of your connection before proceeding.</p></main></body></html>`],
+  // A Korean block notice that keeps the original URL.
+  '/korean-deny': [200, html('접근 차단 안내',
+    '<main><h1>접근 차단 안내</h1><p>비정상적인 경로로 접속하여 접근이 차단되었습니다. 관리자에게 문의하세요.</p></main>')],
   // A normal page that embeds a CAPTCHA field keeps its own content and links.
   '/login-with-captcha': [200, html('회원 로그인', `<header><nav>
       <a href="/">홈</a><a href="/notice">공지사항</a><a href="/help">도움말</a><a href="/join">회원가입</a><a href="/find">아이디 찾기</a>
@@ -110,6 +117,11 @@ test('reports a same-origin security check as blocked', async () => {
   const health = await expectUnavailable('/challenge', { contentGraceMs: 0 });
   assert.equal(health.status, 'BLOCKED');
   assert.equal(health.http_status, 200);
+});
+
+test('reports a Cloudflare wait page and a Korean block notice as blocked', async () => {
+  assert.equal((await expectUnavailable('/cloudflare-wait', { contentGraceMs: 0 })).status, 'BLOCKED');
+  assert.equal((await expectUnavailable('/korean-deny', { contentGraceMs: 0 })).status, 'BLOCKED');
 });
 
 test('still scores a normal page that embeds a CAPTCHA field', async () => {

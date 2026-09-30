@@ -105,8 +105,8 @@ export type LiveReportSession = {
   expiresAt: string;
 };
 
-/** Findings in advertising or changing regions: reported, never scored or counted. */
-export type IssueExclusionReason = "AD" | "DYNAMIC";
+/** Findings in advertising, changing or layer-popup regions: reported, never scored or counted. */
+export type IssueExclusionReason = "AD" | "DYNAMIC" | "POPUP";
 
 export type EvaluationIssue = {
   ruleId?: string | null;

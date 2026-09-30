@@ -144,3 +144,38 @@ test('a comparison load that is a different page marks nothing', () => {
   assert.deepEqual(changedContentKeys(current, { a: '1', x: '오류 페이지' }), []);
   assert.deepEqual(changedContentKeys(current, null), []);
 });
+
+test('excludes an in-page ad that names itself [광고], and keeps an ordinary link about ads', async () => {
+  // Naver's headline ad is a plain link with an image whose alt starts with
+  // "[광고]"; no ad marker or ad iframe is involved.
+  const page = `<!doctype html><html lang="ko"><head><title>포털</title></head><body><main>
+    <h1>포털 서비스</h1><p>변하지 않는 서비스 안내 문구입니다. 이 영역은 계속 검사합니다.</p>
+    <a id="headline-ad" href="/ad"><img src="${IMAGE}" width="240" height="60" alt="[광고]멤버십 초대 이벤트">
+      <span id="headline-ad-text" style="color:#d4d4d4;background:#fff">구독료보다 더 큰 적립 혜택</span></a>
+    <a id="ad-guide" href="/guide"><img src="${IMAGE}" width="240" height="60" alt="광고 안내 페이지">
+      <span id="ad-guide-text" style="color:#d4d4d4;background:#fff">광고 문의 안내</span></a>
+  </main></body></html>`;
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(page);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'excluded-regions-label-test-'));
+  try {
+    await run(`http://127.0.0.1:${server.address().port}/`, path.join(directory, 'result.json'),
+      { settleMs: 0, contentGraceMs: 0, compareLoad: false });
+    const api = JSON.parse(fs.readFileSync(path.join(directory, 'result_api.json'), 'utf8'));
+    const html = fs.readFileSync(path.join(directory, 'result.html'), 'utf8');
+    const selectors = (violations) => violations.flatMap((violation) =>
+      violation.rules.flatMap((rule) => rule.nodes.map((node) => node.selector)));
+    const ad = api.excluded_violations.find((group) => group.reason === 'AD');
+    assert.ok(ad && selectors(ad.violations).some((selector) => selector.includes('headline-ad-text')));
+    assert.ok(selectors(api.violations).every((selector) => !selector.includes('headline-ad-text')));
+    assert.ok(selectors(api.violations).some((selector) => selector.includes('ad-guide-text')),
+      'an alt text that merely mentions ads is not an ad');
+    assert.match(html, /<a id="headline-ad"[^>]*data-ua-excluded-region="AD"/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

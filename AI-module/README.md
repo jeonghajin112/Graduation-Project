@@ -46,6 +46,7 @@ AI-module/
 | excluded-regions.js | 광고와 두 번 불러올 때 내용이 바뀐 영역을 표시하고, 그 안의 위반을 점수 대상과 분리 |
 | hidden-elements.js | 분석 화면 폭에서 렌더링되지 않는 요소를 스냅샷에 표시해 텍스트 분석이 같은 기준을 쓰게 함 |
 | cv-anchors.js | CV 캡처 시점의 보이는 요소마다 문서 좌표·선택자·내용 서명(글자, 이미지 경로)을 `result_cv_anchors.json`에 기록 |
+| popup-layers.js | 접속 직후 본문을 가리는 레이어 팝업을 찾아 따로 검사한 뒤 닫음 |
 | artifact.js | typed locator를 만들고 annotation을 포함한 내부 분석용 DOM snapshot 직렬화 |
 | adapter.js | axe-core 결과를 KWCAG 항목으로 매핑하는 어댑터 |
 | mapping.js | KWCAG 33개 항목의 매핑 데이터 (axe 규칙 ID, 심각도, 가중치) |
@@ -79,17 +80,23 @@ PC에서는 숨겨진 모바일 전용 공지 목록이 대표적이며, 같은 
 
 | 사유 | 판정 |
 |---|---|
-| `AD` | 광고 표식(`ins.adsbygoogle`, `data-ad-slot`, `aria-label="광고"` 등)이나 광고 서버 주소의 iframe. 두 번 모두 같은 광고가 나와도 제외한다 |
+| `AD` | 광고 표식(`ins.adsbygoogle`, `data-ad-slot`, `aria-label="광고"` 등)이나 광고 서버 주소의 iframe. 두 번 모두 같은 광고가 나와도 제외한다. 페이지 안에 직접 그려진 광고도 대체 텍스트나 `aria-label`이 "[광고]"로 시작하면 감싸는 링크째 제외한다(네이버 상단 헤드라인 광고) |
 | `DYNAMIC` | 같은 브라우저 컨텍스트에서 페이지를 한 번 더 불러와 비교했을 때 글자·이미지 주소·iframe 주소가 달라졌거나 한쪽 로드에만 있는 요소(방문마다 탭·레이아웃이 바뀌는 추천 피드). 하위 내용의 절반 이상이 바뀐 부모까지(페이지 면적의 25% 이하) 넓혀 목록 전체를 묶는다. 두 번째 로드가 분석 페이지 요소의 절반도 공유하지 않으면 오류·차단 화면으로 보고 비교하지 않는다 |
+| `POPUP` | 접속 직후 화면의 20% 이상을 덮는 fixed/absolute, z-index 100 이상 레이어(공지·이벤트 팝업). 팝업이 열린 상태에서 **세 모듈 모두** 팝업을 따로 검사한다: 규칙 기반은 팝업만 axe 검사, 텍스트는 팝업 내용을 `result_popup.html`로 저장해 같은 추출기(`--popup-layer`)·난이도 엔진으로 검사, CV는 팝업 부분만 캡처해 같은 CV 분석기로 검사(규칙 엔진이 이미 찾은 명도 대비 요소와 겹치면 뺌). 결과는 모두 `POPUP` 사유로 따로 보고하고 점수(규칙 점수, 난이도 page_score, CV 통과율)에는 넣지 않는다. 그다음 팝업의 닫기 버튼("닫기", "오늘 하루 보지 않기" 등)을 누르고 항상 `display:none`으로 숨긴 뒤 두 번째 로딩 비교, 본문 axe 검사, DOM snapshot, CV 이미지가 팝업이 닫힌 화면을 본다 |
 
 사이트 캐러셀과 슬라이드 배너는 `carousel-audit.js`가 모든 슬라이드를 검사하므로 `DYNAMIC`으로 보지 않는다.
 바뀌지 않는 배너와 광고 신호가 없는 자체 커머스 영역도 두 번 불러와 같으면 그대로 검사한다.
 정적 fallback(`INITIAL_RESPONSE_STATIC`)은 비교할 두 번째 응답이 없어 `AD`만 적용한다.
 
+팝업을 점수에서 빼는 이유: 팝업은 행사·공지 기간에만 떠서 점수에 넣으면 같은 사이트 점수가 측정일마다 흔들린다(동적 영역과 같은 논리). 그래도 기관이 만든 콘텐츠이고 키보드로 닫을 수 없는 팝업처럼 실제 장벽이 될 수 있어 세 모듈 모두 검사해 리포트에 따로 보여준다. 광고·동적 영역은 사이트 콘텐츠가 아니라서 검사 자체를 하지 않는다는 점이 다르다.
+
 표시한 요소에는 `data-ua-excluded-region` 속성을 남기고, `result_api.json`에 다음을 기록한다.
 
 - `metadata.excluded_regions`: 최상위 제외 영역의 사유와 문서 좌표(CSS px)
 - `excluded_violations`: 사유별 `{reason, violations, unmapped_violations}`. 형식은 점수 대상 위반과 같다
+- `metadata.popup_layers`: 찾아서 닫은 레이어 팝업의 id·문서 좌표, 닫기 버튼 클릭 여부, 팝업 안 명도 대비 위반 요소 좌표(`color_contrast_boxes`, CV 중복 제거용). 팝업은 `data-ua-popup` 속성으로 표시한다
+- 팝업 텍스트 블록: `text_difficulty`·`text_suggestions`의 `results` 뒤에 `exclusion_reason: "POPUP"`으로 붙는다(`meta.page_score`는 본문만으로 계산)
+- 팝업 CV 위반: `cv_visual.excluded_violations`에 `reason: "POPUP"`으로 붙는다(좌표는 본문 CV와 같은 스크린샷 px)
 
 텍스트 추출기는 이 속성(`data-ua-excluded-region`)과 `data-ua-hidden`이 붙은 요소를 읽지 않고, CV 분석기는 텍스트 상자 중심이 제외 영역 안에 있으면
 통과율 표본에서 빼고 위반만 `excluded_violations`(사유 포함)에 남긴다. 백엔드는 제외 위반을
@@ -317,6 +324,10 @@ BotManager 전용 `#bm-wait-background`와 `#loading-overlay`가 표시되고 �
 스크립트 없이 정적으로 다시 열어 분석한다. 이 제한적 fallback은 로그와 HTML의
 `data-accessibility-replay-source="INITIAL_RESPONSE_STATIC"` 표식으로 드러나며,
 CAPTCHA 우회나 `navigator.webdriver` 위장은 수행하지 않는다.
+
+교차 출처 이동 판정에는 URL(`captcha`, `botmanager`, `challenge`, `/deny/`, `bot-check`), 정부24 MBuster 차단 주소(`/mbuster`),
+Cloudflare 대기 화면 표식(`_cf_chl_`, `cf-chl-`, "Just a moment...", "Checking if the site connection is secure")을 함께 본다.
+MBuster와 Cloudflare 표식은 그것만으로 차단으로 본다. Cloudflare·DataDome 태그가 심긴 정상 페이지는 차단으로 보지 않는다.
 
 ### 프론트엔드에 내려줄 때
 

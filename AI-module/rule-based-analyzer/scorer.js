@@ -42,12 +42,10 @@
  *
  *   총 감점은 소수점 이하 반올림하며, 최저 점수는 0점 (음수 없음)
  *
- * [등급 판정 기준]
- *   95점 이상 → A등급 (우수)
- *   85점 이상 → B등급 (양호)
- *   70점 이상 → C등급 (보통)
- *   50점 이상 → D등급 (미흡)
- *   50점 미만 → F등급 (심각)
+ * [등급 없음 — 2026-09-27 변경]
+ *   예전에는 이 점수에 A~F 5단계 모듈 등급을 따로 붙였지만, run_all.py의 최종
+ *   등급(A+~F 7단계)과 구간·글자 수가 달라서 "등급"이 어느 쪽인지 헷갈렸음.
+ *   등급은 run_all.py의 최종 등급 하나로만 통일하고, 이 모듈은 점수만 낸다.
  *
  * [파이프라인 내 위치]
  *   axe-core 실행 → adapter.js (KWCAG 변환) → scorer.js (점수 계산) → run.js (결과 출력)
@@ -57,7 +55,6 @@
  *   const adapterResult = convert(axeResults);  // adapter.js
  *   const scoreResult = score(adapterResult);
  *   // scoreResult.score    → 최종 점수 (예: 68)
- *   // scoreResult.grade    → 등급 (예: 'C')
  *   // scoreResult.items    → 항목별 감점 상세
  */
 
@@ -100,7 +97,6 @@ const MAX_SCORE = 100;
  *     score: 68,              ← 최종 점수 (0~100)
  *     maxScore: 100,          ← 만점
  *     totalDeduction: 32,     ← 총 감점
- *     grade: 'C',             ← 등급
  *     severityBreakdown: {    ← 심각도별 감점 상세
  *       critical: { count, deductionPerNode, totalDeduction },
  *       major:    { count, deductionPerNode, totalDeduction },
@@ -197,23 +193,13 @@ function score(adapterResult) {
   // 만점(100)에서 총 감점을 빼되, 0점 미만으로 내려가지 않도록 보정
   const finalScore = Math.max(0, MAX_SCORE - totalDeduction);
 
-  // ── 등급 판정 ──
-  // 점수 구간에 따라 5단계 등급 부여
-  // 이 구간은 프로젝트에서 자체 설계한 기준이며,
-  // 향후 실제 공공 웹사이트 테스트 결과를 바탕으로 조정할 수 있음
-  let grade;
-  if (finalScore >= 95) grade = 'A';       // 우수: 거의 모든 기준 충족
-  else if (finalScore >= 85) grade = 'B';  // 양호: 경미한 위반만 존재
-  else if (finalScore >= 70) grade = 'C';  // 보통: 일부 중요 위반 존재
-  else if (finalScore >= 50) grade = 'D';  // 미흡: 다수의 위반 존재
-  else grade = 'F';                        // 심각: 접근성 개선이 시급함
+  // (2026-09-27: 모듈 등급 A~F 판정 제거 — 등급은 run_all.py의 최종 등급으로 통일)
 
   // ── 최종 결과 반환 ──
   return {
     score: finalScore,
     maxScore: MAX_SCORE,
     totalDeduction,
-    grade,
 
     // 심각도별 감점 상세
     // → 프론트엔드에서 "critical 5건(-22.5점), major 3건(-6점)" 형태로 시각화

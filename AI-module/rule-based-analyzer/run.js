@@ -62,12 +62,16 @@ const { analyzeWithCarouselStates } = require('./carousel-audit');
 const { markHiddenElements } = require('./hidden-elements');
 const { collectCvAnchors } = require('./cv-anchors');
 const {
+  addPopupViolations,
   changedContentKeys,
   collectContentSignatures,
   loadComparisonSignatures,
   markExcludedRegions,
   partitionAxeResultsByRegion,
 } = require('./excluded-regions');
+const {
+  POPUP_ATTRIBUTE, capturePopupLayers, findPopupLayers, hidePopupLayers,
+} = require('./popup-layers');
 const fs = require('fs');
 const path = require('path');
 
@@ -110,7 +114,11 @@ function challengeSignals({
   const signals = [];
   const urlPatterns = [
     ['AUTOMATION_REASON', /[?&](?:atn|reason)=(?:selenium|webdriver|automation|bot)(?:[&#]|$)/i],
-    ['CHALLENGE_URL', /(?:captcha|botmanager|stclab|security[-_/]?check|browser[-_/]?check|challenge)/i],
+    ['CHALLENGE_URL', /(?:captcha|botmanager|stclab|security[-_/]?check|browser[-_/]?check|challenge|bot[-_]?check|\/deny\/)/i],
+    // 정부24(gov.kr)가 자동 접근을 차단할 때 넘기는 MBuster 안내 주소
+    // (plus.gov.kr/mbuster). 2026-09-14 동작검증에서 실제로 확인된 차단 경로라
+    // 이 주소로 넘어간 것만으로 차단으로 본다.
+    ['MBUSTER', /\/mbuster(?:[/?#]|$)/i],
   ];
   for (const [name, pattern] of urlPatterns) {
     if (pattern.test(decodedUrl)) signals.push(name);
@@ -122,6 +130,9 @@ function challengeSignals({
     ['CAPTCHA', /hcaptcha|recaptcha|turnstile|captcha/i],
     ['WEBDRIVER', /navigator\.webdriver|atn\s*[=:]\s*["']?selenium|webdriver detected/i],
     ['SECURITY_CHECK', /verify (?:that )?you are human|security (?:verification|check)|automated (?:access|browser|traffic)/i],
+    // Cloudflare 대기·차단 화면. challenge-platform 스크립트는 정상 페이지에도
+    // 심기므로 쓰지 않고, 대기 화면에만 있는 표식과 문구만 본다.
+    ['CLOUDFLARE', /_cf_chl_|cf-chl-|just a moment\.\.\.|checking (?:if the site connection is secure|your browser)|attention required! \| cloudflare/i],
   ];
   for (const [name, pattern] of documentPatterns) {
     if (pattern.test(documentText)) signals.push(name);
@@ -208,7 +219,7 @@ async function detectCrossOriginBotChallenge(page, initialUrl) {
     })(),
   })).catch(() => ({ title: '', text: '', html: '' }));
   const signals = challengeSignals({ url: currentUrl, ...state });
-  const strongSignals = new Set(['AUTOMATION_REASON', 'STCLAB', 'CAPTCHA', 'WEBDRIVER']);
+  const strongSignals = new Set(['AUTOMATION_REASON', 'STCLAB', 'CAPTCHA', 'WEBDRIVER', 'MBUSTER', 'CLOUDFLARE']);
   const sameDocumentChallenge = signals.includes('BOT_MANAGER_WAIT_OVERLAY');
   return {
     detected: sameDocumentChallenge || (crossOrigin && (
@@ -352,7 +363,7 @@ const API_BASE_URL = 'http://localhost:8080/api/v1';
  *      - meta: { url, timestamp, engine, engineVersion, adapterVersion }
  *
  *    scoreResult (from scorer.js):
- *      - score, maxScore, totalDeduction, grade
+ *      - score, maxScore, totalDeduction
  *      - severityBreakdown: { critical, major, minor } — 심각도별 감점 집계
  *      - items: KWCAG 항목별 점수 상세 (weight, weightMultiplier 포함)
  *
@@ -441,7 +452,6 @@ function toApiFormat(kwcagResult, scoreResult) {
     score: scoreResult.score,
     max_score: scoreResult.maxScore,
     total_deduction: scoreResult.totalDeduction,
-    grade: scoreResult.grade,
     severity_breakdown: {
       critical: {
         count: scoreResult.severityBreakdown.critical.count,
@@ -609,6 +619,10 @@ const CHALLENGE_TEXT_PATTERN = new RegExp([
   'verify (?:that )?you are (?:a )?human', 'are you a robot', 'security (?:verification|check)',
   'automated (?:access|browser|traffic)', 'webdriver detected', 'access denied',
   '자동화된 (?:접근|요청|프로그램)', '비정상적인 (?:접근|요청|트래픽)', '로봇이 아닙니다', '보안 확인',
+  // Cloudflare 대기·차단 화면과 흔한 차단 안내 문구 (2026-09-30 추가).
+  // 짧은 본문·링크 4개 이하 조건과 함께만 쓰이므로 정상 페이지 오탐 위험이 낮다.
+  'just a moment\\.\\.\\.', 'checking (?:if the site connection is secure|your browser)',
+  'attention required', 'unusual traffic', '접근이 (?:거부|차단)(?:되었|됐)',
 ].join('|'), 'i');
 const DOCUMENT_CONTENT_SELECTOR = 'img, svg, picture, video, canvas, iframe, object, embed, [role="img"], '
   + 'a[href], button, input:not([type="hidden"]), select, textarea, [role="button"]';
@@ -737,6 +751,19 @@ function toExcludedApiFormat(excluded) {
     });
 }
 
+// axe 실행 범위: WCAG 2.0/2.1/2.2 A·AA 태그 + landmark-one-main(best-practice
+// 태그라 따로 켬, 2026-09-16). options()는 기존 설정을 병합하지 않고 통째로
+// 바꾸므로 runOnly와 rules를 한 번에 넘긴다. 본문 검사와 팝업 검사가 같이 쓴다.
+const AXE_OPTIONS = Object.freeze({
+  runOnly: {
+    type: 'tag',
+    values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'],
+  },
+  rules: {
+    'landmark-one-main': { enabled: true },
+  },
+});
+
 async function run(url, outputPath, options = {}) {
   console.log(`\n검사 대상: ${url}`);
   console.log('─'.repeat(50));
@@ -836,6 +863,35 @@ async function run(url, outputPath, options = {}) {
       reportUnavailablePage(documentHealth);
     }
 
+    // Layer popups: scan each open popup on its own and report its violations
+    // under POPUP (outside the score), then close it so the page scan, the DOM
+    // snapshot and the CV image all see the page as a visitor does after
+    // closing the popup. Popup content is never DYNAMIC even when the
+    // comparison load still shows it. See popup-layers.js.
+    const popupLayers = await findPopupLayers(page);
+    let popupAxeResults = null;
+    if (popupLayers.length > 0) {
+      popupAxeResults = await new AxeBuilder({ page })
+        .include(`[${POPUP_ATTRIBUTE}]`)
+        .options(AXE_OPTIONS)
+        .analyze()
+        .catch((error) => {
+          console.warn(`   레이어 팝업 검사 실패: ${error.message}`);
+          return null;
+        });
+      await capturePopupLayers(page, popupLayers, {
+        htmlPath: siblingOutputPath(output, '_popup.html'),
+        cvScreenshotPath,
+        popupAxeResults,
+        fs,
+      });
+      const closed = await hidePopupLayers(page);
+      for (const layer of popupLayers) {
+        layer.clicked_close = closed.find((entry) => entry.index === layer.index)?.clicked_close ?? false;
+      }
+      console.log(`   레이어 팝업 ${popupLayers.length}개: 규칙·텍스트·CV용으로 따로 저장·검사한 뒤 닫고 본문을 분석합니다.`);
+    }
+
     // A second load reveals content that differs between visits (news,
     // products, rotating ads). The static fallback reproduces one saved
     // response, so it has nothing to compare against.
@@ -857,10 +913,18 @@ async function run(url, outputPath, options = {}) {
     //     wcag22aa          : WCAG 2.2 AA (국제 최신 기준 — 추가 참고용)
     //   → KWCAG 2.2와 매핑되는 핵심 규칙을 모두 커버하되, AAA(최상위) 등급은
     //      공공 서비스의 현실적 준수 수준을 고려해 제외함.
+    //
+    //   [2026-09-16 규칙기반 1차 개선] landmark-one-main 추가.
+    //   WAVE/Lighthouse 교차검증에서 5개 사이트 중 3곳이 main 랜드마크 누락을
+    //   Lighthouse에서만 잡혔다. 이 규칙은 tags가 ['cat.semantics','best-practice']
+    //   뿐이라 WCAG 태그 필터에 걸러지고 있었음(axe-core 4.13에서 직접 조회).
+    //   best-practice 전체를 켜면 재검증 범위가 커지므로 이 규칙만 개별로 켠다.
+    //   주의: AxeBuilder#options()는 기존 설정과 병합되지 않고 통째로 교체되므로
+    //   withTags()와 체이닝하면 태그 제한이 풀린다. runOnly와 rules를 한 번에 넘긴다.
     console.log('3. axe-core 접근성 검사 실행 중...');
     const scanStart = Date.now();
     const scanPage = () => new AxeBuilder({ page })
-      .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+      .options(AXE_OPTIONS)
       .analyze();
     const axeResults = await analyzeWithCarouselStates(page, scanPage);
     // page.setContent() intentionally uses an about:blank container in static
@@ -934,6 +998,7 @@ async function run(url, outputPath, options = {}) {
     //   에서 의미가 전달된다. adapter.js의 mapping.js가 이 매핑을 담당.
     console.log('6. KWCAG 매핑 변환 중...');
     const { included, excluded } = await partitionAxeResultsByRegion(page, axeResults);
+    addPopupViolations(excluded, popupAxeResults);
     const kwcagResult = convert(included);
     kwcagResult.meta.replaySource = replaySourceMode;
     kwcagResult.meta.carouselAudit = axeResults.carouselAudit;
@@ -952,6 +1017,7 @@ async function run(url, outputPath, options = {}) {
     apiData.metadata.scan_duration_ms = scanDuration;  // placeholder를 실측값으로 덮어쓰기
     apiData.metadata.document_health = documentHealth;
     apiData.metadata.excluded_regions = excludedRegions;
+    apiData.metadata.popup_layers = popupLayers;
     apiData.metadata.hidden_element_count = hiddenElementCount;
     apiData.excluded_violations = toExcludedApiFormat(excluded);
 
@@ -985,8 +1051,8 @@ async function run(url, outputPath, options = {}) {
     console.log(`  스캔 소요: ${scanDuration}ms`);
     console.log('');
 
-    // 점수 & 등급 출력
-    console.log(`   접근성 점수: ${scoreResult.score} / ${scoreResult.maxScore}점 (등급: ${scoreResult.grade})`);
+    // 점수 출력 (등급은 run_all.py의 최종 결과 grade 하나로 통일 — 2026-09-27)
+    console.log(`   접근성 점수: ${scoreResult.score} / ${scoreResult.maxScore}점`);
     console.log(`    총 감점: -${scoreResult.totalDeduction}점`);
     console.log('');
 

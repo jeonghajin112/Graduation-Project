@@ -324,7 +324,7 @@ public class AiEvaluationIngestionService {
         addRuleIssues(issues, analysis, module.path("violations"), module.path("unmapped_violations"), null);
         for (JsonNode group : module.path("excluded_violations")) {
             String reason = text(group, "reason", null);
-            if ("AD".equals(reason) || "DYNAMIC".equals(reason)) {
+            if (IssueResult.isExclusionReason(reason)) {
                 addRuleIssues(issues, analysis, group.path("violations"), group.path("unmapped_violations"), reason);
             }
         }
@@ -436,6 +436,8 @@ public class AiEvaluationIngestionService {
                         message
                 );
                 issue.applyLocator(issueLocatorParser.fromTextBlock(block));
+                // Layer-popup text is checked like page text but reported outside the score.
+                issue.applyExclusion(text(block, "exclusion_reason", null));
                 issues.add(issue);
             }
         }
@@ -470,7 +472,7 @@ public class AiEvaluationIngestionService {
                              JsonNode violations, boolean excluded) {
         for (JsonNode violation : violations) {
             String exclusionReason = excluded ? text(violation, "reason", null) : null;
-            if (excluded && !"AD".equals(exclusionReason) && !"DYNAMIC".equals(exclusionReason)) {
+            if (excluded && !IssueResult.isExclusionReason(exclusionReason)) {
                 continue;
             }
             IssueResult issue = new IssueResult(

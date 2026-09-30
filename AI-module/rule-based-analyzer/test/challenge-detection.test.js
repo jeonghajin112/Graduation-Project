@@ -67,3 +67,43 @@ test('does not treat ordinary loading UI or a partial BotManager marker as a cha
     <div id="loading-overlay" hidden></div></body></html>`;
   assert.deepEqual(challengeSignals({ html: dormantMarkerPair }), []);
 });
+
+test('recognises the government MBuster redirect, Cloudflare and vendor markers', () => {
+  assert.deepEqual(challengeSignals({ url: 'https://plus.gov.kr/mbuster?returnUrl=%2F' }), ['MBUSTER']);
+  assert.deepEqual(challengeSignals({ url: 'https://www.gov.kr/portal/main' }), []);
+  assert.deepEqual(challengeSignals({ url: 'https://www.example.go.kr/deny/index.html' }), ['CHALLENGE_URL']);
+  assert.deepEqual(challengeSignals({
+    title: 'Just a moment...',
+    html: '<script>window._cf_chl_opt = {};</script><div id="cf-chl-widget"></div>',
+  }), ['CLOUDFLARE']);
+  // PerimeterX(px-captcha)·DataDome(captcha-delivery.com) block pages are
+  // already covered by the generic CAPTCHA marker.
+  assert.deepEqual(challengeSignals({ html: '<div id="px-captcha"></div>' }), ['CAPTCHA']);
+  assert.deepEqual(challengeSignals({ html: '<iframe src="https://geo.captcha-delivery.com/captcha/"></iframe>' }), ['CAPTCHA']);
+});
+
+test('does not treat vendor tags on an ordinary page as a challenge', () => {
+  // Cloudflare injects challenge-platform scripts and DataDome injects its tag
+  // on normal pages too; neither alone may route a page to the fallback.
+  const ordinary = `<html><head><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+    <script src="https://js.datadome.co/tags.js"></script></head><body><main>정상 본문</main></body></html>`;
+  assert.deepEqual(challengeSignals({ title: '기관 홈페이지', html: ordinary }), []);
+});
+
+test('detects a cross-origin redirect to the MBuster block page', async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.route('https://plus.gov.kr/**', (route) => route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><html lang="ko"><head><title>정부24</title></head><body><p>잠시 후 다시 이용해 주세요.</p></body></html>',
+    }));
+    await page.goto('https://plus.gov.kr/mbuster?returnUrl=%2F');
+    const challenge = await detectCrossOriginBotChallenge(page, 'https://www.gov.kr/');
+    assert.equal(challenge.detected, true);
+    assert.deepEqual(challenge.signals, ['MBUSTER']);
+  } finally {
+    await browser.close();
+  }
+});

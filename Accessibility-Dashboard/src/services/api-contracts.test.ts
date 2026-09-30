@@ -436,14 +436,16 @@ describe("createEvaluationIssuesResponseParser", () => {
   });
 
   it("keeps the reason an issue is reported outside the score", () => {
-    const [scored, advertising, dynamic] = parseIssues([
+    const [scored, advertising, dynamic, popup] = parseIssues([
       createEvaluationIssue(),
       { ...createEvaluationIssue(), id: 2, exclusionReason: "AD" },
-      { ...createEvaluationIssue(), id: 3, exclusionReason: "DYNAMIC" }
+      { ...createEvaluationIssue(), id: 3, exclusionReason: "DYNAMIC" },
+      { ...createEvaluationIssue(), id: 4, exclusionReason: "POPUP" }
     ], "$.data");
     expect(scored?.exclusionReason).toBeUndefined();
     expect(advertising?.exclusionReason).toBe("AD");
     expect(dynamic?.exclusionReason).toBe("DYNAMIC");
+    expect(popup?.exclusionReason).toBe("POPUP");
   });
 
   it.each([
