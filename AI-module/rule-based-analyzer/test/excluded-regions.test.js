@@ -119,6 +119,42 @@ test('still excludes ads when the comparison load is disabled', async () => {
     'without a comparison load nothing is treated as dynamic');
 });
 
+test('a feed that stays fixed for one visitor is compared across visitors', async () => {
+  // Like the Naver feed: a new visitor gets a cookie and a feed picked for
+  // it, and keeps that feed on every later load. The live report is another
+  // visitor and sees another feed.
+  let visitors = 0;
+  const server = http.createServer((request, response) => {
+    let visitor = /(?:^|;\s*)visitor=(\d+)/.exec(request.headers.cookie || '')?.[1];
+    const headers = { 'Content-Type': 'text/html; charset=utf-8' };
+    if (!visitor) {
+      visitors += 1;
+      visitor = String(visitors);
+      headers['Set-Cookie'] = `visitor=${visitor}; Path=/`;
+    }
+    response.writeHead(200, headers);
+    response.end(`<!doctype html><html lang="ko"><head><title>포털</title></head><body><main>
+      <p>변하지 않는 서비스 안내 문구입니다.</p><p>두 번째 안내 문구입니다.</p>
+      <section id="feed"><h2>추천</h2><ul><li><p>방문자 ${visitor}의 추천 콘텐츠</p>
+        <img id="feed-photo" src="${IMAGE}" width="80" height="60"></li></ul></section>
+      <div style="height:2400px">A portal page is much taller than one widget.</div>
+    </main></body></html>`);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'excluded-regions-test-'));
+  try {
+    await run(`http://127.0.0.1:${server.address().port}/`, path.join(directory, 'result.json'),
+      { settleMs: 0, contentGraceMs: 0 });
+    const api = JSON.parse(fs.readFileSync(path.join(directory, 'result_api.json'), 'utf8'));
+    const dynamic = api.excluded_violations.find((group) => group.reason === 'DYNAMIC');
+    assert.ok(dynamic && imageAltSelectors(dynamic.violations).some((selector) => selector.includes('feed-photo')));
+    assert.ok(imageAltSelectors(api.violations).every((selector) => !selector.includes('feed-photo')));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('content present in only one load counts as changed', () => {
   const current = { 'body>header:1': '로고', 'body>main:1>p:1': '안내', 'body>main:1>div:2>p:1': '피드 A' };
   const comparison = { 'body>header:1': '로고', 'body>main:1>p:1': '안내', 'body>main:1>ul:1>li:1': '피드 B' };

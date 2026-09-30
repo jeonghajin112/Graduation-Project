@@ -771,11 +771,12 @@ async function run(url, outputPath, options = {}) {
   // ── 1) 브라우저 실행 & 페이지 로드 ──
   console.log('1. 브라우저 실행 중...');
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
+  const contextOptions = {
     locale: 'ko-KR',                     // 한국어 환경 강제 (Accept-Language: ko-KR)
     viewport: { width: 1280, height: 720 },  // 데스크톱 대표 해상도 고정
     deviceScaleFactor: 1,                 // 문서 CSS 좌표 재현성을 위한 고정 배율
-  });
+  };
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   const output = outputPath || `result_${new Date().toISOString().slice(0, 10)}.json`;
   const settleMs = Number.isFinite(options.settleMs)
@@ -812,7 +813,7 @@ async function run(url, outputPath, options = {}) {
     // health checks; it is used only if the analyzed URL stays the same.
     const earlyComparisonUrl = withoutUrlFragment(page.url());
     const earlyComparison = options.compareLoad !== false && /^https?:/i.test(earlyComparisonUrl)
-      ? loadComparisonSignatures(context, earlyComparisonUrl, { settleMs })
+      ? loadComparisonSignatures(browser, contextOptions, earlyComparisonUrl, { settleMs })
       : null;
     // Awaited below when still needed; an unused visit must not crash the run.
     earlyComparison?.catch(() => {});
@@ -899,7 +900,7 @@ async function run(url, outputPath, options = {}) {
     if (replaySourceMode === 'RENDERED_DOM' && options.compareLoad !== false) {
       comparisonSignatures = earlyComparison && earlyComparisonUrl === analysisFinalUrl
         ? await earlyComparison
-        : await loadComparisonSignatures(context, analysisFinalUrl, { settleMs });
+        : await loadComparisonSignatures(browser, contextOptions, analysisFinalUrl, { settleMs });
     }
 
     // Freeze CSS/Web Animations before both axe and snapshot serialization so

@@ -194,16 +194,19 @@ async function collectContentSignatures(page) {
   return page.evaluate(inspectRegions, inspectionOptions('collect')).catch(() => null);
 }
 
-// Loads the page again in the same browser context and returns its content
-// signatures, or null when the comparison load fails.
-async function loadComparisonSignatures(context, url, { settleMs = 5000 } = {}) {
-  const page = await context.newPage();
+// Loads the page again as another visitor and returns its content signatures,
+// or null when the comparison load fails. The live report opens the page
+// without the analysis' cookies, so a feed that a site keeps fixed for one
+// visitor (the Naver feed) must be compared across visitors, not within one.
+async function loadComparisonSignatures(browser, contextOptions, url, { settleMs = 5000 } = {}) {
+  const context = await browser.newContext(contextOptions);
   try {
+    const page = await context.newPage();
     await page.goto(url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
     await page.waitForTimeout(settleMs);
     return await collectContentSignatures(page);
   } finally {
-    await page.close().catch(() => {});
+    await context.close().catch(() => {});
   }
 }
 
