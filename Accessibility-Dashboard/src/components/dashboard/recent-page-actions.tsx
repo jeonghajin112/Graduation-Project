@@ -4,7 +4,7 @@ import { MoreHorizontal, Trash2 } from "lucide-react";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type { RecentAnalyzedPage } from "@/services/quick-analysis-registry";
 import type { ProjectPageActions } from "./dashboard-surface.types";
-import { handleMenuArrowKeys } from "./menu-keyboard";
+import { handleMenuArrowKeys, openAfterContextMenuRelease } from "./menu-keyboard";
 import { PanelMessage } from "./shared/display";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
 
@@ -81,7 +81,8 @@ export function RecentPageActions({ page, onDelete, children }: {
     onContextMenu={onDelete ? (event) => {
       event.preventDefault();
       event.stopPropagation();
-      showMenu(event.clientX, event.clientY);
+      const { clientX, clientY } = event;
+      openAfterContextMenuRelease(event, () => showMenu(clientX, clientY));
     } : undefined}
     onKeyDown={onDelete ? (event) => {
       if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;

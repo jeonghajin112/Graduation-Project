@@ -20,7 +20,7 @@ import { PageAnalysisStatus } from "./shared/page-analysis-status";
 import { RecentPageActions } from "./recent-page-actions";
 import { API_BASE_URL } from "@/config/api";
 
-import { handleMenuArrowKeys } from "./menu-keyboard";
+import { handleMenuArrowKeys, openAfterContextMenuRelease } from "./menu-keyboard";
 import { PanelMessage } from "./shared/display";
 import { preventAccidentalSubmit } from "./shared/form-keyboard";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
@@ -408,7 +408,8 @@ export function SidebarProjectsSection({
                         }
                         event.preventDefault();
                         event.stopPropagation();
-                        showProjectMenu(project.id, event.clientX, event.clientY);
+                        const { clientX, clientY } = event;
+                        openAfterContextMenuRelease(event, () => showProjectMenu(project.id, clientX, clientY));
                       }}
                       onKeyDown={(event) => {
                         if (

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import type { MouseEvent } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { nextMenuItemIndex } from "./menu-keyboard";
+import { nextMenuItemIndex, openAfterContextMenuRelease } from "./menu-keyboard";
 
 describe("nextMenuItemIndex", () => {
   it("wraps arrow navigation in both directions", () => {
@@ -18,5 +19,39 @@ describe("nextMenuItemIndex", () => {
     expect(nextMenuItemIndex("End", 0, 3)).toBe(2);
     expect(nextMenuItemIndex("Enter", 0, 3)).toBeNull();
     expect(nextMenuItemIndex("ArrowDown", 0, 0)).toBeNull();
+  });
+});
+
+describe("openAfterContextMenuRelease", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const contextMenu = (buttons: number) => ({ buttons }) as MouseEvent<HTMLElement>;
+
+  it("opens at once when contextmenu fires after the release", () => {
+    const open = vi.fn();
+    openAfterContextMenuRelease(contextMenu(0), open);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it("waits for the release when contextmenu fires on press", () => {
+    vi.useFakeTimers();
+    const target = new EventTarget();
+    vi.stubGlobal("window", Object.assign(target, {
+      setTimeout: (callback: () => void, delay: number) => setTimeout(callback, delay)
+    }));
+    const open = vi.fn();
+    openAfterContextMenuRelease(contextMenu(2), open);
+    vi.runAllTimers();
+    expect(open).not.toHaveBeenCalled();
+    target.dispatchEvent(new Event("pointerup"));
+    expect(open).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(open).toHaveBeenCalledOnce();
+    target.dispatchEvent(new Event("pointerup"));
+    vi.runAllTimers();
+    expect(open).toHaveBeenCalledOnce();
   });
 });

@@ -135,6 +135,8 @@ async function main() {
         cwd: dashboardDirectory,
         env: {
           ...process.env,
+          // Expected dates are written in Korean time; CI runners default to UTC.
+          TZ: "Asia/Seoul",
           BASE_URL: baseUrl,
           SIDEBAR_TEST_BASE_URL: baseUrl,
           ...test.environment
