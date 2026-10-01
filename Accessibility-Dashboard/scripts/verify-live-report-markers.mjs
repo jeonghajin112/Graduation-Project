@@ -1550,7 +1550,9 @@ try {
   await popover.waitFor({ state: "hidden" });
 
   // Auto-advancing content must hold still while a marker is being read, so the
-  // marker does not move away from under the pointer.
+  // marker does not move away from under the pointer. A page timeout resolves
+  // only once the previous hover has released the page.
+  await frame.locator("body").evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
   await frame.locator("body").evaluate(() => {
     window.scrollTo(0, 0);
     const slide = document.createElement("div");

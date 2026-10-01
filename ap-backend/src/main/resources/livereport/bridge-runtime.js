@@ -3543,14 +3543,17 @@ const resolveIssueSnapshot = (issueIds = null) => {
   // The page stays still while the pointer or keyboard focus is on a marker or
   // its popover. Focus left behind by a mouse click does not count, or the page
   // would stay frozen after the reader moved on. Resuming waits out the gap
-  // between a marker and its popover.
+  // between a marker and its popover. Linux Chromium can keep :hover after the
+  // pointer leaves the frame, so the pointer is also tracked through its events.
   let pageMotionResumeTimer = 0;
+  let pointerOnMarkers = false;
   const keyboardOnMarkers = () => {
     const active = document.activeElement;
     return document.hasFocus() && active instanceof Element
       && nativeApply(nativeNodeContains, layer, [active]) && active.matches(':focus-visible');
   };
-  const readingMarkers = () => !layer.hidden && (layer.matches(':hover') || keyboardOnMarkers());
+  const readingMarkers = () => !layer.hidden
+    && ((pointerOnMarkers && layer.matches(':hover')) || keyboardOnMarkers());
   const holdPageMotion = () => {
     clearTimeout(pageMotionResumeTimer);
     pageMotionResumeTimer = 0;
@@ -3563,9 +3566,16 @@ const resolveIssueSnapshot = (issueIds = null) => {
       if (!readingMarkers()) resumePageMotion();
     }, 250);
   };
-  layer.addEventListener('pointerover', holdPageMotion);
+  layer.addEventListener('pointerover', () => {
+    pointerOnMarkers = true;
+    holdPageMotion();
+  });
   layer.addEventListener('focusin', () => { if (keyboardOnMarkers()) holdPageMotion(); });
-  layer.addEventListener('pointerout', scheduleResumePageMotion);
+  layer.addEventListener('pointerout', event => {
+    const next = event.relatedTarget;
+    pointerOnMarkers = next instanceof Node && nativeApply(nativeNodeContains, layer, [next]);
+    scheduleResumePageMotion();
+  });
   layer.addEventListener('focusout', scheduleResumePageMotion);
   nativeApply(nativeAddEventListener, globalThis, ['blur', scheduleResumePageMotion]);
   document.addEventListener('pointerdown', event => {
