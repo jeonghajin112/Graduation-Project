@@ -59,7 +59,7 @@ async function verifyTheme(theme, viewport) {
   await capture("page-create", "페이지 추가", "취소");
   await page.getByRole("button", { name: `${fixture.target.name} 제거`, exact: true }).click();
   await capture("page-delete", "페이지 제거", "취소");
-  await page.locator('button[aria-haspopup="menu"]').click();
+  await page.locator(".dashboard-account-menu-trigger").click();
   await page.getByRole("menuitem", { name: "설정", exact: true }).click();
   await capture("settings", "설정", "닫기");
   const baseline = samples["project-create"];
@@ -86,7 +86,7 @@ async function verifyFallbacks(theme) {
     await route.abort("failed");
   });
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
-  await page.locator('button[aria-haspopup="menu"]').click();
+  await page.locator(".dashboard-account-menu-trigger").click();
   await page.getByRole("menuitem", { name: "설정", exact: true }).click();
   const loading = page.getByRole("status").filter({ hasText: "창을 불러오는 중..." });
   const loadingSample = await measure(loading);

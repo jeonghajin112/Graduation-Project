@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CircleAlert } from "lucide-react";
 
@@ -27,7 +27,12 @@ export function AnalysisFailureIndicator({ pageName, requestId, code, className 
   const pinned = useRef(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const cancelClose = () => clearTimeout(timer.current);
-  const close = () => { cancelClose(); pinned.current = false; setPosition(null); };
+  // Refs and the state setter only, so the listeners below can depend on it.
+  const close = useCallback(() => {
+    clearTimeout(timer.current);
+    pinned.current = false;
+    setPosition(null);
+  }, []);
   const show = () => {
     cancelClose();
     const rect = trigger.current?.getBoundingClientRect();
@@ -62,7 +67,7 @@ export function AnalysisFailureIndicator({ pageName, requestId, code, className 
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
     };
-  }, [position]);
+  }, [close, position]);
 
   return <>
     <button ref={trigger} type="button" aria-label={`${pageName} 분석 실패 이유 보기`}
@@ -80,7 +85,7 @@ export function AnalysisFailureIndicator({ pageName, requestId, code, className 
     </button>
     {position && createPortal(<div ref={tooltip} id={tooltipId} role="tooltip"
       onMouseEnter={cancelClose} onMouseLeave={scheduleClose}
-      className="fixed z-[100] rounded-md border border-[var(--border)] bg-[var(--popover)] px-2.5 py-1.5 text-xs leading-normal text-[var(--popover-foreground)] shadow-sm"
+      className="fixed z-[var(--z-tooltip)] rounded-md border border-[var(--border)] bg-[var(--popover)] px-2.5 py-1.5 text-xs leading-normal text-[var(--popover-foreground)] shadow-sm"
       style={{ ...position, width: "max-content", maxWidth: "min(240px, calc(100vw - 24px))" }}>
       {analysisFailureMessage(code)}
     </div>, document.body)}

@@ -130,6 +130,7 @@ type LandingPageProps = {
 
 export function LandingPage({ onEnterApp }: LandingPageProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const chromeRef = useRef<HTMLDivElement>(null);
   const onEnterAppRef = useRef(onEnterApp);
   const { scrollY } = useScroll();
 
@@ -144,6 +145,8 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
     window.scrollTo({ top: 0, behavior: "auto" });
 
     const unmountWorld = mountScrollWorld(root, LANDING_CONFIG, {
+      chromeContainer: chromeRef.current,
+      externalMain: true,
       subscribeScroll: (listener) => scrollY.on("change", listener),
       onEnterApp: () => {
         window.scrollTo({ top: 0, behavior: "auto" });
@@ -159,11 +162,15 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
 
   return (
     <>
-      <div ref={rootRef} className="uni-scroll-world" data-landing-root />
-      {/* 스크롤 필름이 끝난 뒤 이어지는 일반 섹션 */}
-      <LandingFindingsSection />
-      <LandingEngineSection />
-      <LandingFaqSection />
+      {/* 건너뛰기 링크와 상단바(banner)는 main 밖에 둔다. */}
+      <div ref={chromeRef} className="uni-scroll-world-chrome" />
+      <main id={LANDING_CONFIG.mainId} tabIndex={-1} className="outline-none">
+        <div ref={rootRef} className="uni-scroll-world" data-landing-root />
+        {/* 스크롤 필름이 끝난 뒤 이어지는 일반 섹션 */}
+        <LandingFindingsSection />
+        <LandingEngineSection />
+        <LandingFaqSection />
+      </main>
       <LandingFooter />
     </>
   );

@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ const REQUEST_STATUS_RECOVERY_MESSAGE =
 
 
 type AnalysisRecoveryPhase = "ready" | "paused" | "failed" | null;
+type SiteCreateField = "name" | "url";
 
 type AnalysisResumePoint =
   | { kind: "create" }
@@ -113,7 +115,6 @@ function messageFromPersistedAttempt(attempt: PersistedSiteCreateAttempt): strin
 
 export function SiteCreateModal({
   isOpen,
-  isDarkMode,
   project,
   onCreateEvaluationTargetModel,
   onRequestEvaluationTargetAnalysis,
@@ -121,7 +122,6 @@ export function SiteCreateModal({
   onClose
 }: {
   isOpen: boolean;
-  isDarkMode: boolean;
   project: OrganizationModel;
   onCreateEvaluationTargetModel: (
     input: CreateEvaluationTargetModelInput,
@@ -139,6 +139,12 @@ export function SiteCreateModal({
   const [baseUrl, setBaseUrl] = useState("");
   const [isSubmittingSite, setIsSubmittingSite] = useState(false);
   const [siteCreateError, setSiteCreateError] = useState("");
+  const [invalidField, setInvalidField] = useState<SiteCreateField | null>(null);
+  const errorId = useId();
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const wasSubmittingRef = useRef(false);
   const [recoveryPhase, setRecoveryPhase] = useState<AnalysisRecoveryPhase>(null);
   const [resumePoint, setResumePoint] = useState<AnalysisResumePoint>(initialResumePoint);
   const [isRecoveryBlocked, setIsRecoveryBlocked] = useState(false);
@@ -160,6 +166,48 @@ export function SiteCreateModal({
   });
   const isAnalysisNotice =
     recoveryPhase === "ready" || recoveryPhase === "paused";
+
+  const focusField = (field: SiteCreateField) => {
+    window.requestAnimationFrame(() => {
+      (field === "name" ? nameInputRef : urlInputRef).current?.focus({ preventScroll: false });
+    });
+  };
+
+  const rejectField = (field: SiteCreateField, message: string) => {
+    setInvalidField(field);
+    setSiteCreateError(message);
+    focusField(field);
+  };
+
+  // Disabling the focused control while a request runs would drop keyboard
+  // focus onto <body>. Park it on the dialog, then hand it back afterwards.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const wasSubmitting = wasSubmittingRef.current;
+    wasSubmittingRef.current = isSubmittingSite;
+    if (!isOpen || !dialog) {
+      return;
+    }
+    const active = document.activeElement;
+    const focusLost =
+      !(active instanceof HTMLElement) ||
+      !dialog.contains(active) ||
+      (active as HTMLButtonElement | HTMLInputElement).disabled === true;
+    if (isSubmittingSite) {
+      if (focusLost) dialog.focus({ preventScroll: true });
+      return;
+    }
+    if (!wasSubmitting || (!focusLost && active !== dialog)) {
+      return;
+    }
+    const candidates = [
+      invalidField === "url" ? urlInputRef.current : nameInputRef.current,
+      nameInputRef.current,
+      submitButtonRef.current
+    ];
+    const target = candidates.find((element) => element && !element.disabled) ?? dialog;
+    target.focus({ preventScroll: true });
+  }, [dialogRef, invalidField, isOpen, isSubmittingSite]);
 
   useLayoutEffect(() => {
     if (isOpen && siteCreateError.length > 0) {
@@ -224,6 +272,7 @@ export function SiteCreateModal({
     setSiteName("");
     setBaseUrl("");
     setSiteCreateError("");
+    setInvalidField(null);
   }, [isOpen, project.id]);
 
   useEffect(() => {
@@ -236,6 +285,7 @@ export function SiteCreateModal({
         setSiteName("");
         setBaseUrl("");
         setSiteCreateError("");
+        setInvalidField(null);
         setRecoveryPhase(null);
       }
     }
@@ -277,6 +327,7 @@ export function SiteCreateModal({
     setSiteName("");
     setBaseUrl("");
     setSiteCreateError("");
+    setInvalidField(null);
     discardLockRef.current = false;
   };
 
@@ -293,17 +344,18 @@ export function SiteCreateModal({
     const accessUrl = baseUrl.trim();
 
     if (resumePoint.kind === "create" && (name.length === 0 || accessUrl.length === 0)) {
-      setSiteCreateError("페이지 이름과 주소를 입력해주세요.");
+      rejectField(name.length === 0 ? "name" : "url", "페이지 이름과 주소를 입력해주세요.");
       return;
     }
     if (resumePoint.kind === "create" && name.length > SITE_NAME_MAX_LENGTH) {
-      setSiteCreateError(`페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.`);
+      rejectField("name", `페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.`);
       return;
     }
     if (resumePoint.kind === "create" && !isValidEvaluationTargetAccessUrl(accessUrl)) {
-      setSiteCreateError("올바른 페이지 주소를 입력해주세요. 예: https://example.com");
+      rejectField("url", "올바른 페이지 주소를 입력해주세요. 예: https://example.com");
       return;
     }
+    setInvalidField(null);
 
     const operation = beginMutationOperation("site-create-operation");
     if (operation === null) {
@@ -317,6 +369,7 @@ export function SiteCreateModal({
 
     setIsSubmittingSite(true);
     setSiteCreateError("");
+    setInvalidField(null);
     setRecoveryPhase(null);
 
     let nextResumePoint = resumePoint;
@@ -366,7 +419,9 @@ export function SiteCreateModal({
         id: requestId,
         evaluationTargetId: targetId,
         status: "PENDING",
-        requestedAt: new Date().toISOString(),
+        // No server submission time yet; ordering falls back to the request ID
+        // instead of mixing the browser clock with server timestamps.
+        requestedAt: "",
         updatedAt: ""
       }, accessUrl);
 
@@ -442,7 +497,7 @@ export function SiteCreateModal({
     return null;
   }
 
-  return (
+  return createPortal(
     <div className="dashboard-modal-layer">
       <div
         className="absolute inset-0"
@@ -487,16 +542,10 @@ export function SiteCreateModal({
         >
           {siteCreateError.length > 0 && (
             <div
+              id={errorId}
               role="alert"
-              className={`mb-4 rounded-lg border px-3 py-2 text-xs ${
-                isAnalysisNotice
-                  ? isDarkMode
-                    ? "border-[#5b4a1f] bg-[#2a2519] text-[#ffd60a]"
-                    : "border-amber-200 bg-amber-50 text-amber-800"
-                  : isDarkMode
-                    ? "border-[#5e2b32] bg-[#2d1d20] text-[#ff9aa8]"
-                    : "border-rose-200 bg-rose-50 text-rose-700"
-              }`}
+              data-tone={isAnalysisNotice ? "warning" : "danger"}
+              className="dashboard-inline-notice mb-4 rounded-lg border px-3 py-2 text-xs"
             >
               {resumePoint.kind === "create"
                 ? "페이지 추가 실패"
@@ -512,8 +561,15 @@ export function SiteCreateModal({
             <label className="block">
               <span className="dashboard-modal-label">페이지 이름</span>
               <Input
+                ref={nameInputRef}
                 value={siteName}
-                onChange={(event) => setSiteName(event.target.value)}
+                onChange={(event) => {
+                  setSiteName(event.target.value);
+                  if (invalidField === "name") setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "name" || undefined}
+                aria-describedby={invalidField === "name" && siteCreateError ? errorId : undefined}
+                autoComplete="off"
                 disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
                 maxLength={SITE_NAME_MAX_LENGTH}
                 placeholder="페이지 이름 입력"
@@ -524,8 +580,16 @@ export function SiteCreateModal({
             <label className="block">
               <span className="dashboard-modal-label">페이지 주소</span>
               <Input
+                ref={urlInputRef}
                 value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
+                onChange={(event) => {
+                  setBaseUrl(event.target.value);
+                  if (invalidField === "url") setInvalidField(null);
+                }}
+                aria-invalid={invalidField === "url" || undefined}
+                aria-describedby={invalidField === "url" && siteCreateError ? errorId : undefined}
+                inputMode="url"
+                autoComplete="url"
                 disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
                 maxLength={SITE_URL_MAX_LENGTH}
                 placeholder="https://example.com"
@@ -565,6 +629,7 @@ export function SiteCreateModal({
             </Button>
 
             <Button
+              ref={submitButtonRef}
               type="submit"
               size="sm"
               disabled={isSubmittingSite || isRecoveryBlocked}
@@ -586,6 +651,7 @@ export function SiteCreateModal({
           </div>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   );
 }

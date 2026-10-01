@@ -60,7 +60,7 @@ const {
 } = require('./artifact');
 const { analyzeWithCarouselStates } = require('./carousel-audit');
 const { markHiddenElements } = require('./hidden-elements');
-const { collectCvAnchors } = require('./cv-anchors');
+const { collectCvAnchors, stableCvAnchors } = require('./cv-anchors');
 const {
   addPopupViolations,
   changedContentKeys,
@@ -966,31 +966,37 @@ async function run(url, outputPath, options = {}) {
       // and are no longer clipped to a screenshot/tile boundary.
       await revalidateAxeLocators(page, axeResults);
       console.log(`5. 캡처 메타데이터 생성: ${artifactOutput}`);
-
-      if (cvScreenshotPath) {
-        try {
-          // This raster exists only as an inter-module CV input in the OS temp
-          // directory. It is never persisted evidence or part of ingestion.
-          const cvImage = await page.screenshot({
-            type: 'png',
-            fullPage: true,
-            caret: 'hide',
-            animations: 'disabled',
-            scale: 'css',
-            timeout: 60000,
-          });
-          fs.writeFileSync(cvScreenshotPath, cvImage);
-          console.log(`   CV 전용 임시 이미지 생성: ${cvScreenshotPath}`);
-          // Elements under CV boxes, from the same page state as the image, so
-          // CV findings can follow elements instead of screenshot coordinates.
-          const cvAnchorsOutput = siblingOutputPath(output, '_cv_anchors.json');
-          fs.writeFileSync(cvAnchorsOutput, JSON.stringify(await collectCvAnchors(page)), 'utf-8');
-        } catch (error) {
-          console.warn(`   CV 전용 임시 이미지 생성 실패: ${error.message}`);
-        }
-      }
     } finally {
+      // Chromium needs rendering tasks to advance for Page.captureScreenshot.
+      // Keeping virtual time paused until after the capture can deadlock it.
       await releaseVirtualTime();
+    }
+
+    if (cvScreenshotPath) {
+      try {
+        const anchorsBefore = await collectCvAnchors(page);
+        // CSS/Web Animations were paused before axe. Leave their current state
+        // intact: disabling them here would finish/rewind the analyzed layout.
+        // This PNG is private CV input, never persisted evidence or ingestion.
+        const cvImage = await page.screenshot({
+          type: 'png',
+          fullPage: true,
+          caret: 'hide',
+          animations: 'allow',
+          scale: 'css',
+          timeout: 60000,
+        });
+        fs.writeFileSync(cvScreenshotPath, cvImage);
+        console.log(`   CV 전용 임시 이미지 생성: ${cvScreenshotPath}`);
+        // Timers can run again. Only associate OCR boxes with elements whose
+        // content and rectangle stayed unchanged across the capture.
+        const cvAnchorsOutput = siblingOutputPath(output, '_cv_anchors.json');
+        const anchors = stableCvAnchors(anchorsBefore, await collectCvAnchors(page));
+        fs.writeFileSync(cvAnchorsOutput, JSON.stringify(anchors), 'utf-8');
+      } catch (error) {
+        console.warn(`   CV 전용 임시 이미지 생성 실패: ${error.message}`);
+      }
+      await revalidateAxeLocators(page, axeResults);
     }
 
     // ── 5) 어댑터 변환: axe 결과 → KWCAG 33개 항목 ──

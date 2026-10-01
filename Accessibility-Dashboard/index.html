@@ -6,13 +6,58 @@
     <meta name="description" content="규칙·텍스트·시각 분석에서 발견한 웹 접근성 이슈를 위치와 이유, 개선 가이드와 함께 확인하세요." />
     <meta name="theme-color" content="#f5f5f7" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link
-      rel="preload"
-      href="/landing/scroll-world/opening.webp"
-      as="image"
-      type="image/webp"
-      fetchpriority="high"
-    />
+    <script>
+      // Runs before first paint. Keep in sync with
+      // src/components/dashboard/shared/use-dashboard-theme.ts ("bridge-theme").
+      (function () {
+        var path = window.location.pathname;
+        var root = document.documentElement;
+
+        // The landing hero still is only used on "/". Other routes skip it so
+        // dashboard deep links do not spend bandwidth on a landing image.
+        if (path === "/") {
+          var preload = document.createElement("link");
+          preload.rel = "preload";
+          preload.as = "image";
+          preload.type = "image/webp";
+          preload.href = "/landing/scroll-world/opening.webp";
+          preload.setAttribute("fetchpriority", "high");
+          document.head.appendChild(preload);
+          return;
+        }
+
+        // The landing page is always light and the product preview always
+        // starts light without reading the saved preference.
+        if (path === "/product-preview") {
+          return;
+        }
+
+        var mode = "system";
+        try {
+          var saved = window.localStorage.getItem("bridge-theme");
+          if (saved === "dark" || saved === "light") {
+            mode = saved;
+          }
+        } catch (error) {
+          // Storage can be blocked; fall back to the system preference.
+        }
+
+        var prefersDark = false;
+        try {
+          prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        } catch (error) {
+          prefersDark = false;
+        }
+
+        if (mode === "dark" || (mode === "system" && prefersDark)) {
+          root.classList.add("dark");
+          var themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) {
+            themeColor.setAttribute("content", "#111113");
+          }
+        }
+      })();
+    </script>
     <meta property="og:title" content="UNI ACCESS | 웹 접근성 결과를 명확하게" />
     <meta property="og:description" content="웹 접근성 검사 결과를 발견 위치, 사용자 영향, 확인 기준, 권장사항의 흐름으로 읽어보세요." />
     <meta property="og:type" content="website" />

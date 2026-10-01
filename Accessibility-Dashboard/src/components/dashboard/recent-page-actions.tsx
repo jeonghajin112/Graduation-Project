@@ -1,11 +1,14 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Trash2 } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "lucide-react";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type { RecentAnalyzedPage } from "@/services/quick-analysis-registry";
 import type { ProjectPageActions } from "./dashboard-surface.types";
+import { handleMenuArrowKeys } from "./menu-keyboard";
 import { PanelMessage } from "./shared/display";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
+
+const MENU_WIDTH = 140;
 
 export function RecentPageActions({ page, onDelete, children }: {
   page: RecentAnalyzedPage;
@@ -20,12 +23,20 @@ export function RecentPageActions({ page, onDelete, children }: {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const titleId = useId();
+  const menuId = useId();
   const close = () => {
     if (!busyRef.current) setConfirming(false);
   };
+  // A deleted page takes its row (the opener) with it; continue from the
+  // remaining recent list instead of dropping focus onto <body>.
+  const getFallbackFocus = useCallback(
+    () => document.querySelector<HTMLElement>("aside .sidebar-tree-recent-list button"),
+    []
+  );
   const dialogRef = useDialogAccessibility({
-    isOpen: confirming, onClose: close, closeDisabled: busy, returnFocusRef: triggerRef
+    isOpen: confirming, onClose: close, closeDisabled: busy, returnFocusRef: triggerRef, getFallbackFocus
   });
 
   useEffect(() => {
@@ -33,13 +44,20 @@ export function RecentPageActions({ page, onDelete, children }: {
     return () => { mountedRef.current = false; };
   }, []);
 
-  const showMenu = (left: number, top: number) => {
+  const positionMenu = (left: number, top: number) => {
     const menu = menuRef.current;
-    if (!menu || confirming) return;
-    triggerRef.current = rowRef.current?.querySelector<HTMLButtonElement>("button") ?? null;
-    menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - 140))}px`;
+    if (!menu) return null;
+    menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - MENU_WIDTH))}px`;
     menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - 48))}px`;
-    menu.showPopover();
+    return menu;
+  };
+
+  const showMenu = (left: number, top: number) => {
+    if (confirming) return;
+    triggerRef.current = rowRef.current?.querySelector<HTMLButtonElement>("button") ?? null;
+    const menu = positionMenu(left, top);
+    if (!menu) return;
+    if (!menu.matches(":popover-open")) menu.showPopover();
     menu.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
   };
 
@@ -59,7 +77,7 @@ export function RecentPageActions({ page, onDelete, children }: {
     }
   };
 
-  return <div ref={rowRef} className="relative"
+  return <div ref={rowRef} className={onDelete ? "sidebar-row-has-more relative" : "relative"}
     onContextMenu={onDelete ? (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -74,17 +92,47 @@ export function RecentPageActions({ page, onDelete, children }: {
     } : undefined}
   >
     {children}
+    {onDelete && <button
+      ref={(element) => element?.setAttribute("popovertarget", menuId)}
+      type="button"
+      className="sidebar-row-more"
+      aria-label={`${page.pageName} 관리 메뉴`}
+      aria-haspopup="menu"
+      aria-expanded={isMenuOpen}
+      aria-controls={menuId}
+      title={`${page.pageName} 관리`}
+      onClick={(event) => {
+        // Runs before the native popovertarget toggle opens the menu.
+        triggerRef.current = event.currentTarget;
+        const rect = event.currentTarget.getBoundingClientRect();
+        positionMenu(rect.right - MENU_WIDTH + 8, rect.bottom + 4);
+      }}
+    >
+      <MoreHorizontal size={14} aria-hidden="true" />
+    </button>}
     {onDelete && <div ref={(element) => {
       menuRef.current = element;
-      if (element) element.popover = "auto";
-    }} role="menu" aria-label={`${page.pageName} 관리`}
+      if (!element) return;
+      element.popover = "auto";
+      element.ontoggle = (event) => {
+        const open = (event as ToggleEvent).newState === "open";
+        setIsMenuOpen(open);
+        if (open) {
+          window.requestAnimationFrame(() =>
+            element.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true })
+          );
+        }
+      };
+    }} id={menuId} role="menu" aria-label={`${page.pageName} 관리`}
       onKeyDown={(event) => {
         if (event.key === "Escape" || event.key === "Tab") {
           event.preventDefault();
           event.stopPropagation();
           menuRef.current?.hidePopover();
           triggerRef.current?.focus({ preventScroll: true });
+          return;
         }
+        handleMenuArrowKeys(event);
       }}
       className="fixed inset-auto m-0 min-w-[132px] overflow-hidden rounded-xl border border-[var(--dashboard-nested-border)] bg-[var(--report-search-popover-bg)] px-0 py-1 text-[var(--dashboard-text-primary)] shadow-[var(--dashboard-header-shadow)]"
     >

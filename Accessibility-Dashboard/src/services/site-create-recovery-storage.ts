@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/config/api";
+import { getTargetRescanStorageKey } from "@/services/analysis-recovery-storage";
 import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
@@ -263,4 +264,79 @@ export function clearSiteCreateRecovery(
 
 export function clearSiteCreateRecoveryStorage(): void {
   clearSessionRecoveryStorage(SITE_CREATE_RECOVERY_STORAGE_KEY);
+}
+
+function normalizeTargetRescanAttempt(targetId: number) {
+  return (value: unknown): PersistedSiteCreateAttempt | null => {
+    const attempt = normalizePersistedSiteCreateAttempt(value);
+    return attempt !== null && getAttemptTargetId(attempt) === targetId ? attempt : null;
+  };
+}
+
+function getAttemptTargetId(attempt: PersistedSiteCreateAttempt): number | null {
+  return attempt.phase === "target-reconciling" ? null : attempt.targetId;
+}
+
+/**
+ * Rescans of an existing page use a per-target slot instead of the single
+ * page-creation slot. A cancelled rescan on page A therefore never blocks a
+ * rescan of page B or a new page creation.
+ */
+export function readTargetRescanRecovery(targetId: number): SiteCreateRecoveryReadResult {
+  const recovery = readSessionRecovery(
+    getTargetRescanStorageKey(targetId),
+    normalizeTargetRescanAttempt(targetId)
+  );
+  if (recovery.kind !== "valid") {
+    return recovery;
+  }
+  return {
+    kind: "valid",
+    attempt: recovery.value,
+    rawValue: recovery.rawValue,
+    isStale: isSiteCreateAttemptStale(recovery.value)
+  };
+}
+
+export function writeTargetRescanRecovery(
+  attempt: PersistedSiteCreateAttempt,
+  expectedRawValue: string | null
+): StoredSiteCreateAttempt | null {
+  const targetId = getAttemptTargetId(attempt);
+  if (targetId === null) {
+    return null;
+  }
+  const stored = writeSessionRecoveryIfUnchanged(
+    getTargetRescanStorageKey(targetId),
+    attempt,
+    normalizeTargetRescanAttempt(targetId),
+    expectedRawValue
+  );
+  if (stored === null) {
+    return null;
+  }
+  return { attempt: stored.value, rawValue: stored.rawValue };
+}
+
+export function clearTargetRescanRecovery(targetId: number, expectedRawValue: string): boolean {
+  return clearSessionRecoveryIfUnchanged(getTargetRescanStorageKey(targetId), expectedRawValue);
+}
+
+/**
+ * Retires the page-creation checkpoint of an accepted request, and only that
+ * one. A rescan retires its own per-page checkpoint inside the request flow,
+ * and unrelated creation work (another page or project) stays untouched.
+ * Returns false only when this request's checkpoint could not be removed.
+ */
+export function retireAcceptedTargetAnalysis(targetId: number, requestId: number): boolean {
+  const recovery = readSiteCreateRecovery();
+  if (
+    recovery.kind !== "valid" ||
+    recovery.attempt.phase !== "poll" ||
+    recovery.attempt.targetId !== targetId ||
+    recovery.attempt.requestId !== requestId
+  ) {
+    return true;
+  }
+  return clearSiteCreateRecovery(recovery.rawValue);
 }

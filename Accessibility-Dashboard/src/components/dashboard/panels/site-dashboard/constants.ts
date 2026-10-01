@@ -1,10 +1,13 @@
 import type { SeverityChartItem } from "./types";
 
+// Severity colors are CSS tokens (src/styles/theme-tokens.css). `color` is a
+// CSS value assigned to custom properties in inline styles, so it must stay a
+// CSS expression — it is never read as a literal hex in JavaScript.
 export const severityChartItems: SeverityChartItem[] = [
-  { key: "CRITICAL", label: "심각", color: "#f35f63" },
-  { key: "HIGH", label: "높음", color: "#fb8a3d" },
-  { key: "MEDIUM", label: "중간", color: "#f3b234" },
-  { key: "LOW", label: "낮음", color: "#10b981" }
+  { key: "CRITICAL", label: "심각", color: "var(--site-severity-critical-fill)" },
+  { key: "HIGH", label: "높음", color: "var(--site-severity-high-fill)" },
+  { key: "MEDIUM", label: "중간", color: "var(--site-severity-medium-fill)" },
+  { key: "LOW", label: "낮음", color: "var(--site-severity-low-fill)" }
 ];
 
 const criterionByLegacyIssueCode: Record<string, string> = {

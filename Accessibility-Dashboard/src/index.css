@@ -110,13 +110,14 @@
     outline: 3px solid var(--ring);
     outline-offset: 2px;
   }
-
-  .bridge-dashboard,
-  .bridge-dashboard * {
-    letter-spacing: -0.012em !important;
-  }
 }
 
+/*
+ * Dashboard layout defaults. These stay in @layer base so Tailwind utilities
+ * and component CSS can refine them. Declarations that must beat utilities
+ * (theme surfaces, fixed control geometry) live in the unlayered override
+ * block at the end of this file — not as !important.
+ */
 @layer base {
   .bridge-dashboard {
     --dashboard-top-height: max(220px, 25vh);
@@ -158,148 +159,143 @@
     --dashboard-top-height: clamp(96px, 10vh, 112px);
   }
 
-.bridge-dashboard.dashboard-project-detail {
-  --dashboard-top-height: clamp(124px, calc(12vh + 16px), 132px);
-  --dashboard-project-content-max-width: clamp(100rem, 80vw, 187.5rem);
-  --dashboard-project-content-gap: clamp(0.5rem, calc(-0.5rem + 0.8333vw), 1.5rem);
-  --dashboard-project-grid-gap: clamp(0.75rem, calc(-0.25rem + 0.8333vw), 1.75rem);
-  --dashboard-project-card-min-height: clamp(8.5rem, 8.125vw, 17.5rem);
-  --dashboard-project-card-padding: clamp(0.875rem, 0.8333vw, 2rem);
-}
+  .bridge-dashboard.dashboard-project-detail {
+    --dashboard-top-height: clamp(124px, calc(12vh + 16px), 132px);
+    --dashboard-project-content-max-width: clamp(100rem, 80vw, 187.5rem);
+    --dashboard-project-content-gap: clamp(0.5rem, calc(-0.5rem + 0.8333vw), 1.5rem);
+    --dashboard-project-grid-gap: clamp(0.75rem, calc(-0.25rem + 0.8333vw), 1.75rem);
+    --dashboard-project-card-min-height: clamp(8.5rem, 8.125vw, 17.5rem);
+    --dashboard-project-card-padding: clamp(0.875rem, 0.8333vw, 2rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-content {
-  width: 100%;
-  max-width: var(--dashboard-project-content-max-width);
-  margin-block-start: var(--dashboard-project-content-gap);
-  margin-inline: auto;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-content {
+    width: 100%;
+    max-width: var(--dashboard-project-content-max-width);
+    margin-block-start: var(--dashboard-project-content-gap);
+    margin-inline: auto;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
-  right: auto;
-  left: 50%;
-  width: min(100%, var(--dashboard-project-content-max-width));
-  transform: translateX(-50%);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
+    right: auto;
+    left: 50%;
+    width: min(100%, var(--dashboard-project-content-max-width));
+    transform: translateX(-50%);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
-  right: max(
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
+    right: max(
     var(--dashboard-side-gutter),
     calc(
       (100% - var(--dashboard-sidebar-width) - var(--dashboard-project-content-max-width)) / 2
     )
   );
-}
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
-  gap: var(--dashboard-project-grid-gap);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    gap: var(--dashboard-project-grid-gap);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card {
-  min-height: var(--dashboard-project-card-min-height);
-  padding: var(--dashboard-project-card-padding);
-  border-radius: clamp(0.875rem, 0.573vw, 1.375rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card {
+    min-height: var(--dashboard-project-card-min-height);
+    padding: var(--dashboard-project-card-padding);
+    border-radius: clamp(0.875rem, 0.573vw, 1.375rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-favicon {
-  width: clamp(2rem, 1.458vw, 3.5rem);
-  height: clamp(2rem, 1.458vw, 3.5rem);
-  border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-favicon {
+    width: clamp(2rem, 1.458vw, 3.5rem);
+    height: clamp(2rem, 1.458vw, 3.5rem);
+    border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-title {
-  font-size: clamp(0.875rem, 0.573vw, 1.375rem);
-  line-height: 1.2;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-title {
+    font-size: clamp(0.875rem, 0.573vw, 1.375rem);
+    line-height: 1.2;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-meta,
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-time {
-  font-size: clamp(0.6875rem, 0.417vw, 1rem);
-  line-height: 1.35;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-meta,
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-time {
+    font-size: clamp(0.6875rem, 0.417vw, 1rem);
+    line-height: 1.35;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-url,
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-status {
-  font-size: clamp(0.75rem, 0.469vw, 1.125rem);
-  line-height: 1.35;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-url,
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-status {
+    font-size: clamp(0.75rem, 0.469vw, 1.125rem);
+    line-height: 1.35;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-score {
-  font-size: clamp(0.9375rem, 0.625vw, 1.5rem);
-  line-height: 1.25;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-score {
+    font-size: clamp(0.9375rem, 0.625vw, 1.5rem);
+    line-height: 1.25;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-add-button {
-  height: clamp(1.75rem, 1.094vw, 2.625rem);
-  padding-inline: clamp(1rem, 0.625vw, 1.5rem);
-  border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
-  font-size: clamp(0.75rem, 0.417vw, 1rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-add-button {
+    height: clamp(1.75rem, 1.094vw, 2.625rem);
+    padding-inline: clamp(1rem, 0.625vw, 1.5rem);
+    border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
+    font-size: clamp(0.75rem, 0.417vw, 1rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-header {
-  gap: clamp(0.625rem, 0.417vw, 1rem);
-  padding-right: clamp(2.25rem, 1.25vw, 3rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-header {
+    gap: clamp(0.625rem, 0.417vw, 1rem);
+    padding-right: clamp(2.25rem, 1.25vw, 3rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-main {
-  gap: clamp(1rem, 0.625vw, 1.5rem);
-  margin-top: clamp(0.75rem, 0.5209vw, 1.25rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-main {
+    gap: clamp(1rem, 0.625vw, 1.5rem);
+    margin-top: clamp(0.75rem, 0.5209vw, 1.25rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-footer {
-  gap: clamp(0.75rem, 0.5209vw, 1.25rem);
-  padding-top: clamp(0.75rem, 0.4688vw, 1.125rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-footer {
+    gap: clamp(0.75rem, 0.5209vw, 1.25rem);
+    padding-top: clamp(0.75rem, 0.4688vw, 1.125rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-url svg {
-  width: clamp(0.625rem, 0.4167vw, 1rem);
-  height: clamp(0.625rem, 0.4167vw, 1rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-url svg {
+    width: clamp(0.625rem, 0.4167vw, 1rem);
+    height: clamp(0.625rem, 0.4167vw, 1rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-status-dot {
-  width: clamp(0.375rem, 0.2083vw, 0.5rem);
-  height: clamp(0.375rem, 0.2083vw, 0.5rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-status-dot {
+    width: clamp(0.375rem, 0.2083vw, 0.5rem);
+    height: clamp(0.375rem, 0.2083vw, 0.5rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete {
-  top: clamp(0.625rem, 0.4167vw, 1rem);
-  right: clamp(0.625rem, 0.4167vw, 1rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete {
+    top: clamp(0.625rem, 0.4167vw, 1rem);
+    right: clamp(0.625rem, 0.4167vw, 1rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button {
-  width: clamp(1.75rem, 0.9375vw, 2.25rem);
-  height: clamp(1.75rem, 0.9375vw, 2.25rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button {
+    width: clamp(1.75rem, 0.9375vw, 2.25rem);
+    height: clamp(1.75rem, 0.9375vw, 2.25rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button svg {
-  width: clamp(0.8125rem, 0.4688vw, 1.125rem);
-  height: clamp(0.8125rem, 0.4688vw, 1.125rem);
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button svg {
+    width: clamp(0.8125rem, 0.4688vw, 1.125rem);
+    height: clamp(0.8125rem, 0.4688vw, 1.125rem);
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb {
-  height: clamp(1rem, 0.5208vw, 1.25rem);
-  gap: clamp(0.125rem, 0.1042vw, 0.25rem);
-  font-size: clamp(0.75rem, 0.4167vw, 1rem);
-  line-height: 1.25;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb {
+    height: clamp(1rem, 0.5208vw, 1.25rem);
+    gap: clamp(0.125rem, 0.1042vw, 0.25rem);
+    font-size: clamp(0.75rem, 0.4167vw, 1rem);
+    line-height: 1.25;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-label {
-  height: 100%;
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-label {
+    height: 100%;
+  }
 
-.bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-chevron {
-  width: clamp(0.625rem, 0.3125vw, 0.75rem);
-  height: clamp(0.625rem, 0.3125vw, 0.75rem);
-  transform: translateY(clamp(-0.0625rem, -0.026vw, 0rem));
-}
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-chevron {
+    width: clamp(0.625rem, 0.3125vw, 0.75rem);
+    height: clamp(0.625rem, 0.3125vw, 0.75rem);
+    transform: translateY(clamp(-0.0625rem, -0.026vw, 0rem));
+  }
 
   .bridge-dashboard.theme-light {
     background: var(--dashboard-page-bg);
     color-scheme: light;
-  }
-
-  .bridge-dashboard.theme-light > div,
-  .bridge-dashboard.theme-light .dashboard-shell {
-    background: var(--dashboard-shell-bg) !important;
   }
 
   .bridge-dashboard.theme-dark {
@@ -307,218 +303,45 @@
     color-scheme: dark;
   }
 
-  .bridge-dashboard.theme-dark > div {
-    background: var(--dashboard-shell-bg) !important;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-shell {
-    background: var(--dashboard-shell-bg) !important;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-shell.bg-white {
-    background-color: var(--dashboard-shell-bg) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-top-zone {
-    height: var(--dashboard-top-height);
-    background: var(--dashboard-top-bg);
-  }
-
-  .bridge-dashboard.theme-light .dashboard-content-zone {
-    min-height: calc(100dvh - var(--dashboard-top-height));
-    background: var(--dashboard-content-bg);
-  }
-
+  .bridge-dashboard.theme-light .dashboard-top-zone,
   .bridge-dashboard.theme-dark .dashboard-top-zone {
     height: var(--dashboard-top-height);
     background: var(--dashboard-top-bg);
   }
 
+  .bridge-dashboard.theme-light .dashboard-content-zone,
   .bridge-dashboard.theme-dark .dashboard-content-zone {
     min-height: calc(100dvh - var(--dashboard-top-height));
     background: var(--dashboard-content-bg);
   }
 
-  .bridge-dashboard.theme-dark .bg-white {
-    background-color: var(--dashboard-nested-surface) !important;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-card {
-    background-color: var(--dashboard-card-bg) !important;
-    border-color: var(--dashboard-card-border) !important;
-    border-width: 0 !important;
-    border-radius: 28px !important;
-  }
-
   .bridge-dashboard.theme-light .dashboard-card {
-    background: var(--dashboard-card-bg) !important;
-    border: 1px solid var(--dashboard-card-border) !important;
-    border-radius: 28px !important;
-    box-shadow:
-      0 22px 58px rgba(31, 27, 24, 0.065),
-      inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
     backdrop-filter: blur(18px);
   }
 
-  .bridge-dashboard .dashboard-content-zone .dashboard-card {
-    background: var(--dashboard-content-card-bg) !important;
-    border-color: var(--dashboard-card-border) !important;
-    border-width: 0 !important;
-    box-shadow: none !important;
-  }
-
-  /*
-   * Page detail: borderless glassmorphism surfaces.
-   * These live in @layer base because the layered card defaults above use
-   * !important, and layered !important outranks unlayered !important.
-   */
+  /* Page detail: borderless glassmorphism surfaces (fills in the override block). */
   .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
-    border: 0 !important;
-    border-radius: 18px !important;
-    background: var(--site-glass-bg) !important;
-    box-shadow: var(--site-glass-shadow), var(--site-glass-highlight) !important;
     -webkit-backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
     backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
   }
 
   /* The live page fills this shell edge to edge. Only its title bar blurs. */
   .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
-    background: transparent !important;
-    box-shadow: none !important;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-  }
-
-  /* Without backdrop-filter the translucent fill alone can drop text contrast. */
-  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-    .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
-      background: var(--site-glass-bg-opaque) !important;
-    }
   }
 
   /* Users who ask for less transparency, or high-contrast mode, get opaque. */
   @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
     .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
-      background: var(--site-glass-bg-opaque) !important;
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }
   }
 
-  .bridge-dashboard.theme-light .dashboard-card .bg-white {
-    background-color: var(--dashboard-nested-surface) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-card .bg-slate-50,
-  .bridge-dashboard.theme-light .dashboard-card .bg-slate-100,
-  .bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/60,
-  .bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/70 {
-    background-color: var(--dashboard-muted-surface) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-card .border-slate-200,
-  .bridge-dashboard.theme-light .dashboard-card .border-slate-200\/70,
-  .bridge-dashboard.theme-light .dashboard-card .border-slate-200\/80 {
-    border-color: var(--dashboard-nested-border) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-card .text-slate-900 {
-    color: var(--dashboard-text-strong) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-card .text-slate-500,
-  .bridge-dashboard.theme-light .dashboard-card .text-slate-600 {
-    color: var(--dashboard-text-muted) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-50:hover,
-  .bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-100:hover {
-    background-color: var(--dashboard-hover-surface) !important;
-  }
-
-  .bridge-dashboard.theme-dark .bg-slate-50 {
-    background-color: var(--dashboard-nested-surface) !important;
-  }
-
-  .bridge-dashboard.theme-dark .bg-slate-100 {
-    background-color: var(--dashboard-muted-surface) !important;
-  }
-
-  .bridge-dashboard.theme-dark .border-slate-200,
-  .bridge-dashboard.theme-dark .border-slate-200\/80,
-  .bridge-dashboard.theme-dark .border-slate-300 {
-    border-color: var(--dashboard-nested-border) !important;
-  }
-
-  .bridge-dashboard.theme-dark .text-slate-950,
-  .bridge-dashboard.theme-dark .text-slate-900 {
-    color: var(--dashboard-text-strong) !important;
-  }
-
-  .bridge-dashboard.theme-dark .text-slate-800 {
-    color: #e5e5e5 !important;
-  }
-
-  .bridge-dashboard.theme-dark .text-slate-700 {
-    color: #cccccc !important;
-  }
-
-  .bridge-dashboard.theme-dark .text-slate-600 {
-    color: var(--dashboard-text-secondary) !important;
-  }
-
-  .bridge-dashboard.theme-dark .text-slate-500 {
-    color: var(--dashboard-text-muted) !important;
-  }
-
-  .bridge-dashboard.theme-dark input:not(.dashboard-modal-input),
-  .bridge-dashboard.theme-dark textarea {
-    color: #e6e6e6 !important;
-  }
-
-  .bridge-dashboard.theme-dark input:not(.dashboard-modal-input)::placeholder,
-  .bridge-dashboard.theme-dark textarea::placeholder {
-    color: #8f8f8f !important;
-  }
-
-  .bridge-dashboard.theme-dark .hover\:bg-slate-50:hover,
-  .bridge-dashboard.theme-dark .hover\:bg-slate-100:hover {
-    background-color: var(--dashboard-hover-surface) !important;
-  }
-
-  .bridge-dashboard.theme-dark .sidebar-nav-link:hover {
-    background-color: var(--dashboard-sidebar-item-hover-bg) !important;
-    border-color: var(--dashboard-sidebar-item-hover-border) !important;
-    color: var(--dashboard-sidebar-hover-text) !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-row:hover {
-    background-color: var(--project-table-row-hover-bg) !important;
-  }
-
-  .bridge-dashboard.theme-light aside.dashboard-sidebar {
-    background: rgba(255, 255, 255, 0.72) !important;
-    border-color: var(--dashboard-border-subtle) !important;
-  }
-
   /* Permanent sidebar rail (no floating drawer chrome) */
   .bridge-dashboard.theme-light .dashboard-drawer {
-    background: var(--dashboard-drawer-bg) !important;
-    border-color: var(--dashboard-border-subtle) !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
     backdrop-filter: none;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-drawer {
-    background: var(--dashboard-drawer-bg) !important;
-    border-color: #222222 !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-sidebar {
-    background: var(--dashboard-drawer-bg) !important;
   }
 
   .bridge-dashboard .dashboard-sidebar {
@@ -533,19 +356,6 @@
       width: var(--dashboard-sidebar-width);
       height: 100dvh;
     }
-  }
-
-  .bridge-dashboard.theme-dark .sidebar-nav-link.sidebar-nav-link-active {
-    background-color: var(--dashboard-sidebar-active-bg) !important;
-    border-color: var(--dashboard-sidebar-item-active-border) !important;
-    color: var(--dashboard-sidebar-active-text) !important;
-    box-shadow: none !important;
-  }
-
-  .bridge-dashboard .dashboard-fixed-header {
-    top: var(--dashboard-fixed-top) !important;
-    right: var(--dashboard-side-gutter) !important;
-    left: var(--dashboard-side-gutter) !important;
   }
 
   .bridge-dashboard .dashboard-sidebar-wordmark {
@@ -580,20 +390,15 @@
     display: inline-flex;
     flex: 0 0 var(--dashboard-account-avatar-size);
     box-sizing: border-box;
-    width: var(--dashboard-account-avatar-size) !important;
-    height: var(--dashboard-account-avatar-size) !important;
     min-width: var(--dashboard-account-avatar-size);
     min-height: var(--dashboard-account-avatar-size);
-    padding: 0 !important;
     margin: 0;
     align-items: center;
     justify-content: center;
     border-radius: 9999px;
     background-color: var(--dashboard-accent);
     color: #ffffff;
-    font-size: clamp(0.75rem, 0.3646vw, 0.875rem) !important;
     font-weight: 700;
-    line-height: 1 !important;
     letter-spacing: 0;
     text-align: center;
     overflow: hidden;
@@ -606,15 +411,11 @@
     margin: 0;
     padding: 0;
     color: var(--dashboard-text-primary);
-    font-size: var(--dashboard-account-name-size) !important;
-    line-height: 1 !important;
   }
 
   .bridge-dashboard .dashboard-account-menu-chevron {
     display: block;
     box-sizing: border-box;
-    width: var(--dashboard-account-chevron-size) !important;
-    height: var(--dashboard-account-chevron-size) !important;
     min-width: var(--dashboard-account-chevron-size);
     min-height: var(--dashboard-account-chevron-size);
     flex: 0 0 var(--dashboard-account-chevron-size);
@@ -668,42 +469,11 @@
 
   .bridge-dashboard.theme-dark .dashboard-account-menu {
     border-color: #52525b;
-    background-color: #242424 !important;
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-account-menu-item {
-    color: #ffffff !important;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-account-menu-item svg {
-    color: #c8c8c8 !important;
   }
 
   .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:hover {
     background: rgba(148, 163, 184, 0.14);
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-account-menu-item:hover,
-  .bridge-dashboard.theme-dark .dashboard-account-menu-item:focus-visible {
-    background: #333333 !important;
-    color: #ffffff !important;
-  }
-
-  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item:hover,
-  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item:focus-visible {
-    background: #333333 !important;
-    color: #ffffff !important;
-  }
-
-  .bridge-dashboard.theme-light .sidebar-project-context-menu-item-destructive {
-    color: #d70015 !important;
-  }
-
-  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive,
-  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:hover,
-  .bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:focus-visible {
-    color: #ff453a !important;
   }
 
   .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:focus-visible,
@@ -715,25 +485,11 @@
   .bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active,
   .bridge-dashboard .dashboard-sidebar .sidebar-nav-link:hover,
   .bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
-    height: var(--dashboard-sidebar-nav-height) !important;
-    gap: var(--dashboard-sidebar-nav-gap) !important;
-    padding-inline: var(--dashboard-sidebar-nav-padding) !important;
     /* Never pill: lock control radius for idle/selected/hover/focus */
-    border-radius: var(--dashboard-sidebar-item-radius, 0.5rem) !important;
     line-height: 1.2;
   }
 
-  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
-    outline-color: var(--dashboard-accent) !important;
-  }
-
-  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-tree-child-row {
-    /* Reserve the status icon's space even when the sidebar is narrow. */
-    padding-inline-end: 2rem !important;
-  }
-
   .bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:last-child {
-    font-size: var(--dashboard-account-name-size) !important;
     line-height: 1.2;
   }
 
@@ -757,193 +513,37 @@
     min-height: 0;
   }
 
-  .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article {
-    max-width: var(--dashboard-analyze-panel-width) !important;
-  }
-
   .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article > div:first-child h2 {
-    font-size: var(--dashboard-analyze-title-size) !important;
     line-height: 1.15;
   }
 
-  .bridge-dashboard .quick-analyze-input-shell,
-  .bridge-dashboard .quick-analyze-submit {
-    height: var(--dashboard-analyze-control-height) !important;
-  }
-
   #root .bridge-dashboard .dashboard-home-title:not(.dashboard-site-title) {
-    font-size: clamp(2.85rem, 6.4vh, 4.9rem) !important;
-    font-weight: 800 !important;
-    letter-spacing: -0.035em !important;
     line-height: 0.95;
   }
 
   #root .bridge-dashboard .dashboard-home-title.dashboard-project-title {
-    font-size: clamp(1.625rem, 1.667vw, 3.25rem) !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.025em !important;
     line-height: 1.1;
   }
 
-  .bridge-dashboard.theme-light .dashboard-fixed-header {
+  .bridge-dashboard.theme-light .dashboard-fixed-header,
+  .bridge-dashboard.theme-dark .dashboard-fixed-header {
     pointer-events: none;
   }
 
   .bridge-dashboard.theme-light .dashboard-fixed-header button,
   .bridge-dashboard.theme-light .dashboard-fixed-header a,
-  .bridge-dashboard.theme-light .dashboard-fixed-header .dashboard-header-account {
-    pointer-events: auto;
-  }
-
-  .bridge-dashboard.theme-dark .dashboard-fixed-header {
-    pointer-events: none;
-  }
-
+  .bridge-dashboard.theme-light .dashboard-fixed-header .dashboard-header-account,
   .bridge-dashboard.theme-dark .dashboard-fixed-header button,
   .bridge-dashboard.theme-dark .dashboard-fixed-header a,
   .bridge-dashboard.theme-dark .dashboard-fixed-header .dashboard-header-account {
     pointer-events: auto;
   }
 
-  .bridge-dashboard.theme-light .sidebar-nav-link {
-    color: var(--dashboard-sidebar-muted-text) !important;
-    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif !important;
-  }
-
-  .bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active {
-    background-color: var(--dashboard-sidebar-active-bg) !important;
-    border-color: var(--dashboard-sidebar-item-active-border) !important;
-    color: var(--dashboard-sidebar-active-text) !important;
-    box-shadow: none !important;
-  }
-
-  .bridge-dashboard.theme-light .sidebar-nav-link:hover {
-    background-color: var(--dashboard-sidebar-item-hover-bg) !important;
-    border-color: var(--dashboard-sidebar-item-hover-border) !important;
-    color: var(--dashboard-sidebar-hover-text) !important;
-  }
-
-  .bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active:hover {
-    background-color: var(--dashboard-sidebar-active-bg) !important;
-    color: var(--dashboard-sidebar-active-text) !important;
-  }
-
-  .bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-trigger:hover,
-  .bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-item:hover,
-  .bridge-dashboard.theme-light .dashboard-sidebar .sidebar-project-context-menu-item:hover {
-    background-color: var(--dashboard-sidebar-item-hover-bg) !important;
-  }
-
-  .bridge-dashboard.theme-light .fixed.inset-0.bg-white {
-    background-color: #f8f6f2 !important;
-  }
-
-  .bridge-dashboard.theme-dark .shadow-\[0_18px_42px_rgba\(15\,23\,42\,0\.10\)\] {
-    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35) !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table th {
-    color: #64748b !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-head {
-    background-color: var(--project-table-head-bg) !important;
-    border-color: rgba(226, 232, 240, 0.8) !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-row:hover {
-    background-color: var(--project-table-row-hover-bg) !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .site-status-badge {
-    border: none !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .site-status-badge-finished {
-    background-color: rgba(16, 185, 129, 0.1) !important;
-    color: #059669 !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .site-status-badge-running {
-    background-color: rgba(14, 165, 233, 0.1) !important;
-    color: #0284c7 !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .site-status-badge-failed {
-    background-color: rgba(244, 63, 94, 0.1) !important;
-    color: #e11d48 !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .site-status-badge-idle {
-    background-color: #f1f5f9 !important;
-    color: #64748b !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-icon-action:hover {
-    background-color: rgba(15, 23, 42, 0.065) !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table td,
-  .bridge-dashboard.theme-light .project-list-table p,
-  .bridge-dashboard.theme-light .project-list-table span,
-  .bridge-dashboard.theme-light .project-list-table button {
-    color: var(--dashboard-text-primary) !important;
-  }
-
-  .bridge-dashboard.theme-light .project-list-table .project-list-updated {
-    color: var(--dashboard-text-secondary) !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table th,
-  .bridge-dashboard.theme-dark .project-list-table td,
-  .bridge-dashboard.theme-dark .project-list-table p,
-  .bridge-dashboard.theme-dark .project-list-table span,
-  .bridge-dashboard.theme-dark .project-list-table button {
-    color: var(--dashboard-text-primary) !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .site-status-badge {
-    border: none !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .site-status-badge-finished {
-    background-color: rgba(16, 185, 129, 0.1) !important;
-    color: #34d399 !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .site-status-badge-running {
-    background-color: rgba(14, 165, 233, 0.1) !important;
-    color: #38bdf8 !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .site-status-badge-failed {
-    background-color: rgba(244, 63, 94, 0.1) !important;
-    color: #fb7185 !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .site-status-badge-idle {
-    background-color: rgba(148, 163, 184, 0.14) !important;
-    color: #94a3b8 !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-head {
-    background-color: var(--project-table-head-bg) !important;
-    border-color: var(--dashboard-nested-border) !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-row:hover {
-    background-color: var(--project-table-row-hover-bg) !important;
-  }
-
-  .bridge-dashboard.theme-dark .project-list-table .project-list-updated {
-    color: var(--dashboard-text-muted) !important;
-  }
-
   .bridge-dashboard .dashboard-skip-link {
     position: absolute;
     inset-block-start: 1rem;
     inset-inline-start: 1rem;
-    z-index: 1000;
+    z-index: var(--z-skip-link);
     display: inline-flex;
     min-height: 44px;
     align-items: center;
@@ -972,7 +572,6 @@
     overflow: visible;
     white-space: nowrap;
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1044,10 +643,10 @@
 .bridge-dashboard .dashboard-sidebar .reference-sidebar-row,
 .bridge-dashboard .dashboard-sidebar .sidebar-tree-row {
   min-height: var(--dashboard-sidebar-nav-height);
-  height: var(--dashboard-sidebar-nav-height) !important;
-  gap: clamp(0.375rem, 0.2344vw, 0.5625rem) !important;
-  padding-inline: clamp(0.5rem, 0.3125vw, 0.75rem) !important;
-  border-radius: clamp(0.5rem, 0.2604vw, 0.625rem) !important;
+  height: var(--dashboard-sidebar-nav-height);
+  gap: clamp(0.375rem, 0.2344vw, 0.5625rem);
+  padding-inline: clamp(0.5rem, 0.3125vw, 0.75rem);
+  border-radius: clamp(0.5rem, 0.2604vw, 0.625rem);
   font-size: clamp(0.8125rem, 0.4427vw, 1.0625rem);
   line-height: clamp(1rem, 0.5209vw, 1.25rem);
 }
@@ -1056,8 +655,8 @@
   --dashboard-sidebar-nav-height: clamp(1.875rem, 1.1719vw, 2.8125rem);
   --dashboard-sidebar-nav-padding: clamp(0.5rem, 0.3125vw, 0.75rem);
   min-height: var(--dashboard-sidebar-nav-height);
-  height: var(--dashboard-sidebar-nav-height) !important;
-  padding-inline: var(--dashboard-sidebar-nav-padding) !important;
+  height: var(--dashboard-sidebar-nav-height);
+  padding-inline: var(--dashboard-sidebar-nav-padding);
 }
 
 .bridge-dashboard .dashboard-sidebar .reference-sidebar-primary-row > span:first-child,
@@ -1077,7 +676,7 @@
 
 .bridge-dashboard .dashboard-sidebar .reference-sidebar-primary-row > span:last-child,
 .bridge-dashboard .dashboard-sidebar .sidebar-tree-label {
-  font-size: clamp(0.8125rem, 0.4427vw, 1.0625rem) !important;
+  font-size: clamp(0.8125rem, 0.4427vw, 1.0625rem);
   font-weight: 500;
   line-height: clamp(1rem, 0.5209vw, 1.25rem);
 }
@@ -1121,7 +720,7 @@
   position: relative;
   justify-content: center;
   width: var(--dashboard-sidebar-nav-height);
-  padding-inline: 0 !important;
+  padding-inline: 0;
 }
 
 .bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .reference-sidebar-primary-row > span:last-child {
@@ -1212,7 +811,7 @@
 }
 
 .bridge-dashboard .sidebar-tree-parent-row {
-  padding-left: clamp(0.25rem, 0.1563vw, 0.375rem) !important;
+  padding-left: clamp(0.25rem, 0.1563vw, 0.375rem);
 }
 
 .bridge-dashboard .sidebar-tree-chevron {
@@ -1276,16 +875,6 @@
   margin-top: clamp(1.25rem, 0.7292vw, 1.75rem);
 }
 
-.bridge-dashboard.theme-dark .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active {
-  background: rgba(255, 255, 255, 0.055) !important;
-  border-color: transparent !important;
-  color: var(--dashboard-sidebar-active-text) !important;
-}
-
-.bridge-dashboard.theme-dark .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
-}
-
 @media (max-width: 767px) {
   /* Let wrapped project names reserve space before the action and page cards. */
   .bridge-dashboard.dashboard-project-detail .dashboard-top-zone {
@@ -1337,7 +926,7 @@
 
   .bridge-dashboard .dashboard-sidebar .reference-sidebar-row,
   .bridge-dashboard .dashboard-sidebar .sidebar-tree-row {
-    border-radius: var(--dashboard-sidebar-item-radius) !important;
+    border-radius: var(--dashboard-sidebar-item-radius);
     font-size: 0.8125rem;
   }
 }
@@ -1404,4 +993,444 @@
     display: flex;
     flex-direction: column;
   }
+}
+
+/*
+ * Theme and geometry overrides that must beat Tailwind utilities.
+ * These used to be `!important` declarations inside `@layer base`
+ * (layered !important outranks everything, including component CSS and
+ * utilities). Unlayered rules already win over the utilities layer, so they
+ * are plain declarations here. Keep this block last in the file so it also
+ * wins equal-specificity ties with the rules above.
+ */
+:where(.bridge-dashboard, .bridge-dashboard *) {
+  letter-spacing: -0.012em;
+}
+
+.bridge-dashboard.theme-light > div,
+.bridge-dashboard.theme-light .dashboard-shell,
+.bridge-dashboard.theme-dark > div,
+.bridge-dashboard.theme-dark .dashboard-shell {
+  background: var(--dashboard-shell-bg);
+}
+
+.bridge-dashboard.theme-dark .dashboard-shell.bg-white {
+  background-color: var(--dashboard-shell-bg);
+}
+
+.bridge-dashboard.theme-dark .bg-white {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-dark .dashboard-card {
+  background-color: var(--dashboard-card-bg);
+  border-color: var(--dashboard-card-border);
+  border-width: 0;
+  border-radius: 28px;
+}
+
+.bridge-dashboard.theme-light .dashboard-card {
+  background: var(--dashboard-card-bg);
+  border: 1px solid var(--dashboard-card-border);
+  border-radius: 28px;
+  box-shadow:
+    0 22px 58px rgba(31, 27, 24, 0.065),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.bridge-dashboard .dashboard-content-zone .dashboard-card {
+  background: var(--dashboard-content-card-bg);
+  border-color: var(--dashboard-card-border);
+  border-width: 0;
+  box-shadow: none;
+}
+
+.bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+  border: 0;
+  border-radius: 18px;
+  background: var(--site-glass-bg);
+  box-shadow: var(--site-glass-shadow), var(--site-glass-highlight);
+}
+
+.bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+    background: var(--site-glass-bg-opaque);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+    background: var(--site-glass-bg-opaque);
+  }
+}
+
+.bridge-dashboard.theme-light .dashboard-card .bg-white {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-50,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/60,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/70 {
+  background-color: var(--dashboard-muted-surface);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200,
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/70,
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/80 {
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .text-slate-900 {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .text-slate-500,
+.bridge-dashboard.theme-light .dashboard-card .text-slate-600 {
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-50:hover,
+.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-100:hover {
+  background-color: var(--dashboard-hover-surface);
+}
+
+.bridge-dashboard.theme-dark .bg-slate-50 {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-dark .bg-slate-100,
+.bridge-dashboard.theme-dark .bg-slate-100\/60,
+.bridge-dashboard.theme-dark .bg-slate-100\/70 {
+  background-color: var(--dashboard-muted-surface);
+}
+
+.bridge-dashboard.theme-dark .border-slate-200,
+.bridge-dashboard.theme-dark .border-slate-200\/70,
+.bridge-dashboard.theme-dark .border-slate-200\/80,
+.bridge-dashboard.theme-dark .border-slate-300 {
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-dark .text-slate-950,
+.bridge-dashboard.theme-dark .text-slate-900 {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-dark .text-slate-800 {
+  color: #e5e5e5;
+}
+
+.bridge-dashboard.theme-dark .text-slate-700 {
+  color: #cccccc;
+}
+
+.bridge-dashboard.theme-dark .text-slate-600 {
+  color: var(--dashboard-text-secondary);
+}
+
+.bridge-dashboard.theme-dark .text-slate-500 {
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard.theme-dark input:not(.dashboard-modal-input),
+.bridge-dashboard.theme-dark textarea {
+  color: #e6e6e6;
+}
+
+.bridge-dashboard.theme-dark input:not(.dashboard-modal-input)::placeholder,
+.bridge-dashboard.theme-dark textarea::placeholder {
+  color: #8f8f8f;
+}
+
+.bridge-dashboard.theme-dark .hover\:bg-slate-50:hover,
+.bridge-dashboard.theme-dark .hover\:bg-slate-100:hover {
+  background-color: var(--dashboard-hover-surface);
+}
+
+/* Without this, hover:text-slate-900 turns labels near-black on dark surfaces.
+   :where() keeps it weaker than component-specific hover colors. */
+:where(.bridge-dashboard.theme-dark) .hover\:text-slate-900:hover,
+:where(.bridge-dashboard.theme-dark) .hover\:text-slate-950:hover {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-dark .sidebar-nav-link:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+  border-color: var(--dashboard-sidebar-item-hover-border);
+  color: var(--dashboard-sidebar-hover-text);
+}
+
+.bridge-dashboard.theme-dark .project-list-row:hover {
+  background-color: var(--project-table-row-hover-bg);
+}
+
+.bridge-dashboard.theme-light aside.dashboard-sidebar {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--dashboard-border-subtle);
+}
+
+.bridge-dashboard.theme-light .dashboard-drawer {
+  background: var(--dashboard-drawer-bg);
+  border-color: var(--dashboard-border-subtle);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.bridge-dashboard.theme-dark .dashboard-drawer {
+  background: var(--dashboard-drawer-bg);
+  border-color: #222222;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.bridge-dashboard.theme-dark .dashboard-sidebar {
+  background: var(--dashboard-drawer-bg);
+}
+
+.bridge-dashboard.theme-dark .sidebar-nav-link.sidebar-nav-link-active {
+  background-color: var(--dashboard-sidebar-active-bg);
+  border-color: var(--dashboard-sidebar-item-active-border);
+  color: var(--dashboard-sidebar-active-text);
+  box-shadow: none;
+}
+
+.bridge-dashboard .dashboard-fixed-header {
+  top: var(--dashboard-fixed-top);
+  right: var(--dashboard-side-gutter);
+  left: var(--dashboard-side-gutter);
+}
+
+.bridge-dashboard .dashboard-account-avatar {
+  width: var(--dashboard-account-avatar-size);
+  height: var(--dashboard-account-avatar-size);
+  padding: 0;
+  font-size: clamp(0.75rem, 0.3646vw, 0.875rem);
+  line-height: 1;
+}
+
+.bridge-dashboard .dashboard-account-name {
+  font-size: var(--dashboard-account-name-size);
+  line-height: 1;
+}
+
+.bridge-dashboard .dashboard-account-menu-chevron {
+  width: var(--dashboard-account-chevron-size);
+  height: var(--dashboard-account-chevron-size);
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu {
+  background-color: #242424;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item {
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item svg {
+  color: #c8c8c8;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item:hover,
+.bridge-dashboard.theme-dark .dashboard-account-menu-item:focus-visible {
+  background: #333333;
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item:hover,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item:focus-visible {
+  background: #333333;
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-light .sidebar-project-context-menu-item-destructive {
+  color: #d70015;
+}
+
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:hover,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:focus-visible {
+  color: #ff453a;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:hover,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
+  height: var(--dashboard-sidebar-nav-height);
+  gap: var(--dashboard-sidebar-nav-gap);
+  padding-inline: var(--dashboard-sidebar-nav-padding);
+  border-radius: var(--dashboard-sidebar-item-radius, 0.5rem);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
+  outline-color: var(--dashboard-accent);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-tree-child-row {
+  padding-inline-end: 2rem;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:last-child {
+  font-size: var(--dashboard-account-name-size);
+}
+
+.bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article {
+  max-width: var(--dashboard-analyze-panel-width);
+}
+
+.bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article > div:first-child h2 {
+  font-size: var(--dashboard-analyze-title-size);
+}
+
+.bridge-dashboard .quick-analyze-input-shell,
+.bridge-dashboard .quick-analyze-submit {
+  height: var(--dashboard-analyze-control-height);
+}
+
+#root .bridge-dashboard .dashboard-home-title:not(.dashboard-site-title) {
+  font-size: clamp(2.85rem, 6.4vh, 4.9rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+#root .bridge-dashboard .dashboard-home-title.dashboard-project-title {
+  font-size: clamp(1.625rem, 1.667vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link {
+  color: var(--dashboard-sidebar-muted-text);
+  font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active {
+  background-color: var(--dashboard-sidebar-active-bg);
+  border-color: var(--dashboard-sidebar-item-active-border);
+  color: var(--dashboard-sidebar-active-text);
+  box-shadow: none;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+  border-color: var(--dashboard-sidebar-item-hover-border);
+  color: var(--dashboard-sidebar-hover-text);
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active:hover {
+  background-color: var(--dashboard-sidebar-active-bg);
+  color: var(--dashboard-sidebar-active-text);
+}
+
+.bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-trigger:hover,
+.bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-item:hover,
+.bridge-dashboard.theme-light .dashboard-sidebar .sidebar-project-context-menu-item:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+}
+
+.bridge-dashboard.theme-light .fixed.inset-0.bg-white {
+  background-color: #f8f6f2;
+}
+
+.bridge-dashboard.theme-dark .shadow-\[0_18px_42px_rgba\(15\,23\,42\,0\.10\)\] {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+}
+
+.bridge-dashboard.theme-light .project-list-table th {
+  color: #64748b;
+}
+
+.bridge-dashboard.theme-light .project-list-head {
+  background-color: var(--project-table-head-bg);
+  border-color: rgba(226, 232, 240, 0.8);
+}
+
+.bridge-dashboard.theme-light .project-list-row:hover {
+  background-color: var(--project-table-row-hover-bg);
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge {
+  border: none;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-finished {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-running {
+  background-color: rgba(14, 165, 233, 0.1);
+  color: #0284c7;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-failed {
+  background-color: rgba(244, 63, 94, 0.1);
+  color: #e11d48;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-idle {
+  background-color: #f1f5f9;
+  color: #64748b;
+}
+
+.bridge-dashboard.theme-light .project-list-icon-action:hover {
+  background-color: rgba(15, 23, 42, 0.065);
+}
+
+.bridge-dashboard.theme-light .project-list-table td,
+.bridge-dashboard.theme-light .project-list-table p,
+.bridge-dashboard.theme-light .project-list-table span,
+.bridge-dashboard.theme-light .project-list-table button {
+  color: var(--dashboard-text-primary);
+}
+
+.bridge-dashboard.theme-light .project-list-table .project-list-updated {
+  color: var(--dashboard-text-secondary);
+}
+
+.bridge-dashboard.theme-dark .project-list-table th,
+.bridge-dashboard.theme-dark .project-list-table td,
+.bridge-dashboard.theme-dark .project-list-table p,
+.bridge-dashboard.theme-dark .project-list-table span,
+.bridge-dashboard.theme-dark .project-list-table button {
+  color: var(--dashboard-text-primary);
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge {
+  border: none;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-finished {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-running {
+  background-color: rgba(14, 165, 233, 0.1);
+  color: #38bdf8;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-failed {
+  background-color: rgba(244, 63, 94, 0.1);
+  color: #fb7185;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-idle {
+  background-color: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+}
+
+.bridge-dashboard.theme-dark .project-list-head {
+  background-color: var(--project-table-head-bg);
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-dark .project-list-table .project-list-updated {
+  color: var(--dashboard-text-muted);
 }

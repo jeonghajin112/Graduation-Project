@@ -21,6 +21,15 @@ describe("evaluation request selection", () => {
     expect(selectLatestAnalysisAttempt([])).toBeNull();
     expect(selectLatestAnalysisAttempt([request(1, 101, ""), request(2, 101, "")])?.id).toBe(2);
   });
+  it("orders an accepted placeholder without a server time by its request ID", () => {
+    // The browser clock (or a server in another time zone) must not rank a
+    // just-accepted rescan behind the failed attempt it replaces.
+    const previousFailure = { ...request(40, 101, "2026-09-25T09:00:00"), status: "FAILED" as const };
+    const acceptedPlaceholder = { ...request(41, 101, ""), status: "PENDING" as const };
+    expect(selectLatestAnalysisAttempt([previousFailure, acceptedPlaceholder])).toBe(acceptedPlaceholder);
+    expect(selectLatestAnalysisAttempt([acceptedPlaceholder, previousFailure])).toBe(acceptedPlaceholder);
+  });
+
   it("returns no request for empty input or an empty eligible set", () => {
     expect(selectLatestEvaluationRequest([])).toBeNull();
     expect(buildLatestEvaluationRequestByTargetId([]).size).toBe(0);

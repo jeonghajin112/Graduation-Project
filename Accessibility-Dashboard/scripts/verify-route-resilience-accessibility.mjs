@@ -100,7 +100,7 @@ async function verifyModalLoadingOwnership() {
   });
 
   await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
-  const accountTrigger = page.locator('button[aria-haspopup="menu"]');
+  const accountTrigger = page.locator(".dashboard-account-menu-trigger");
   await accountTrigger.click();
   await page.getByRole("menuitem", { name: "설정" }).click();
   await modalRequested;
@@ -127,9 +127,12 @@ async function verifyModalLoadingOwnership() {
   await page.waitForFunction(() => {
     const shell = document.querySelector("[data-dashboard-app-shell]");
     const openDialog = document.querySelector('[role="dialog"]');
+    // The real dialog takes over the fallback's inert lock on the shell so
+    // browse-mode screen readers cannot wander behind the aria-modal dialog.
     return (
-      shell?.hasAttribute("inert") === false &&
+      shell?.hasAttribute("inert") === true &&
       openDialog instanceof HTMLElement &&
+      !shell.contains(openDialog) &&
       openDialog.contains(document.activeElement)
     );
   });
@@ -138,6 +141,7 @@ async function verifyModalLoadingOwnership() {
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-haspopup") === "menu"
   );
+  assert.equal(await appShell.getAttribute("inert"), null, "closing the dialog must release the shell");
   fixture.assertIsolated();
   await context.close();
 }
@@ -173,7 +177,7 @@ async function verifyTitlesHeadingAndThemeCleanup() {
     1
   );
 
-  const accountTrigger = page.locator('button[aria-haspopup="menu"]');
+  const accountTrigger = page.locator(".dashboard-account-menu-trigger");
   await accountTrigger.click();
   await page.getByRole("menuitem", { name: "설정" }).click();
   const settingsDialog = page.getByRole("dialog", { name: "설정" });

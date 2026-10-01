@@ -12,6 +12,10 @@ import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
 const recoveryStorageKey = "accessibility-dashboard.site-create-attempt.v1";
+// The seeded record is a legacy standalone rescan preparation (its target is in
+// previousTargetIds). The request flow releases it and continues in the
+// per-page rescan slot, so the shared page-creation slot stays free.
+const rescanStorageKey = "accessibility-dashboard.target-rescan-attempts.v1:711";
 const timestamp = "2026-08-29T10:00:00.000Z";
 const organization = {
   id: 71,
@@ -394,12 +398,14 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
       const unresolvedCheckpoint = await page.evaluate((key) => {
         const rawValue = sessionStorage.getItem(key);
         return rawValue === null ? null : JSON.parse(rawValue);
-      }, recoveryStorageKey);
+      }, rescanStorageKey);
       assert.equal(
         unresolvedCheckpoint?.phase,
         "request-reconciling",
-        "unmount cleanup must preserve the ambiguous POST checkpoint"
+        "unmount cleanup must preserve the ambiguous POST checkpoint until it is settled"
       );
+      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), recoveryStorageKey), null,
+        "a rescan must not hold the shared page-creation slot");
 
       releaseReconcileRequest();
       await page.waitForTimeout(50);
@@ -415,16 +421,19 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
         0,
         "unmount abort must release the lease before the next authoritative refresh"
       );
-      assert.equal(observed.requestPosts, 1);
-      assert.equal(observed.requestListGets, 2);
-      assert.equal(observed.requestStatusGets, 0);
-      assert.equal(observed.backgroundStatusGets, 2);
-      assert.equal(observed.incompleteOverviewGets, 2);
-      assert.notEqual(
-        await page.evaluate((key) => sessionStorage.getItem(key), recoveryStorageKey),
-        null,
-        "unmount cleanup must keep the persisted duplicate-POST checkpoint"
+      // The abandoned rescan is settled in the background with GETs only.
+      await page.waitForFunction(
+        (key) => sessionStorage.getItem(key) === null,
+        rescanStorageKey,
+        { timeout: 10_000 }
       );
+      assert.equal(observed.requestPosts, 1, "background settlement must never resend the POST");
+      assert.equal(observed.requestListGets, 3, "the abandoned POST is settled by one extra GET");
+      assert.equal(observed.requestStatusGets, 0);
+      // The next authoritative overview may come from the settled rescan's own
+      // refresh rather than from a second (backed-off) background status poll.
+      assert.ok(observed.backgroundStatusGets >= 1, JSON.stringify(observed));
+      assert.ok(observed.incompleteOverviewGets >= 2);
       assert.deepEqual(observed.unknownRequests, []);
       return observed;
     }

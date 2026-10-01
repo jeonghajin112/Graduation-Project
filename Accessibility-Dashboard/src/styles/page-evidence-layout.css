@@ -951,18 +951,6 @@
   padding: 0.125rem 0.25rem;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-page-analysis-actions__stale {
-  margin: 0;
-  padding: 0.125rem 0.375rem;
-  border-radius: 999px;
-  color: #93370d;
-  background: #fef0c7;
-  font-size: var(--site-rail-caption-size);
-  font-weight: 700;
-  line-height: 1.45;
-  white-space: nowrap;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-page-analysis-actions__rescan {
   display: inline-flex;
   align-items: center;
@@ -1190,9 +1178,89 @@
    current live document remain inspectable as compact cards in the rail. */
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel {
-  --site-unavailable-issue-height: clamp(12rem, 27dvh, 15rem);
+  /* Compact rows (title, reason, location) so several fit; the full
+     explanation lives in the details dialog and the final report. */
+  --site-unavailable-issue-height: clamp(8.25rem, 16dvh, 9rem);
   display: flex;
   flex-direction: column;
+}
+
+/* Restorable issues also carry a "문제 위치로 이동" action. */
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel--recoverable {
+  --site-unavailable-issue-height: clamp(10.5rem, 20dvh, 11.5rem);
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0.625rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reasons li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  color: var(--dashboard-text-muted);
+  background: var(--site-row-surface);
+  font-size: var(--site-rail-caption-size);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reasons strong {
+  color: var(--dashboard-text-strong);
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts > div {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts dt {
+  color: var(--dashboard-text-muted);
+  font-size: var(--site-rail-caption-size);
+  font-weight: 650;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__where {
+  overflow: hidden;
+  color: var(--dashboard-text-strong);
+  font-size: var(--site-rail-caption-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__where code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__where,
+.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__reasons strong {
+  color: #ffffff;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel:not(.is-empty) {
@@ -1336,9 +1404,13 @@
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue h4 {
+  display: -webkit-box;
   flex: none;
   min-width: 0;
-  margin-top: 0.25rem;
+  margin-top: 0.125rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--dashboard-text-strong);
   font-size: calc(var(--site-rail-body-size) + 0.125rem);
   font-weight: 750;

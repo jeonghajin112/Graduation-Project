@@ -34,7 +34,6 @@ export function DashboardMutationModals({ dashboard }: {
             <SiteCreateModal
               key={dashboard.selectedOrganizationModel.id}
               isOpen
-              isDarkMode={dashboard.isDarkMode}
               project={dashboard.selectedOrganizationModel}
               onCreateEvaluationTargetModel={dashboard.handleCreateEvaluationTargetModel}
               onRequestEvaluationTargetAnalysis={dashboard.handleRequestEvaluationTargetAnalysis}

@@ -268,7 +268,7 @@ export function parseEnumValue<const Values extends readonly string[]>(
   values: Values
 ): Values[number] {
   if (typeof value !== "string" || !values.includes(value)) {
-    return failContract(value, path, values.map((candidate) => `\"${candidate}\"`).join(" | "));
+    return failContract(value, path, values.map((candidate) => `"${candidate}"`).join(" | "));
   }
   return value as Values[number];
 }
@@ -345,8 +345,8 @@ function assertExpectedString(
   if (expected !== undefined && actual !== expected) {
     throw new ApiContractValidationError({
       fieldPath: path,
-      expected: `${label} \"${expected}\"`,
-      actualType: `문자열 \"${actual}\"`
+      expected: `${label} "${expected}"`,
+      actualType: `문자열 "${actual}"`
     });
   }
 }

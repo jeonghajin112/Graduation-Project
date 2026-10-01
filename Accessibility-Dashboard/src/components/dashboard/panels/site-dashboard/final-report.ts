@@ -2,6 +2,7 @@ import { getLocatorCategory, type LocatorCategory } from "./locator-labels";
 import type { AnalyzerType, IssueResultModel, SeverityLevel } from "@/types/accessibility-domain";
 
 import { formatIssueCodeLabel, normalizeIssueCode, severityChartItems } from "./constants";
+import { getIssueCoordinateBox } from "./issue-locator";
 import type { LocatorCheckState, LocatorIssueState, RecentIssueRow, SeverityChartItem } from "./types";
 
 export const analyzerLabels: Record<AnalyzerType, string> = {
@@ -63,6 +64,11 @@ export function canShowOnPage(status: ReportLocationStatus): boolean {
   return status === "on-page" || status === "other-state";
 }
 
+/** Critical and high findings: the ones the summary asks to fix first. */
+export function countUrgent(summary: ReportSummary): number {
+  return summary.severities.reduce((total, item) => total + (severityRank[item.key] <= severityRank.HIGH ? item.count : 0), 0);
+}
+
 export type ReportSummary = {
   total: number;
   severities: Array<SeverityChartItem & { count: number }>;
@@ -94,7 +100,7 @@ export function summarizeReportLocations(
   locationOf: (row: RecentIssueRow) => ReportLocationStatus
 ): ReportLocationSummary {
   const summary: ReportLocationSummary = {
-    checking: 0, disconnected: 0, "on-page": 0, "other-state": 0, "page-setting": 0, outdated: 0, unavailable: 0
+    checking: 0, disconnected: 0, "on-page": 0, "other-state": 0, "page-setting": 0, unavailable: 0
   };
   for (const row of rows) summary[locationOf(row)] += 1;
   return summary;
@@ -109,6 +115,11 @@ export type ReportFixUnit = {
   count: number;
   analyzers: AnalyzerType[];
 };
+
+// The key a criterion group and a fix unit's "목록에서 보기" link share.
+export function criterionCode(issueCode: string): string {
+  return normalizeIssueCode(issueCode) || "기타";
+}
 
 // A fix unit groups issues a developer resolves with the same change: one
 // engine rule, or one criterion/title pair when the engine has no rule id.
@@ -134,7 +145,7 @@ export function buildFixPriorities(rows: readonly RecentIssueRow[], limit = 5): 
         unit: {
           key,
           title: mostFrequent(group.map((row) => row.issue.issueTitle)),
-          code,
+          code: criterionCode(code),
           codeLabel: formatIssueCodeLabel(code),
           severity: highestSeverity(group),
           count: group.length,
@@ -158,6 +169,9 @@ export type ReportCriterionGroup = {
   codeLabel: string;
   title: string;
   severity: SeverityChartItem;
+  /** Only the severities present in the group, most severe first. */
+  severityCounts: Array<SeverityChartItem & { count: number }>;
+  analyzers: AnalyzerType[];
   rows: RecentIssueRow[];
 };
 
@@ -184,7 +198,7 @@ function compareCriteria(left: string, right: string): number {
 export function groupByCriterion(rows: readonly RecentIssueRow[]): ReportCriterionGroup[] {
   const groups = new Map<string, RecentIssueRow[]>();
   for (const row of rows) {
-    const code = normalizeIssueCode(row.issue.issueCode) || "기타";
+    const code = criterionCode(row.issue.issueCode);
     const group = groups.get(code);
     if (group) group.push(row);
     else groups.set(code, [row]);
@@ -196,18 +210,42 @@ export function groupByCriterion(rows: readonly RecentIssueRow[]): ReportCriteri
       codeLabel: formatIssueCodeLabel(code),
       title: mostFrequent(group.map((row) => row.issue.issueTitle)),
       severity: highestSeverity(group),
+      severityCounts: summarizeReport(group).severities.filter((item) => item.count > 0),
+      analyzers: analyzerOrder.filter((analyzer) => group.some((row) => row.analyzerType === analyzer)),
       rows: [...group].sort(compareRows)
     }));
+}
+
+export type ContrastFinding = { text: string; contrast: string; required: string };
+
+// The visual engine stores "text=…, contrast=…, required=…"; anchoring on the
+// last two keys keeps commas inside the measured text intact.
+export function parseContrastMessage(message: string): ContrastFinding | null {
+  const match = /^text=([\s\S]*), contrast=([^,\n]*), required=([^,\n]*)$/.exec(message.trim());
+  if (!match) return null;
+  const required = match[3]!.trim();
+  return {
+    text: match[1]!.trim(),
+    contrast: match[2]!.trim(),
+    required: required && !required.includes(":") ? `${required}:1` : required
+  };
 }
 
 export type ReportFilters = {
   severity: SeverityLevel | "ALL";
   analyzer: AnalyzerType | "ALL";
-  location: "ALL" | "on-page" | "outdated" | "page-setting" | "unavailable";
+  location: "ALL" | "on-page" | "page-setting" | "unavailable";
   query: string;
 };
 
 export const defaultReportFilters: ReportFilters = { severity: "ALL", analyzer: "ALL", location: "ALL", query: "" };
+
+// Location states exist only once the current page has reported positions.
+// Until then a chosen location filter would hide every issue behind a
+// disabled control, so it is set aside and applies again when ready.
+export function getEffectiveReportFilters(filters: ReportFilters, locatorCheckState: LocatorCheckState): ReportFilters {
+  return locatorCheckState === "ready" || filters.location === "ALL" ? filters : { ...filters, location: "ALL" };
+}
 
 export function filterReportRows(
   rows: readonly RecentIssueRow[],
@@ -220,7 +258,11 @@ export function filterReportRows(
     if (filters.analyzer !== "ALL" && row.analyzerType !== filters.analyzer) return false;
     if (filters.location !== "ALL") {
       const status = locationOf(row);
-      if (filters.location === "on-page" ? !canShowOnPage(status) : status !== filters.location) return false;
+      // "위치 표시 불가" includes page settings, like the report metric.
+      const matches = filters.location === "on-page" ? canShowOnPage(status)
+        : filters.location === "unavailable" ? status === "unavailable" || status === "page-setting"
+          : status === filters.location;
+      if (!matches) return false;
     }
     if (!query) return true;
     const { issue } = row;
@@ -258,19 +300,30 @@ export function splitDescriptionSections(description: string): ReportDescription
 }
 
 export type ReportIssueLocation =
-  | { kind: "path"; steps: Array<{ context: string; selector: string }> }
+  | { kind: "path"; steps: Array<{ context: string; selector: string; frameUrl?: string }> }
   | { kind: "coordinates"; x: number; y: number; width: number | null; height: number | null }
   | { kind: "text"; value: string }
   | null;
 
 // Coordinate-only findings (the visual engine) keep a coordinate label in
 // `selector`; it must not be presented as a CSS selector a developer can search.
-export function describeIssueLocation(issue: IssueResultModel): ReportIssueLocation {
+// Screenshot pixels are shown in document CSS pixels, like the page markers.
+export function describeIssueLocation(issue: IssueResultModel, deviceScaleFactor?: number | null): ReportIssueLocation {
   const locator = issue.locator;
   const steps = (Array.isArray(locator?.pathSteps) ? locator.pathSteps : [])
     .filter((step) => typeof step?.selector === "string" && step.selector.trim().length > 0)
-    .map((step) => ({ context: String(step.context), selector: step.selector.trim() }));
+    .map((step) => ({
+      context: String(step.context),
+      selector: step.selector.trim(),
+      // about:blank is a placeholder for frames without their own document.
+      ...(typeof step.frameUrl === "string" && step.frameUrl && step.frameUrl !== "about:blank" ? { frameUrl: step.frameUrl } : {})
+    }));
   if (steps.length > 0) return { kind: "path", steps };
+  const box = getIssueCoordinateBox(issue, deviceScaleFactor);
+  if (box) {
+    const round = (value: number) => Math.round(value * 10) / 10;
+    return { kind: "coordinates", x: round(box.x), y: round(box.y), width: round(box.width), height: round(box.height) };
+  }
   if (typeof locator?.x === "number" && typeof locator.y === "number") {
     return {
       kind: "coordinates",

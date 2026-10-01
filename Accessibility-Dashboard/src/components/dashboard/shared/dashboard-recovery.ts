@@ -179,3 +179,80 @@ export function protectRecoverySnapshot(
   // recovers or the bounded protection lease above expires.
   return recovery.lastConsistentData ?? nextData;
 }
+
+export type DirectoryRemoval = { organizationId: number } | { targetId: number };
+
+function pruneRemovedDirectoryEntry(
+  snapshot: DashboardViewModel,
+  removal: DirectoryRemoval
+): DashboardViewModel {
+  const removedTargetIds = new Set<number>();
+  const organizations = snapshot.organizations.flatMap((organization) => {
+    if ("organizationId" in removal) {
+      if (organization.id !== removal.organizationId) {
+        return [organization];
+      }
+      organization.evaluationTargets.forEach((target) => removedTargetIds.add(target.id));
+      return [];
+    }
+    if (!organization.evaluationTargets.some((target) => target.id === removal.targetId)) {
+      return [organization];
+    }
+    removedTargetIds.add(removal.targetId);
+    return [{
+      ...organization,
+      evaluationTargets: organization.evaluationTargets.filter((target) => target.id !== removal.targetId)
+    }];
+  });
+  if ("targetId" in removal) {
+    removedTargetIds.add(removal.targetId);
+  }
+  const removedRequestIds = new Set(
+    snapshot.evaluationRequests
+      .filter((request) => removedTargetIds.has(request.evaluationTargetId))
+      .map((request) => request.id)
+  );
+  return {
+    ...snapshot,
+    organizations,
+    evaluationRequests: snapshot.evaluationRequests.filter((request) => !removedRequestIds.has(request.id)),
+    resultSummaries: snapshot.resultSummaries.filter((summary) => !removedRequestIds.has(summary.requestId)),
+    latestIssueCounts: snapshot.latestIssueCounts.filter(
+      (statistics) => !removedTargetIds.has(statistics.evaluationTargetId)
+    ),
+    scoreResults: snapshot.scoreResults.filter(
+      (scoreResult) => !removedRequestIds.has(scoreResult.evaluationRequestId)
+    )
+  };
+}
+
+/**
+ * A confirmed deletion is not a stale snapshot. Remove the deleted entry from
+ * every protection baseline and from the fallback snapshot so an overlapping
+ * creation lease cannot keep showing it after the refresh.
+ */
+export function forgetRemovedDirectoryEntry(
+  recovery: DirectoryRecovery | null,
+  removal: DirectoryRemoval
+): void {
+  if (!recovery) {
+    return;
+  }
+  for (const lease of recovery.leases.values()) {
+    const pruned = pruneRemovedDirectoryEntry({
+      organizations: lease.baselineOrganizations,
+      evaluationRequests: lease.baselineEvaluationRequests,
+      resultSummaries: lease.baselineResultSummaries,
+      latestIssueCounts: lease.baselineLatestIssueCounts,
+      scoreResults: lease.baselineScoreResults
+    }, removal);
+    lease.baselineOrganizations = pruned.organizations;
+    lease.baselineEvaluationRequests = pruned.evaluationRequests;
+    lease.baselineResultSummaries = pruned.resultSummaries;
+    lease.baselineLatestIssueCounts = pruned.latestIssueCounts;
+    lease.baselineScoreResults = pruned.scoreResults;
+  }
+  if (recovery.lastConsistentData) {
+    recovery.lastConsistentData = pruneRemovedDirectoryEntry(recovery.lastConsistentData, removal);
+  }
+}

@@ -1,0 +1,220 @@
+/*
+ * Accessibility-driven dashboard tokens and controls.
+ *
+ * Tokens are declared on the document (:root / .dark) as well as on the
+ * dashboard theme classes because dialogs are portaled to <body>, outside
+ * .bridge-dashboard. Text tokens meet WCAG AA (4.5:1) on the surfaces they
+ * are used on; light muted text uses the shared --dashboard-text-muted
+ * (#6e6e73, 5.1:1 on white) instead of the former #86868b / #a1a1a6.
+ */
+:root,
+.bridge-dashboard.theme-light {
+  --dashboard-danger-text: #b42332;
+  --dashboard-danger-border: #d70015;
+  --dashboard-danger-surface: #fff1f2;
+  --dashboard-danger-surface-border: #fecdd3;
+  --dashboard-warning-text: #8a5a00;
+  --dashboard-warning-surface: #fffbeb;
+  --dashboard-warning-surface-border: #fde68a;
+  --dashboard-field-bg: #e5e5ea;
+  --dashboard-field-focus-border: #1d1d1f;
+  --dashboard-field-icon: #6e6e73;
+  --dashboard-field-placeholder: #6e6e73;
+  --dashboard-disabled-bg: #3a3a3c;
+  --dashboard-disabled-text: #8e8e93;
+  --dashboard-card-glass-border: rgba(255, 255, 255, 0.85);
+  --dashboard-card-glass-bg: rgba(255, 255, 255, 0.65);
+  --dashboard-card-glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 10px 28px rgba(29, 29, 31, 0.07);
+  --dashboard-card-glass-hover-border: #ffffff;
+  --dashboard-card-glass-hover-bg: rgba(255, 255, 255, 0.8);
+  --dashboard-card-divider: #e5e5ea;
+  --dashboard-card-status-text: #515154;
+  --dashboard-favicon-fallback-border: #e5e5ea;
+  --dashboard-favicon-fallback-bg: #ffffff;
+  --dashboard-favicon-fallback-icon: #6e6e73;
+  --dashboard-loading-surface: var(--background, #f5f5f7);
+}
+
+.dark,
+.bridge-dashboard.theme-dark {
+  --dashboard-danger-text: #ff453a;
+  --dashboard-danger-border: #ff453a;
+  --dashboard-danger-surface: #2d1d20;
+  --dashboard-danger-surface-border: #5e2b32;
+  --dashboard-warning-text: #ffd60a;
+  --dashboard-warning-surface: #2a2519;
+  --dashboard-warning-surface-border: #5b4a1f;
+  --dashboard-field-bg: #2c2c2e;
+  --dashboard-field-focus-border: #ffffff;
+  --dashboard-field-icon: #8e8e93;
+  --dashboard-field-placeholder: #8e8e93;
+  --dashboard-disabled-bg: #3a3a3c;
+  --dashboard-disabled-text: #8e8e93;
+  --dashboard-card-glass-border: rgba(255, 255, 255, 0.12);
+  --dashboard-card-glass-bg: rgba(255, 255, 255, 0.05);
+  --dashboard-card-glass-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 28px rgba(0, 0, 0, 0.18);
+  --dashboard-card-glass-hover-border: rgba(255, 255, 255, 0.2);
+  --dashboard-card-glass-hover-bg: rgba(255, 255, 255, 0.075);
+  --dashboard-card-divider: #38383a;
+  --dashboard-card-status-text: #c7c7cc;
+  --dashboard-favicon-fallback-border: rgba(255, 255, 255, 0.1);
+  --dashboard-favicon-fallback-bg: #ffffff;
+  --dashboard-favicon-fallback-icon: #6e6e73;
+  --dashboard-loading-surface: var(--background, #111113);
+}
+
+/* Inline notices in dialogs (site create). */
+.dashboard-inline-notice[data-tone="danger"] {
+  border-color: var(--dashboard-danger-surface-border);
+  background: var(--dashboard-danger-surface);
+  color: var(--dashboard-danger-text);
+}
+
+.dashboard-inline-notice[data-tone="warning"] {
+  border-color: var(--dashboard-warning-surface-border);
+  background: var(--dashboard-warning-surface);
+  color: var(--dashboard-warning-text);
+}
+
+/* Project detail glass cards (previously per-theme utility ternaries). */
+.bridge-dashboard .dashboard-project-glass {
+  border-color: var(--dashboard-card-glass-border);
+  background-color: var(--dashboard-card-glass-bg);
+  box-shadow: var(--dashboard-card-glass-shadow);
+}
+
+.bridge-dashboard .dashboard-project-glass--interactive:hover {
+  border-color: var(--dashboard-card-glass-hover-border);
+  background-color: var(--dashboard-card-glass-hover-bg);
+}
+
+.bridge-dashboard .dashboard-project-favicon-fallback {
+  border: 1px solid var(--dashboard-favicon-fallback-border);
+  background-color: var(--dashboard-favicon-fallback-bg);
+  color: var(--dashboard-favicon-fallback-icon);
+}
+
+/* Touch screens have no hover: keep the card delete action discoverable. */
+@media (hover: none) {
+  .bridge-dashboard .dashboard-project-card-delete-button {
+    opacity: 1;
+  }
+}
+
+/* ---- Sidebar tree: disclosure toggle separated from project navigation ---- */
+.bridge-dashboard .sidebar-tree-toggle {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  z-index: 1;
+  width: max(1.5rem, calc(clamp(0.25rem, 0.1563vw, 0.375rem) + clamp(0.875rem, 0.4688vw, 1.125rem) + 0.25rem));
+  border: 0;
+  border-radius: var(--dashboard-sidebar-item-radius) 0 0 var(--dashboard-sidebar-item-radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.bridge-dashboard .sidebar-tree-toggle:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -2px;
+}
+
+/* ---- Sidebar row "more" (관리 메뉴) buttons ---- */
+.bridge-dashboard .sidebar-row-more {
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  z-index: 2;
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--dashboard-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: background-color 150ms ease;
+}
+
+.bridge-dashboard .sidebar-row-has-more:hover > .sidebar-row-more,
+.bridge-dashboard .sidebar-row-has-more:focus-within > .sidebar-row-more,
+.bridge-dashboard .sidebar-row-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.bridge-dashboard .sidebar-row-more:hover {
+  background: var(--dashboard-sidebar-item-hover-bg);
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard .sidebar-row-more:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -2px;
+}
+
+/* Recent rows keep their analysis status icon left of the more button. */
+.bridge-dashboard .sidebar-row-has-more > [data-analysis-status] {
+  right: 1.875rem;
+}
+
+/* More specific than the tree row padding-inline rule so labels truncate
+   before the status icon and the more button instead of running under them. */
+.bridge-dashboard .dashboard-sidebar .sidebar-row-has-more > .sidebar-nav-link.sidebar-tree-child-row {
+  padding-right: 3.5rem;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-row-has-more > .sidebar-nav-link.sidebar-tree-parent-row {
+  padding-right: 2rem;
+}
+
+@media (hover: none) {
+  .bridge-dashboard .sidebar-row-more {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-dashboard .sidebar-row-more {
+    transition: none;
+  }
+}
+
+/* ---- Collapsed rail keeps an avatar-only account trigger ---- */
+.bridge-dashboard .dashboard-account-rail-trigger {
+  display: none;
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .dashboard-account-rail-trigger {
+  display: inline-flex;
+  flex: none;
+  width: var(--dashboard-sidebar-nav-height);
+  height: var(--dashboard-sidebar-nav-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: clamp(0.5rem, 0.2604vw, 0.625rem);
+  background: transparent;
+  cursor: pointer;
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .dashboard-account-rail-trigger:hover {
+  background: var(--dashboard-sidebar-item-hover-bg);
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .dashboard-account-rail-trigger:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -2px;
+}
+
+@media (min-width: 768px) {
+  .bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .dashboard-header-account {
+    flex-direction: column;
+    align-items: center;
+  }
+}

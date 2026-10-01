@@ -1,4 +1,8 @@
-import { fetchAnalysisAttempt, fetchActiveTargetRequests, requestEvaluationTargetRescan } from "@/services/analysis-protocol-api";
+import {
+  fetchAnalysisAttempt,
+  fetchActiveTargetRequests,
+  submitEvaluationTargetRescan
+} from "@/services/analysis-protocol-api";
 import { API_BASE_URL } from "@/config/api";
 import {
   fetchEvaluationTarget,
@@ -6,11 +10,15 @@ import {
 } from "@/services/backend-api";
 import {
   clearSiteCreateRecovery,
+  clearTargetRescanRecovery,
   normalizeSiteCreateAccessUrl,
   readSiteCreateRecovery,
-  writeSiteCreateRecovery
+  readTargetRescanRecovery,
+  writeSiteCreateRecovery,
+  writeTargetRescanRecovery
 } from "@/services/site-create-recovery-storage";
 import type { PersistedSiteCreateAttempt, StoredSiteCreateAttempt } from "@/services/site-create-recovery-storage";
+import { createRandomUuid } from "@/services/random-uuid";
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
@@ -22,10 +30,8 @@ import {
   REQUEST_RECONCILE_ATTEMPTS,
   REQUEST_RECONCILE_INTERVAL_MS,
   SITE_RECOVERY_BLOCKED_MESSAGE,
-  SITE_RECOVERY_CONFLICT_MESSAGE,
   SITE_RECOVERY_PERSISTENCE_MESSAGE,
   TARGET_ANALYSIS_PREFLIGHT_MESSAGE,
-  TARGET_CREATE_RECOVERY_MESSAGE,
   TARGET_REQUEST_RECOVERY_MESSAGE,
   commitMutationOnce,
   getPersistedTargetId,
@@ -33,7 +39,7 @@ import {
   reconcileWithRetries,
   runWithNetworkDeadline
 } from "./site-create-recovery-workflow";
-import type { DirectoryRecoveryToken } from "./use-dashboard-data";
+import type { DirectoryRecoveryToken, LoadDashboard } from "./use-dashboard-data";
 import {
   persistAcceptedAnalysisRequest,
   recordAcceptedAnalysisRequest
@@ -45,20 +51,121 @@ export type TargetAnalysisRequestCheckpoint = {
   requestId: number | null;
   releaseAbortListener: (() => void) | null;
   recoveryToken: DirectoryRecoveryToken | null;
-  stored: StoredSiteCreateAttempt;
+  /** `null` once an accepted rescan needs no durable state. */
+  stored: StoredSiteCreateAttempt | null;
 };
 
 export type UseEvaluationTargetAnalysisRequestOptions = {
   beginDirectoryRecovery: () => DirectoryRecoveryToken;
   dashboardData: DashboardViewModel | null;
   endDirectoryRecovery: (token: DirectoryRecoveryToken) => void;
+  loadDashboard?: LoadDashboard;
 };
+
+export const ABANDONED_RESCAN_RECONCILE_ATTEMPTS = 4;
+export const ABANDONED_RESCAN_RECONCILE_INTERVAL_MS = 1_000;
 
 function isPreparedRescan(attempt: PersistedSiteCreateAttempt): boolean {
   // A rescan starts with an existing target. A partially completed page
   // creation excludes its new target from this baseline and must be preserved.
   return attempt.phase === "request-ready" &&
     attempt.previousTargetIds.includes(attempt.targetId);
+}
+
+function isTerminalRequest(request: EvaluationRequestModel): boolean {
+  return request.status === "COMPLETED" || request.status === "FAILED";
+}
+
+/**
+ * Where one analysis request keeps its durable checkpoint. The page-creation
+ * flow continues in the single shared creation slot. A rescan of an existing
+ * page uses a per-page slot, so a cancelled rescan on page A never blocks page
+ * B, a new page creation, or another project.
+ */
+type RecoverySlot = {
+  kind: "site-create" | "rescan";
+  write: (
+    attempt: PersistedSiteCreateAttempt,
+    expectedRawValue: string | null
+  ) => StoredSiteCreateAttempt | null;
+  clear: (rawValue: string) => boolean;
+};
+
+const siteCreateSlot: RecoverySlot = {
+  kind: "site-create",
+  write: writeSiteCreateRecovery,
+  clear: clearSiteCreateRecovery
+};
+
+function createRescanSlot(targetId: number): RecoverySlot {
+  return {
+    kind: "rescan",
+    write: writeTargetRescanRecovery,
+    clear: (rawValue) => clearTargetRescanRecovery(targetId, rawValue)
+  };
+}
+
+type ReconcilingAttempt = Extract<PersistedSiteCreateAttempt, { phase: "request-reconciling" }>;
+
+/**
+ * Finds the request created by one submitted attempt. With a server receipt
+ * key a foreground retry may resend the same idempotent POST; a background
+ * cleanup only reads.
+ */
+async function probeSubmittedRequest(
+  { analysisKey, knownRequestIds, targetId }: Pick<ReconcilingAttempt, "analysisKey" | "knownRequestIds" | "targetId">,
+  signal: AbortSignal,
+  allowIdempotentResubmit: boolean
+): Promise<EvaluationRequestModel | null> {
+  if (analysisKey) {
+    const receipt = await fetchAnalysisAttempt(analysisKey, signal);
+    if (receipt) return receipt.evaluationTargetId === targetId ? receipt : null;
+    return allowIdempotentResubmit
+      ? submitEvaluationTargetRescan(targetId, signal, analysisKey)
+      : null;
+  }
+  const known = new Set(knownRequestIds);
+  const reconciledRequests = await fetchEvaluationRequests(signal);
+  const candidates = reconciledRequests.filter(
+    (request) => request.evaluationTargetId === targetId && !known.has(request.id)
+  );
+  // Without a server correlation key, choosing among multiple
+  // candidates could attach this modal to another actor's request.
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+/**
+ * A rescan cancelled after its POST (page closed, navigation) may still be
+ * accepted by the server. Settle its per-page checkpoint with GETs only,
+ * detached from the closed UI. An unreadable outcome keeps the checkpoint for
+ * the next rescan of that page, and it stops blocking after 24 hours.
+ */
+export async function settleAbandonedTargetRescan(
+  stored: StoredSiteCreateAttempt,
+  onAccepted?: (request: EvaluationRequestModel) => void
+): Promise<void> {
+  const attempt = stored.attempt;
+  if (attempt.phase !== "request-reconciling") {
+    return;
+  }
+  let request: EvaluationRequestModel | null;
+  try {
+    request = await runWithNetworkDeadline((signal) => reconcileWithRetries({
+      attempts: ABANDONED_RESCAN_RECONCILE_ATTEMPTS,
+      intervalMs: ABANDONED_RESCAN_RECONCILE_INTERVAL_MS,
+      signal,
+      probe: (probeSignal) => probeSubmittedRequest(attempt, probeSignal, false)
+    }));
+  } catch {
+    return;
+  }
+  // Found, or never arrived after a bounded wait: nothing from this tab is in
+  // flight any more. A late server-side commit is still caught by the active
+  // request preflight of the next rescan.
+  clearTargetRescanRecovery(attempt.targetId, stored.rawValue);
+  if (request) {
+    onAccepted?.(request);
+  }
 }
 
 type RequestContext = UseEvaluationTargetAnalysisRequestOptions & {
@@ -68,72 +175,107 @@ type RequestContext = UseEvaluationTargetAnalysisRequestOptions & {
 };
 
 export async function requestTargetAnalysis(
-  { beginDirectoryRecovery, dashboardData, endDirectoryRecovery,
+  { beginDirectoryRecovery, dashboardData, endDirectoryRecovery, loadDashboard,
     targetAnalysisRequestCheckpointRef, releaseRequestCheckpoint, bindCheckpointToSignal }: RequestContext,
   targetId: number, signal?: AbortSignal, previousFailedRequestId?: number
 ): Promise<number> {
   signal?.throwIfAborted();
   const reconcileCheckpoint = async (
-    checkpoint: TargetAnalysisRequestCheckpoint
-  ): Promise<number | null> =>
-    runWithNetworkDeadline(async (reconcileSignal) => {
-      const knownRequestIds = new Set(checkpoint.knownRequestIds);
-      return reconcileWithRetries({
+    stored: StoredSiteCreateAttempt
+  ): Promise<EvaluationRequestModel | null> => {
+    const attempt = stored.attempt;
+    if (attempt.phase !== "request-reconciling") {
+      return null;
+    }
+    return runWithNetworkDeadline(async (reconcileSignal) =>
+      reconcileWithRetries({
         attempts: REQUEST_RECONCILE_ATTEMPTS,
         intervalMs: REQUEST_RECONCILE_INTERVAL_MS,
         signal: reconcileSignal,
-        probe: async (requestSignal) => {
-          if (checkpoint.stored.attempt.analysisKey) {
-            const receipt = await fetchAnalysisAttempt(checkpoint.stored.attempt.analysisKey, requestSignal);
-            if (receipt) return receipt.evaluationTargetId === checkpoint.targetId ? receipt.id : null;
-            return requestEvaluationTargetRescan(checkpoint.targetId, requestSignal, checkpoint.stored.attempt.analysisKey);
-          }
-          const reconciledRequests = await fetchEvaluationRequests(requestSignal);
-          const candidates = reconciledRequests.filter(
-            (request) =>
-              request.evaluationTargetId === checkpoint.targetId &&
-              !knownRequestIds.has(request.id)
-          );
-          // Without a server correlation key, choosing among multiple
-          // candidates could attach this modal to another actor's request.
-          return candidates.length === 1 ? candidates[0]!.id : null;
-        }
-      });
-    }, signal);
+        probe: (requestSignal) => probeSubmittedRequest(attempt, requestSignal, true)
+      }), signal);
+  };
 
   const replaceRequestId =
     Number.isSafeInteger(previousFailedRequestId) && (previousFailedRequestId ?? 0) > 0
       ? previousFailedRequestId ?? null
       : null;
-  const persistedRecovery = readSiteCreateRecovery();
-  if (persistedRecovery.kind === "blocked") {
-    throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
-  }
 
+  // The shared creation slot is consulted only for the page it created.
+  // Unrelated or unreadable creation work belongs to the page-add dialog.
+  let slot: RecoverySlot = createRescanSlot(targetId);
   let stored: StoredSiteCreateAttempt | null = null;
-  if (persistedRecovery.kind === "valid") {
-    const persistedTargetId = getPersistedTargetId(persistedRecovery.attempt);
-    if (isPreparedRescan(persistedRecovery.attempt)) {
+  const siteCreateRecovery = readSiteCreateRecovery();
+  if (siteCreateRecovery.kind === "valid") {
+    if (isPreparedRescan(siteCreateRecovery.attempt)) {
       // Older clients wrote this before the first GET. No POST is pending
       // in request-ready, so release only that exact standalone preparation.
-      if (!clearSiteCreateRecovery(persistedRecovery.rawValue)) {
+      if (!clearSiteCreateRecovery(siteCreateRecovery.rawValue)) {
         throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
-    } else if (persistedTargetId === targetId) {
+    } else if (getPersistedTargetId(siteCreateRecovery.attempt) === targetId) {
+      slot = siteCreateSlot;
       stored = {
-        attempt: persistedRecovery.attempt,
-        rawValue: persistedRecovery.rawValue
+        attempt: siteCreateRecovery.attempt,
+        rawValue: siteCreateRecovery.rawValue
       };
-    } else {
-      throw new UserFacingError(SITE_RECOVERY_CONFLICT_MESSAGE);
     }
   }
 
-  if (stored?.attempt.phase === "target-reconciling") {
-    throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
+  if (slot.kind === "rescan") {
+    const rescanRecovery = readTargetRescanRecovery(targetId);
+    if (rescanRecovery.kind === "blocked") {
+      // An unreadable value cannot describe a POST we could reconcile. When
+      // storage itself is unavailable (rawValue null), the checkpoint write
+      // below fails closed before any POST.
+      if (rescanRecovery.rawValue !== null && !slot.clear(rescanRecovery.rawValue)) {
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+      }
+    } else if (rescanRecovery.kind === "valid") {
+      const persisted = rescanRecovery.attempt;
+      if (rescanRecovery.isStale || persisted.phase === "poll") {
+        // A day-old checkpoint (or an accepted one whose retirement failed)
+        // no longer protects anything the active-request preflight misses.
+        if (!slot.clear(rescanRecovery.rawValue)) {
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        }
+      } else {
+        stored = { attempt: persisted, rawValue: rescanRecovery.rawValue };
+      }
+    }
   }
 
-  if (stored?.attempt.phase === "poll") {
+  const acceptRequest = (
+    checkpoint: TargetAnalysisRequestCheckpoint,
+    input: Parameters<typeof recordAcceptedAnalysisRequest>[1]
+  ): number => {
+    if (slot.kind === "site-create") {
+      return recordAcceptedAnalysisRequest(
+        checkpoint as { stored: StoredSiteCreateAttempt; requestId: number | null },
+        input
+      );
+    }
+    // The dashboard poller owns an accepted rescan's progress; retire its
+    // per-page checkpoint so nothing lingers after the page closes. A failed
+    // retirement is reconciled (and replaced) by the next rescan.
+    if (input.expectedRawValue !== null) {
+      slot.clear(input.expectedRawValue);
+    }
+    checkpoint.stored = null;
+    checkpoint.requestId = input.requestId;
+    return input.requestId;
+  };
+
+  const abandonIfCancelled = (checkpoint: TargetAnalysisRequestCheckpoint) => {
+    if (slot.kind !== "rescan" || !signal?.aborted || checkpoint.stored === null) {
+      return;
+    }
+    void settleAbandonedTargetRescan(checkpoint.stored, () => {
+      void loadDashboard?.({ background: true, refreshAfterInFlight: true });
+    });
+  };
+
+  if (slot.kind === "site-create" && stored?.attempt.phase === "poll") {
     if (replaceRequestId === null) {
       releaseRequestCheckpoint(targetAnalysisRequestCheckpointRef.current);
       targetAnalysisRequestCheckpointRef.current = {
@@ -164,6 +306,60 @@ export async function requestTargetAnalysis(
     stored = requestReady;
   }
 
+  if (stored?.attempt.phase === "request-reconciling") {
+    const reconcilingStored: StoredSiteCreateAttempt = stored;
+    const reconcilingAttempt = stored.attempt;
+    let existingCheckpoint = targetAnalysisRequestCheckpointRef.current;
+    if (
+      existingCheckpoint === null ||
+      existingCheckpoint.stored?.attempt.attemptId !== reconcilingAttempt.attemptId
+    ) {
+      releaseRequestCheckpoint(existingCheckpoint);
+      existingCheckpoint = {
+        targetId,
+        knownRequestIds: reconcilingAttempt.knownRequestIds,
+        requestId: null,
+        releaseAbortListener: null,
+        recoveryToken: beginDirectoryRecovery(),
+        stored: reconcilingStored
+      };
+      targetAnalysisRequestCheckpointRef.current = existingCheckpoint;
+    } else {
+      existingCheckpoint.stored = reconcilingStored;
+      existingCheckpoint.knownRequestIds = reconcilingAttempt.knownRequestIds;
+      existingCheckpoint.requestId = null;
+    }
+    bindCheckpointToSignal(existingCheckpoint, signal);
+
+    let recoveredRequest: EvaluationRequestModel | null;
+    try {
+      recoveredRequest = await reconcileCheckpoint(reconcilingStored);
+    } catch (error) {
+      abandonIfCancelled(existingCheckpoint);
+      throw error;
+    }
+    if (recoveredRequest === null) {
+      throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
+    }
+    if (slot.kind === "rescan" && isTerminalRequest(recoveredRequest)) {
+      // The earlier rescan already finished while its page was closed. This
+      // click asks for a new analysis, so retire it and start fresh below.
+      releaseRequestCheckpoint(existingCheckpoint);
+      if (!slot.clear(reconcilingStored.rawValue)) {
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+      }
+      stored = null;
+    } else {
+      return acceptRequest(existingCheckpoint, {
+        attempt: reconcilingAttempt,
+        expectedRawValue: reconcilingStored.rawValue,
+        targetId,
+        knownRequestIds: reconcilingAttempt.knownRequestIds,
+        requestId: recoveredRequest.id
+      });
+    }
+  }
+
   let preparedAttempt: Extract<PersistedSiteCreateAttempt, { phase: "request-ready" }> | null = null;
   if (stored === null) {
     const project = dashboardData?.organizations.find((organization) =>
@@ -179,7 +375,7 @@ export async function requestTargetAnalysis(
     }
     preparedAttempt = {
       version: 1,
-      attemptId: window.crypto.randomUUID(),
+      attemptId: createRandomUuid(),
       apiScope: API_BASE_URL,
       projectId: project.id,
       name: target.name,
@@ -190,42 +386,6 @@ export async function requestTargetAnalysis(
       targetId,
       previousFailedRequestId: replaceRequestId
     };
-  }
-
-  if (stored?.attempt.phase === "request-reconciling") {
-    let existingCheckpoint = targetAnalysisRequestCheckpointRef.current;
-    if (
-      existingCheckpoint === null ||
-      existingCheckpoint.stored.attempt.attemptId !== stored.attempt.attemptId
-    ) {
-      releaseRequestCheckpoint(existingCheckpoint);
-      existingCheckpoint = {
-        targetId,
-        knownRequestIds: stored.attempt.knownRequestIds,
-        requestId: null,
-        releaseAbortListener: null,
-        recoveryToken: beginDirectoryRecovery(),
-        stored
-      };
-      targetAnalysisRequestCheckpointRef.current = existingCheckpoint;
-    } else {
-      existingCheckpoint.stored = stored;
-      existingCheckpoint.knownRequestIds = stored.attempt.knownRequestIds;
-      existingCheckpoint.requestId = null;
-    }
-    bindCheckpointToSignal(existingCheckpoint, signal);
-
-    const recoveredRequestId = await reconcileCheckpoint(existingCheckpoint);
-    if (recoveredRequestId === null) {
-      throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);
-    }
-    return recordAcceptedAnalysisRequest(existingCheckpoint, {
-      attempt: stored.attempt,
-      expectedRawValue: stored.rawValue,
-      targetId,
-      knownRequestIds: stored.attempt.knownRequestIds,
-      requestId: recoveredRequestId
-    });
   }
 
   const readyAttempt = stored?.attempt ?? preparedAttempt;
@@ -291,6 +451,21 @@ export async function requestTargetAnalysis(
     ) ?? []
   );
   if (inFlightRequest) {
+    if (slot.kind === "rescan") {
+      endDirectoryRecovery(recoveryToken);
+      if (stored !== null && !slot.clear(stored.rawValue)) {
+        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+      }
+      targetAnalysisRequestCheckpointRef.current = {
+        targetId,
+        knownRequestIds: [...knownRequestIds],
+        requestId: inFlightRequest.id,
+        releaseAbortListener: null,
+        recoveryToken: null,
+        stored: null
+      };
+      return inFlightRequest.id;
+    }
     let pollStored;
     try {
       pollStored = persistAcceptedAnalysisRequest({
@@ -314,11 +489,11 @@ export async function requestTargetAnalysis(
     return inFlightRequest.id;
   }
 
-  const requestReconciling = writeSiteCreateRecovery(
+  const requestReconciling = slot.write(
     {
       ...readyAttempt,
       phase: "request-reconciling",
-      analysisKey: dashboardData?.analysisProtocolVersion === 1 ? window.crypto.randomUUID() : undefined,
+      analysisKey: dashboardData?.analysisProtocolVersion === 1 ? createRandomUuid() : undefined,
       targetId,
       knownRequestIds: [...knownRequestIds],
       previousFailedRequestId: effectiveFailedRequestId
@@ -339,62 +514,68 @@ export async function requestTargetAnalysis(
   };
   targetAnalysisRequestCheckpointRef.current = checkpoint;
   bindCheckpointToSignal(checkpoint, signal);
+  const analysisKey = requestReconciling.attempt.analysisKey;
 
   try {
-    const commitOutcome = await commitMutationOnce({
-      signal,
-      operation: (requestSignal) =>
-        requestEvaluationTargetRescan(targetId, requestSignal, checkpoint.stored.attempt.analysisKey),
-      accept: (requestId) =>
-        requestId !== null && !knownRequestIds.has(requestId) ? requestId : null
-    });
-    if (commitOutcome.kind === "accepted") {
-      return recordAcceptedAnalysisRequest(checkpoint, {
-        attempt: checkpoint.stored.attempt,
-        expectedRawValue: checkpoint.stored.rawValue,
-        targetId,
-        knownRequestIds: checkpoint.knownRequestIds,
-        requestId: commitOutcome.value
+    try {
+      const commitOutcome = await commitMutationOnce({
+        signal,
+        operation: async (requestSignal) =>
+          (await submitEvaluationTargetRescan(targetId, requestSignal, analysisKey)).id,
+        accept: (requestId) =>
+          requestId !== null && !knownRequestIds.has(requestId) ? requestId : null
       });
-    }
-  } catch (error) {
-    if (isDefinitiveMutationRejection(error)) {
-      if (readyAttempt.previousTargetIds.includes(targetId)) {
-        const cleared = clearSiteCreateRecovery(checkpoint.stored.rawValue);
-        releaseRequestCheckpoint(checkpoint);
-        if (!cleared) throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-        throw error;
-      }
-      const requestReady = writeSiteCreateRecovery(
-        {
-          ...checkpoint.stored.attempt,
-          phase: "request-ready",
+      if (commitOutcome.kind === "accepted") {
+        return acceptRequest(checkpoint, {
+          attempt: requestReconciling.attempt,
+          expectedRawValue: requestReconciling.rawValue,
           targetId,
-          previousFailedRequestId: effectiveFailedRequestId
-        },
-        checkpoint.stored.rawValue
-      );
-      releaseRequestCheckpoint(checkpoint);
-      if (requestReady === null) {
-        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          knownRequestIds: checkpoint.knownRequestIds,
+          requestId: commitOutcome.value
+        });
+      }
+    } catch (error) {
+      if (isDefinitiveMutationRejection(error)) {
+        if (readyAttempt.previousTargetIds.includes(targetId)) {
+          const cleared = slot.clear(requestReconciling.rawValue);
+          releaseRequestCheckpoint(checkpoint);
+          if (!cleared) throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+          throw error;
+        }
+        const requestReady = slot.write(
+          {
+            ...requestReconciling.attempt,
+            phase: "request-ready",
+            targetId,
+            previousFailedRequestId: effectiveFailedRequestId
+          },
+          requestReconciling.rawValue
+        );
+        releaseRequestCheckpoint(checkpoint);
+        if (requestReady === null) {
+          throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+        }
+        throw error;
       }
       throw error;
     }
-    throw error;
-  }
 
-  // A lost POST response does not prove that the server rejected the
-  // request. Reconcile the request list before allowing a retry so the UI
-  // does not start a duplicate scan for the same target.
-  const recoveredRequestId = await reconcileCheckpoint(checkpoint);
-  if (recoveredRequestId !== null) {
-    return recordAcceptedAnalysisRequest(checkpoint, {
-      attempt: checkpoint.stored.attempt,
-      expectedRawValue: checkpoint.stored.rawValue,
-      targetId,
-      knownRequestIds: checkpoint.knownRequestIds,
-      requestId: recoveredRequestId
-    });
+    // A lost POST response does not prove that the server rejected the
+    // request. Reconcile the request list before allowing a retry so the UI
+    // does not start a duplicate scan for the same target.
+    const recoveredRequest = await reconcileCheckpoint(requestReconciling);
+    if (recoveredRequest !== null) {
+      return acceptRequest(checkpoint, {
+        attempt: requestReconciling.attempt,
+        expectedRawValue: requestReconciling.rawValue,
+        targetId,
+        knownRequestIds: checkpoint.knownRequestIds,
+        requestId: recoveredRequest.id
+      });
+    }
+  } catch (error) {
+    abandonIfCancelled(checkpoint);
+    throw error;
   }
 
   throw new UserFacingError(TARGET_REQUEST_RECOVERY_MESSAGE);

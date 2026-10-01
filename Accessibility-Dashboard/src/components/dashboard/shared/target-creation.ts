@@ -14,6 +14,7 @@ import type {
   PersistedSiteCreateAttempt,
   StoredSiteCreateAttempt
 } from "@/services/site-create-recovery-storage";
+import { createRandomUuid } from "@/services/random-uuid";
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   CreateEvaluationTargetInput as CreateEvaluationTargetModelInput,
@@ -254,7 +255,7 @@ export async function createTargetWithRecovery(
   const stored = writeSiteCreateRecovery(
     {
       version: 1,
-      attemptId: window.crypto.randomUUID(),
+      attemptId: createRandomUuid(),
       apiScope: API_BASE_URL,
       projectId: normalizedInput.projectId,
       name: normalizedInput.name,

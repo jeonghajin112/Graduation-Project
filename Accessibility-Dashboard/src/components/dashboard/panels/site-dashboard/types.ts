@@ -3,6 +3,7 @@ import type { LocatorConnectionStatus } from "./page-replay-protocol";
 
 export type ScoreChartItem = {
   slot: number;
+  requestId?: number;
   date: string;
   label: string;
   score: number;
@@ -40,7 +41,5 @@ export type LocatorReport = {
   recoverableHiddenIssueIds: number[];
   /** Page settings such as the viewport or language have no place on screen. */
   pageSettingIssueIds: number[];
-  /** The page changed after the analysis, so the stored location no longer matches. */
-  outdatedIssueIds: number[];
   issueStates: Record<number, LocatorIssueState>;
 };

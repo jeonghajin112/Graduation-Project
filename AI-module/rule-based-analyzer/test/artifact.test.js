@@ -185,6 +185,24 @@ test('preserves typed locator through adapter and API conversion', () => {
   assert.deepEqual(apiNode.locator, locator);
 });
 
+test('releasing virtual time keeps rendering tasks running beyond the first millisecond', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent('<html><body>Rendering can continue</body></html>');
+    const release = await pausePageVirtualTime(page);
+    await release();
+    const start = await page.evaluate(() => performance.now());
+    await page.waitForFunction(start => performance.now() - start > 50, start, {
+      polling: 10, timeout: 2000,
+    });
+    const png = await page.screenshot({ timeout: 3000 });
+    assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  } finally {
+    await browser.close();
+  }
+});
+
 test('serializes the internal DOM snapshot and resolves DOM_RECT from one paused state', async () => {
   const browser = await chromium.launch({ headless: true });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'artifact-browser-test-'));

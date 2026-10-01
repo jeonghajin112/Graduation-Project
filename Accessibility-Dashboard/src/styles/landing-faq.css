@@ -1,4 +1,4 @@
-.ua-faq { position: relative; z-index: 45; background: #fff; color: #1c222b; font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.ua-faq { position: relative; z-index: var(--z-landing-section); background: #fff; color: #1c222b; font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 .ua-faq__inner { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); gap: clamp(40px, 7vw, 100px); max-width: 1440px; margin: 0 auto; padding: clamp(80px, 8vw, 128px) clamp(24px, 5vw, 64px) clamp(120px, 12vw, 180px); }
 .ua-faq__head h2 { margin: 0; font-size: clamp(32px, 3vw, 44px); font-weight: 750; line-height: 1.3; letter-spacing: -.04em; word-break: keep-all; }
 .ua-faq__head p { margin: 26px 0 0; color: #626973; font-size: 15px; line-height: 1.7; }

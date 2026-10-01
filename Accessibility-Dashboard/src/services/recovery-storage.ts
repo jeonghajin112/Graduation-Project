@@ -55,6 +55,23 @@ export function clearSessionRecoveryStorage(storageKey: string): void {
   }
 }
 
+/** Removes every key in one per-item recovery family (for example per target). */
+export function clearSessionRecoveryStorageByPrefix(prefix: string): void {
+  try {
+    const storage = window.sessionStorage;
+    const matchingKeys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key !== null && key.startsWith(prefix)) {
+        matchingKeys.push(key);
+      }
+    }
+    matchingKeys.forEach((key) => storage.removeItem(key));
+  } catch {
+    // Logout must remain available when storage is blocked by the browser.
+  }
+}
+
 export function clearSessionRecoveryIfUnchanged(
   storageKey: string,
   expectedRawValue: string

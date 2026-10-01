@@ -2,7 +2,7 @@
    z-index 45: 필름의 stage(10)·copy(20)·route(40) 위, topbar(50)·hint(60) 아래. */
 .ua-engine {
   position: relative;
-  z-index: 45;
+  z-index: var(--z-landing-section);
   background: #f5f5f7;
   color: #1d1d1f;
   font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;

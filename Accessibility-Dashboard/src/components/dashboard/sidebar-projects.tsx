@@ -1,6 +1,6 @@
 import type { SidebarProjectActions } from "./dashboard-surface.types";
-import { ChevronRight, FileText, Folder, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ChevronRight, FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
@@ -20,6 +20,7 @@ import { PageAnalysisStatus } from "./shared/page-analysis-status";
 import { RecentPageActions } from "./recent-page-actions";
 import { API_BASE_URL } from "@/config/api";
 
+import { handleMenuArrowKeys } from "./menu-keyboard";
 import { PanelMessage } from "./shared/display";
 import { preventAccidentalSubmit } from "./shared/form-keyboard";
 import { useDialogAccessibility } from "./shared/use-dialog-accessibility";
@@ -28,6 +29,7 @@ const PROJECT_MENU_WIDTH = 132;
 const PROJECT_MENU_HEIGHT = 74;
 const PROJECT_MENU_GAP = 4;
 const PROJECT_MENU_VIEWPORT_PADDING = 8;
+const PROJECT_NAME_MAX_LENGTH = 100;
 const EMPTY_QUICK_ANALYSIS_RESULTS: readonly QuickAnalysisResultRecord[] = [];
 const subscribeStaticQuickAnalysisResults = () => () => undefined;
 const ANALYSIS_ACKNOWLEDGED_KEY = `uni-access.analysis-acknowledged.v1:${API_BASE_URL}`;
@@ -88,6 +90,10 @@ export function SidebarProjectsSection({
   const deleteLockRef = useRef(false);
   const activeDeleteOperationIdRef = useRef<symbol | null>(null);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<number>>(() => new Set());
+  const [openMenuProjectId, setOpenMenuProjectId] = useState<number | null>(null);
+  const addProjectButtonRef = useRef<HTMLButtonElement>(null);
+  const editNameInputRef = useRef<HTMLInputElement>(null);
+  const editErrorId = useId();
   const [acknowledgedAnalyses, setAcknowledgedAnalyses] = useState(readAcknowledgedAnalyses);
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
@@ -195,15 +201,26 @@ export function SidebarProjectsSection({
     setDeleteError("");
   };
 
+  // After a project disappears its row (the dialog opener) is gone too; land on
+  // the first remaining project or the add button instead of <body>.
+  const getProjectFallbackFocus = useCallback(
+    () =>
+      document.querySelector<HTMLElement>("aside .sidebar-tree-parent-row") ??
+      addProjectButtonRef.current,
+    []
+  );
   const editDialogRef = useDialogAccessibility<HTMLFormElement>({
     isOpen: editingProject !== null,
     onClose: closeEdit,
-    closeDisabled: isSaving
+    closeDisabled: isSaving,
+    initialFocusRef: editNameInputRef,
+    getFallbackFocus: getProjectFallbackFocus
   });
   const deleteDialogRef = useDialogAccessibility({
     isOpen: deletingProject !== null,
     onClose: closeDelete,
-    closeDisabled: isDeleting
+    closeDisabled: isDeleting,
+    getFallbackFocus: getProjectFallbackFocus
   });
 
   const openEdit = (project: OrganizationModel) => {
@@ -228,6 +245,7 @@ export function SidebarProjectsSection({
     const name = editName.trim();
     if (name.length === 0) {
       setEditError("프로젝트 이름은 필수입니다.");
+      window.requestAnimationFrame(() => editNameInputRef.current?.focus({ preventScroll: true }));
       return;
     }
 
@@ -248,6 +266,7 @@ export function SidebarProjectsSection({
     } catch (error) {
       if (activeSaveOperationIdRef.current === operationId) {
         setEditError(getApiErrorMessage(error, "프로젝트를 수정하지 못했습니다. 잠시 후 다시 시도해 주세요."));
+        window.requestAnimationFrame(() => editNameInputRef.current?.focus({ preventScroll: true }));
       }
     } finally {
       if (activeSaveOperationIdRef.current === operationId) {
@@ -287,10 +306,10 @@ export function SidebarProjectsSection({
     }
   };
 
-  const showProjectMenu = (projectId: number, preferredLeft: number, preferredTop: number) => {
+  const positionProjectMenu = (projectId: number, preferredLeft: number, preferredTop: number) => {
     const menuElement = projectMenuElements.current.get(projectId);
     if (!menuElement) {
-      return;
+      return null;
     }
 
     const maxLeft = Math.max(
@@ -304,8 +323,12 @@ export function SidebarProjectsSection({
 
     menuElement.style.left = `${Math.max(PROJECT_MENU_VIEWPORT_PADDING, Math.min(preferredLeft, maxLeft))}px`;
     menuElement.style.top = `${Math.max(PROJECT_MENU_VIEWPORT_PADDING, Math.min(preferredTop, maxTop))}px`;
+    return menuElement;
+  };
 
-    if (!menuElement.matches(":popover-open")) {
+  const showProjectMenu = (projectId: number, preferredLeft: number, preferredTop: number) => {
+    const menuElement = positionProjectMenu(projectId, preferredLeft, preferredTop);
+    if (menuElement && !menuElement.matches(":popover-open")) {
       menuElement.showPopover();
     }
   };
@@ -315,6 +338,7 @@ export function SidebarProjectsSection({
       <div className="sidebar-tree-section-header flex items-center gap-2">
         <p className={SIDEBAR_SECTION_HEADING}>프로젝트</p>
         <button
+          ref={addProjectButtonRef}
           type="button"
           onClick={actions?.onCreateProject}
           disabled={readOnly}
@@ -322,7 +346,7 @@ export function SidebarProjectsSection({
           aria-label="프로젝트 추가"
           title={readOnly ? "읽기 전용 미리보기에서는 프로젝트를 추가할 수 없습니다" : "프로젝트 추가"}
         >
-          <Plus size={14} strokeWidth={2.2} />
+          <Plus size={14} strokeWidth={2.2} aria-hidden="true" />
         </button>
       </div>
 
@@ -337,7 +361,25 @@ export function SidebarProjectsSection({
 
               return (
                 <li key={project.id}>
-                  <div className="group relative">
+                  <div className={cn("group relative", !readOnly && "sidebar-row-has-more")}>
+                    <button
+                      type="button"
+                      className="sidebar-tree-toggle"
+                      aria-expanded={isExpanded}
+                      aria-controls={childListId}
+                      aria-label={`${project.name} 페이지 목록 ${isExpanded ? "접기" : "펼치기"}`}
+                      onClick={() => {
+                        setExpandedProjectIds((current) => {
+                          const next = new Set(current);
+                          if (next.has(project.id)) {
+                            next.delete(project.id);
+                          } else {
+                            next.add(project.id);
+                          }
+                          return next;
+                        });
+                      }}
+                    />
                     <button
                       ref={(element) => {
                         if (element) {
@@ -348,13 +390,14 @@ export function SidebarProjectsSection({
                       }}
                       type="button"
                       onClick={() => {
+                        // Opening a project reveals its pages; collapsing is the
+                        // separate disclosure button's job.
                         setExpandedProjectIds((current) => {
-                          const next = new Set(current);
-                          if (next.has(project.id)) {
-                            next.delete(project.id);
-                          } else {
-                            next.add(project.id);
+                          if (current.has(project.id)) {
+                            return current;
                           }
+                          const next = new Set(current);
+                          next.add(project.id);
                           return next;
                         });
                         onSelectProject(project.id);
@@ -385,17 +428,16 @@ export function SidebarProjectsSection({
                         );
                       }}
                       aria-keyshortcuts={readOnly ? undefined : "Shift+F10"}
-                      aria-expanded={isExpanded}
-                      aria-controls={childListId}
                       aria-current={isActive ? "page" : undefined}
                       className={cn(
                         SIDEBAR_NAV_ITEM_BASE,
                         "sidebar-tree-parent-row",
+                        !readOnly && "pr-8",
                         isActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
                       )}
                       title={project.name}
                     >
-                      <span className="sidebar-tree-chevron inline-flex shrink-0 items-center justify-center">
+                      <span className="sidebar-tree-chevron inline-flex shrink-0 items-center justify-center" aria-hidden="true">
                         <ChevronRight
                           size={13}
                           aria-hidden="true"
@@ -417,6 +459,26 @@ export function SidebarProjectsSection({
                       </span>
                     </button>
 
+                    {!readOnly ? (
+                      <button
+                        ref={(element) => element?.setAttribute("popovertarget", menuId)}
+                        type="button"
+                        className="sidebar-row-more"
+                        aria-label={`${project.name} 관리 메뉴`}
+                        aria-haspopup="menu"
+                        aria-expanded={openMenuProjectId === project.id}
+                        aria-controls={menuId}
+                        title={`${project.name} 관리`}
+                        onClick={(event) => {
+                          // Runs before the native popovertarget toggle opens the menu.
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          positionProjectMenu(project.id, rect.right - PROJECT_MENU_WIDTH, rect.bottom + PROJECT_MENU_GAP);
+                        }}
+                      >
+                        <MoreHorizontal size={14} aria-hidden="true" />
+                      </button>
+                    ) : null}
+
                    {!readOnly ? <div
                     ref={(element) => {
                       if (!element) {
@@ -427,6 +489,9 @@ export function SidebarProjectsSection({
                       element.popover = "auto";
                       element.ontoggle = (event) => {
                         const isOpen = (event as ToggleEvent).newState === "open";
+                        setOpenMenuProjectId((current) =>
+                          isOpen ? project.id : current === project.id ? null : current
+                        );
                         if (isOpen) {
                           window.requestAnimationFrame(() =>
                             element.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true })
@@ -440,6 +505,7 @@ export function SidebarProjectsSection({
                     id={menuId}
                     role="menu"
                     aria-label={`${project.name} 관리`}
+                    onKeyDown={handleMenuArrowKeys}
                     className={cn(
                       "fixed inset-auto m-0 min-w-[132px] overflow-hidden rounded-xl border border-[var(--dashboard-nested-border)] bg-[var(--report-search-popover-bg)] px-0 py-1 text-[var(--dashboard-text-primary)] shadow-[var(--dashboard-header-shadow)]"
                     )}
@@ -452,7 +518,7 @@ export function SidebarProjectsSection({
                         "sidebar-project-context-menu-item mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium text-[var(--dashboard-text-primary)] transition-colors hover:bg-[var(--dashboard-hover-surface)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px]"
                       )}
                     >
-                      <Pencil size={13} />
+                      <Pencil size={13} aria-hidden="true" />
                       수정
                     </button>
                     <button
@@ -463,7 +529,7 @@ export function SidebarProjectsSection({
                         "sidebar-project-context-menu-item sidebar-project-context-menu-item-destructive mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium transition-colors hover:bg-[var(--dashboard-hover-surface)] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-[-2px]"
                       )}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={13} aria-hidden="true" />
                       삭제
                     </button>
                    </div> : null}
@@ -530,7 +596,9 @@ export function SidebarProjectsSection({
               );
             })}
           </ul>
-        ) : null}
+        ) : (
+          <p className="sidebar-tree-empty-copy">프로젝트가 없습니다.</p>
+        )}
       </div>
 
       <div className="sidebar-tree-recent flex flex-col">
@@ -605,7 +673,11 @@ export function SidebarProjectsSection({
                   프로젝트 수정
                 </h3>
 
-                {editError.length > 0 && <PanelMessage className="dashboard-modal-message" label={`프로젝트 수정 실패: ${editError}`} isError />}
+                {editError.length > 0 && (
+                  <div id={editErrorId}>
+                    <PanelMessage className="dashboard-modal-message" label={`프로젝트 수정 실패: ${editError}`} isError />
+                  </div>
+                )}
 
                 <div className="mt-4 space-y-4">
                   <label className="block">
@@ -613,8 +685,13 @@ export function SidebarProjectsSection({
                       프로젝트 이름
                     </span>
                     <input
+                      ref={editNameInputRef}
                       value={editName}
                       onChange={(event) => setEditName(event.target.value)}
+                      maxLength={PROJECT_NAME_MAX_LENGTH}
+                      autoComplete="off"
+                      aria-invalid={editError.length > 0 || undefined}
+                      aria-describedby={editError.length > 0 ? editErrorId : undefined}
                       className="dashboard-modal-input"
                       placeholder="예: 고령자 접근성 점검"
                     />

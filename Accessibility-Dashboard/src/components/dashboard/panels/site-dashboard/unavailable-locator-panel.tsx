@@ -2,26 +2,78 @@ import { ChevronLeft, ChevronRight, LocateFixed } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import { formatIssueCodeLabel } from "./constants";
+import { getIssueCoordinateBox } from "./issue-locator";
 import { getLocatorLabel } from "./locator-labels";
-import { formatIssueDescription, toPageReplayIssue } from "./page-replay-protocol";
+import { toPageReplayIssue } from "./page-replay-protocol";
 import type { LocatorCheckState, LocatorIssueState, RecentIssueRow } from "./types";
 
 type UnavailableLocatorPanelProps = {
   checkState: LocatorCheckState;
   hasHiddenIssues?: boolean;
-  mode?: "recoverable" | "page-settings" | "outdated" | "unavailable";
+  mode?: "recoverable" | "page-settings" | "unavailable";
   onSelectIssue?: (issueId: number) => void;
   onShowLocation: (issueId: number) => void;
   issueStates?: Record<number, LocatorIssueState>;
   rows: RecentIssueRow[];
+  /** Capture pixel scale for screenshot coordinates. */
+  deviceScaleFactor?: number | null;
 };
 
 const panelHeadings = {
   recoverable: "다른 화면 상태의 문제",
   "page-settings": "페이지 전체 설정",
-  outdated: "분석 이후 바뀐 문제",
   unavailable: "화면에 표시되지 않은 문제"
 };
+
+const pathContextLabels: Record<string, string> = { FRAME: "프레임 안", SHADOW_ROOT: "Shadow DOM 안" };
+
+// The rail names where a finding is in one line: the element the path ends
+// at (and whether it is inside a frame or shadow root). The details dialog
+// and the final report keep the full path, HTML and explanation.
+function describeWhere(
+  row: RecentIssueRow,
+  analyzedText?: string,
+  deviceScaleFactor?: number | null
+): { text: string; full: string; code: boolean } {
+  const { locator, locationPath } = row.issue;
+  const steps = (Array.isArray(locator?.pathSteps) ? locator.pathSteps : [])
+    .filter((step) => typeof step?.selector === "string" && step.selector.trim().length > 0);
+  if (steps.length > 0) {
+    const last = steps[steps.length - 1]!;
+    const context = pathContextLabels[String(last.context)];
+    const selector = last.selector.trim();
+    return {
+      text: context ? `${context} · ${selector}` : selector,
+      full: steps.map((step) => step.selector.trim()).join(" › "),
+      code: true
+    };
+  }
+  // Screenshot pixels read in document CSS pixels, like the page markers.
+  const box = getIssueCoordinateBox(row.issue, deviceScaleFactor);
+  const point = box ?? (typeof locator?.x === "number" && typeof locator.y === "number"
+    ? { x: locator.x, y: locator.y }
+    : null);
+  if (point) {
+    const text = `화면 좌표 x ${Math.round(point.x)}, y ${Math.round(point.y)}`;
+    return { text, full: text, code: false };
+  }
+  const path = locationPath.trim();
+  if (path) return { text: path, full: path, code: true };
+  // Without a path, the analysed sentence is what a developer can search for.
+  const sentence = analyzedText?.replace(/\s+/g, " ").trim();
+  if (sentence) return { text: `문장 “${sentence}”`, full: sentence, code: false };
+  return { text: "위치 정보 없음", full: "위치 정보 없음", code: false };
+}
+
+// How many findings share each reason, most common first.
+function summarizeReasons(rows: RecentIssueRow[], issueStates?: Record<number, LocatorIssueState>) {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const label = getLocatorLabel(issueStates?.[row.issue.id]);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1]);
+}
 
 // 최대 세 페이지를 표시하며 첫 페이지는 왼쪽, 마지막 페이지는 오른쪽에 둔다.
 function getPagerDotWindow(pageCount: number, pageIndex: number) {
@@ -44,6 +96,8 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
     const pagination = list.parentElement;
     const pager = panel.querySelector<HTMLElement>(".site-unavailable-locator-panel__pager");
     if (!header || !pagination || !pager) return;
+    // The reason summary sits outside the pages.
+    const extrasOf = () => [...panel.querySelectorAll<HTMLElement>(".site-unavailable-locator-panel__reasons")];
 
     const measure = () => {
       const style = getComputedStyle(list);
@@ -60,7 +114,11 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
         + px(panelStyle.borderTopWidth) + px(panelStyle.borderBottomWidth)
         + header.getBoundingClientRect().height
         + px(paginationStyle.marginTop) + px(paginationStyle.marginBottom)
-        + px(paginationStyle.rowGap) + pager.getBoundingClientRect().height;
+        + px(paginationStyle.rowGap) + pager.getBoundingClientRect().height
+        + extrasOf().reduce((sum, element) => {
+          const style = getComputedStyle(element);
+          return sum + element.getBoundingClientRect().height + px(style.marginTop) + px(style.marginBottom);
+        }, 0);
       const chromeValue = `${chromeHeight}px`;
       if (panel.style.getPropertyValue("--site-unavailable-panel-chrome-height") !== chromeValue) {
         panel.style.setProperty("--site-unavailable-panel-chrome-height", chromeValue);
@@ -83,12 +141,14 @@ function useUnavailableIssuePageSize(hasVisibleRows: boolean) {
       observer.observe(rail);
       observer.observe(header);
       observer.observe(pager);
+      for (const element of extrasOf()) observer.observe(element);
       for (const card of rail.children) observer.observe(card);
       measure();
     };
     observeRail();
     const childObserver = new MutationObserver(observeRail);
     childObserver.observe(rail, { childList: true });
+    childObserver.observe(panel, { childList: true });
     return () => {
       observer.disconnect();
       childObserver.disconnect();
@@ -105,13 +165,15 @@ export function UnavailableLocatorPanel({
   onSelectIssue,
   onShowLocation,
   issueStates,
-  rows
+  rows,
+  deviceScaleFactor = null
 }: UnavailableLocatorPanelProps) {
   const [activeIssueId, setActiveIssueId] = useState<number | null>(null);
   const { listRef, pageSize } = useUnavailableIssuePageSize(checkState === "ready" && rows.length > 0);
   const isRecoverable = mode === "recoverable";
   const heading = panelHeadings[mode];
   const headingId = `site-${mode}-locator-heading`;
+  const reasonCounts = mode === "unavailable" ? summarizeReasons(rows, issueStates) : [];
 
   const selectedIndex = rows.findIndex((row) => row.issue.id === activeIssueId);
   const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
@@ -193,6 +255,14 @@ export function UnavailableLocatorPanel({
           {rows.length.toLocaleString("ko-KR")}건
         </span>
       </div>
+      {reasonCounts.length > 1 ? (
+        <ul className="site-unavailable-locator-panel__reasons" aria-label="이유별 건수">
+          {reasonCounts.slice(0, 3).map(([label, count]) => (
+            <li key={label}>{label} <strong>{count.toLocaleString("ko-KR")}</strong></li>
+          ))}
+          {reasonCounts.length > 3 ? <li>그 밖의 이유 {reasonCounts.slice(3).reduce((sum, [, count]) => sum + count, 0)}</li> : null}
+        </ul>
+      ) : null}
 
       <div
         className="site-unavailable-locator-panel__pagination"
@@ -203,6 +273,7 @@ export function UnavailableLocatorPanel({
           {visibleRows.map((row) => {
             const replayIssue = toPageReplayIssue(row);
             const issueCode = formatIssueCodeLabel(replayIssue.code);
+            const where = describeWhere(row, replayIssue.textAnalysis?.sourceText, deviceScaleFactor);
             const style = {
               "--site-unavailable-issue-color": row.severity.color
             } as CSSProperties;
@@ -246,12 +317,20 @@ export function UnavailableLocatorPanel({
                   </button>
                 </div>
                 <h4 data-copyable>{replayIssue.title}</h4>
-                <p data-copyable className="site-unavailable-locator-panel__reason">
-                  {getLocatorLabel(issueStates?.[row.issue.id])}
-                </p>
-                <p data-copyable className="site-unavailable-locator-panel__message">
-                  {formatIssueDescription(row.issue.message, row.analyzerType, row.issue.ruleId) || "상세 설명이 없습니다."}
-                </p>
+                <dl className="site-unavailable-locator-panel__facts">
+                  <div>
+                    <dt>이유</dt>
+                    <dd data-copyable className="site-unavailable-locator-panel__reason">
+                      {getLocatorLabel(issueStates?.[row.issue.id])}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>위치</dt>
+                    <dd data-copyable className="site-unavailable-locator-panel__where" title={where.full}>
+                      {where.code ? <code>{where.text}</code> : where.text}
+                    </dd>
+                  </div>
+                </dl>
                 {isRecoverable && onSelectIssue ? (
                   <div className="site-unavailable-locator-panel__actions">
                     <button

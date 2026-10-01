@@ -160,7 +160,7 @@ export async function verifyLiveReportKeyboardNavigation(page, frame, createIssu
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       }
       await page.keyboard.press(key);
-      await frame.locator('body').evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      await frame.locator('body').evaluate(() => document.documentElement.animate([], 17).finished.then(() => undefined));
       assert.equal(await frame.locator('body').evaluate(() =>
         document.activeElement.matches('.ap-live-marker') ||
         Boolean(document.activeElement.closest('#ap-live-issue-popover'))), true,

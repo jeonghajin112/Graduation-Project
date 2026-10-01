@@ -13,7 +13,8 @@ import {
   parseLiveReportBridgeAvailableMessage,
   parseLiveReportSessionExhaustedEvent,
   parseLiveReportSessionExhaustedMessage,
-  parseLiveReportPortMessage
+  parseLiveReportPortMessage,
+  shouldConnectAnnouncedLiveBridge
 } from "./live-report-protocol";
 import { DASHBOARD_REPLAY_SOURCE, PAGE_REPLAY_SOURCE } from "./page-replay-protocol";
 
@@ -308,9 +309,7 @@ describe("live report session boundary", () => {
       createReadyEvent({
         payload: { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken: "other_document" }
       }),
-      createReadyEvent({
-        payload: { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken, extra: true }
-      }),
+      createReadyEvent({ payload: "not an event" }),
       createReadyEvent({ unexpected: true })
     ]) {
       expect(parseLiveReportPortMessage(value, {
@@ -343,5 +342,53 @@ describe("live report session boundary", () => {
       sequence: 1,
       payload
     });
+  });
+});
+
+describe("authenticated events the dashboard does not understand", () => {
+  const options = { session, challenge, expectedSequence: 2, expectedDocumentToken: documentToken };
+
+  it("consumes them without a payload instead of failing the connection", () => {
+    for (const payload of [
+      { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken, extra: true },
+      { source: PAGE_REPLAY_SOURCE, type: "NEWER_EVENT", documentToken },
+      { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken, issueId: 1, status: "SOMEWHERE" }
+    ]) {
+      const parsed = parseLiveReportPortMessage(createReadyEvent({ payload }), options);
+      expect(parsed?.type).toBe("EVENT");
+      expect(parsed?.type === "EVENT" ? parsed.payload : undefined).toBeNull();
+    }
+  });
+
+  it("still rejects an event for another document", () => {
+    expect(parseLiveReportPortMessage(createReadyEvent({
+      payload: { source: PAGE_REPLAY_SOURCE, type: "NEWER_EVENT", documentToken: "other_document" }
+    }), options)).toBeNull();
+  });
+});
+
+describe("announced live bridges", () => {
+  const origin = VIEWER_ORIGIN;
+  const connected = { sessionId: session.sessionId, viewerOrigin: origin, documentToken };
+  const announce = (overrides: Partial<Parameters<typeof shouldConnectAnnouncedLiveBridge>[0]>) =>
+    shouldConnectAnnouncedLiveBridge({
+      connection: connected, sessionId: session.sessionId, viewerOrigin: origin,
+      documentToken: "forged_document", reconnectAllowed: false, ...overrides
+    });
+
+  it("ignores a forged announcement while the connected document is still loaded", () => {
+    expect(announce({})).toBe(false);
+    expect(announce({ viewerOrigin: `https://${"b2".repeat(20)}.replay.example.test` })).toBe(false);
+  });
+
+  it("reconnects after the iframe loaded another document or when nothing is connected", () => {
+    expect(announce({ reconnectAllowed: true })).toBe(true);
+    expect(announce({ connection: null })).toBe(true);
+    expect(announce({ connection: { ...connected, sessionId: "session_old" } })).toBe(true);
+  });
+
+  it("does not restart a handshake or an acknowledged document", () => {
+    expect(announce({ connection: { ...connected, documentToken: null } })).toBe(false);
+    expect(announce({ documentToken, reconnectAllowed: true })).toBe(false);
   });
 });

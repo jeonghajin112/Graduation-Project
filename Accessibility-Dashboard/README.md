@@ -44,6 +44,30 @@ npm run preview
 
 빌드 결과는 `dist/`에 생성된다. `npm run preview`는 빌드 결과를 로컬에서 확인하는 명령이다. 배포 호스트는 `/analyze`, `/projects/...`, `/recent-pages/...` 같은 SPA 경로를 `index.html`로 연결하고 `/api`는 백엔드로 보내거나 빌드 시 API base를 지정해야 한다.
 
+## 배포 설정
+
+프로덕션 빌드(`npm run build`)는 [.env.production](.env.production)과 빌드 환경 변수를 읽는다. 다음 값을 배포 환경에 맞춘다.
+
+| 변수 | 필수 | 설명 |
+|---|---|---|
+| `VITE_API_BASE_URL` | 아니요 | 기본값 `/api`. 호스트가 같은 origin의 `/api`를 백엔드로 프록시한다. 다른 origin을 쓰면 전체 URL을 지정하고 백엔드 CORS를 맞춘다. |
+| `VITE_LIVE_REPORT_VIEWER_BASE_URL` | 예 | 배포된 라이브 리포트 viewer origin(예: `https://viewer.example.com`). 경로·쿼리 없는 https origin이어야 하며 백엔드 `LIVE_REPORT_VIEWER_BASE_URL`과 같아야 한다. |
+
+`VITE_LIVE_REPORT_VIEWER_BASE_URL`은 배포마다 달라 저장소에 넣지 않는다. CI 변수로 주입하거나 추적되지 않는 `.env.production.local`에 둔다.
+
+```powershell
+$env:VITE_LIVE_REPORT_VIEWER_BASE_URL = "https://viewer.example.com"
+npm run build
+```
+
+값이 비었거나 `localhost`·`127.0.0.1`을 가리키거나 https origin이 아니면 `vite.config.ts`가 빌드를 멈춘다. 이 검사가 없으면 번들에 `http://localhost:9090`이 기본값으로 들어가 배포 환경의 viewer 프레임이 모두 거부되고, 점수만 보이고 페이지 렌더링은 나오지 않는다. 로컬 백엔드를 대상으로 일부러 프로덕션 빌드를 만들 때만 `LIVE_REPORT_VIEWER_ALLOW_LOCAL=true`를 함께 지정한다.
+
+`index.html`은 첫 페인트 전에 저장된 테마(`bridge-theme`)를 대시보드 경로에 적용하고, 랜딩 이미지 preload는 `/` 경로에서만 추가한다. `robots.txt`는 대시보드 경로(`/analyze`, `/projects/`, `/recent-pages/`)와 `/api/`를 크롤링 대상에서 뺀다.
+
+## 검사와 CI
+
+`npm run lint`(ESLint)와 `npm run typecheck`를 제공한다. GitHub Actions의 [frontend 워크플로](../.github/workflows/frontend.yml)가 lint, 타입 검사, `npm test`, 라이브 리포트 replay suite를 실행한다. 세부 범위는 [테스트 가이드](docs/testing.md)를 따른다.
+
 기본 통합 검증은 `npm test`다. 변경 범위에 따른 단위·브라우저·리포트 검증은 [테스트 가이드](docs/testing.md), 번들 분석은 `npm run analyze:bundle`, 번들 경계 검사는 `npm run test:bundle`을 사용한다.
 
 `npm run test:list`로 테스트를 확인하고 `npm run test:run -- --test <파일>`로 필요한 회귀만 실행할 수 있다. 실행별 결과와 로그는 `artifacts/frontend-tests/`에 저장한다.

@@ -21,6 +21,9 @@ npx playwright install chromium
 | `npm run test:run -- --test <파일>` | 선택한 CI 테스트만 실행. `--test` 반복 가능 |
 | `npm run test:unit -- <테스트 경로>` | 지정한 Vitest 테스트 |
 | `npm run test:unit` | 전체 단위 테스트 |
+| `npm run lint` | ESLint(typescript-eslint, React Hooks). 오류만 실패로 처리 |
+| `npm run lint:strict` | 경고까지 실패로 처리(기존 hook 의존성 경고 정리 후 기본값 목표) |
+| `npm run typecheck` | 앱과 `vite.config.ts` 타입 검사(빌드 없음) |
 | `npm run build` | TypeScript 검사와 프로덕션 빌드 |
 | `npm run test:bundle` | 새 분석 빌드와 번들 경계·예산 검사 |
 | `npm test` | 번들 검사 → 전체 단위 테스트 → 격리 CI suite |
@@ -29,6 +32,10 @@ npx playwright install chromium
 | `npm run test:visual` | 랜딩 시각 검증 |
 | `npm run test:replay` | 실제 백엔드 rewriter를 이용한 리포트 회귀 |
 | `npm run test:backend` | 실행 중인 실제 백엔드를 사용하는 통합 검증 |
+
+`test:bundle`은 `--mode analyze`로 빌드하지만 `.env.production` 값을 그대로 읽으므로 배포 번들과 같은 환경을 측정한다. 라이브 리포트 viewer 주소만 접속하지 않는 검사용 origin(`https://viewer.bundle-check.invalid`)으로 대체한다.
+
+GitHub Actions([frontend.yml](../../.github/workflows/frontend.yml))는 `lint` → `typecheck` → `npm test`를 실행하고, 별도 job에서 백엔드 fixture를 Gradle로 export하는 `test:replay`를 실행한다. `test:backend`와 `scale` suite는 실제 백엔드·대용량 fixture가 필요해 수동으로 실행한다.
 
 `test:ci`는 `npm test`의 별칭이다. 개별 suite 명령에는 `npm test`의 pretest가 자동으로 붙지 않는다. 이미 실행한 검사와 같은 범위를 이유 없이 반복하지 않는다.
 
@@ -62,7 +69,7 @@ npm run test:run -- --suite scale
 
 새 분석 계약은 `verify-analysis-protocol.mjs`에서 10,001개 이력, 빠른 분석·재분석의 접수 전후 응답 유실, 동일 키 복구, 배치 상태 조회와 장기 미확인 요청의 수동 복구를 확인한다. 실제 서버의 동시 접수·키 충돌·HTTP 계약은 백엔드 `AnalysisSubmissionIntegrationTest`가 검증한다. 서버 계약 버전을 제공하지 않는 fixture는 기존 복구 경로를 계속 검사한다.
 
-`verify-final-report.mjs`는 탭의 키보드 조작과 URL·뒤로 가기, 보기 전환 중 뷰어 유지, 요약·우선순위·KWCAG 그룹·필터, 위치 표시 불가 사유와 좌표 표시, 문제 상세 포커스 복원, 인쇄 시 전체 펼침과 출력 범위, ‘페이지에서 보기’의 `FOCUS_ISSUE` 전달과 재로딩 없음, 리포트 링크로 직접 열기, 광고·동적 영역 이슈가 점수 대상 집계·뷰어에 들어가지 않고 별도 항목으로만 표시되는지, 페이지 전체 설정·분석 이후 바뀐 문제의 목록 분리와 재분석 안내, 속한 요소에 표시한 문제의 리포트 문구를 확인한다.
+`verify-final-report.mjs`는 탭의 키보드 조작과 URL·뒤로 가기, 보기 전환 중 뷰어 유지, 요약 문장·수치·심각도 비율·우선순위·KWCAG 그룹·필터, 규칙 ID·문제 번호·현재 위치 이유, 명도 대비 측정값 표시, KWCAG 33개 항목 상태·텍스트 검사 실패 시 ‘검사 못 함’·항목에서 문제 그룹으로 이동, 위치 표시 불가 사유와 좌표 표시, 문제 상세 포커스 복원, 인쇄 시 전체 펼침과 출력 범위, ‘페이지에서 보기’의 `FOCUS_ISSUE` 전달과 재로딩 없음, 리포트 링크로 직접 열기, 광고·동적 영역 이슈가 점수 대상 집계·뷰어에 들어가지 않고 별도 항목으로만 표시되는지, 페이지 전체 설정의 목록 분리, 분석 이후 바뀐 문제가 ‘화면에 표시되지 않은 문제’에 들어가는지와 재분석 안내, ‘위치 표시 불가’ 필터와 수치의 일치, 속한 요소에 표시한 문제의 리포트 문구를 확인한다.
 
 `verify-result-hardening.mjs`는 라이브 연결 실패 상태에서 0·1·5,000·5,001·10,001개 결과의 안내, 제거된 전체 문제 버튼의 부재, 차트의 자료 없음과 실제 0개를 확인한다. 기존 개별 문제 상세의 포커스와 HTML 이스케이프는 page evidence 회귀에서 확인한다. `verify-landing-idle.mjs`는 영상의 정지 상태와 스크롤 후 재개·정지에서 RAF 호출을 측정한다.
 

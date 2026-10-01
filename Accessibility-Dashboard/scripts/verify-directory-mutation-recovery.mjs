@@ -41,6 +41,14 @@ async function verify(browser, kind, mode) {
           evaluationTargets: organizationActive ? targets : []
         }));
       }
+      // Edits and deletions confirm server state with single-entity reads.
+      if (request.method() === "GET" && (pathname === "/api/organizations/1" || pathname === "/api/targets/101")) {
+        events.push("GET");
+        if (mode === "lookup-stalled" && patches > 0) { pendingRoutes.push(route); return; }
+        return fulfillJson(route, pathname === "/api/targets/101"
+          ? { ...target, status: targets.length > 0 ? "ACTIVE" : "DELETED" }
+          : { ...organization, status: organizationActive ? "ACTIVE" : "INACTIVE" });
+      }
       if (request.method() === "PATCH" && pathname === patchPath) {
         patches++;
         events.push("PATCH");
@@ -133,6 +141,10 @@ async function verifyDeletePreservesCurrentRoute(browser) {
       const pathname = new URL(request.url()).pathname;
       if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
         return fulfillJson(route, createDashboardOverview({ organizations }));
+      }
+      if (request.method() === "GET" && pathname === "/api/organizations/1") {
+        return fulfillJson(route, { ...project(1),
+          status: organizations.some(candidate => candidate.id === 1) ? "ACTIVE" : "INACTIVE" });
       }
       if (request.method() === "PATCH" && pathname === "/api/organizations/1/deactivate") {
         patches++;

@@ -89,7 +89,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
     const route = document.querySelector(".sw-route");
     const stage = document.querySelector(".sw-stage");
     const openingPoster = document.querySelector(".sw-scene .sw-scene__still");
-    const activeCopy = document.querySelector('.sw-copy[aria-hidden="false"]');
+    const activeCopy = document.querySelector('.sw-copy[data-sw-active="true"]');
     const wordmark = document.querySelector(".sw-wordmark,.sw-brand__name");
     const topCta = document.querySelector(".sw-topcta");
     const titleStyle = title ? getComputedStyle(title) : null;
@@ -110,8 +110,12 @@ async function verifyReducedMotionViewport(browser, viewport) {
       mainCount: document.querySelectorAll("main#uni-access-main").length,
       h1Count: document.querySelectorAll("h1").length,
       copyCount: document.querySelectorAll(".sw-copy").length,
-      activeCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="false"]:not([inert])').length,
-      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
+      activeCopyCount: document.querySelectorAll('.sw-copy[data-sw-active="true"]').length,
+      // Copy stays in the accessibility tree; inactive scenes only leave the Tab order.
+      hiddenCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="true"], .sw-copy[inert]').length,
+      inactiveCopyLeakCount: document.querySelectorAll(
+        '.sw-copy[data-sw-active="false"] :is(a[href], button):not([tabindex="-1"])'
+      ).length,
       routeVisible: Boolean(route && isVisible(route)),
       horizontalProgressCount: document.querySelectorAll(".sw-scrollbar").length,
       sectionNumberCount: document.querySelectorAll(".sw-copy__num").length,
@@ -152,7 +156,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(facts.h1Count, 1, `${label}: landing must expose one h1`);
   assert.equal(facts.copyCount, 5, `${label}: expected five narrative scenes`);
   assert.equal(facts.activeCopyCount, 1, `${label}: exactly one scene copy must be active`);
-  assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy escaped inert state`);
+  assert.equal(facts.hiddenCopyCount, 0, `${label}: scene copy must stay readable by assistive technology`);
+  assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy controls escaped the Tab order`);
   assert.equal(facts.routeVisible, false, `${label}: side progress bar must stay hidden`);
   assert.equal(facts.horizontalProgressCount, 0, `${label}: obsolete top progress bar is still rendered`);
   assert.equal(facts.sectionNumberCount, 0, `${label}: decorative section counters must stay removed`);
@@ -267,13 +272,13 @@ async function verifyReducedMotionViewport(browser, viewport) {
   // Scroll distance is capped at the FHD unit even when media fills a taller viewport.
   await page.evaluate(() => window.scrollTo(0, Math.min(innerHeight, 1080) * 5.15));
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
+    () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
   await settle(page);
   const report = await page.evaluate(() => {
     const scene = document.querySelectorAll(".sw-scene")[3];
     const media = scene?.querySelector(".sw-scene__video, .sw-scene__still");
-    const copy = document.querySelector('.sw-copy[aria-hidden="false"]');
+    const copy = document.querySelector('.sw-copy[data-sw-active="true"]');
     const rect = media?.getBoundingClientRect();
     const copyRect = copy?.getBoundingClientRect();
     const overlaps = Boolean(
@@ -282,8 +287,8 @@ async function verifyReducedMotionViewport(browser, viewport) {
       rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1
     );
     return {
-      title: document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent,
-      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[aria-hidden="true"]:not([inert])').length,
+      title: document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent,
+      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[data-sw-active="false"] :is(a[href], button):not([tabindex="-1"])').length,
       cardElementFound: Boolean(media),
       cardWidth: rect?.width ?? 0,
       cardRadius: media ? Number.parseFloat(getComputedStyle(media).borderTopLeftRadius) : 0,
@@ -313,16 +318,16 @@ async function verifyReducedMotionViewport(browser, viewport) {
 
   await page.evaluate(() => window.scrollTo(0, Math.min(innerHeight, 1080) * 6.75));
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
+    () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
   );
   assert.deepEqual(
-    await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__cta a').allTextContents(),
+    await page.locator('.sw-copy[data-sw-active="true"] .sw-copy__cta a').allTextContents(),
     ["새 페이지 분석", "분석 결과 보기"],
     `${label}: final actions are missing`
   );
   await page.getByRole("link", { name: "분석 결과 보기", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector(".sw-copy[aria-hidden=false] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
+    () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
 
   assert.equal(apiRequestCount, 0, `${label}: landing unexpectedly requested an API`);
@@ -375,7 +380,7 @@ async function verifyDesktopMotionPath(browser) {
   const scenes = [];
   for (const scene of refreshedScenes) {
     await page.evaluate((scrollVh) => window.scrollTo(0, innerHeight * scrollVh), scene.scrollVh);
-    await page.locator(`#sw-section-${scene.id}[aria-hidden="false"]:not([inert])`).waitFor();
+    await page.locator(`#sw-section-${scene.id}[data-sw-active="true"]`).waitFor();
     await page.waitForFunction((index) => {
       const element = document.querySelectorAll(".sw-scene")[index];
       const video = element?.querySelector("video");
@@ -402,7 +407,7 @@ async function verifyDesktopMotionPath(browser) {
         withinViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
         overlapsCopy: rect.left < copyRect.right - 1 && rect.right > copyRect.left + 1 &&
           rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1,
-        activeCopyCount: document.querySelectorAll('.sw-copy[aria-hidden="false"]:not([inert])').length,
+        activeCopyCount: document.querySelectorAll('.sw-copy[data-sw-active="true"]').length,
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
       };
     }, scene);
@@ -506,12 +511,12 @@ async function verifyMobileHeightOnlyResize(browser) {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await page.waitForFunction(() => {
     const maxScroll = document.documentElement.scrollHeight - innerHeight;
-    const activeTitle = document.querySelector('.sw-copy[aria-hidden="false"] .sw-copy__title');
+    const activeTitle = document.querySelector('.sw-copy[data-sw-active="true"] .sw-copy__title');
     return Math.abs(scrollY - maxScroll) <= 1 && activeTitle?.textContent === "접근성을 한 화면에서";
   });
   assert.equal(await page.locator(".sw-route").isVisible(), false, "mobile resize must not restore the side bar");
   assert.equal(
-    await page.locator('.sw-copy[aria-hidden="false"] .sw-copy__title').textContent(),
+    await page.locator('.sw-copy[data-sw-active="true"] .sw-copy__title').textContent(),
     "접근성을 한 화면에서",
     "mobile height-only resize lost the final scene state"
   );
@@ -526,7 +531,7 @@ async function verifyScrollControl(browser) {
       const page = await context.newPage();
       await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
       await page.locator('[data-scroll-world-ready="true"]').waitFor();
-      const down = page.getByRole("button", { name: "SCROLL DOWN: 아래로 스크롤", exact: true });
+      const down = page.getByRole("button", { name: "아래로 스크롤", exact: true });
       const animation = await down.locator("svg").evaluate((arrow) => getComputedStyle(arrow).animationName);
       assert.equal(animation === "none", reducedMotion === "reduce", "scroll arrow must respect reduced motion");
       await down.click();
@@ -536,7 +541,7 @@ async function verifyScrollControl(browser) {
         await page.evaluate((value) => window.scrollTo({
           top: (document.documentElement.scrollHeight - innerHeight) * value, behavior: "instant"
         }), fraction);
-        const label = fraction === 1 ? "TOP: 맨 위로 이동" : "SCROLL DOWN: 아래로 스크롤";
+        const label = fraction === 1 ? "맨 위로 이동" : "아래로 스크롤";
         const control = page.getByRole("button", { name: label, exact: true });
         await control.waitFor();
         const facts = await control.evaluate((element) => {
@@ -556,7 +561,7 @@ async function verifyScrollControl(browser) {
           await page.screenshot({ path: `${outDir}/scroll-control-${viewport.width}-${fraction === 1 ? "bottom" : "opening"}.png` });
         }
       }
-      const top = page.getByRole("button", { name: "TOP: 맨 위로 이동", exact: true });
+      const top = page.getByRole("button", { name: "맨 위로 이동", exact: true });
       if (viewport.width >= 860) {
         await top.focus();
         await top.press("Enter");
@@ -643,10 +648,10 @@ async function verifyMessageHandoff(browser) {
     });
     assert.ok(alignment < 1, `The arriving word must align with the next heading (${alignment}px).`);
     await scrollToProgress(0.32, "findings");
-    assert.equal(await page.locator(".ua-findings__body").getAttribute("aria-hidden"), "false");
+    assert.equal(await page.locator(".ua-findings__body").getAttribute("aria-hidden"), null);
     await scrollToProgress(0.18, "handoff");
     await scrollToProgress(0.06, "message");
-    assert.equal(await page.locator(".ua-findings__message").getAttribute("aria-hidden"), "false");
+    assert.equal(await page.locator(".ua-findings__message").getAttribute("aria-hidden"), null);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await scrollToProgress(0.2, "findings");
     assert.equal(await page.locator(".ua-findings__moving-word").isVisible(), false);

@@ -5,8 +5,21 @@ import {
   getEvidenceFrameIdentity,
   getReplaySourceWidth,
   resolveEvidenceSource,
+  resolveReplayCaptureMetadataStatus,
   shouldAwaitLiveDocumentHealthAfterFrameLoad
 } from "./evidence-source";
+
+describe("replay capture metadata status", () => {
+  it("holds coordinates while loading and drops them once the capture is known to be absent", () => {
+    expect(resolveReplayCaptureMetadataStatus("loading", false)).toBe("pending");
+    expect(resolveReplayCaptureMetadataStatus("ready", true)).toBe("ready");
+    // A cached value stays usable while a retry reloads it.
+    expect(resolveReplayCaptureMetadataStatus("loading", true)).toBe("ready");
+    for (const loadState of ["error", "empty", "idle"] as const) {
+      expect(resolveReplayCaptureMetadataStatus(loadState, false)).toBe("missing");
+    }
+  });
+});
 
 describe("page evidence source selection", () => {
   it("uses only the active live session identity in the product flow", () => {

@@ -1,3 +1,39 @@
+/*
+ * Document-level tokens shared by the dashboard, its portaled dialogs and the
+ * landing page.
+ *
+ * Stacking scale. Use these for elements that compete across the page;
+ * small local values (0–3) inside an isolated component stay as numbers.
+ *   raised      1      local lift inside a component
+ *   dropdown    40     menus anchored to a trigger
+ *   landing     45     landing sections above the fixed scroll film
+ *                      (film stage 10 · copy 20 · route 40 · topbar 50 · hint 60)
+ *   overlay     999    full-screen route/loading overlays
+ *   skip-link   1000   keyboard skip link, above page chrome
+ *   modal       10000  modal dialogs and their backdrop
+ *   tooltip     10100  tooltips, above modals so they stay readable in dialogs
+ */
+:root {
+  --z-raised: 1;
+  --z-dropdown: 40;
+  --z-landing-section: 45;
+  --z-overlay: 999;
+  --z-skip-link: 1000;
+  --z-modal: 10000;
+  --z-tooltip: 10100;
+
+  /*
+   * Severity fills for charts, bars and report badges (drawn with dark ink,
+   * the same in both themes). src/components/dashboard/panels/site-dashboard/
+   * constants.ts references these by name. Theme-aware severity text/background
+   * pairs are the --site-severity-*-text / -bg tokens below.
+   */
+  --site-severity-critical-fill: #f35f63;
+  --site-severity-high-fill: #fb8a3d;
+  --site-severity-medium-fill: #f3b234;
+  --site-severity-low-fill: #10b981;
+}
+
 @layer base {
   .bridge-dashboard {
     --dashboard-accent: var(--primary, #0071e3);

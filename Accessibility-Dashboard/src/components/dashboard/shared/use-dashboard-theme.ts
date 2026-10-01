@@ -1,8 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 import type { ThemeMode } from "@/types/theme";
 
+// index.html reads the same key before first paint. Keep both in sync.
 const THEME_STORAGE_KEY = "bridge-theme";
+const LIGHT_THEME_COLOR = "#f5f5f7";
+const DARK_THEME_COLOR = "#111113";
+
+function setBrowserThemeColor(color: string) {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", color);
+}
 
 function readStoredTheme(): ThemeMode {
   if (typeof window === "undefined") {
@@ -53,12 +60,16 @@ export function useDashboardTheme({
     }
   }, [persist, themeMode]);
 
-  useEffect(() => {
+  // Layout effect: apply the document theme before the browser paints, so
+  // client-side navigation into the dashboard never shows a light frame.
+  useLayoutEffect(() => {
     const rootElement = document.documentElement;
     rootElement.classList.toggle("dark", isDarkMode);
+    setBrowserThemeColor(isDarkMode ? DARK_THEME_COLOR : LIGHT_THEME_COLOR);
 
     return () => {
       rootElement.classList.remove("dark");
+      setBrowserThemeColor(LIGHT_THEME_COLOR);
     };
   }, [isDarkMode]);
 

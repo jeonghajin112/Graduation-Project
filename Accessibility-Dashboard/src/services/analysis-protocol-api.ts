@@ -39,12 +39,12 @@ export function fetchEvaluationStatuses(ids: readonly number[], signal?: AbortSi
   return apiRequest(`/requests/statuses?ids=${ids.join(",")}`, createEvaluationStatusesParser(ids), { cache: "no-store", signal });
 }
 
-export async function requestEvaluationTargetRescan(
+export function submitEvaluationTargetRescan(
   targetId: number,
   signal?: AbortSignal,
   attemptId?: string
-): Promise<number | null> {
-  const response = await apiRequest(
+): Promise<EvaluationRequestModel> {
+  return apiRequest(
     "/requests",
     createEvaluationRequestResponseParser({ expectedTargetId: targetId }),
     {
@@ -57,7 +57,6 @@ export async function requestEvaluationTargetRescan(
     signal
     }
   );
-  return response.id;
 }
 
 export async function startUrlEvaluation(url: string, signal?: AbortSignal, attemptId?: string): Promise<EvaluationRequestModel> {

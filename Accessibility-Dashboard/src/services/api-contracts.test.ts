@@ -152,6 +152,16 @@ function createEvaluationIssue() {
 }
 
 describe("parseDashboardOverviewResponse", () => {
+  it.each([
+    "2026-10-01T12:00:00+09:00",
+    "2026-10-01T03:00:00Z",
+    "2026-10-01T12:00:00.123456+09:00",
+    // Older servers sent local timestamps without an offset.
+    "2026-10-01T12:00:00"
+  ])("accepts server timestamps with and without an offset: %s", (date) => {
+    expect(() => parseDashboardOverviewResponse(createValidOverview(date), "data")).not.toThrow();
+  });
+
   it("keeps the fields used by the dashboard and recovery guard", () => {
     const parsed = parseDashboardOverviewResponse(createValidOverview(), "$.data");
     expect(parsed.organizations[0]?.updatedAt).toBe(validDate);

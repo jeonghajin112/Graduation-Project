@@ -174,6 +174,17 @@ try {
       return;
     }
 
+    // Edits and deletions confirm server state with single-entity reads.
+    if (method === "GET" && pathname === `/api/organizations/${organization.id}`) {
+      await fulfillJson(route, { ...organization, status: organizationActive ? "ACTIVE" : "INACTIVE" });
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/targets/${target.id}`) {
+      await fulfillJson(route, { ...target, status: targets.length > 0 ? "ACTIVE" : "DELETED" });
+      return;
+    }
+
     if (method === "PATCH" && pathname === `/api/targets/${target.id}/delete`) {
       observed.pageDeletePatches += 1;
       pageDeleteStarted.resolve();

@@ -23,14 +23,14 @@ const DashboardPreviewRoute = lazy(() =>
 function AppRouteFallback() {
   return (
     <section
-      className="fixed inset-0 z-[999] flex items-center justify-center bg-white"
+      className="fixed inset-0 z-[999] flex items-center justify-center bg-[var(--background)]"
       role="status"
       aria-live="polite"
       aria-atomic="true"
       aria-busy="true"
     >
-      <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-lg">
-        <p className="text-sm font-medium text-slate-700">분석 화면을 불러오는 중...</p>
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 shadow-lg">
+        <p className="text-sm font-medium text-[var(--foreground)]">분석 화면을 불러오는 중...</p>
       </div>
     </section>
   );

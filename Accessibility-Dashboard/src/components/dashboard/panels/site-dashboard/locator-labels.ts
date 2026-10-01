@@ -7,7 +7,8 @@ export type LocatorExplanationKey =
   | "missingPath" | "invalidPath" | "notFound" | "detached" | "contentChanged"
   | "frame" | "shadowRoot" | "unsupportedContext" | "ariaHidden" | "inert"
   | "noLayoutBox" | "zeroOpacity" | "hidden" | "carouselFailed" | "limitExceeded"
-  | "hiddenUnknown" | "unknown" | "pageSetting" | "focusReveal" | "focusRevealFailed";
+  | "hiddenUnknown" | "unknown" | "pageSetting" | "focusReveal" | "focusRevealFailed"
+  | "statusTimeout" | "replayRejected" | "captureMissing";
 
 const keysByReason: Record<string, LocatorExplanationKey> = {
   EMPTY_PATH: "missingPath",
@@ -32,21 +33,30 @@ const keysByReason: Record<string, LocatorExplanationKey> = {
   CAROUSEL_RECOVERY_FAILED: "carouselFailed",
   ISSUE_LIMIT_EXCEEDED: "limitExceeded",
   DOCUMENT_METADATA: "pageSetting",
-  FOCUS_REVEAL_FAILED: "focusRevealFailed"
+  FOCUS_REVEAL_FAILED: "focusRevealFailed",
+  // Assigned by the dashboard, not the viewer.
+  STATUS_TIMEOUT: "statusTimeout",
+  REPLAY_REJECTED: "replayRejected",
+  CAPTURE_METADATA_MISSING: "captureMissing"
 };
 
 
-export type LocatorCategory = "on-page" | "other-state" | "page-setting" | "outdated" | "unavailable";
+export type LocatorCategory = "on-page" | "other-state" | "page-setting" | "unavailable";
 
-// One grouping for the rail lists, the report and the re-analysis notice.
-// A stored path that finds nothing or finds changed text means the page
-// changed after the analysis.
+// One grouping for the rail lists and the report. Findings in a hidden tab,
+// menu or slide are shown on the area around them, so they are on the page.
 export function getLocatorCategory(state: LocatorIssueState): LocatorCategory {
   if (state.status === "VISIBLE" || state.status === "CONNECTED" || state.status === "OFFSCREEN") return "on-page";
   if (state.status === "HIDDEN_STATE" && state.recoverable === true) return "other-state";
   if (state.reason === "DOCUMENT_METADATA") return "page-setting";
-  if (state.reason === "ELEMENT_CONTENT_CHANGED" || state.reason === "SELECTOR_NOT_FOUND") return "outdated";
   return "unavailable";
+}
+
+// A stored path that finds nothing or finds changed text means the page
+// changed after the analysis. Those findings are not shown on screen; they
+// stay in the unavailable list and drive the re-analysis notice.
+export function isChangedAfterAnalysis(state?: LocatorIssueState): boolean {
+  return state?.reason === "ELEMENT_CONTENT_CHANGED" || state?.reason === "SELECTOR_NOT_FOUND";
 }
 
 export type LocatorExplanationOptions = {
@@ -97,7 +107,10 @@ export const locatorLabels: Record<LocatorExplanationKey, string> = {
   unknown: "위치를 확인하지 못함",
   pageSetting: "페이지 전체 설정",
   focusReveal: "포커스하면 나타나는 요소",
-  focusRevealFailed: "포커스해도 나타나지 않음"
+  focusRevealFailed: "포커스해도 나타나지 않음",
+  statusTimeout: "위치 확인 시간 초과",
+  replayRejected: "검사 화면이 받지 못함",
+  captureMissing: "분석 당시 화면 정보 없음"
 };
 
 export function getLocatorLabel(state?: LocatorIssueState, options?: LocatorExplanationOptions): string {

@@ -1,5 +1,6 @@
 import type { EvaluationCaptureMetadata } from "@/types/accessibility-domain";
 
+import type { EvaluationCaptureMetadataLoadState } from "./use-evaluation-capture-metadata";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
 export type EvidenceFrameKind = "live" | "preview" | null;
@@ -21,6 +22,16 @@ export function getEvidenceFrameIdentity({
     return previewRuntimeUrl === null ? null : `preview:${previewRuntimeUrl}`;
   }
   return null;
+}
+
+// Coordinate markers need the capture's width and pixel scale. Wait while it
+// loads; once it is known to be absent, coordinates cannot be placed.
+export function resolveReplayCaptureMetadataStatus(
+  loadState: EvaluationCaptureMetadataLoadState,
+  hasCaptureMetadata: boolean
+): "pending" | "ready" | "missing" {
+  if (hasCaptureMetadata) return "ready";
+  return loadState === "loading" ? "pending" : "missing";
 }
 
 export function shouldAwaitLiveDocumentHealthAfterFrameLoad({

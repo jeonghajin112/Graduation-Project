@@ -26,7 +26,8 @@ import {
   getLiveReportConnectTargetOrigin,
   parseLiveReportBridgeAvailableMessage,
   parseLiveReportSessionExhaustedEvent,
-  parseLiveReportPortMessage
+  parseLiveReportPortMessage,
+  shouldConnectAnnouncedLiveBridge
 } from "./live-report-protocol";
 import {
   DASHBOARD_REPLAY_SOURCE,
@@ -41,13 +42,19 @@ import {
 import type { LocatorReport, RecentIssueRow } from "./types";
 import { useBatchedLocatorStates } from "./use-batched-locator-states";
 import { buildLocatorReport } from "./locator-report";
+import { getIssueCoordinateBox } from "./issue-locator";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 
 type ReplayConnectionState = "loading" | "ready" | "error";
 
+/** Whether the analysis-time capture (width and pixel scale) is known. */
+export type ReplayCaptureMetadataStatus = "pending" | "ready" | "missing";
+
 type LiveReportPortConnection = {
   challenge: string;
   documentToken: string | null;
+  /** The iframe load event of this document was already observed. */
+  documentLoaded: boolean;
   nextInboundSequence: number;
   nextOutboundSequence: number;
   port: MessagePort;
@@ -71,6 +78,9 @@ const REPLAY_FRAME_LOAD_TIMEOUT_MS = 120_000;
 // Match the live viewer's bounded INIT_ISSUES input. Overflow remains in the
 // unavailable list rather than waiting for statuses the viewer cannot send.
 const LIVE_REPORT_ISSUE_LIMIT = 5_000;
+// After INIT_ISSUES the viewer reports every issue within a few frames. An
+// issue still unreported after this is listed as not shown on the page.
+const LOCATOR_STATUS_TIMEOUT_MS = 10_000;
 
 type PageEvidenceConnectionOptions = {
   evaluationRequestId: number | null;
@@ -86,6 +96,7 @@ type PageEvidenceConnectionOptions = {
   selectedIssueFocusRequestId: number;
   replayViewportMetrics: ReplayViewportMetrics;
   chromeHeight: number;
+  captureMetadataStatus?: ReplayCaptureMetadataStatus;
 };
 
 /** Owns the frame connection, document lifecycle, and report messages.
@@ -94,7 +105,7 @@ type PageEvidenceConnectionOptions = {
 export function usePageEvidenceConnection({
   evaluationRequestId, liveSession, liveSessionLoadState, onRetryLiveSession,
   onLocatorReportChange, onSelectIssue, previewRuntimeUrl, rows, deviceScaleFactor, selectedIssueId,
-  selectedIssueFocusRequestId, replayViewportMetrics, chromeHeight
+  selectedIssueFocusRequestId, replayViewportMetrics, chromeHeight, captureMetadataStatus = "ready"
 }: PageEvidenceConnectionOptions) {
   const [documentTitle, setDocumentTitle] = useState<string | null>(null);
   const [isDocumentScrolled, setIsDocumentScrolled] = useState(false);
@@ -106,14 +117,18 @@ export function usePageEvidenceConnection({
     "request-started"
   );
   const [replayReadyEpoch, setReplayReadyEpoch] = useState(0);
-  const { locatorStates, enqueueLocatorState, resetLocatorStates, cancelPendingLocatorStates } = useBatchedLocatorStates();
+  const {
+    locatorStates, enqueueLocatorState, resetLocatorStates, cancelPendingLocatorStates, settleMissingLocatorStates
+  } = useBatchedLocatorStates();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const activeFrameKindRef = useRef<EvidenceFrameKind>(null);
   const evaluationRequestIdRef = useRef(evaluationRequestId);
   const liveReportPortRef = useRef<LiveReportPortConnection | null>(null);
   const liveSessionRef = useRef<LiveReportSession | null>(liveSession);
   const retryLiveReportSessionRef = useRef(onRetryLiveSession);
-  const liveReportBridgeConnectorRef = useRef<(viewerOrigin?: string) => void>(() => {});
+  const liveReportBridgeConnectorRef = useRef<(viewerOrigin?: string, documentLoaded?: boolean) => void>(
+    () => {}
+  );
   const replayMessageHandlerRef = useRef<(message: PageReplayToDashboardMessage) => void>(() => {});
   const activeDocumentTokenRef = useRef<string | null>(null);
   const pendingDocumentTokenRef = useRef<string | null>(null);
@@ -125,6 +140,11 @@ export function usePageEvidenceConnection({
   const replayFrameLoadWatchdogEpochRef = useRef(0);
   const replayReadyTimeoutRef = useRef<number | null>(null);
   const replayReadyWatchdogEpochRef = useRef(0);
+  const locatorStatusTimeoutRef = useRef<number | null>(null);
+  const locatorStatusWatchdogEpochRef = useRef(0);
+  // Set by an iframe load that replaced a connected document. Only then may a
+  // new AVAILABLE announcement replace an established bridge connection.
+  const liveReconnectAllowedRef = useRef(false);
   const initializedReplayRef = useRef<{
     documentToken: string;
     issuesSignature: string;
@@ -142,10 +162,16 @@ export function usePageEvidenceConnection({
     createLiveReportAutomaticRecoveryState(evaluationRequestId)
   );
 
+  const omitCoordinateBoxes = captureMetadataStatus === "missing";
   const replayIssues = useMemo(
-    () => rows.map((row) => toPageReplayIssue(row, deviceScaleFactor)),
-    [deviceScaleFactor, rows]
+    () => rows.map((row) => toPageReplayIssue(row, deviceScaleFactor, { omitCoordinateBox: omitCoordinateBoxes })),
+    [deviceScaleFactor, omitCoordinateBoxes, rows]
   );
+  // Coordinate-only findings sent without their box. The viewer reports them
+  // as having no path; the real reason is the missing capture.
+  const coordinateOmittedIssueIds = useMemo(() => new Set(omitCoordinateBoxes
+    ? rows.filter((row) => getIssueCoordinateBox(row.issue) !== null).map((row) => row.issue.id)
+    : []), [omitCoordinateBoxes, rows]);
   const {
     frameKind: activeFrameKind,
     loadState: effectiveLoadState
@@ -175,7 +201,7 @@ export function usePageEvidenceConnection({
   const reportIssueIdsSignature = useMemo(() => reportIssueIds.join(","), [reportIssueIds]);
   const locatorReport = useMemo<LocatorReport>(() => {
     const connected = effectiveLoadState === "ready" && replayConnectionState === "ready";
-    const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : replayIssues.length;
+    const issueLimit = activeFrameKind === "live" ? LIVE_REPORT_ISSUE_LIMIT : reportIssueIds.length;
     return buildLocatorReport({ requestId: evaluationRequestId, issueIds: reportIssueIds,
       issueIdsSignature: reportIssueIdsSignature, issueLimit, connected, states: locatorStates,
       failed: effectiveLoadState === "error" || (effectiveLoadState === "ready" && replayConnectionState === "error") });
@@ -242,6 +268,26 @@ export function usePageEvidenceConnection({
     }
   }
 
+  function clearLocatorStatusTimeout() {
+    locatorStatusWatchdogEpochRef.current += 1;
+    if (locatorStatusTimeoutRef.current !== null) {
+      window.clearTimeout(locatorStatusTimeoutRef.current);
+      locatorStatusTimeoutRef.current = null;
+    }
+  }
+
+  function armLocatorStatusTimeout(issueIds: readonly number[]) {
+    clearLocatorStatusTimeout();
+    const watchdogEpoch = locatorStatusWatchdogEpochRef.current;
+    locatorStatusTimeoutRef.current = window.setTimeout(() => {
+      if (locatorStatusWatchdogEpochRef.current !== watchdogEpoch) {
+        return;
+      }
+      locatorStatusTimeoutRef.current = null;
+      settleMissingLocatorStates(issueIds, { status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
+    }, LOCATOR_STATUS_TIMEOUT_MS);
+  }
+
   function closeLiveReportPort() {
     cancelPendingLocatorStates();
     const connection = liveReportPortRef.current;
@@ -260,6 +306,7 @@ export function usePageEvidenceConnection({
     }
     clearReplayFrameLoadTimeout();
     clearReplayReadyTimeout();
+    clearLocatorStatusTimeout();
     setFallbackIssueId(null);
     if (
       activeFrameKindRef.current === "live" &&
@@ -352,6 +399,7 @@ export function usePageEvidenceConnection({
   }
 
   function invalidateReplayDocumentSession({ resetRetiredTokens = false } = {}) {
+    clearLocatorStatusTimeout();
     setDocumentTitle(null);
     setIsDocumentScrolled(false);
     resetLocatorStates();
@@ -413,7 +461,7 @@ export function usePageEvidenceConnection({
     postToReplay({ source: DASHBOARD_REPLAY_SOURCE, type: "FOCUS_REPORT_UI", direction });
   }
 
-  function connectLiveReportBridge(viewerOrigin?: string) {
+  function connectLiveReportBridge(viewerOrigin?: string, documentLoaded = false) {
     const frameWindow = iframeRef.current?.contentWindow;
     const session = liveSession;
     if (!frameWindow || !session || activeFrameKindRef.current !== "live") {
@@ -448,6 +496,7 @@ export function usePageEvidenceConnection({
     const connection: LiveReportPortConnection = {
       challenge,
       documentToken: null,
+      documentLoaded,
       nextInboundSequence: 1,
       nextOutboundSequence: 1,
       port: channel.port1,
@@ -475,13 +524,16 @@ export function usePageEvidenceConnection({
       connection.nextInboundSequence += 1;
       if (message.type === "ACK") {
         connection.documentToken = message.documentToken;
+        liveReconnectAllowedRef.current = false;
         advanceReplayLoadingPhase("bridge-connected");
         armReplayReadyTimeout();
         requestReplayDocumentState();
         return;
       }
 
-      replayMessageHandlerRef.current(message.payload);
+      if (message.payload !== null) {
+        replayMessageHandlerRef.current(message.payload);
+      }
     };
     channel.port1.onmessageerror = () => failLiveReportConnection(session.sessionId);
     channel.port1.start();
@@ -546,6 +598,8 @@ export function usePageEvidenceConnection({
     const initializedReplay = initializedReplayRef.current;
     if (
       documentToken === null ||
+      // Coordinates depend on the capture scale; place them once it is known.
+      captureMetadataStatus === "pending" ||
       !isValidReplayViewportMetrics(replayViewportMetrics) ||
       (initializedReplay?.documentToken === documentToken &&
         initializedReplay.issuesSignature === replayIssuesSignature)
@@ -567,6 +621,7 @@ export function usePageEvidenceConnection({
       documentToken,
       issuesSignature: replayIssuesSignature
     };
+    armLocatorStatusTimeout(transmittedReplayIssues.map((issue) => issue.id));
   }
 
   useEffect(() => {
@@ -578,6 +633,7 @@ export function usePageEvidenceConnection({
     clearReplayReadyTimeout();
     closeLiveReportPort();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
+    liveReconnectAllowedRef.current = false;
     setFallbackIssueId(null);
     resetLocatorStates();
     setReplayLoadingPhase(
@@ -597,7 +653,11 @@ export function usePageEvidenceConnection({
       closeLiveReportPort();
       invalidateReplayDocumentSession();
     };
-  }, [effectiveLoadState, frameIdentity, frameRevision, frameRuntimeUrl]);
+    // The helpers below are recreated every render but only touch refs,
+    // state setters and the stable batch callbacks. Listing them would tear
+    // the connection down on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFrameKind, effectiveLoadState, frameIdentity, frameRevision, frameRuntimeUrl, resetLocatorStates]);
 
   useEffect(() => {
     setFallbackIssueId(null);
@@ -606,7 +666,7 @@ export function usePageEvidenceConnection({
   useLayoutEffect(() => {
     setFallbackIssueId(null);
     resetLocatorStates();
-  }, [replayIssuesSignature]);
+  }, [replayIssuesSignature, resetLocatorStates]);
 
   useEffect(() => {
     if (effectiveLoadState !== "ready" || replayConnectionState !== "ready") {
@@ -646,6 +706,7 @@ export function usePageEvidenceConnection({
       }
       setReplayConnectionState("loading");
       clearReplayReadyTimeout();
+      clearLocatorStatusTimeout();
       armReplayFrameLoadTimeout();
       return;
     }
@@ -673,6 +734,7 @@ export function usePageEvidenceConnection({
       setReplayLoadingPhase("source-ready");
       setReplayConnectionState("loading");
       clearReplayReadyTimeout();
+      clearLocatorStatusTimeout();
       armReplayFrameLoadTimeout();
       if (activeFrameKindRef.current === "live") {
         closeLiveReportPort();
@@ -793,14 +855,28 @@ export function usePageEvidenceConnection({
       return;
     }
 
+    if (message.type === "COMMAND_REJECTED") {
+      // The viewer kept its sequence but holds no issues: list every finding
+      // as not shown instead of leaving the location check pending.
+      if (message.commandType === "INIT_ISSUES") {
+        clearLocatorStatusTimeout();
+        settleMissingLocatorStates(
+          transmittedReplayIssues.map((issue) => issue.id),
+          { status: "UNAVAILABLE", reason: "REPLAY_REJECTED" }
+        );
+      }
+      return;
+    }
+
     if (message.type === "LOCATOR_STATUS") {
       if (!replayIssueIds.has(message.issueId)) {
         return;
       }
 
+      const captureMissing = message.status === "UNAVAILABLE" && coordinateOmittedIssueIds.has(message.issueId);
       enqueueLocatorState(message.issueId, {
         status: message.status,
-        reason: message.reason,
+        reason: captureMissing ? "CAPTURE_METADATA_MISSING" : message.reason,
         recoverable: message.recoverable,
         ownerKind: message.ownerKind
       });
@@ -842,15 +918,16 @@ export function usePageEvidenceConnection({
         if (!available) {
           return;
         }
-        const connection = liveReportPortRef.current;
-        if (
-          connection?.sessionId === session.sessionId &&
-          connection.viewerOrigin === targetOrigin &&
-          (connection.documentToken === null || connection.documentToken === available.documentToken)
-        ) {
+        if (!shouldConnectAnnouncedLiveBridge({
+          connection: liveReportPortRef.current,
+          sessionId: session.sessionId,
+          viewerOrigin: targetOrigin,
+          documentToken: available.documentToken,
+          reconnectAllowed: liveReconnectAllowedRef.current
+        })) {
           return;
         }
-        liveReportBridgeConnectorRef.current(targetOrigin);
+        liveReportBridgeConnectorRef.current(targetOrigin, liveReconnectAllowedRef.current);
         return;
       }
 
@@ -870,6 +947,10 @@ export function usePageEvidenceConnection({
 
     window.addEventListener("message", handleReplayMessage);
     return () => window.removeEventListener("message", handleReplayMessage);
+    // Registered once for the component's lifetime. The listener reads the
+    // current session, frame and handlers through refs, and
+    // failLiveReportConnection only touches refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -878,6 +959,9 @@ export function usePageEvidenceConnection({
     }
 
     sendReplayViewScale();
+    // The dependencies are the values sendReplayViewScale reads; the function
+    // itself is recreated every render and would resend on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     replayConnectionState,
     replayReadyEpoch,
@@ -893,7 +977,12 @@ export function usePageEvidenceConnection({
     }
 
     sendInitialIssues();
+    // Reinitialize only when the transmitted issues, their placement inputs or
+    // the document change. The selection travels separately as FOCUS_ISSUE,
+    // so it is deliberately not a trigger here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    captureMetadataStatus,
     replayConnectionState,
     replayIssuesSignature,
     replayReadyEpoch,
@@ -922,6 +1011,9 @@ export function usePageEvidenceConnection({
       type: "FOCUS_ISSUE",
       issueId: selectedVisibleIssueId
     });
+    // Focus is sent when the selection or an explicit request changes.
+    // postToReplay is recreated every render and reads the connection ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replayConnectionState, selectedIssueFocusRequestId, selectedVisibleIssueId]);
 
   function handleFrameLoad() {
@@ -935,6 +1027,12 @@ export function usePageEvidenceConnection({
         activeSession !== null &&
         existingConnection?.sessionId === activeSession.sessionId
       ) {
+        // The first load belongs to the connected document; a later one means
+        // the iframe now shows another document whose bridge may reconnect.
+        if (existingConnection.documentLoaded) {
+          liveReconnectAllowedRef.current = true;
+        }
+        existingConnection.documentLoaded = true;
         if (existingConnection.documentToken !== null) {
           if (!shouldAwaitLiveDocumentHealthAfterFrameLoad({
             confirmedDocumentToken: confirmedLiveDocumentTokenRef.current,
@@ -956,7 +1054,7 @@ export function usePageEvidenceConnection({
       setFallbackIssueId(null);
       resetLocatorStates();
       setReplayConnectionState("loading");
-      connectLiveReportBridge();
+      connectLiveReportBridge(undefined, true);
       return;
     }
 
@@ -998,6 +1096,11 @@ export function usePageEvidenceConnection({
     }
   }
 
+  // A retry the user asked for earns one automatic recovery again.
+  function resetAutomaticLiveRecovery() {
+    automaticLiveRecoveryRef.current = createLiveReportAutomaticRecoveryState(evaluationRequestIdRef.current);
+  }
+
   function retryFrame() {
     setReplayLoadingPhase(
       activeFrameKindRef.current === "live"
@@ -1023,6 +1126,6 @@ export function usePageEvidenceConnection({
     activeFrameKind, effectiveLoadState, replayConnectionState, replayLoadingPhase,
     documentTitle, isDocumentScrolled, fallbackIssue,
     unavailableLocatorCount, recoverableHiddenLocatorCount,
-    handleFrameLoad, handleFrameError, retryFrame, enterReportFocus
+    handleFrameLoad, handleFrameError, retryFrame, enterReportFocus, resetAutomaticLiveRecovery
   };
 }

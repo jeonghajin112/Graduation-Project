@@ -7,6 +7,10 @@ import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
 const storageKey = "accessibility-dashboard.site-create-attempt.v1";
+// Rescans of existing pages keep their checkpoint in a per-page slot.
+const rescanKey = targetId => `accessibility-dashboard.target-rescan-attempts.v1:${targetId}`;
+const readAll = page => page.evaluate(keys => keys.map(key => sessionStorage.getItem(key)),
+  [storageKey, rescanKey(101), rescanKey(102)]);
 const timestamp = "2026-09-09T00:00:00.000Z";
 const organization = { id: 1, name: "Rescan isolation project", type: "ETC", homepageUrl: null,
   description: "", status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
@@ -72,7 +76,7 @@ async function verifyFailureIsolation(browser, mode) {
     await open(101);
     await page.getByRole("button", { name: "재분석", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: mode === "post-422" ? "입력한 내용을 확인" : "서비스에 일시적인 문제" }).waitFor();
-    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null,
+    assert.deepEqual(await readAll(page), [null, null, null],
       "a failed preflight or definitive rejection must leave no standalone reservation");
     assert.deepEqual(posts, mode === "post-422" ? [101] : []);
     // Navigating reloads the app in the same session: the safe failure must not
@@ -85,7 +89,7 @@ async function verifyFailureIsolation(browser, mode) {
     await page.getByRole("button", { name: "재분석", exact: true }).click();
     await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
     assert.deepEqual(posts, mode === "post-422" ? [101, 102] : [102]);
-    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
+    assert.deepEqual(await readAll(page), [null, null, null]);
     console.log(`PASS rescan isolation: ${mode}`);
   } finally { await scenario.close(); }
 }
@@ -99,14 +103,17 @@ async function verifyLegacyAndCreationRecovery(browser, createdTarget) {
     const before = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
     await page.getByRole("button", { name: "재분석", exact: true }).click();
     if (createdTarget) {
-      await page.getByRole("alert").filter({ hasText: "다른 페이지 작업" }).waitFor();
-      assert.deepEqual(posts, [], "an unfinished page creation must not be discarded");
-      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), before);
+      // Another page's unfinished creation neither blocks this page's rescan
+      // nor is discarded by it.
+      await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
+      assert.deepEqual(posts, [102], "a page creation on 101 must not block a rescan of 102");
+      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), before,
+        "an unfinished page creation must not be discarded");
     } else {
       await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
       assert.deepEqual(posts, [102], "an old standalone request-ready record must not block B");
     }
-    console.log(`PASS rescan recovery: ${createdTarget ? "preserve page creation" : "release legacy preparation"}`);
+    console.log(`PASS rescan recovery: ${createdTarget ? "isolate page creation" : "release legacy preparation"}`);
   } finally { await scenario.close(); }
 }
 
@@ -119,7 +126,7 @@ async function verifyLostResponse(browser) {
     await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
     assert.deepEqual(posts, [101], "response loss and double click must never duplicate POST");
     assert.equal(fixture.countRequests({ method: "GET", pathname: "/api/requests" }), 2);
-    assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
+    assert.deepEqual(await readAll(page), [null, null, null]);
     console.log("PASS rescan recovery: lost response reconciles by GET");
   } finally { await scenario.close(); }
 }
@@ -132,21 +139,23 @@ async function verifyOwnershipAndCancel(browser, mode) {
     await page.getByRole("button", { name: "재분석", exact: true }).click();
     await responsePending;
     if (mode === "cancel-preflight") {
-      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null,
+      assert.deepEqual(await readAll(page), [null, null, null],
         "a preflight must not reserve durable recovery before any POST");
       await page.locator("aside").getByRole("button", { name: "새 페이지 분석", exact: true }).click();
       await page.locator("#quick-analyze-url").waitFor();
       releaseResponse();
       assert.deepEqual(posts, []);
-      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
+      assert.deepEqual(await readAll(page), [null, null, null]);
     } else {
-      const original = await page.evaluate(key => JSON.parse(sessionStorage.getItem(key)), storageKey);
+      const original = await page.evaluate(key => JSON.parse(sessionStorage.getItem(key)), rescanKey(101));
       assert.equal(original.phase, "request-reconciling", "the checkpoint must exist before POST");
-      const newer = JSON.stringify(recoveryFor(102, { attemptId: "newer-owner", phase: "request-reconciling", knownRequestIds: [] }));
-      await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), { key: storageKey, value: newer });
+      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null,
+        "a rescan must not reserve the shared page-creation slot");
+      const newer = JSON.stringify(recoveryFor(101, { attemptId: "newer-owner", phase: "request-reconciling", knownRequestIds: [] }));
+      await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), { key: rescanKey(101), value: newer });
       releaseResponse();
       await page.getByRole("alert").waitFor();
-      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), newer,
+      assert.equal(await page.evaluate(key => sessionStorage.getItem(key), rescanKey(101)), newer,
         "an older rejection must not erase another attempt's recovery");
       assert.deepEqual(posts, [101]);
     }

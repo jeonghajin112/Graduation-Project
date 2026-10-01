@@ -1,7 +1,7 @@
 .ua-message {
   /* Cover the scroll film while keeping its fixed navigation above this section. */
   position: relative;
-  z-index: 45;
+  z-index: var(--z-landing-section);
   display: grid;
   min-height: clamp(26rem, 64svh, 48rem);
   place-items: center;

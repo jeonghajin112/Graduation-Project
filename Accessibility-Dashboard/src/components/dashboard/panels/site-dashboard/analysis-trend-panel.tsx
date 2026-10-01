@@ -6,8 +6,9 @@ import type {
   ScoreResult
 } from "@/types/accessibility-domain";
 
+import { buildScoreTrend, padScoreTrend } from "./score-trend";
 import type { ScoreChartItem } from "./types";
-import { formatDateLabel, formatShortDate } from "./utils";
+import { formatDateLabel } from "./utils";
 
 type AnalysisTrendPanelProps = {
   evaluationRequests: EvaluationRequestModel[];
@@ -20,65 +21,16 @@ function formatScore(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-const TREND_SLOT_COUNT = 7;
-
 export function AnalysisTrendPanel({
   evaluationRequests,
   evaluationTargetId,
   resultSummaries,
   scoreResults
 }: AnalysisTrendPanelProps) {
-  const data = useMemo(() => {
-    const scoreByRequestId = new Map(
-      scoreResults.map((scoreResult) => [
-        scoreResult.evaluationRequestId,
-        scoreResult.totalScore
-      ])
-    );
-    const summaryByRequestId = new Map(
-      resultSummaries.map((summary) => [summary.requestId, summary])
-    );
-
-    const recentItems = evaluationRequests
-      .filter((request) => request.evaluationTargetId === evaluationTargetId)
-      .map((request) => {
-        const summary = summaryByRequestId.get(request.id);
-        const score = summary?.totalScore ?? scoreByRequestId.get(request.id) ?? null;
-        if (score === null || !Number.isFinite(score)) {
-          return null;
-        }
-
-        const date = summary?.requestedAt ?? request.requestedAt ?? request.updatedAt;
-        return {
-          slot: 0,
-          date,
-          label: formatShortDate(date),
-          score: Math.round(score * 10) / 10,
-          issueCount: summary?.totalIssueCount ?? null
-        } satisfies ScoreChartItem;
-      })
-      .filter((item): item is ScoreChartItem => item !== null)
-      .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
-      .slice(-TREND_SLOT_COUNT);
-
-    const emptySlotCount = TREND_SLOT_COUNT - recentItems.length;
-    const emptySlots = Array.from({ length: emptySlotCount }, (_, slot) => ({
-      slot,
-      date: "",
-      label: "",
-      score: 0,
-      issueCount: 0,
-      isPlaceholder: true
-    } satisfies ScoreChartItem));
-
-    return [
-      ...emptySlots,
-      ...recentItems.map((item, index) => ({
-        ...item,
-        slot: emptySlotCount + index
-      }))
-    ];
-  }, [evaluationRequests, evaluationTargetId, resultSummaries, scoreResults]);
+  const data = useMemo(
+    () => padScoreTrend(buildScoreTrend(evaluationRequests, evaluationTargetId, resultSummaries, scoreResults)),
+    [evaluationRequests, evaluationTargetId, resultSummaries, scoreResults]
+  );
   const completedCount = data.filter((item) => !item.isPlaceholder).length;
   const latest = completedCount > 0 ? data[data.length - 1] : null;
   const chartSummary = latest

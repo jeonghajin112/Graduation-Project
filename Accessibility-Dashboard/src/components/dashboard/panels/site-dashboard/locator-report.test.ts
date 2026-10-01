@@ -19,17 +19,18 @@ describe("locator reporting", () => {
     expect(sameLocatorReport(next, buildLocatorReport({ ...input, states: new Map(Object.entries(next.issueStates).map(([id, state]) => [Number(id), state])) }))).toBe(true);
     expect(sameLocatorReport(next, { ...next, requestId: 502 })).toBe(false);
   });
-  it("separates page settings and findings the page no longer matches", () => {
+  it("lists findings the page no longer matches as unavailable and counts them separately", () => {
     const states = new Map<number, LocatorIssueState>([
       [1, { status: "UNAVAILABLE", reason: "DOCUMENT_METADATA" }],
       [2, { status: "UNAVAILABLE", reason: "ELEMENT_CONTENT_CHANGED" }],
       [3, { status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" }],
-      [4, { status: "VISIBLE", reason: "SCREEN_READER_ONLY", ownerKind: "BUTTON" }]
+      [4, { status: "VISIBLE", reason: "SCREEN_READER_ONLY", ownerKind: "BUTTON" }],
+      [5, { status: "UNAVAILABLE", reason: "SELECTOR_NOT_FOUND" }],
+      [6, { status: "OFFSCREEN", reason: "APPROXIMATE_AREA", ownerKind: "REGION" }]
     ]);
-    const report = buildLocatorReport({ ...input, issueIds: [1, 2, 3, 4], issueIdsSignature: "1,2,3,4", issueLimit: 10, states });
+    const report = buildLocatorReport({ ...input, issueIds: [1, 2, 3, 4, 5, 6], issueIdsSignature: "1,2,3,4,5,6", issueLimit: 10, states });
     expect(report.pageSettingIssueIds).toEqual([1]);
-    expect(report.outdatedIssueIds).toEqual([2]);
-    expect(report.unavailableIssueIds).toEqual([3]);
+    expect(report.unavailableIssueIds).toEqual([2, 3, 5]);
     expect(report.recoverableHiddenIssueIds).toEqual([]);
   });
   it("does not report confirmed positions when disconnected", () => {

@@ -14,6 +14,7 @@ import {
   parseVoidResponse,
   type ApiResponseParser
 } from "@/services/api-contracts";
+import { createAbortError } from "@/services/async-cancellation";
 import { UserFacingError } from "@/services/user-facing-error";
 import {
   buildLatestEvaluationRequestByTargetId,
@@ -335,8 +336,11 @@ export async function apiRequest<T>(
       ...requestInit
     });
   } catch (error) {
-    if (isAbortError(error)) {
-      throw error;
+    if (isAbortError(error) || signal?.aborted) {
+      // fetch rejects with the signal's reason, which may be a caller's
+      // timeout message. A cancelled or timed-out caller is never a network
+      // failure; callers own their deadline messages via their own checks.
+      throw isAbortError(error) ? error : createAbortError();
     }
 
     throw new ApiRequestError({
@@ -353,10 +357,11 @@ export async function apiRequest<T>(
   try {
     payload = await readJsonResponse(response, { method, path, url });
   } catch (error) {
-    // readJsonResponse already wraps with ApiRequestError
-    if (!response.ok && error instanceof ApiRequestError) {
-      throw error;
+    // Aborting while the body streams must stay a cancellation as well.
+    if (signal?.aborted && !(error instanceof ApiRequestError)) {
+      throw isAbortError(error) ? error : createAbortError();
     }
+    // readJsonResponse already wraps parse failures with ApiRequestError.
     throw error;
   }
 
@@ -744,6 +749,32 @@ export async function fetchEvaluationTarget(targetId: number, signal?: AbortSign
     `/targets/${targetId}`,
     createEvaluationTargetResponseParser({ expectedId: targetId }),
     { signal }
+  );
+}
+
+/** Fresh single-project read; `null` when the project no longer exists. */
+export async function fetchOrganizationState(
+  organizationId: number,
+  signal?: AbortSignal
+): Promise<Organization | null> {
+  const parser = createOrganizationResponseParser(organizationId);
+  return apiRequest(
+    `/organizations/${organizationId}`,
+    (value, path) => (value === null ? null : parser(value, path)),
+    { cache: "no-store", signal, optionalStatuses: [404] }
+  );
+}
+
+/** Fresh single-page read; `null` when the page no longer exists. */
+export async function fetchEvaluationTargetState(
+  targetId: number,
+  signal?: AbortSignal
+): Promise<EvaluationTarget | null> {
+  const parser = createEvaluationTargetResponseParser({ expectedId: targetId });
+  return apiRequest(
+    `/targets/${targetId}`,
+    (value, path) => (value === null ? null : parser(value, path)),
+    { cache: "no-store", signal, optionalStatuses: [404] }
   );
 }
 

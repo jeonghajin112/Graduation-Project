@@ -6,14 +6,18 @@ import { severityChartItems } from "./constants";
 import { parseDashboardView } from "./dashboard-view-tabs";
 import {
   buildFixPriorities,
+  countUrgent,
   defaultReportFilters,
   describeIssueLocation,
   filterReportRows,
+  getEffectiveReportFilters,
   getReportLocationStatus,
   groupByCriterion,
+  parseContrastMessage,
   splitDescriptionSections,
   summarizeReport,
   summarizeReportLocations,
+  type ReportFilters,
   type ReportLocationStatus
 } from "./final-report";
 import type { RecentIssueRow } from "./types";
@@ -71,8 +75,12 @@ describe("report location status", () => {
     expect(getReportLocationStatus({ status: "VISIBLE", reason: "SCREEN_READER_ONLY", ownerKind: "BUTTON" }, "ready"))
       .toBe("on-page");
     expect(getReportLocationStatus({ status: "UNAVAILABLE", reason: "DOCUMENT_METADATA" }, "ready")).toBe("page-setting");
-    expect(getReportLocationStatus({ status: "UNAVAILABLE", reason: "ELEMENT_CONTENT_CHANGED" }, "ready")).toBe("outdated");
-    expect(getReportLocationStatus({ status: "UNAVAILABLE", reason: "SELECTOR_NOT_FOUND" }, "ready")).toBe("outdated");
+    // Findings the page no longer contains cannot be shown on screen.
+    expect(getReportLocationStatus({ status: "UNAVAILABLE", reason: "ELEMENT_CONTENT_CHANGED" }, "ready")).toBe("unavailable");
+    expect(getReportLocationStatus({ status: "UNAVAILABLE", reason: "SELECTOR_NOT_FOUND" }, "ready")).toBe("unavailable");
+    // Content in a hidden tab or menu is shown on the area around it.
+    expect(getReportLocationStatus({ status: "VISIBLE", reason: "APPROXIMATE_AREA", ownerKind: "REGION" }, "ready"))
+      .toBe("on-page");
   });
 
   it("does not claim a position before the viewer reports one or after it disconnects", () => {
@@ -100,11 +108,24 @@ describe("report summary", () => {
 
   it("counts location outcomes", () => {
     const statuses: Record<number, ReportLocationStatus> = {
-      1: "on-page", 2: "unavailable", 3: "unavailable", 4: "outdated", 5: "page-setting"
+      1: "on-page", 2: "unavailable", 3: "unavailable", 4: "other-state", 5: "page-setting"
     };
     expect(summarizeReportLocations([1, 2, 3, 4, 5].map((id) => row(id)), (item) => statuses[item.issue.id]!)).toEqual({
-      checking: 0, disconnected: 0, "on-page": 1, "other-state": 0, "page-setting": 1, outdated: 1, unavailable: 2
+      checking: 0, disconnected: 0, "on-page": 1, "other-state": 1, "page-setting": 1, unavailable: 2
     });
+  });
+
+  it("filters 위치 표시 불가 the same way the report metric counts it", () => {
+    const statuses: Record<number, ReportLocationStatus> = {
+      1: "on-page", 2: "unavailable", 3: "page-setting", 4: "other-state"
+    };
+    const rows = [1, 2, 3, 4].map((id) => row(id));
+    const locationOf = (item: RecentIssueRow) => statuses[item.issue.id]!;
+    const ids = (location: ReportFilters["location"]) =>
+      filterReportRows(rows, { ...defaultReportFilters, location }, locationOf).map((item) => item.issue.id);
+    expect(ids("unavailable")).toEqual([2, 3]);
+    expect(ids("page-setting")).toEqual([3]);
+    expect(ids("on-page")).toEqual([1, 4]);
   });
 });
 
@@ -151,6 +172,40 @@ describe("criterion groups", () => {
     expect(contrast.rows.map(({ issue }) => issue.id)).toEqual([4, 3]);
     expect(contrast.severity.key).toBe("CRITICAL");
   });
+
+  it("lists only the severities and engines present in a group", () => {
+    const [group] = groupByCriterion([
+      row(1, { code: "5.4.3", severity: "LOW", analyzer: "CV_VISION" }),
+      row(2, { code: "5.4.3", severity: "HIGH" }),
+      row(3, { code: "5.4.3", severity: "LOW", analyzer: "CV_VISION" })
+    ]);
+    expect(group!.severityCounts.map(({ key, count }) => [key, count])).toEqual([["HIGH", 1], ["LOW", 2]]);
+    expect(group!.analyzers).toEqual(["RULE_BASED", "CV_VISION"]);
+  });
+});
+
+describe("urgent findings", () => {
+  it("counts critical and high findings only", () => {
+    expect(countUrgent(summarizeReport([
+      row(1, { severity: "CRITICAL" }), row(2, { severity: "HIGH" }), row(3, { severity: "MEDIUM" }), row(4, { severity: "LOW" })
+    ]))).toBe(2);
+  });
+});
+
+describe("contrast messages", () => {
+  it("reads the visual engine's measured text, ratio and requirement", () => {
+    expect(parseContrastMessage("text=다운로드, contrast=2.10:1, required=4.5")).toEqual({
+      text: "다운로드", contrast: "2.10:1", required: "4.5:1"
+    });
+    expect(parseContrastMessage("text=1, 2, 3, contrast=3.0:1, required=3:1")).toEqual({
+      text: "1, 2, 3", contrast: "3.0:1", required: "3:1"
+    });
+  });
+
+  it("leaves other messages to the regular description", () => {
+    expect(parseContrastMessage("Elements must meet minimum color contrast ratio thresholds")).toBeNull();
+    expect(parseContrastMessage("text=다운로드, contrast=2.10:1")).toBeNull();
+  });
 });
 
 describe("report filters", () => {
@@ -181,6 +236,20 @@ describe("issue location description", () => {
     expect(describeIssueLocation(row(1, {
       locator: { pathSteps: [{ context: "DOCUMENT", selector: "#ad" }, { context: "FRAME", selector: " .banner " }] }
     }).issue)).toEqual({ kind: "path", steps: [{ context: "DOCUMENT", selector: "#ad" }, { context: "FRAME", selector: ".banner" }] });
+  });
+
+  it("keeps a frame's own address but not the about:blank placeholder", () => {
+    expect(describeIssueLocation(row(1, {
+      locator: { pathSteps: [
+        { context: "DOCUMENT", selector: "#ad", frameUrl: null },
+        { context: "FRAME", selector: ".banner", frameUrl: "https://ads.example/frame" },
+        { context: "FRAME", selector: ".inner", frameUrl: "about:blank" }
+      ] }
+    }).issue)).toEqual({ kind: "path", steps: [
+      { context: "DOCUMENT", selector: "#ad" },
+      { context: "FRAME", selector: ".banner", frameUrl: "https://ads.example/frame" },
+      { context: "FRAME", selector: ".inner" }
+    ] });
   });
 
   it("presents coordinate-only findings as coordinates instead of a selector", () => {
@@ -216,5 +285,32 @@ describe("issue description sections", () => {
       { heading: null, body: "첫 줄\n둘째 줄" },
       { heading: null, body: "개선 안내" }
     ]);
+  });
+});
+
+describe("report location filter readiness", () => {
+  it("sets a chosen location filter aside until positions are known", () => {
+    const filters = { ...defaultReportFilters, location: "unavailable" as const, severity: "LOW" as const };
+    expect(getEffectiveReportFilters(filters, "ready")).toBe(filters);
+    for (const state of ["loading", "error"] as const) {
+      expect(getEffectiveReportFilters(filters, state)).toEqual({ ...filters, location: "ALL" });
+    }
+  });
+});
+
+describe("fix unit links", () => {
+  it("points a finding without a criterion code at the same group key", () => {
+    const rows = [row(1, { code: " ", ruleId: null, title: "코드 없음" })];
+    expect(buildFixPriorities(rows)[0]!.code).toBe(groupByCriterion(rows)[0]!.code);
+  });
+});
+
+describe("screenshot coordinates in the report", () => {
+  it("reads screenshot pixels in document CSS pixels like the page markers", () => {
+    const issue = row(1, {
+      locator: { pathSteps: [], x: 803, y: 13, width: 39, height: 12, coordinateSpace: "SCREENSHOT_PX" }
+    }).issue;
+    expect(describeIssueLocation(issue, 2)).toEqual({ kind: "coordinates", x: 401.5, y: 6.5, width: 19.5, height: 6 });
+    expect(describeIssueLocation(issue, null)).toEqual({ kind: "coordinates", x: 803, y: 13, width: 39, height: 12 });
   });
 });

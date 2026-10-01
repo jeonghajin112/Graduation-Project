@@ -88,7 +88,7 @@ export function LandingFindingsSection() {
   }, []);
 
   return (
-    <section className="ua-findings is-visible" aria-labelledby={scene === "findings" ? "ua-findings-title" : "ua-message-title"}>
+    <section className="ua-findings is-visible" aria-labelledby="ua-findings-title">
       <div className="ua-findings__inner">
         <div className="ua-findings__track" ref={trackRef}>
         {[0, 0.37, 0.55, 0.73, 0.91].map((progress, index) => (
@@ -96,23 +96,25 @@ export function LandingFindingsSection() {
             aria-hidden="true" style={{ "--snap-progress": progress } as CSSProperties} />
         ))}
         <div className="ua-findings__stage" ref={stageRef} data-scene={scene}>
-        <div className="ua-findings__message" aria-hidden={scene === "findings"}>
+        {/* Scroll only drives the visuals (opacity, the moving word); all copy
+            stays readable by assistive technology in document order. */}
+        <div className="ua-findings__message">
           <LandingMessageSection wordRef={sourceWordRef} />
         </div>
         <span ref={movingWordRef} className="ua-findings__moving-word" aria-hidden="true">문제</span>
-        <div className="ua-findings__body" ref={bodyRef} aria-hidden={scene !== "findings"} data-phase={phase === 0 ? "intro" : "steps"}>
+        <div className="ua-findings__body" ref={bodyRef} data-phase={phase === 0 ? "intro" : "steps"}>
         <div className="ua-findings__copy">
-          <header className="ua-findings__head" aria-hidden={phase !== 0}>
+          <header className="ua-findings__head">
             <h2 id="ua-findings-title"><span ref={targetWordRef} className="ua-findings__target-word">문제</span>를 찾았다면,<br />바꿀 <span>이유</span>까지.</h2>
           </header>
-          <ol className="ua-findings__steps" aria-hidden={phase === 0}>
+          <ol className="ua-findings__steps">
             {STEPS.map((step, index) => (
               <li key={step.title} className={activeStep === index ? "is-active" : ""} aria-current={activeStep === index ? "step" : undefined}>
                 <div className="ua-findings__step">
                 <span className="ua-findings__number" aria-hidden="true">0{index + 1}</span>
                 <span className="ua-findings__step-copy">
                   <span className="ua-findings__step-title">{step.title}</span>
-                  <span className="ua-findings__description-reveal" aria-hidden={activeStep !== index}>
+                  <span className="ua-findings__description-reveal">
                     <span className="ua-findings__description-clip"><span className="ua-findings__step-description">{step.body}</span></span>
                   </span>
                 </span>

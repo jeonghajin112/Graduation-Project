@@ -104,4 +104,23 @@ describe("locator state batches", () => {
     scheduled[2]!.flush();
     expect([...publish.mock.calls[1]![0].keys()]).toEqual([1, 3]);
   });
+
+  it("settles only issues without a reported or queued status", () => {
+    const { batch, publish } = fixture();
+    batch.enqueue(1, { status: "VISIBLE" });
+    batch.settleMissing([1, 2, 3], { status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
+    const settled = publish.mock.calls.at(-1)![0];
+    expect(settled.get(1)).toEqual({ status: "VISIBLE" });
+    expect(settled.get(2)).toEqual({ status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
+    expect(settled.get(3)).toEqual({ status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
+
+    const calls = publish.mock.calls.length;
+    batch.settleMissing([1, 2, 3], { status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
+    expect(publish).toHaveBeenCalledTimes(calls);
+
+    // A late report still replaces the fallback.
+    batch.enqueue(2, { status: "OFFSCREEN" });
+    batch.flush();
+    expect(publish.mock.calls.at(-1)![0].get(2)).toEqual({ status: "OFFSCREEN" });
+  });
 });

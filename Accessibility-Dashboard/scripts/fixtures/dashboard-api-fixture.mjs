@@ -115,7 +115,18 @@ export async function installDashboardApiFixture(page) {
     { method: "GET", pathname: "/api/dashboard/overview", handle: (route) => fulfillJson(route, overview) },
     { method: "GET", pathname: `/api/results/requests/${request.id}/issues`, handle: (route) => fulfillJson(route, []) },
     { method: "GET", pathname: `/api/results/requests/${request.id}/capture-metadata`, handle: (route) => fulfillJson(route, captureMetadata) },
-    { method: "POST", pathname: `/api/results/requests/${request.id}/live-session`, handle: (route) => fulfillJson(route, null) }
+    { method: "POST", pathname: `/api/results/requests/${request.id}/live-session`, handle: (route) => fulfillJson(route, null) },
+    // Directory edits/deletions confirm their state with single-entity reads.
+    // Derive them from the (test-mutable) overview so both views agree.
+    { method: "GET", pathname: `/api/organizations/${organization.id}`, handle: (route) => fulfillJson(route, {
+      ...organization,
+      status: overview.organizations.some((candidate) => candidate.id === organization.id) ? "ACTIVE" : "INACTIVE"
+    }) },
+    { method: "GET", pathname: `/api/targets/${target.id}`, handle: (route) => fulfillJson(route, {
+      ...target,
+      status: overview.organizations.some((candidate) =>
+        candidate.evaluationTargets.some((entry) => entry.id === target.id)) ? "ACTIVE" : "DELETED"
+    }) }
   ]);
 
   return {

@@ -34,6 +34,12 @@ export function useBatchedLocatorStates() {
   }, [batch]);
   const resetLocatorStates = useCallback(() => batch.reset(), [batch]);
   const cancelPendingLocatorStates = useCallback(() => batch.cancelPending(), [batch]);
+  const settleMissingLocatorStates = useCallback(
+    (issueIds: readonly number[], state: LocatorIssueState) => batch.settleMissing(issueIds, state),
+    [batch]
+  );
 
-  return { locatorStates, enqueueLocatorState, resetLocatorStates, cancelPendingLocatorStates };
+  return {
+    locatorStates, enqueueLocatorState, resetLocatorStates, cancelPendingLocatorStates, settleMissingLocatorStates
+  };
 }

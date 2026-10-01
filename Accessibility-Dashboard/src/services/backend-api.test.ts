@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiRequestError, fetchDashboardViewModel, getApiErrorMessage } from "./backend-api";
+import { ApiRequestError, fetchDashboardViewModel, getApiErrorMessage, isAbortError } from "./backend-api";
 import { UserFacingError } from "./user-facing-error";
 
 const SAFE_FALLBACK = "요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -163,5 +163,32 @@ describe("dashboard overview request selection", () => {
     data.evaluationRequests[0].updatedAt = "invalid";
     respondWith(data);
     await expect(fetchDashboardViewModel()).rejects.toThrow("data.evaluationRequests[0].updatedAt");
+  });
+});
+
+describe("request cancellation", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports a caller's deadline abort as cancellation, not as a network failure", async () => {
+    // fetch rejects with the signal's reason; a string timeout reason used to
+    // become ApiRequestError(status: null) and a misleading "check your
+    // internet connection" banner.
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })));
+    const controller = new AbortController();
+    const pending = fetchDashboardViewModel(controller.signal);
+    controller.abort("요청 처리에 시간이 오래 걸리고 있습니다.");
+    const error = await pending.catch((reason: unknown) => reason);
+    expect(isAbortError(error)).toBe(true);
+    expect(error).not.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("still reports an unaborted transport failure as a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(fetchDashboardViewModel(new AbortController().signal)).rejects.toMatchObject({
+      name: "ApiRequestError",
+      status: null
+    });
   });
 });

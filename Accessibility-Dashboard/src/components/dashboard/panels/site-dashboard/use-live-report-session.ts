@@ -14,6 +14,7 @@ import {
   getLiveReportSessionRefreshDelay,
   getLiveReportSessionRefreshRetryDelay,
   isSameLiveReportSessionRenewal,
+  isLiveReportSessionRenewable,
   isLiveReportSessionSafelyUsable
 } from "./live-report-session-policy";
 import { LiveReportSessionGenerationFence } from "./live-report-session-generation";
@@ -192,6 +193,28 @@ export function useLiveReportSession(
       }
       return currentState as ReadyLiveReportSessionState;
     };
+    const getRenewableCurrentSession = (): ReadyLiveReportSessionState | null => {
+      const currentState = stateRef.current;
+      if (
+        currentState.requestId !== requestId ||
+        currentState.loadState !== "ready" ||
+        currentState.session === null ||
+        !isLiveReportSessionRenewable(currentState.session, window.location.origin)
+      ) {
+        return null;
+      }
+      return currentState as ReadyLiveReportSessionState;
+    };
+    // A renewal attempted inside the safety guard that did not succeed cannot
+    // keep the old session; create a fresh one instead of showing an error.
+    const replaceUnrenewedSession = (renewing: boolean): boolean => {
+      if (!renewing || getSafelyUsableCurrentSession() !== null) {
+        return false;
+      }
+      forceFreshSessionRef.current = true;
+      setRetryRevision((current) => current + 1);
+      return true;
+    };
     const scheduleRefreshRetry = (currentState: ReadyLiveReportSessionState): boolean => {
       const delay = getLiveReportSessionRefreshRetryDelay(
         currentState.session,
@@ -228,7 +251,7 @@ export function useLiveReportSession(
 
     const currentState = forceFreshSession
       ? null
-      : getSafelyUsableCurrentSession();
+      : getRenewableCurrentSession();
     const requestGeneration = sessionGenerationFence.current(requestId);
     const consumerController = new AbortController();
     const sharedRequest = acquireSessionRequest(
@@ -253,6 +276,9 @@ export function useLiveReportSession(
           if (retainedState !== null && scheduleRefreshRetry(retainedState)) {
             return;
           }
+          if (replaceUnrenewedSession(currentState !== null)) {
+            return;
+          }
         }
         writeSessionCache(nextState);
         commitState(nextState.loadState === "unavailable"
@@ -272,6 +298,9 @@ export function useLiveReportSession(
         if (retainedState !== null && scheduleRefreshRetry(retainedState)) {
           return;
         }
+        if (replaceUnrenewedSession(currentState !== null)) {
+          return;
+        }
         commitState({
           errorMessage: getApiErrorMessage(
             error,
@@ -289,6 +318,28 @@ export function useLiveReportSession(
       sharedRequest.release();
     };
   }, [commitState, enabled, requestId, retryRevision]);
+
+  // Background tabs throttle the refresh timer. Renew as soon as the page is
+  // visible again if the refresh is already due.
+  useEffect(() => {
+    if (!enabled || requestId === null) return;
+    const handleVisibilityChange = () => {
+      const currentState = stateRef.current;
+      if (
+        document.visibilityState !== "visible" ||
+        currentState.requestId !== requestId ||
+        currentState.loadState !== "ready" ||
+        currentState.session === null ||
+        getLiveReportSessionRefreshDelay(currentState.session) !== 0
+      ) {
+        return;
+      }
+      sessionCache.delete(requestId);
+      setRetryRevision((current) => current + 1);
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [enabled, requestId]);
 
   const retry = useCallback(() => {
     forceFreshSessionRef.current = true;

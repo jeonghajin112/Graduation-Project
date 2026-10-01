@@ -22,6 +22,7 @@ import {
   SITE_URL_MAX_LENGTH,
   isValidEvaluationTargetAccessUrl
 } from "@/services/site-create-recovery-storage";
+import { createRandomUuid } from "@/services/random-uuid";
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   DashboardViewModel,
@@ -37,6 +38,7 @@ import {
 
 import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
+import { toRequestStatus } from "./quick-analysis-status";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
@@ -76,6 +78,12 @@ const QUICK_ANALYSIS_BLOCKED_RECOVERY_MESSAGE =
   "확인할 수 없는 이전 분석 작업이 남아 있어 중복 요청을 막았습니다. 로그아웃한 뒤 다시 시도해 주세요.";
 const QUICK_ANALYSIS_DIFFERENT_URL_MESSAGE =
   "이전 주소의 접수 여부를 먼저 확인해야 합니다. 중복 접수를 막기 위해 기존 주소로 되돌렸습니다.";
+const QUICK_ANALYSIS_PHASE_ANNOUNCEMENTS: Record<QuickAnalysisPhase, string> = {
+  idle: "",
+  requesting: "현재 상태: 분석 요청 중",
+  paused: "현재 상태: 상태 확인 필요",
+  failed: "현재 상태: 분석 실패"
+};
 
 
 
@@ -244,12 +252,10 @@ function findReconciledQuickAnalysisRequest(
 
 export function QuickAnalyzePanel({
   supportsIdempotency = false,
-  isDarkMode,
   onAnalysisAccepted,
   readOnly
 }: {
   supportsIdempotency?: boolean;
-  isDarkMode: boolean;
 } & (
   | { readOnly: true; onAnalysisAccepted?: never }
   | {
@@ -272,7 +278,11 @@ export function QuickAnalyzePanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [acceptedMessage, setAcceptedMessage] = useState("");
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const progressHeadingRef = useRef<HTMLHeadingElement>(null);
+  const progressActionRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const [phase, setPhase] = useState<QuickAnalysisPhase>("idle");
+  const previousPhaseRef = useRef<QuickAnalysisPhase>(phase);
   const {
     beginMutationOperation,
     cancelMutationOperation,
@@ -335,7 +345,7 @@ export function QuickAnalyzePanel({
     onAnalysisAccepted({
       id: restored.requestId,
       evaluationTargetId: restored.targetId,
-      status: restored.kind === "target" ? "COMPLETED" : (restored.status as EvaluationRequestModel["status"] ?? "PENDING"),
+      status: restored.kind === "target" ? "COMPLETED" : toRequestStatus(restored.status),
       requestedAt: new Date(restored.startedAt).toISOString(),
       updatedAt: restored.updatedAt ?? ""
     }, restored.url);
@@ -345,7 +355,6 @@ export function QuickAnalyzePanel({
       setAcceptedMessage("접수된 분석은 사이드바에서 확인할 수 있습니다. 다음 주소를 입력해 주세요.");
     }
     // Consume mount-time recovery once; the dashboard owns ongoing requests.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly, onAnalysisAccepted]);
 
   const handleReset = () => {
@@ -354,6 +363,33 @@ export function QuickAnalyzePanel({
     setErrorMessage("");
     setIsSubmitting(false);
   };
+
+  // The form and the progress view replace each other, so the focused control
+  // is always unmounted on a phase change. Hand focus to the matching element
+  // of the new view unless the user has already moved elsewhere.
+  useEffect(() => {
+    const previousPhase = previousPhaseRef.current;
+    previousPhaseRef.current = phase;
+    if (previousPhase === phase) {
+      return;
+    }
+    const focusFrame = window.requestAnimationFrame(() => {
+      const active = document.activeElement;
+      const focusIsLost =
+        !active || active === document.body || (panelRef.current?.contains(active) ?? false);
+      if (!focusIsLost) {
+        return;
+      }
+      const target =
+        phase === "idle"
+          ? urlInputRef.current
+          : phase === "requesting"
+            ? progressHeadingRef.current
+            : (progressActionRef.current ?? progressHeadingRef.current);
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [phase]);
 
   const handleSubmit = async () => {
     if (readOnly) {
@@ -409,7 +445,7 @@ export function QuickAnalyzePanel({
           return;
         }
 
-        const attemptId = window.crypto.randomUUID();
+        const attemptId = createRandomUuid();
         const startedAt = Date.now();
         const knownRequestIds = baseline?.evaluationRequests.map((request) => request.id) ?? [];
         if (knownRequestIds.length > REQUEST_IDS_MAX_LENGTH) {
@@ -562,7 +598,7 @@ export function QuickAnalyzePanel({
       onAnalysisAccepted({
         id: checkpoint.requestId,
         evaluationTargetId: checkpoint.targetId!,
-        status: checkpoint.kind === "target" ? "COMPLETED" : (checkpoint.status as EvaluationRequestModel["status"] ?? "PENDING"),
+        status: checkpoint.kind === "target" ? "COMPLETED" : toRequestStatus(checkpoint.status),
         requestedAt: new Date(checkpoint.startedAt).toISOString(),
         updatedAt: checkpoint.updatedAt ?? ""
       }, normalized);
@@ -589,18 +625,19 @@ export function QuickAnalyzePanel({
     }
   };
 
+  const liveAnnouncement = phase === "idle" ? acceptedMessage : QUICK_ANALYSIS_PHASE_ANNOUNCEMENTS[phase];
+
   return (
     <div className={`quick-analyze-layout min-h-0 w-full flex-1 ${showProgressView ? "quick-analyze-layout--progress" : "relative"}`}>
+      {/* Stays mounted across the form/progress swap so changes are announced. */}
+      <p className="sr-only" role="status" aria-atomic="true">{liveAnnouncement}</p>
       <article
+        ref={panelRef}
         className={showProgressView ? "quick-analyze-progress-panel" : "absolute left-1/2 top-[40%] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[28px] bg-transparent p-5 sm:max-w-2xl sm:p-7 lg:max-w-3xl lg:p-8"}
       >
         {!showProgressView ? (
           <div>
-            <h2
-              className={`mb-8 text-center text-2xl font-black tracking-tight sm:mb-10 sm:text-3xl ${
-                isDarkMode ? "text-white" : "text-slate-900"
-              }`}
-            >
+            <h2 className="mb-8 text-center text-2xl font-black tracking-tight text-[var(--dashboard-text-strong)] sm:mb-10 sm:text-3xl">
               확인할 페이지 주소를 입력하세요
             </h2>
             <label htmlFor="quick-analyze-url" className="sr-only">
@@ -608,14 +645,10 @@ export function QuickAnalyzePanel({
             </label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <div
-                className={`quick-analyze-input-shell relative flex h-11 min-h-11 min-w-0 flex-none items-center rounded-[10px] border transition-colors sm:flex-1 ${
+                className={`quick-analyze-input-shell relative flex h-11 min-h-11 min-w-0 flex-none items-center rounded-[10px] border bg-[var(--dashboard-field-bg)] transition-colors sm:flex-1 ${
                   hasError
-                    ? isDarkMode
-                      ? "border-[#ff453a] bg-[#2c2c2e] focus-within:border-[#ff453a]"
-                      : "border-[#d70015] bg-[#e5e5ea] focus-within:border-[#d70015]"
-                    : isDarkMode
-                      ? "border-transparent bg-[#2c2c2e] focus-within:border-white"
-                      : "border-transparent bg-[#e5e5ea] focus-within:border-[#1d1d1f]"
+                    ? "border-[var(--dashboard-danger-border)] focus-within:border-[var(--dashboard-danger-border)]"
+                    : "border-transparent focus-within:border-[var(--dashboard-field-focus-border)]"
                 }`}
               >
                 <Search
@@ -623,7 +656,7 @@ export function QuickAnalyzePanel({
                   strokeWidth={2}
                   aria-hidden="true"
                   className={`pointer-events-none absolute left-3 shrink-0 ${
-                    hasError ? "text-[#ff453a]" : "text-[#8e8e93]"
+                    hasError ? "text-[var(--dashboard-danger-text)]" : "text-[var(--dashboard-field-icon)]"
                   }`}
                 />
                 <input
@@ -650,11 +683,9 @@ export function QuickAnalyzePanel({
                   aria-describedby={hasError ? "quick-analyze-url-error" : undefined}
                   readOnly={readOnly}
                   placeholder="https://example.com"
-                  className={`h-full w-full min-w-0 rounded-[inherit] border-0 bg-transparent pl-9 pr-3 text-sm outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${
-                    isDarkMode
-                      ? "text-[#f5f5f7] placeholder:text-[#8e8e93]"
-                      : "text-[#1d1d1f] placeholder:text-[#86868b]"
-                  }`}
+                  inputMode="url"
+                  autoComplete="url"
+                  className="h-full w-full min-w-0 rounded-[inherit] border-0 bg-transparent pl-9 pr-3 text-sm text-[var(--dashboard-text-primary)] outline-none placeholder:text-[var(--dashboard-field-placeholder)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
               <button
@@ -663,29 +694,44 @@ export function QuickAnalyzePanel({
                 onClick={() => {
                   void handleSubmit();
                 }}
-                className="quick-analyze-submit inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[#0071e3] px-4 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-[#3a3a3c] disabled:text-[#8e8e93] sm:w-auto sm:min-w-[7.5rem]"
+                className="quick-analyze-submit inline-flex h-11 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-[var(--primary)] px-4 text-sm font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-[var(--dashboard-disabled-bg)] disabled:text-[var(--dashboard-disabled-text)] sm:w-auto sm:min-w-[7.5rem]"
               >
                 {isBusy && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
                 <span>{isBusy ? "분석 중..." : "분석 시작"}</span>
                 {!isBusy && <ArrowRight size={15} aria-hidden="true" />}
               </button>
             </div>
-            {acceptedMessage && <p role="status" className="mt-3 text-center text-xs text-[var(--dashboard-text-muted)]">{acceptedMessage}</p>}
-            {hasError && (
-              <p id="quick-analyze-url-error" className="mt-2 text-left text-xs text-[#ff453a]">
-                {errorMessage}
-              </p>
-            )}
+            {acceptedMessage && <p className="mt-3 text-center text-xs text-[var(--dashboard-text-muted)]">{acceptedMessage}</p>}
+            {/* Always mounted as an assertive live region: an alert inserted
+                together with its text is often skipped by screen readers.
+                The alert role is only exposed while there is a message, so an
+                empty region is never reported as an alert. Empty, it has no height. */}
+            <p
+              id="quick-analyze-url-error"
+              aria-live="assertive"
+              aria-atomic="true"
+              role={hasError ? "alert" : undefined}
+              className={hasError ? "mt-2 text-left text-xs text-[var(--dashboard-danger-text)]" : undefined}
+            >
+              {errorMessage}
+            </p>
           </div>
         ) : (
-          <QuickAnalysisProgress phase={phase} url={normalizeUrl(urlInput)} isBusy={isBusy}>
+          <QuickAnalysisProgress
+            phase={phase}
+            url={normalizeUrl(urlInput)}
+            isBusy={isBusy}
+            headingRef={progressHeadingRef}
+            announceStatus={false}
+          >
             {phase === "failed" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p role="alert" className="text-center text-xs text-rose-500">{errorMessage}</p>
+                <p role="alert" className="text-center text-xs text-[var(--dashboard-danger-text)]">{errorMessage}</p>
                 <button
+                  ref={progressActionRef}
                   type="button"
                   onClick={handleReset}
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover"
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-5 text-sm font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover"
                 >
                   다시 시도
                 </button>
@@ -694,14 +740,15 @@ export function QuickAnalyzePanel({
 
             {phase === "paused" && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <p role="alert" className="text-center text-xs text-amber-600">{errorMessage}</p>
+                <p role="alert" className="text-center text-xs text-[var(--dashboard-warning-text)]">{errorMessage}</p>
                 <button
+                  ref={progressActionRef}
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => {
                     void handleSubmit();
                   }}
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[#0071e3] px-5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-wait disabled:opacity-60"
+                  className="inline-flex h-11 items-center justify-center rounded-lg bg-[var(--primary)] px-5 text-sm font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover disabled:cursor-wait disabled:opacity-60"
                 >
                   {isSubmitting ? "상태 확인 중..." : "상태 다시 확인"}
                 </button>

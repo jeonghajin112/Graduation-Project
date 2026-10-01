@@ -11,8 +11,13 @@ import {
 import { parseDashboardRoute } from "@/services/dashboard-route";
 import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 
-import { runDirectoryMutation } from "./directory-mutation";
-import { useDashboardData } from "./use-dashboard-data";
+import {
+  readEvaluationTargetRemoved,
+  readOrganizationRemoved,
+  readOrganizationUpdateApplied,
+  runDirectoryMutation
+} from "./directory-mutation";
+import { useDashboardData, type DirectoryRemoval } from "./use-dashboard-data";
 import { useDashboardTheme } from "./use-dashboard-theme";
 import { useOrganizationModelCreateForm } from "./use-organization-model-create-form";
 import { useSiteCreateWorkflow } from "./use-site-create-workflow";
@@ -31,6 +36,7 @@ export function useDashboardController({
   const { isDarkMode, themeMode, setThemeMode } = useDashboardTheme();
   const routeState = useMemo(() => parseDashboardRoute(location.pathname), [location.pathname]);
   const {
+    acknowledgeDirectoryRemoval,
     beginDirectoryRecovery,
     trackEvaluationRequest,
     dashboardData,
@@ -203,20 +209,28 @@ export function useDashboardController({
     selectedOrganizationModel
   ]);
 
-  const applyDirectoryMutation = useCallback(async (
-    options: Omit<Parameters<typeof runDirectoryMutation>[0], "signal">
-  ) => {
+  const applyDirectoryMutation = useCallback(async ({
+    removal,
+    ...options
+  }: Omit<Parameters<typeof runDirectoryMutation>[0], "signal"> & {
+    removal?: DirectoryRemoval;
+  }) => {
     const controller = new AbortController();
     directoryOperationsRef.current.add(controller);
     try {
       await runDirectoryMutation({ ...options, signal: controller.signal });
       controller.signal.throwIfAborted();
+      if (removal) {
+        // A confirmed deletion must not be restored by an overlapping
+        // creation lease that treats its absence as a stale snapshot.
+        acknowledgeDirectoryRemoval(removal);
+      }
       await loadDashboard({ refreshAfterInFlight: true, clearOnError: false });
       controller.signal.throwIfAborted();
     } finally {
       directoryOperationsRef.current.delete(controller);
     }
-  }, [loadDashboard]);
+  }, [acknowledgeDirectoryRemoval, loadDashboard]);
 
   const handleUpdateOrganizationModel = useCallback(
     async ({
@@ -230,8 +244,7 @@ export function useDashboardController({
     }) => {
       await applyDirectoryMutation({
         operation: (signal) => updateOrganizationModel({ projectId, name, description }, signal),
-        isApplied: (snapshot) => snapshot.organizations.some((project) =>
-          project.id === projectId && project.name === name && project.description === description)
+        readApplied: readOrganizationUpdateApplied({ projectId, name, description })
       });
     },
     [applyDirectoryMutation]
@@ -241,7 +254,8 @@ export function useDashboardController({
     async (projectId: number) => {
       await applyDirectoryMutation({
         operation: (signal) => deleteOrganizationModel(projectId, signal),
-        isApplied: (snapshot) => !snapshot.organizations.some((project) => project.id === projectId)
+        readApplied: readOrganizationRemoved(projectId),
+        removal: { organizationId: projectId }
       });
 
       // The route-validation effect above uses the current selection after the
@@ -254,8 +268,8 @@ export function useDashboardController({
     async ({ projectId, siteId }: { projectId: number; siteId: number }) => {
       await applyDirectoryMutation({
         operation: (signal) => deleteEvaluationTargetModel({ projectId, siteId }, signal),
-        isApplied: (snapshot) => !snapshot.organizations.some((project) =>
-          project.id === projectId && project.evaluationTargets.some((target) => target.id === siteId))
+        readApplied: readEvaluationTargetRemoved(siteId),
+        removal: { targetId: siteId }
       });
     },
     [applyDirectoryMutation]

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,10 @@ export function OrganizationModelCreateModal({
   const hasRecovery = hasPendingOrganizationCreate || isRecoveryBlocked;
   const nameInputRef = useRef<HTMLInputElement>(null);
   const previousHasRecoveryRef = useRef(hasRecovery);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const wasSubmittingRef = useRef(isSubmitting);
+  const errorId = useId();
+  const isNameInvalid = errorMessage.length > 0 && !hasRecovery;
   const dialogRef = useDialogAccessibility<HTMLFormElement>({
     isOpen,
     onClose,
@@ -55,6 +59,33 @@ export function OrganizationModelCreateModal({
     return () => window.cancelAnimationFrame(focusFrame);
   }, [hasRecovery, isOpen]);
 
+  // The name input and buttons are disabled while the request runs; keep
+  // keyboard focus inside the dialog and return it once the request settles.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const wasSubmitting = wasSubmittingRef.current;
+    wasSubmittingRef.current = isSubmitting;
+    if (!isOpen || !dialog) {
+      return;
+    }
+    const active = document.activeElement;
+    const focusLost =
+      !(active instanceof HTMLElement) ||
+      !dialog.contains(active) ||
+      (active as HTMLButtonElement | HTMLInputElement).disabled === true;
+    if (isSubmitting) {
+      if (focusLost) dialog.focus({ preventScroll: true });
+      return;
+    }
+    if (!wasSubmitting || (!focusLost && active !== dialog)) {
+      return;
+    }
+    const target = [nameInputRef.current, submitButtonRef.current].find(
+      (element) => element && !element.disabled
+    ) ?? dialog;
+    target.focus({ preventScroll: true });
+  }, [dialogRef, isOpen, isSubmitting]);
+
   if (!isOpen) {
     return null;
   }
@@ -63,6 +94,7 @@ export function OrganizationModelCreateModal({
     <div className="dashboard-modal-layer">
       <div
         className="absolute inset-0"
+        aria-hidden="true"
         onClick={() => {
           if (!isSubmitting) {
             onClose();
@@ -91,17 +123,22 @@ export function OrganizationModelCreateModal({
         </h3>
 
         {errorMessage.length > 0 && (
-          <PanelMessage
-            className="dashboard-modal-message"
-            label={hasRecovery ? errorMessage : `프로젝트 생성 실패: ${errorMessage}`}
-            isError
-          />
+          <div id={errorId}>
+            <PanelMessage
+              className="dashboard-modal-message"
+              label={hasRecovery ? errorMessage : `프로젝트 생성 실패: ${errorMessage}`}
+              isError
+            />
+          </div>
         )}
 
         <div className="mt-5">
           <Input
             ref={nameInputRef}
             aria-label="프로젝트 이름"
+            aria-invalid={isNameInvalid || undefined}
+            aria-describedby={errorMessage.length > 0 ? errorId : undefined}
+            autoComplete="off"
             value={name}
             maxLength={100}
             disabled={isSubmitting || hasRecovery}
@@ -143,6 +180,7 @@ export function OrganizationModelCreateModal({
           </Button>
           {!isRecoveryBlocked && (
             <Button
+              ref={submitButtonRef}
               type="submit"
               size="sm"
               disabled={isSubmitting}

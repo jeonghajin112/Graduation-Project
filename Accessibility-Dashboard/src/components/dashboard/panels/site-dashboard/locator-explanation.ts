@@ -12,7 +12,24 @@ const presentations: Record<string, { label: string; ownedLabel?: string; descri
   INVISIBLE_ELEMENT: {
     label: "보이지 않는 요소",
     ownedLabel: "{owner} 안의 보이지 않는 요소",
-    description: "투명하거나 크기가 없어 눈에 보이지 않지만 스크린리더와 키보드로는 접근할 수 있는 요소입니다. 이 요소가 속한 {owner}에 마커를 표시합니다."
+    description: "크기가 없어 눈에 보이지 않지만 스크린리더와 키보드로는 접근할 수 있는 요소입니다. 이 요소가 속한 {owner}에 마커를 표시합니다."
+  },
+  TRANSPARENT_ELEMENT: {
+    label: "투명한 요소",
+    description: "투명도가 0이라 눈에 보이지 않는 요소입니다. 크기와 위치는 그대로 있으므로 요소가 있는 자리에 마커와 테두리를 표시합니다."
+  },
+  HIDDEN_IN_PLACE: {
+    label: "숨겨진 요소(visibility)",
+    description: "visibility:hidden으로 숨겨진 요소입니다. 크기와 위치는 그대로 있으므로 요소가 있는 자리에 마커와 테두리를 표시합니다."
+  },
+  REVEALED_BY_CONTROL: {
+    label: "닫힌 탭·메뉴 안의 요소",
+    ownedLabel: "닫힌 탭·메뉴 안의 요소 · 여는 {owner}에 표시",
+    description: "닫힌 탭이나 메뉴 안에 있어 지금은 보이지 않는 요소입니다. 누르면 이 요소를 보여 주는 {owner}에 마커를 표시합니다."
+  },
+  SHADOW_HOST: {
+    label: "닫힌 Shadow DOM 안의 요소 · 대략적 위치",
+    description: "들어갈 수 없는 닫힌 Shadow DOM 안에 있는 요소입니다. 정확한 위치 대신 이를 감싼 바깥 요소에 마커를 표시합니다."
   },
   FRAME_CONTENT: {
     label: "프레임 안의 요소",
@@ -25,6 +42,11 @@ const presentations: Record<string, { label: string; ownedLabel?: string; descri
   ASSISTIVE_INERT: {
     label: "조작이 막힌 요소",
     description: "화면에는 보이지만 inert가 설정되어 선택하거나 입력할 수 없는 요소입니다."
+  },
+  APPROXIMATE_AREA: {
+    label: "숨겨진 영역의 요소 · 대략적 위치",
+    ownedLabel: "{owner} 안의 숨겨진 요소 · 대략적 위치",
+    description: "닫힌 탭, 접힌 메뉴, 넘어간 슬라이드처럼 지금은 숨겨진 곳에 있는 요소입니다. 정확한 위치를 알 수 없어 이 요소가 들어 있는 {owner}에 대략적으로 마커를 표시합니다."
   }
 };
 
@@ -68,7 +90,10 @@ const descriptions: Record<LocatorExplanationKey, string> = {
   unknown: "뷰어가 자세한 미표시 이유를 제공하지 않았습니다. 저장된 위치 정보를 참고해 주세요.",
   pageSetting: "뷰포트, 문서 제목, 언어처럼 화면에 그려지지 않고 페이지 전체에 적용되는 설정입니다. 특정 위치가 없으므로 마커를 표시하지 않습니다.",
   focusReveal: "키보드로 초점을 옮기면 나타나는 요소입니다(예: 본문 바로가기). ‘문제 위치로 이동’을 누르면 초점을 옮겨 표시합니다.",
-  focusRevealFailed: "초점을 옮겼지만 요소가 화면에 나타나지 않았습니다. 저장된 요소 경로를 확인해 주세요."
+  focusRevealFailed: "초점을 옮겼지만 요소가 화면에 나타나지 않았습니다. 저장된 요소 경로를 확인해 주세요.",
+  statusTimeout: "검사 화면이 제한 시간 안에 이 문제의 위치를 알려 주지 않았습니다. 저장된 위치 정보를 참고하거나 화면을 다시 불러와 주세요.",
+  replayRejected: "검사 화면이 문제 목록을 받지 못했습니다. 화면을 다시 불러와 주세요.",
+  captureMissing: "분석 당시 화면 크기와 배율 정보를 불러오지 못해 좌표로 찾은 문제의 위치를 현재 화면에 맞출 수 없습니다."
 };
 
 // Descriptions are only read in the lazily loaded issue details; the page

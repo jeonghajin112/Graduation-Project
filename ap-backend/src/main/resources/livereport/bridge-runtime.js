@@ -50,6 +50,106 @@
   const arrayIsArray = Array.isArray;
   const numberIsSafeInteger = Number.isSafeInteger;
   const numberIsFinite = Number.isFinite;
+  // 마커나 팝오버를 보는 동안 자동으로 넘어가는 슬라이드가 움직이면 마커가 풀려
+  // 버린다. 그동안 페이지 스크립트의 타이머·애니메이션 프레임·CSS 애니메이션을
+  // 멈춰 둔다. 이 런타임은 아래의 원본 타이머를 써서 멈춤의 영향을 받지 않는다.
+  const setTimeout = globalThis.setTimeout.bind(globalThis);
+  const clearTimeout = globalThis.clearTimeout.bind(globalThis);
+  const setInterval = globalThis.setInterval.bind(globalThis);
+  const clearInterval = globalThis.clearInterval.bind(globalThis);
+  const requestAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
+  const cancelAnimationFrame = globalThis.cancelAnimationFrame.bind(globalThis);
+  const nativeEval = globalThis.eval;
+  let pageMotionPaused = false;
+  // Timers and frames that came due while paused, keyed by the id the page holds.
+  const heldPageTimeouts = new Map();
+  const heldPageFrames = new Map();
+  const pausedPageAnimations = [];
+  const pausedPageMarquees = [];
+  const pageTimerCallback = callback => typeof callback === 'function'
+    ? callback
+    : () => nativeEval(String(callback));
+  const runPageCallback = (callback, args) => nativeApply(callback, globalThis, args);
+  globalThis.setTimeout = function(callback, delay, ...args) {
+    const run = pageTimerCallback(callback);
+    const id = setTimeout(() => {
+      if (!pageMotionPaused) { runPageCallback(run, args); return; }
+      heldPageTimeouts.set(id, {run, args, delay:Number(delay) || 0, handle:0});
+    }, delay);
+    return id;
+  };
+  const clearPageTimer = function(id) {
+    clearTimeout(id);
+    const held = heldPageTimeouts.get(id);
+    if (held) { clearTimeout(held.handle); heldPageTimeouts.delete(id); }
+  };
+  globalThis.clearTimeout = clearPageTimer;
+  // Ticks that come due while paused are skipped; the interval keeps its phase.
+  globalThis.setInterval = function(callback, delay, ...args) {
+    const run = pageTimerCallback(callback);
+    return setInterval(() => {
+      if (!pageMotionPaused) runPageCallback(run, args);
+    }, delay);
+  };
+  globalThis.clearInterval = clearPageTimer;
+  globalThis.requestAnimationFrame = function(callback) {
+    const id = requestAnimationFrame(timestamp => {
+      if (!pageMotionPaused) { runPageCallback(callback, [timestamp]); return; }
+      heldPageFrames.set(id, {callback, handle:0});
+    });
+    return id;
+  };
+  globalThis.cancelAnimationFrame = function(id) {
+    cancelAnimationFrame(id);
+    const held = heldPageFrames.get(id);
+    if (held) { cancelAnimationFrame(held.handle); heldPageFrames.delete(id); }
+  };
+  const pausePageMotion = ownedRoot => {
+    if (pageMotionPaused) return;
+    pageMotionPaused = true;
+    try {
+      document.getAnimations().forEach(animation => {
+        const target = animation.effect?.target;
+        if (animation.playState !== 'running' || (target && nativeApply(nativeNodeContains, ownedRoot, [target]))) return;
+        animation.pause();
+        pausedPageAnimations.push(animation);
+      });
+    } catch (_) { /* Animations are optional; timers are already held. */ }
+    document.querySelectorAll('marquee').forEach(marquee => {
+      try { marquee.stop(); pausedPageMarquees.push(marquee); } catch (_) {}
+    });
+  };
+  // A timeout that came due while paused runs one full delay after resuming,
+  // so a slide does not jump the moment the pointer leaves the marker.
+  const resumePageMotion = () => {
+    if (!pageMotionPaused) return;
+    pageMotionPaused = false;
+    // Paused again before a resumed callback runs: it stays held for next time.
+    heldPageTimeouts.forEach((held, id) => {
+      if (held.handle) return;
+      held.handle = setTimeout(() => {
+        held.handle = 0;
+        if (pageMotionPaused || heldPageTimeouts.get(id) !== held) return;
+        heldPageTimeouts.delete(id);
+        runPageCallback(held.run, held.args);
+      }, held.delay);
+    });
+    heldPageFrames.forEach((held, id) => {
+      if (held.handle) return;
+      held.handle = requestAnimationFrame(timestamp => {
+        held.handle = 0;
+        if (pageMotionPaused || heldPageFrames.get(id) !== held) return;
+        heldPageFrames.delete(id);
+        runPageCallback(held.callback, [timestamp]);
+      });
+    });
+    pausedPageAnimations.splice(0).forEach(animation => {
+      try { if (animation.playState === 'paused') animation.play(); } catch (_) {}
+    });
+    pausedPageMarquees.splice(0).forEach(marquee => {
+      try { marquee.start(); } catch (_) {}
+    });
+  };
   bridgeScriptElement?.remove();
   const mirrorPrefix = `${gatewayOrigin}/api/live-reports/${sessionId}/mirror/${nonce}/`;
   const mirrorUrl = new URL(mirrorPrefix);
@@ -311,9 +411,16 @@
         || data.protocolVersion !== protocolVersion
         || data.bridgeSecret !== bridgeSecret || data.challenge !== activeChallenge
         || data.documentToken !== documentToken
-        || !numberIsSafeInteger(data.sequence) || data.sequence !== inboundSequence + 1
-        || !isBoundedLiveCommand(data.payload)) return;
+        || !numberIsSafeInteger(data.sequence) || data.sequence !== inboundSequence + 1) return;
+    // An authenticated command in order always consumes its sequence. Refusing
+    // its payload without that would silently drop every later command.
     inboundSequence = data.sequence;
+    if (!isBoundedLiveCommand(data.payload)) {
+      const commandType = isObjectRecord(data.payload) && typeof data.payload.type === 'string'
+        && /^[A-Z_]{1,32}$/.test(data.payload.type) ? data.payload.type : 'UNKNOWN';
+      post({type:'COMMAND_REJECTED', commandType});
+      return;
+    }
     if (handleLiveCommand) handleLiveCommand(data.payload);
   };
   const onConnectMessage = event => {
@@ -1536,8 +1643,11 @@ const presentationOwnerLabels = Object.freeze({
   LINK:'링크', BUTTON:'버튼', FORM_CONTROL:'입력 요소', TABLE:'표', REGION:'영역', ELEMENT:'상위 요소'
 });
 const presentationNoteReasons = new Set([
-  'SCREEN_READER_ONLY', 'INVISIBLE_ELEMENT', 'FRAME_CONTENT', 'ASSISTIVE_HIDDEN', 'ASSISTIVE_INERT'
+  'SCREEN_READER_ONLY', 'INVISIBLE_ELEMENT', 'FRAME_CONTENT', 'ASSISTIVE_HIDDEN', 'ASSISTIVE_INERT', 'APPROXIMATE_AREA',
+  'TRANSPARENT_ELEMENT', 'HIDDEN_IN_PLACE', 'REVEALED_BY_CONTROL', 'SHADOW_HOST'
 ]);
+// Markers that stand near a finding rather than on it are drawn dashed.
+const approximatePresentationKinds = new Set(['APPROXIMATE_AREA', 'REVEALED_BY_CONTROL', 'SHADOW_HOST']);
 const presentationNoteFor = issue => {
   const presentation = locatorPresentationByIssueId.get(issue?.id);
   if (!presentation) return '';
@@ -1546,13 +1656,23 @@ const presentationNoteFor = issue => {
     case 'SCREEN_READER_ONLY':
       return `화면에 보이지 않는 스크린리더 전용 텍스트입니다. 이 텍스트가 속한 ${owner}에 표시했습니다.`;
     case 'INVISIBLE_ELEMENT':
-      return `투명하거나 크기가 없어 보이지 않는 요소입니다. 이 요소가 속한 ${owner}에 표시했습니다.`;
+      return `크기가 없어 보이지 않는 요소입니다. 이 요소가 속한 ${owner}에 표시했습니다.`;
+    case 'TRANSPARENT_ELEMENT':
+      return '투명도가 0이라 눈에 보이지 않는 요소입니다. 요소가 있는 자리에 표시했습니다.';
+    case 'HIDDEN_IN_PLACE':
+      return 'visibility:hidden으로 숨겨진 요소입니다. 크기와 위치는 그대로라 요소가 있는 자리에 표시했습니다.';
+    case 'REVEALED_BY_CONTROL':
+      return `닫힌 탭이나 메뉴 안에 있는 요소입니다. 누르면 이 요소를 보여 주는 ${owner}에 표시했습니다.`;
+    case 'SHADOW_HOST':
+      return '들어갈 수 없는 닫힌 Shadow DOM 안의 요소입니다. 바깥 요소에 대략적으로 표시했습니다.';
     case 'FRAME_CONTENT':
       return 'iframe 안에 있는 요소입니다. 프레임 영역에 표시했습니다.';
     case 'ASSISTIVE_HIDDEN':
       return '화면에는 보이지만 스크린리더에서는 숨겨진(aria-hidden) 요소입니다.';
     case 'ASSISTIVE_INERT':
       return '화면에는 보이지만 선택하거나 입력할 수 없게 막힌(inert) 요소입니다.';
+    case 'APPROXIMATE_AREA':
+      return `닫힌 탭, 접힌 메뉴, 넘어간 슬라이드처럼 지금은 숨겨진 곳에 있는 요소입니다. 정확한 위치를 알 수 없어 이 요소가 들어 있는 ${owner}에 대략적으로 표시했습니다.`;
     default:
       return '';
   }
@@ -1823,15 +1943,19 @@ const markerUsesViewportCoordinates = entry => {
   if (!anchor?.element?.isConnected) return false;
   return positionAnchorUsesViewportCoordinates(anchor);
 };
+// Transparent and visibility:hidden elements keep their box; findings on
+// them are marked in place.
+const transparentMarkerTargets = new WeakSet();
 const highlightRectsForElement = element => {
   if (!(element instanceof Element) || !element.isConnected) return [];
   const clippingAncestors = [];
+  const inPlaceTarget = transparentMarkerTargets.has(element);
   for (let current = element; current; current = composedElementParent(current)) {
     const style = getComputedStyle(current);
     const opacity = Number.parseFloat(style.opacity);
     if (current.hidden || style.display === 'none'
-        || style.visibility === 'hidden' || style.visibility === 'collapse'
-        || (numberIsFinite(opacity) && opacity <= 0)) return [];
+        || (!inPlaceTarget && (style.visibility === 'hidden' || style.visibility === 'collapse'))
+        || (!inPlaceTarget && numberIsFinite(opacity) && opacity <= 0)) return [];
     if (current === element || current === document.documentElement || current === document.body) continue;
     const containsPaint = String(style.contain || '').split(' ')
       .some(token => token === 'paint' || token === 'strict' || token === 'content');
@@ -2315,7 +2439,9 @@ const targetVisibleInViewport = (element, rect) => (
         // Carousel slides are revealed by switching slides instead.
         || closestComposedMatching(element, carouselSlideSelector)) return null;
     const hidden = hiddenStateForElement(element);
-    if (hidden?.reason === 'ZERO_OPACITY') return {kind:'INVISIBLE_ELEMENT'};
+    if (hidden?.reason === 'ZERO_OPACITY') {
+      return hasNoLayoutBox(element) ? {kind:'INVISIBLE_ELEMENT'} : {kind:'TRANSPARENT_ELEMENT'};
+    }
     if (hidden && !isAssistiveOnlyHidden(hidden)) return null;
     if (element.getClientRects().length === 0) return {kind:'INVISIBLE_ELEMENT'};
     const clipped = screenReaderOnlyAncestor(element);
@@ -2326,6 +2452,13 @@ const targetVisibleInViewport = (element, rect) => (
         return {kind:'FOCUS_TO_REVEAL', focusTarget:current};
       }
       if (current === clipped) break;
+    }
+    // A zero-size skip-link wrapper: its link sits off the page and slides in
+    // on focus. Links clipped by a screen-reader-only ancestor never appear.
+    const inner = element.querySelector(focusableSelector);
+    if (inner && !inner.disabled && screenReaderOnlyAncestor(inner) === inner) {
+      const rect = inner.getBoundingClientRect();
+      if (rect.width > 1 && rect.height > 1) return {kind:'FOCUS_TO_REVEAL', focusTarget:inner};
     }
     return {kind:'SCREEN_READER_ONLY'};
   };
@@ -2372,18 +2505,147 @@ const targetVisibleInViewport = (element, rect) => (
   };
   const isDocumentMetadata = element => element === document.documentElement
     || Boolean(document.head && element.isConnected && document.head.contains(element));
+  const hasNoLayoutBox = element => {
+    if (element.getClientRects().length === 0) return true;
+    const rect = element.getBoundingClientRect();
+    return !(rect.width > 0 && rect.height > 0);
+  };
+  // A slide the viewer can switch to is restored by the carousel path instead
+  // (the same cases locatorStateForIssue reports as recoverable).
+  const inRecoverableCarousel = (element, issue) => {
+    const carousel = carouselDescriptorFor(element, issue?.carouselContext);
+    if (!carousel || !carousel.root.isConnected) return false;
+    const hidden = hiddenStateForElement(element);
+    return hidden ? hidden.element === carousel.slide : true;
+  };
+  // Content in a closed tab, a collapsed menu or a fade slider has no box of
+  // its own. Such findings are shown on the visible area that contains them.
+  const needsApproximateArea = (element, issue) => {
+    if (!(element instanceof Element) || !element.isConnected || layer.contains(element)
+        || element === document.documentElement || element === document.body
+        || inRecoverableCarousel(element, issue)) return false;
+    return isVisuallyHidden(element) || hasNoLayoutBox(element);
+  };
+  // An approximate area must still point somewhere: past a quarter of the page
+  // it no longer tells the reader where to look.
+  const approximateAreaMaxShare = 0.25;
+  const approximateAreaFor = element => {
+    const root = document.documentElement;
+    const pageArea = Math.max(root.scrollWidth, innerWidth) * Math.max(root.scrollHeight, innerHeight);
+    for (let current = composedElementParent(element); current instanceof Element; current = composedElementParent(current)) {
+      if (current === document.body || current === document.documentElement) return null;
+      if (!canCarryMarker(current)) continue;
+      const rect = current.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) continue;
+      if (rect.width * rect.height > pageArea * approximateAreaMaxShare) return null;
+      const owner = presentationOwnerKinds.find(([, selector]) => current.matches(selector));
+      return {element:current, kind:owner ? owner[0] : current.matches(presentationRegionSelector) ? 'REGION' : 'ELEMENT'};
+    }
+    return null;
+  };
+  const isVisuallyHidden = element => {
+    const hidden = hiddenStateForElement(element);
+    return Boolean(hidden && !isAssistiveOnlyHidden(hidden));
+  };
+  // A skip-link list is a zero-height box whose links slide in on focus.
+  // Focus cannot reveal content that is display:none or on another slide.
+  const focusRevealTargetFor = (element, issue) => {
+    if (!hasNoLayoutBox(element) || isVisuallyHidden(element) || inRecoverableCarousel(element, issue)) return null;
+    const target = closestComposedMatching(element, focusableSelector) || element.querySelector(focusableSelector);
+    if (!target || target.disabled || isVisuallyHidden(target)) return null;
+    return screenReaderOnlyAncestor(target) ? target : null;
+  };
+  // Transparent and visibility:hidden elements (or slides) still have their
+  // box, so their findings are marked exactly where they are.
+  const inPlaceHiddenKinds = {ZERO_OPACITY:'TRANSPARENT_ELEMENT', VISIBILITY_HIDDEN:'HIDDEN_IN_PLACE'};
+  const inPlaceKindFor = (element, issue) => {
+    const kind = inPlaceHiddenKinds[hiddenStateForElement(element)?.reason];
+    return kind && !inRecoverableCarousel(element, issue) && !hasNoLayoutBox(element) ? kind : null;
+  };
+  const inPlaceTargetFor = (resolved, element, kind) => {
+    transparentMarkerTargets.add(element);
+    return {...resolved, exposure:kind, presentation:{kind}};
+  };
+  const ownerKindOf = element => presentationOwnerKinds.find(([, selector]) => element.matches(selector))?.[0]
+    || (element.matches(presentationRegionSelector) ? 'REGION' : 'ELEMENT');
+  // The tab, menu button or summary that opens a hidden panel: the panel's
+  // aria-labelledby tab, a control whose aria-controls/href/data-target names
+  // the panel (or an element between it and the finding), or a closed <details>.
+  const visibleControlFor = (element, candidate) => candidate instanceof Element && !candidate.contains(element)
+    && canCarryMarker(candidate) ? candidate : null;
+  // Content of a closed <details> is not rendered; its summary opens it.
+  const closedDetailsSummaryFor = element => {
+    const details = closestComposedMatching(element, 'details:not([open])');
+    return details ? visibleControlFor(element, details.querySelector(':scope > summary')) : null;
+  };
+  const revealControlFor = element => {
+    const hidden = hiddenStateForElement(element);
+    if (!hidden || isAssistiveOnlyHidden(hidden)) return closedDetailsSummaryFor(element);
+    const visibleControl = candidate => visibleControlFor(element, candidate);
+    const root = element.getRootNode();
+    const byId = id => (root.getElementById ? root.getElementById(id) : null) || document.getElementById(id);
+    for (const id of String(hidden.element.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)) {
+      const tab = visibleControl(byId(id));
+      if (tab && tab.matches('[role="tab"],button,a[href],summary,[role="button"]')) return tab;
+    }
+    for (let current = element; current instanceof Element; current = composedElementParent(current)) {
+      if (current.id) {
+        const id = CSS.escape(current.id);
+        const control = Array.from(root.querySelectorAll(`[aria-controls~="${id}"],a[href="#${id}"],`
+          + `[data-target="#${id}"],[data-bs-target="#${id}"]`)).map(visibleControl).find(Boolean);
+        if (control) return control;
+      }
+      if (current === hidden.element) break;
+    }
+    return closedDetailsSummaryFor(element);
+  };
+  const revealedByControl = (resolved, element, control) => ({...resolved, element:control, source:element,
+    exposure:'REVEALED_BY_CONTROL', presentation:{kind:'REVEALED_BY_CONTROL', ownerKind:ownerKindOf(control)}});
+  // After the viewer could not switch to a slide or reveal a skip link, the
+  // finding is shown on the area around it instead of being dropped.
+  const failedRevealIssueIds = new Set();
+  const approximateTargetFor = (resolved, element) => {
+    const area = approximateAreaFor(element);
+    if (!area) return {...resolved, exposure:'APPROXIMATE_AREA'};
+    return {...resolved, element:area.element, source:element, exposure:'APPROXIMATE_AREA',
+      presentation:{kind:'APPROXIMATE_AREA', ownerKind:area.kind}};
+  };
+  // What presentationTargetFor decides for an element, for change detection.
+  const exposureKindFor = (element, issue) => (failedRevealIssueIds.has(issue?.id) ? 'APPROXIMATE_AREA' : null)
+    || (closedDetailsSummaryFor(element) ? 'REVEALED_BY_CONTROL' : null)
+    || invisibleExposureOf(element)?.kind
+    || (focusRevealTargetFor(element, issue) ? 'FOCUS_TO_REVEAL' : null)
+    || inPlaceKindFor(element, issue)
+    || (needsApproximateArea(element, issue) && revealControlFor(element) ? 'REVEALED_BY_CONTROL' : null)
+    || (needsApproximateArea(element, issue) ? 'APPROXIMATE_AREA' : null);
   // Decide where a resolved finding is shown. Page settings have no place on
-  // screen; invisible but exposed elements are shown on their owner.
-  const presentationTargetFor = resolved => {
+  // screen; invisible but exposed elements are shown on their owner, and
+  // hidden ones on the control that opens them or the area around them.
+  const presentationTargetFor = (resolved, issue) => {
     const element = resolved?.element;
     if (!element || resolved.presentation || layer.contains(element)) return resolved;
     if (isDocumentMetadata(element)) return {element:null, reason:'DOCUMENT_METADATA'};
+    if (failedRevealIssueIds.has(issue?.id)) return approximateTargetFor(resolved, element);
+    const summary = closedDetailsSummaryFor(element);
+    if (summary) return revealedByControl(resolved, element, summary);
     const exposure = invisibleExposureOf(element);
-    if (!exposure) return resolved;
+    if (!exposure) {
+      const focusTarget = focusRevealTargetFor(element, issue);
+      if (focusTarget) {
+        return {...resolved, element:focusTarget, source:element, exposure:'FOCUS_TO_REVEAL',
+          presentation:{kind:'FOCUS_TO_REVEAL'}};
+      }
+      const inPlaceKind = inPlaceKindFor(element, issue);
+      if (inPlaceKind) return inPlaceTargetFor(resolved, element, inPlaceKind);
+      if (!needsApproximateArea(element, issue)) return resolved;
+      const control = revealControlFor(element);
+      return control ? revealedByControl(resolved, element, control) : approximateTargetFor(resolved, element);
+    }
     if (exposure.kind === 'FOCUS_TO_REVEAL') {
       return {...resolved, element:exposure.focusTarget, source:element, exposure:exposure.kind,
         presentation:{kind:'FOCUS_TO_REVEAL'}};
     }
+    if (exposure.kind === 'TRANSPARENT_ELEMENT') return inPlaceTargetFor(resolved, element, exposure.kind);
     const owner = presentationOwnerFor(element);
     if (!owner) return {...resolved, exposure:exposure.kind};
     return {...resolved, element:owner.element, source:element, exposure:exposure.kind,
@@ -2398,8 +2660,14 @@ const targetVisibleInViewport = (element, rect) => (
       return {status:'HIDDEN_STATE', reason:'FOCUS_TO_REVEAL', recoverable:true};
     }
     const context = issue?.carouselContext;
-    const carousel = carouselDescriptorFor(element, context);
+    // A marker moved to a surrounding element or control is never a slide to restore.
+    const carousel = approximatePresentationKinds.has(presentation?.kind) ? null : carouselDescriptorFor(element, context);
     const hiddenState = hiddenStateForElement(element);
+    if (presentation && inPlaceHiddenKinds[hiddenState?.reason] === presentation.kind) {
+      const state = baseLocatorState(element, null, targetGeometry);
+      return state.status === 'VISIBLE' || state.status === 'OFFSCREEN'
+        ? {...state, reason:presentation.kind} : state;
+    }
     const onSlide = Boolean(carousel && hiddenState?.element === carousel.slide);
     if (hiddenState && (!isAssistiveOnlyHidden(hiddenState) || onSlide)) {
       return {status:'HIDDEN_STATE', reason:hiddenState.reason, recoverable:onSlide};
@@ -2654,7 +2922,7 @@ const targetVisibleInViewport = (element, rect) => (
       const source = resolved?.source || resolved?.element;
       if (!(source instanceof Element) || layer.contains(source) || resolved.presentation?.kind === 'FRAME_CONTENT'
           || !targets.some(target => target instanceof Node && target.contains(source))) return false;
-      return (invisibleExposureOf(source)?.kind || null) !== (resolved.exposure || null);
+      return (exposureKindFor(source, issue) || null) !== (resolved.exposure || null);
     });
   };
   const position = (mode = 'full') => {
@@ -2918,7 +3186,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     currentIssues.forEach(issue => {
       if (!issue || !Number.isSafeInteger(issue.id) || issue.id <= 0
           || (issueIds && !issueIds.has(issue.id))) return;
-      snapshot.set(issue.id, presentationTargetFor(resolveIssue(issue, queries)));
+      snapshot.set(issue.id, presentationTargetFor(resolveIssue(issue, queries), issue));
     });
     markerShadowObservers.forEach((observer, root) => {
       if (!root.host.isConnected || (!issueIds && !queries.shadowRoots.has(root))) {
@@ -2964,6 +3232,8 @@ const resolveIssueSnapshot = (issueIds = null) => {
       entry.selectedIssueId = clusterIssuesFor(entry).some(issue => issue.id === selectedIssueId)
         ? selectedIssueId : highestSeverityIssue(entry.issues)?.id;
       if (!entry.marker) createMarkerGroup(entry);
+      entry.marker.classList.toggle('ap-live-marker--approximate', entry.issues.every(issue =>
+        approximatePresentationKinds.has(resolvedIssueTargets.get(issue.id)?.presentation?.kind)));
       if (!entry.issues.some(issue => String(issue.id) === entry.marker.dataset.issueId)) {
         entry.marker.dataset.issueId = String(highestSeverityIssue(entry.issues)?.id || entry.issues[0].id);
       }
@@ -3087,6 +3357,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     focusRequestVersion += 1;
     locatorStatusSignatures.clear();
     locatorPresentationByIssueId.clear();
+    failedRevealIssueIds.clear();
     presentationMutationTargets.clear();
     currentIssues = (Array.isArray(items) ? items : []).slice(0, 5000);
     simpleDocumentLocators = currentIssues.every(isSimpleDocumentLocator);
@@ -3161,6 +3432,17 @@ const resolveIssueSnapshot = (issueIds = null) => {
     closePopover();
     post({type:'ISSUE_DETAIL_FALLBACK', issueId});
   };
+  // A slide or skip link that could not be revealed is placed on the area
+  // around it on the next attempt; false when there is no such area.
+  const fallBackToApproximateArea = issue => {
+    const resolved = resolvedIssueTargets.get(issue.id);
+    const source = resolved?.source || resolved?.element;
+    if (failedRevealIssueIds.has(issue.id) || !(source instanceof Element) || !approximateAreaFor(source)) return false;
+    failedRevealIssueIds.add(issue.id);
+    locatorStatusSignatures.delete(issue.id);
+    retryFocusedIssue(issue.id);
+    return true;
+  };
   const focusIssue = async issueId => {
     let requestVersion = ++focusRequestVersion;
     pendingFocusIssueId = issueId;
@@ -3199,6 +3481,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
       } else if (state.status === 'HIDDEN_STATE' && state.recoverable) {
         attemptedCarouselRecovery = true;
         if (!activateCarouselState(entry.element, issue.carouselContext)) {
+          if (fallBackToApproximateArea(issue)) return;
           reportLocatorState(issue, {
             status:'HIDDEN_STATE', reason:'CAROUSEL_CONTEXT_MISMATCH', recoverable:false
           });
@@ -3227,6 +3510,8 @@ const resolveIssueSnapshot = (issueIds = null) => {
         openPopover(entry.clusterHost || entry, issueId, false, true);
         return;
       }
+      if ((attemptedCarouselRecovery || attemptedFocusReveal) && state.status === 'HIDDEN_STATE'
+          && fallBackToApproximateArea(issue)) return;
       if (attemptedCarouselRecovery && state.status === 'HIDDEN_STATE') {
         state = {status:'HIDDEN_STATE', reason:'CAROUSEL_RECOVERY_FAILED', recoverable:false};
         reportLocatorState(issue, state);
@@ -3255,6 +3540,34 @@ const resolveIssueSnapshot = (issueIds = null) => {
   popover.addEventListener('focusin', clearCloseTimer);
   popover.addEventListener('focusout', scheduleClosePopover);
   popover.addEventListener('click', event => event.stopPropagation());
+  // The page stays still while the pointer or keyboard focus is on a marker or
+  // its popover. Focus left behind by a mouse click does not count, or the page
+  // would stay frozen after the reader moved on. Resuming waits out the gap
+  // between a marker and its popover.
+  let pageMotionResumeTimer = 0;
+  const keyboardOnMarkers = () => {
+    const active = document.activeElement;
+    return document.hasFocus() && active instanceof Element
+      && nativeApply(nativeNodeContains, layer, [active]) && active.matches(':focus-visible');
+  };
+  const readingMarkers = () => !layer.hidden && (layer.matches(':hover') || keyboardOnMarkers());
+  const holdPageMotion = () => {
+    clearTimeout(pageMotionResumeTimer);
+    pageMotionResumeTimer = 0;
+    pausePageMotion(layer);
+  };
+  const scheduleResumePageMotion = () => {
+    if (!pageMotionPaused || pageMotionResumeTimer) return;
+    pageMotionResumeTimer = setTimeout(() => {
+      pageMotionResumeTimer = 0;
+      if (!readingMarkers()) resumePageMotion();
+    }, 250);
+  };
+  layer.addEventListener('pointerover', holdPageMotion);
+  layer.addEventListener('focusin', () => { if (keyboardOnMarkers()) holdPageMotion(); });
+  layer.addEventListener('pointerout', scheduleResumePageMotion);
+  layer.addEventListener('focusout', scheduleResumePageMotion);
+  nativeApply(nativeAddEventListener, globalThis, ['blur', scheduleResumePageMotion]);
   document.addEventListener('pointerdown', event => {
     if (popover.hidden && pendingFocusIssueId === null) return;
     const target = event.target;
@@ -3292,7 +3605,7 @@ const resolveIssueSnapshot = (issueIds = null) => {
     }
     if (data.type === 'SET_MARKERS_VISIBLE') {
       layer.hidden = data.markersVisible === false;
-      if (layer.hidden) closePopover();
+      if (layer.hidden) { closePopover(); scheduleResumePageMotion(); }
       else schedulePosition();
     }
     if (data.type === 'SET_VIEW_SCALE' && data.documentToken === documentToken
@@ -3349,6 +3662,8 @@ const resolveIssueSnapshot = (issueIds = null) => {
       marked.forEach(entry => { entry.positionAnchor = undefined; });
       schedulePosition('preserve-root');
     }
+    // A marker replaced under the pointer never reports pointerout.
+    scheduleResumePageMotion();
   }, 1000);
   // Attaching a root to an existing host emits no DOM mutation.
   // Reuse the reconciliation queue for locator paths and inset navigation.

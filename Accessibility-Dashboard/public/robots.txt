@@ -1,2 +1,8 @@
 User-agent: *
 Allow: /
+# Signed-in dashboard routes and the API are not public content.
+Disallow: /analyze
+Disallow: /dashboard
+Disallow: /projects/
+Disallow: /recent-pages/
+Disallow: /api/

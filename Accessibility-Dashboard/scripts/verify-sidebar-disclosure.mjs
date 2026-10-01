@@ -49,50 +49,56 @@ async function verifyViewport({ height, name, width }) {
   const sidebar = page.locator("aside");
   const currentItems = () => sidebar.locator('[aria-current="page"]');
   const analyzeItem = sidebar.getByRole("button", { name: "새 페이지 분석", exact: true });
-  const projectParents = sidebar.locator('button[aria-controls^="sidebar-project-pages-"]');
-  const firstProject = projectParents.first();
+  // The disclosure toggle and the project navigation are separate buttons:
+  // opening a project never collapses its pages, the chevron toggle does.
+  const projectToggles = sidebar.locator('button.sidebar-tree-toggle[aria-controls^="sidebar-project-pages-"]');
+  const firstToggle = projectToggles.first();
+  const firstProject = firstToggle.locator("xpath=following-sibling::button[1]");
 
   assert.equal(await sidebar.locator('[role="tree"]').count(), 0);
   assert.equal(await currentItems().count(), 1);
   assert.equal(await analyzeItem.getAttribute("aria-current"), "page");
   assert.equal(await firstProject.count(), 1, `${name}: project fixture is required`);
-  assert.equal(await firstProject.getAttribute("aria-expanded"), "false");
+  assert.equal(await firstToggle.getAttribute("aria-expanded"), "false");
+  assert.match((await firstToggle.getAttribute("aria-label")) ?? "", /페이지 목록 펼치기$/);
 
   const lightMetrics = await firstProject.evaluate((element) => {
     const nameElement = element.querySelector("span.flex-1.truncate");
-    const countElement = element.querySelector("span.text-xs");
     return {
-      countColor: countElement ? getComputedStyle(countElement).color : null,
       height: element.getBoundingClientRect().height,
       nameColor: nameElement ? getComputedStyle(nameElement).color : null
     };
   });
   assert.equal(lightMetrics.height, 44);
   assert.equal(lightMetrics.nameColor, "rgb(29, 29, 31)");
-  assert.equal(lightMetrics.countColor, "rgb(110, 110, 115)");
 
   await firstProject.click();
   await page.waitForURL(/\/projects\/\d+$/);
   await page.waitForFunction(() => {
-    const parent = document.querySelector('aside button[aria-controls^="sidebar-project-pages-"]');
-    return parent?.getAttribute("aria-expanded") === "true" && parent.getAttribute("aria-current") === "page";
+    const toggle = document.querySelector('aside button.sidebar-tree-toggle[aria-controls^="sidebar-project-pages-"]');
+    const project = toggle?.nextElementSibling;
+    return toggle?.getAttribute("aria-expanded") === "true" && project?.getAttribute("aria-current") === "page";
   });
   assert.equal(await currentItems().count(), 1);
   assert.equal(await firstProject.getAttribute("aria-current"), "page");
+  assert.equal(await firstProject.getAttribute("aria-expanded"), null, "navigation button must not claim disclosure state");
 
-  const childListId = await firstProject.getAttribute("aria-controls");
+  const childListId = await firstToggle.getAttribute("aria-controls");
   assert.ok(childListId);
   const childList = sidebar.locator(`#${childListId}`);
   assert.equal(await childList.evaluate((element) => element.tagName), "UL");
   assert.equal(await childList.locator(":scope > li").count() > 0, true, `${name}: page fixture is required`);
   assert.equal(await firstProject.locator("svg.lucide-folder-open").count(), 1);
 
+  await firstToggle.focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await firstToggle.getAttribute("aria-expanded"), "false");
+  await firstToggle.focus();
+  await page.keyboard.press("Space");
+  assert.equal(await firstToggle.getAttribute("aria-expanded"), "true");
   await firstProject.focus();
   await page.keyboard.press("Enter");
-  assert.equal(await firstProject.getAttribute("aria-expanded"), "false");
-  await firstProject.focus();
-  await page.keyboard.press("Space");
-  assert.equal(await firstProject.getAttribute("aria-expanded"), "true");
+  assert.equal(await firstToggle.getAttribute("aria-expanded"), "true", "opening a project must not collapse it");
 
   const firstChild = childList.locator('a[href*="/pages/"]').first();
   assert.equal(await firstChild.getAttribute("aria-current"), null);
@@ -111,10 +117,10 @@ async function verifyViewport({ height, name, width }) {
   });
   assert.equal(await currentItems().count(), 1);
   assert.equal(await firstProject.getAttribute("aria-current"), null);
-  assert.equal(await firstProject.getAttribute("aria-expanded"), "true");
+  assert.equal(await firstToggle.getAttribute("aria-expanded"), "true");
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction(() => {
-    const parent = document.querySelector('aside button[aria-controls^="sidebar-project-pages-"]');
+    const parent = document.querySelector('aside button.sidebar-tree-toggle[aria-controls^="sidebar-project-pages-"]');
     const selected = document.querySelectorAll('aside [aria-current="page"]');
     return (
       parent?.getAttribute("aria-expanded") === "true" &&
@@ -125,14 +131,25 @@ async function verifyViewport({ height, name, width }) {
   const expandedScreenshotPath = path.join(artifactsDir, `sidebar-disclosure-${name}-expanded.png`);
   await page.screenshot({ path: expandedScreenshotPath, fullPage: true });
 
+  // A visible "관리 메뉴" button replaces the right-click-only entry point
+  // (touch screens without a context menu, keyboard users unaware of Shift+F10).
   const menuTrigger = sidebar.locator('button[aria-label$="관리 메뉴"]').first();
-  const countRect = await firstProject.locator("span.text-xs").boundingBox();
+  const projectRect = await firstProject.boundingBox();
   const menuRect = await menuTrigger.boundingBox();
-  assert.ok(countRect && menuRect);
-  assert.equal(countRect.x + countRect.width <= menuRect.x, true);
+  assert.ok(projectRect && menuRect);
+  assert.equal(menuRect.x + menuRect.width <= projectRect.x + projectRect.width + 0.5, true);
+  assert.equal(menuRect.width >= 24 && menuRect.height >= 24, true, "menu trigger must meet the 24px target size");
   await menuTrigger.click();
-  const projectMenu = page.getByRole("dialog", { name: /관리$/ }).first();
+  const projectMenu = page.getByRole("menu", { name: /관리$/ }).first();
   await projectMenu.waitFor();
+  assert.equal(await menuTrigger.getAttribute("aria-expanded"), "true");
+  await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "수정");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent?.trim()),
+    "삭제",
+    "ArrowDown must move to the next menu item"
+  );
   await page.keyboard.press("Escape");
   await projectMenu.waitFor({ state: "hidden" });
   assert.equal(await menuTrigger.evaluate((element) => document.activeElement === element), true);
@@ -178,14 +195,11 @@ async function verifyViewport({ height, name, width }) {
 
   const darkMetrics = await firstProject.evaluate((element) => {
     const nameElement = element.querySelector("span.flex-1.truncate");
-    const countElement = element.querySelector("span.text-xs");
     return {
-      countColor: countElement ? getComputedStyle(countElement).color : null,
       nameColor: nameElement ? getComputedStyle(nameElement).color : null
     };
   });
   assert.equal(darkMetrics.nameColor, "rgb(255, 255, 255)");
-  assert.equal(darkMetrics.countColor, "rgb(161, 161, 166)");
   assert.equal(await currentItems().count(), 1);
 
   const overflow = await page.evaluate(() => ({

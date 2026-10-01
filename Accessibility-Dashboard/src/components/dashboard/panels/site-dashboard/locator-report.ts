@@ -12,9 +12,8 @@ export function buildLocatorReport({ requestId, issueIds, issueIdsSignature, iss
   const unavailableIssueIds: number[] = [];
   const recoverableHiddenIssueIds: number[] = [];
   const pageSettingIssueIds: number[] = [];
-  const outdatedIssueIds: number[] = [];
   const listFor = { "other-state": recoverableHiddenIssueIds, "page-setting": pageSettingIssueIds,
-    outdated: outdatedIssueIds, unavailable: unavailableIssueIds, "on-page": null } as const;
+    unavailable: unavailableIssueIds, "on-page": null } as const;
   let allLocated = connected;
   if (connected) issueIds.forEach((id, index) => {
     const state: LocatorIssueState | undefined = index >= issueLimit
@@ -25,7 +24,7 @@ export function buildLocatorReport({ requestId, issueIds, issueIdsSignature, iss
   });
   return { requestId, issueIdsSignature,
     state: failed ? "error" : allLocated ? "ready" : "loading",
-    unavailableIssueIds, recoverableHiddenIssueIds, pageSettingIssueIds, outdatedIssueIds, issueStates };
+    unavailableIssueIds, recoverableHiddenIssueIds, pageSettingIssueIds, issueStates };
 }
 
 export function sameLocatorReport(left: LocatorReport | null, right: LocatorReport): boolean {

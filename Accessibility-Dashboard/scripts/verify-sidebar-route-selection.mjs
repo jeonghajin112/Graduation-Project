@@ -136,7 +136,7 @@ try {
   assert.equal(await currentItems().count(), 1);
   assert.equal(await firstRecentPage.getAttribute("aria-current"), "page");
 
-  const accountTrigger = sidebar.locator('button[aria-haspopup="menu"]');
+  const accountTrigger = sidebar.locator(".dashboard-account-menu-trigger");
   await accountTrigger.click();
   const accountMenuItems = page.getByRole("menuitem");
   const accountMenuItemCount = await accountMenuItems.count();

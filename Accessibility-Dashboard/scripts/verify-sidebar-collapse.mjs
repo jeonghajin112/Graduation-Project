@@ -46,6 +46,22 @@ try {
   assert.ok(collapsedWidth < 96 && collapsedWidth < expandedWidth / 2,
     `collapsed rail should be narrow (${collapsedWidth}px vs ${expandedWidth}px)`);
 
+  // The labelled account trigger is hidden in the rail, but settings and
+  // logout must stay reachable through the avatar-only rail trigger.
+  const railAccount = sidebar.getByRole("button", { name: /^계정 메뉴/ });
+  assert.equal(await railAccount.isVisible(), true, "collapsed rail keeps an account menu trigger");
+  await railAccount.click();
+  const railMenu = page.getByRole("menu", { name: "계정 메뉴" });
+  await railMenu.waitFor();
+  assert.equal(await railMenu.getByRole("menuitem", { name: "설정", exact: true }).isVisible(), true);
+  assert.equal(await railMenu.evaluate((menu) => {
+    const rect = menu.getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+  }), true, "rail account menu must not be clipped by the rail");
+  await page.keyboard.press("Escape");
+  await railMenu.waitFor({ state: "detached" });
+  await page.waitForFunction(() => document.activeElement?.classList.contains("dashboard-account-rail-trigger"));
+
   await analyzeLink.click();
   assert.equal(await analyzeLink.getAttribute("aria-current"), "page");
 

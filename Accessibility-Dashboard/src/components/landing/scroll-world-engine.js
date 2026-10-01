@@ -1,3 +1,4 @@
+// @ts-check
 /* ============================================================================
    scroll-world — portable scroll-scrubbed camera-flight engine
    ----------------------------------------------------------------------------
@@ -82,7 +83,9 @@ export function mountScrollWorld(container, config, options = {}) {
       .sort((p, q) => p.maxDevicePx - q.maxDevicePx).find(v => devicePx <= v.maxDevicePx);
     return (url && variant?.suffix) ? url.replace(/(\.[a-z0-9]+)(\?.*)?$/i, variant.suffix + '$1$2') : url;
   };
-  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  // Network Information API is non-standard; type it locally for @ts-check.
+  const navigatorWithConnection = /** @type {Navigator & { connection?: { saveData?: boolean }, mozConnection?: { saveData?: boolean }, webkitConnection?: { saveData?: boolean } }} */ (navigator);
+  const connection = navigatorWithConnection.connection || navigatorWithConnection.mozConnection || navigatorWithConnection.webkitConnection;
   const saveData = Boolean(connection && connection.saveData);
   const useStaticMedia = () => reduce || saveData || (isMobile() && config.mobileVideo === false);
   const SECTIONS = config.sections || [];
@@ -104,6 +107,16 @@ export function mountScrollWorld(container, config, options = {}) {
   injectCSS();
   container.replaceChildren();
   container.classList.add('sw-root');
+  // Optional landmark split: the skip link and topbar (banner) can live in a
+  // separate element before the page's own <main>, which then wraps this
+  // container together with the content that follows the film.
+  const chrome = options.chromeContainer || null;
+  if (chrome) {
+    chrome.replaceChildren();
+    chrome.classList.add('sw-chrome');
+  }
+  const externalMain = Boolean(options.externalMain);
+  const accentHosts = chrome ? [container, chrome] : [container];
 
   // ---- build the interleaved segment chain: dive0, conn0, dive1, … diveN-1 ----
   const SEGMENTS = [];
@@ -160,9 +173,11 @@ export function mountScrollWorld(container, config, options = {}) {
 
   const stage = el('div', 'sw-stage');
   stage.setAttribute('aria-hidden', 'true');
-  const copylayer = el('main', 'sw-copylayer');
-  copylayer.id = config.mainId || 'uni-access-main';
-  copylayer.tabIndex = -1;
+  const copylayer = el(externalMain ? 'div' : 'main', 'sw-copylayer');
+  if (!externalMain) {
+    copylayer.id = config.mainId || 'uni-access-main';
+    copylayer.tabIndex = -1;
+  }
   const route = el('nav', 'sw-route');
   route.setAttribute('aria-label', '현재 장면');
   if (config.route === false) route.style.display = 'none';   // route:false → 오른쪽 세로 진행 레일 숨김
@@ -171,7 +186,9 @@ export function mountScrollWorld(container, config, options = {}) {
   let hintAtBottom = false;
   if (hint) {
     hint.type = 'button';
-    hint.setAttribute('aria-label', `${config.hint}: 아래로 스크롤`);
+    hint.setAttribute('aria-label', config.hintLabel || '아래로 스크롤');
+    // The visible cue stays in English; mark it so screen readers pronounce it correctly.
+    hintText.lang = config.hintLang || 'en';
     const arrow = el('i');
     arrow.setAttribute('aria-hidden', 'true');
     arrow.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16m-6-6 6 6 6-6"/></svg>';
@@ -187,9 +204,16 @@ export function mountScrollWorld(container, config, options = {}) {
   const track = el('div', 'sw-track');
   track.setAttribute('aria-hidden', 'true');
 
-  [skip, sky, topbar, stage, copylayer, route, hint, track]
-    .filter(Boolean)
-    .forEach(n => container.appendChild(n));
+  if (chrome) {
+    [skip, topbar].forEach(n => chrome.appendChild(n));
+    [sky, stage, copylayer, route, hint, track]
+      .filter(Boolean)
+      .forEach(n => container.appendChild(n));
+  } else {
+    [skip, sky, topbar, stage, copylayer, route, hint, track]
+      .filter(Boolean)
+      .forEach(n => container.appendChild(n));
+  }
 
   // segment scenes
   SEGMENTS.forEach((s, segmentIndex) => {
@@ -234,8 +258,9 @@ export function mountScrollWorld(container, config, options = {}) {
   SECTIONS.forEach((s, i) => {
     const c = el('article', 'sw-copy'); c.style.setProperty('--sw-accent', s.accent || '');
     c.id = `sw-section-${s.id || i + 1}`;
-    c.setAttribute('aria-hidden', 'true');
-    c.inert = true;
+    // Every scene's copy stays in the accessibility tree (reading order =
+    // story order). Only its pointer and Tab reachability follow the scroll.
+    c.dataset.swActive = 'false';
     const headingTag = i === 0 ? 'h1' : 'h2';
     const headingId = i === 0 ? 'ua-hero-title' : `sw-title-${s.id || i + 1}`;
     const headingClass = 'sw-copy__title';
@@ -247,6 +272,12 @@ export function mountScrollWorld(container, config, options = {}) {
       (s.tags && s.tags.length ? `<ul class="sw-copy__tags">${s.tags.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '') +
       (s.cta ? `<div class="sw-copy__cta">${ctaBtns(s.cta)}</div>` : '');
     copylayer.appendChild(c); copies.push(c);
+    setCopyInteractive(c, false);
+    // A screen reader (or a click on an off-screen copy) moving focus into a
+    // scene's copy scrolls the film to that scene so the focus is visible.
+    c.addEventListener('focusin', () => {
+      if (c.dataset.swActive !== 'true') jumpTo(i);
+    });
 
     const dot = el('button', 'sw-route__dot'); dot.type = 'button'; dot.style.setProperty('--sw-accent', s.accent || '');
     dot.setAttribute('aria-label', `${i + 1}. ${s.label || '장면'}`);
@@ -320,12 +351,22 @@ export function mountScrollWorld(container, config, options = {}) {
     jumpTo(sectionIndex);
   }
 
-  container.querySelectorAll('[data-sw-action]').forEach(link => {
-    link.addEventListener('click', onActionClick);
+  accentHosts.forEach(host => {
+    host.querySelectorAll('[data-sw-action]').forEach(link => {
+      link.addEventListener('click', onActionClick);
+    });
+    host.querySelectorAll('[data-sw-section]').forEach(link => {
+      link.addEventListener('click', onSectionLinkClick);
+    });
   });
-  container.querySelectorAll('[data-sw-section]').forEach(link => {
-    link.addEventListener('click', onSectionLinkClick);
-  });
+
+  function setCopyInteractive(copy, isInteractive) {
+    copy.dataset.swActive = String(isInteractive);
+    copy.querySelectorAll('a[href],button').forEach(control => {
+      if (isInteractive) control.removeAttribute('tabindex');
+      else control.tabIndex = -1;
+    });
+  }
 
   function loadClip(s) {
     // Under prefers-reduced-motion we never load the clips at all — the stills stay up
@@ -426,8 +467,7 @@ export function mountScrollWorld(container, config, options = {}) {
           : `translate(${slideX.toFixed(2)}vw, calc(-50% + ${driftY}vh))`;
       const isInteractive = cop > 0.5;
       c.style.pointerEvents = isInteractive ? 'auto' : 'none';
-      c.setAttribute('aria-hidden', String(!isInteractive));
-      c.inert = !isInteractive;
+      if (c.dataset.swActive !== String(isInteractive)) setCopyInteractive(c, isInteractive);
     }
 
     // ---- end of film: hand the last frame over to the document flow ----
@@ -465,7 +505,7 @@ export function mountScrollWorld(container, config, options = {}) {
         n.classList.toggle('is-active', isActive);
         if (isActive) n.setAttribute('aria-current', 'step'); else n.removeAttribute('aria-current');
       });
-      container.style.setProperty('--sw-accent', SECTIONS[near].accent || '');
+      accentHosts.forEach(host => host.style.setProperty('--sw-accent', SECTIONS[near].accent || ''));
       container.classList.toggle('sw-card-active', (SECTIONS[near].layout || 'full') === 'card');
     }
     // This replaces the removed horizontal page gauge, so it follows the
@@ -479,7 +519,7 @@ export function mountScrollWorld(container, config, options = {}) {
       hintAtBottom = atBottom;
       hint.classList.toggle('is-top', atBottom);
       hintText.textContent = atBottom ? 'TOP' : config.hint;
-      hint.setAttribute('aria-label', atBottom ? 'TOP: 맨 위로 이동' : `${config.hint}: 아래로 스크롤`);
+      hint.setAttribute('aria-label', atBottom ? '맨 위로 이동' : (config.hintLabel || '아래로 스크롤'));
     }
     if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
     ticking = false;
@@ -592,6 +632,11 @@ export function mountScrollWorld(container, config, options = {}) {
     container.classList.remove('sw-root', 'sw-card-active');
     container.removeAttribute('data-scroll-world-ready');
     container.style.removeProperty('--sw-accent');
+    if (chrome) {
+      chrome.replaceChildren();
+      chrome.classList.remove('sw-chrome');
+      chrome.style.removeProperty('--sw-accent');
+    }
   };
 
   // ---- helpers ----
@@ -626,11 +671,12 @@ function seedParticles(host, reduce) {
 function injectCSS() {
   const existingStyle = document.getElementById('sw-css');
   const css = `
-  .sw-root{--sw-bg:#f5f5f7;--sw-ink:#1d1d1f;--sw-ink-soft:#6e6e73;--sw-accent:#0071e3;
+  .sw-root,.sw-chrome{--sw-bg:#f5f5f7;--sw-ink:#1d1d1f;--sw-ink-soft:#6e6e73;--sw-accent:#0071e3;
     --sw-font-display:"Pretendard Variable",Pretendard,"Noto Sans KR",system-ui,sans-serif;
     --sw-font-body:"Pretendard Variable",Pretendard,"Noto Sans KR",system-ui,sans-serif;
-    position:relative;min-height:100vh;margin:0;overflow-x:clip;background:var(--sw-bg);color:var(--sw-ink);font-family:var(--sw-font-body);}
-  .sw-root *{box-sizing:border-box;}
+    color:var(--sw-ink);font-family:var(--sw-font-body);}
+  .sw-root{position:relative;min-height:100vh;margin:0;overflow-x:clip;background:var(--sw-bg);}
+  .sw-root *,.sw-chrome *{box-sizing:border-box;}
   .sw-skip-link{position:fixed;left:16px;top:12px;z-index:1000;transform:translateY(-180%);border-radius:10px;background:#fff;color:var(--sw-ink);padding:12px 16px;font-weight:700;text-decoration:none;box-shadow:0 8px 30px rgba(0,0,0,.16);transition:transform .18s ease;}
   .sw-skip-link:focus-visible{transform:translateY(0);outline:3px solid var(--sw-accent);outline-offset:3px;}
   .sw-sky{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:var(--sw-bg);}
@@ -740,13 +786,13 @@ function injectCSS() {
     .sw-route__dot{width:44px;height:44px;}
     .sw-btn{padding:15px 26px;}
   }
-  .sw-root :where(a,button):focus-visible{outline:3px solid var(--sw-accent);outline-offset:3px;}
+  .sw-root :where(a,button):focus-visible,.sw-chrome :where(a,button):focus-visible{outline:3px solid var(--sw-accent);outline-offset:3px;}
   @media (forced-colors:active){
     .sw-route::before{background:GrayText;}
     .sw-route::after{background:Highlight;}
   }
   @media (prefers-reduced-motion:reduce){
-    .sw-root *,.sw-root *::before,.sw-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important;}
+    .sw-root *,.sw-root *::before,.sw-root *::after,.sw-chrome *,.sw-chrome *::before,.sw-chrome *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important;}
     .sw-hint svg{animation:none;}.sw-pt{display:none;}
   }
   `;

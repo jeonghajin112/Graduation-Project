@@ -264,6 +264,11 @@ const replayHtml = `<!doctype html>
         window.__replayMessages = messages;
         window.__replayOutboundMessages = outboundMessages;
         window.__replayDocumentToken = DOCUMENT_TOKEN;
+        // Any script in the proxied page can post this without the secret.
+        window.__postForgedAvailable = () => parent.postMessage({
+          source: LIVE_VIEWER_SOURCE, type: "AVAILABLE", protocolVersion: PROTOCOL_VERSION,
+          sessionId: SESSION_ID, documentToken: DOCUMENT_TOKEN + "_forged"
+        }, "*");
         window.__reconnectWithoutAck = () => {
           livePort?.close();
           livePort = null;
@@ -503,6 +508,9 @@ const replayHtml = `<!doctype html>
 
         addEventListener("message", (event) => {
           const message = event.data;
+          if (event.source === parent && message?.type === "CONNECT") {
+            window.__connectAttempts = (window.__connectAttempts ?? 0) + 1;
+          }
           if (
             event.source !== parent ||
             !message ||
@@ -1290,30 +1298,23 @@ async function verifyUnavailableIssueDescription(page) {
     ]) {
       await detailPage.setViewportSize({ width: layout.width, height: layout.height });
       await detailPage.evaluate(zoom => { document.body.style.zoom = String(zoom); }, layout.zoom);
-      assert.equal(await scrollCard.locator('.site-unavailable-locator-panel__message').textContent().then(text => text.trim()),
-        longDescription, "the card must retain the entire explanation, including text past 1600 characters");
-      await scrollCard.focus();
-      await detailPage.keyboard.press("Home");
-      await scrollCard.hover();
-      await detailPage.mouse.wheel(0, 150);
-      await detailPage.waitForFunction(() => document.querySelector('.site-unavailable-locator-panel__issue[data-issue-id="9003"]')?.scrollTop > 0);
-      await detailPage.keyboard.press("End");
-      await detailPage.waitForFunction(() => {
-        const card = document.querySelector('.site-unavailable-locator-panel__issue[data-issue-id="9003"]');
-        return card && card.scrollTop + card.clientHeight >= card.scrollHeight - 1;
-      });
-      const scrollFacts = await scrollCard.evaluate(card => {
-        const message = card.querySelector('.site-unavailable-locator-panel__message');
+      // The rail card stays compact: why and where. A long explanation lives
+      // in the details dialog and the final report instead.
+      assert.equal(await scrollCard.locator('.site-unavailable-locator-panel__message').count(), 0,
+        "the rail card leaves the explanation to the details dialog");
+      assert.doesNotMatch(await scrollCard.textContent(), /마지막 개선 안내/);
+      assert.equal(await scrollCard.locator('.site-unavailable-locator-panel__reason').textContent(), "요소를 찾지 못함");
+      assert.match(await scrollCard.locator('.site-unavailable-locator-panel__where').textContent(), /#missing-promotion-title/);
+      const cardFacts = await scrollCard.evaluate(card => {
+        const where = card.querySelector('.site-unavailable-locator-panel__where');
         const bounds = card.getBoundingClientRect();
-        const messageBounds = message.getBoundingClientRect();
-        return { overflow: card.scrollWidth - card.clientWidth, endVisible: messageBounds.bottom <= bounds.bottom,
-          scrollable: card.scrollHeight > card.clientHeight, id: card.dataset.issueId };
+        return { overflow: card.scrollWidth - card.clientWidth, whereInside: where.getBoundingClientRect().right <= bounds.right + 1,
+          id: card.dataset.issueId };
       });
-      assert.ok(scrollFacts.scrollable && scrollFacts.endVisible && scrollFacts.overflow <= 1,
-        `the final sentence must be reachable without clipping at ${JSON.stringify(layout)}: ${JSON.stringify(scrollFacts)}`);
-      assert.equal(scrollFacts.id, "9003", "scrolling must not change the issue page");
-      await scrollCard.screenshot({ path: `${outDir}/issue-card-scroll-${layout.width}-${layout.zoom}.png` });
-      await detailPage.keyboard.press("Home");
+      assert.ok(cardFacts.overflow <= 1 && cardFacts.whereInside,
+        `the location line must stay inside the card at ${JSON.stringify(layout)}: ${JSON.stringify(cardFacts)}`);
+      assert.equal(cardFacts.id, "9003");
+      await scrollCard.screenshot({ path: `${outDir}/issue-card-compact-${layout.width}-${layout.zoom}.png` });
     }
     await detailPage.evaluate(() => { document.body.style.zoom = ""; });
     await detailPage.setViewportSize({ width: 390, height: 668 });
@@ -1359,8 +1360,8 @@ async function verifyUnavailableIssueDescription(page) {
     await waitForReplayReady(evidence);
     await waitForUnavailableLocatorCount(evidence, 2);
     const localizedCard = detailPage.locator('[data-issue-id="9003"]');
-    assert.match(await localizedCard.textContent(), /링크/);
-    assert.doesNotMatch(await localizedCard.textContent(), /Fix any/);
+    // The card never shows raw engine text; the dialog carries the localized guidance.
+    assert.doesNotMatch(await localizedCard.textContent(), /Links must have|Fix any/);
     await localizedCard.getByRole("button", { name: "문제 상세", exact: true }).click();
     const ruleExplanation = dialog.getByRole("region", { name: "문제 설명", exact: true });
     assert.match(await ruleExplanation.locator("p").first().textContent(), /개선 안내/);
@@ -1445,6 +1446,14 @@ async function verifyLocatorBatchReconnect(page) {
     await page.waitForFunction(() => window.__locatorBatchScheduled());
     assert.equal(await preview.getAttribute("data-unavailable-locator-count"), "2",
       "the old port status must still be queued before reconnect");
+    const connectsBeforeForgery = await frame.locator("html").evaluate(() => window.__connectAttempts ?? 0);
+    await frame.locator("html").evaluate(() => window.__postForgedAvailable());
+    await page.waitForTimeout(300);
+    assert.equal(await frame.locator("html").evaluate(() => window.__connectAttempts ?? 0), connectsBeforeForgery,
+      "an AVAILABLE posted by the loaded document must not replace its connected bridge");
+    // Only once the iframe has loaded another document may its bridge replace the port.
+    await page.evaluate(() => document.querySelector("iframe.site-page-evidence-replay-frame")
+      .dispatchEvent(new Event("load")));
     await frame.locator("html").evaluate(() => window.__reconnectWithoutAck());
     await frame.locator("html").evaluate(() => new Promise((resolve, reject) => {
       const deadline = performance.now() + 2000;
@@ -1602,6 +1611,10 @@ async function verifyDesktop(page) {
   const nextUnavailableIssue = unavailableLocatorPanel.getByRole("button", {
     name: "다음 문제"
   });
+  // A slightly shorter window fits one card per page, so both issues need the pager.
+  await page.setViewportSize({ width: 1440, height: 860 });
+  await page.waitForFunction(() =>
+    document.querySelector(".site-unavailable-locator-panel")?.getAttribute("data-unavailable-page-size") === "1");
   assert.equal(await unavailableIssueCards.count(), 1);
   assert.deepEqual(
     await unavailableIssueCards.evaluateAll((cards) =>
@@ -1611,7 +1624,7 @@ async function verifyDesktop(page) {
     "the first unavailable issue must be shown on its own"
   );
   assert.match(await unavailablePosition.textContent(), /총 2건 중 1번째 문제/);
-  const copyMessage = unavailableIssueCards.first().locator(".site-unavailable-locator-panel__message");
+  const copyMessage = unavailableIssueCards.first().locator(".site-unavailable-locator-panel__where");
   await copyMessage.scrollIntoViewIfNeeded();
   const copyBounds = await copyMessage.boundingBox();
   assert.ok(copyBounds);
@@ -1647,7 +1660,7 @@ async function verifyDesktop(page) {
   assert.match(await missingBannerCard.textContent(), /중간/);
   assert.match(await missingBannerCard.textContent(), /KWCAG 2\.4\.6/);
   assert.match(await missingBannerCard.textContent(), /사라진 배너 제목 구조가 올바르지 않습니다/);
-  assert.match(await missingBannerCard.textContent(), /현재 재현 DOM에는 이 요소가 없습니다/);
+  assert.match(await missingBannerCard.locator(".site-unavailable-locator-panel__where").textContent(), /#missing-promotion-title/);
   assert.equal(await missingBannerCard.locator(".site-unavailable-locator-panel__reason").textContent(), "요소를 찾지 못함");
   const locationButton = missingBannerCard.getByRole("button", { name: "문제 상세", exact: true });
   await locationButton.click();
@@ -2685,8 +2698,8 @@ async function verifyResponsiveWidths(page) {
     if (isFourK) {
       assert.equal(
         await unavailableLocatorPanel.getAttribute("data-unavailable-page-size"),
-        "4",
-        "4K must expose the four-item unavailable-issue page capacity"
+        "7",
+        "4K must expose the seven-item page capacity of the compact issue rows"
       );
     }
     const frame = page.frameLocator("iframe.site-page-evidence-replay-frame");
@@ -2850,7 +2863,7 @@ async function verifyResponsiveWidths(page) {
       `${viewport.width}px WCAG badge must remain beside severity: ${JSON.stringify(facts)}`
     );
     if (isFourK) {
-      assert.equal(facts.unavailablePageSize, "4", "4K must retain the four-item page capacity");
+      assert.equal(facts.unavailablePageSize, "7", "4K must retain the seven-item page capacity of compact rows");
       assert.deepEqual(
         facts.unavailableIssueIds,
         ["9003", "9004"],
@@ -3022,6 +3035,19 @@ async function verifyUnavailableCapacityResize(page) {
     await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: issue.id, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
   }
   const panel = page.locator('.site-unavailable-locator-panel[data-locator-mode="unavailable"]');
+  const currentCapacity = () => panel.getAttribute("data-unavailable-page-size").then(Number);
+  // Wait until the measured page size settles (two equal readings), then check the layout.
+  const settleCapacity = async () => {
+    let previous = -1;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const capacity = await currentCapacity();
+      if (capacity === previous) break;
+      previous = capacity;
+      await page.waitForTimeout(250);
+    }
+    await waitForCapacity(previous);
+    return previous;
+  };
   const waitForCapacity = async capacity => {
     await page.waitForFunction(capacity => document.querySelector('.site-unavailable-locator-panel[data-locator-mode="unavailable"]')
       ?.getAttribute("data-unavailable-page-size") === String(capacity), capacity);
@@ -3039,49 +3065,60 @@ async function verifyUnavailableCapacityResize(page) {
         cards: [...list.children].map(card => {
           const rect = card.getBoundingClientRect();
           const action = card.querySelector("button").getBoundingClientRect();
-          return { height: rect.height, readableMessage: card.querySelector(".site-unavailable-locator-panel__message").getBoundingClientRect().height,
+          const where = card.querySelector(".site-unavailable-locator-panel__where").getBoundingClientRect();
+          return { height: rect.height, readableWhere: where.height,
+            whereInside: where.bottom <= rect.bottom + 1,
             actionInside: action.top >= rect.top && action.bottom <= rect.bottom && action.right <= rect.right };
         }) };
     });
     assert.ok(geometry.panelOverflow <= 1 && geometry.listOverflow <= 1, JSON.stringify(geometry));
-    assert.ok(geometry.cards.every(card => card.height >= 239 && card.readableMessage >= 16 && card.actionInside), JSON.stringify(geometry));
+    assert.ok(geometry.cards.every(card => card.readableWhere >= 12 && card.whereInside && card.actionInside), JSON.stringify(geometry));
     await assertCompactUnavailablePanel(panel, `capacity ${capacity}`);
   };
   await page.locator('.site-unavailable-locator-panel[data-unavailable-locator-count="4"]').waitFor();
-  await waitForCapacity(2);
-  await panel.getByRole("button", { name: "1번째 페이지", exact: true }).click();
-  assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9001", "9002"]);
-  await panel.getByRole("button", { name: "2번째 페이지", exact: true }).click();
-  assert.deepEqual(await panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId)), ["9003", "9004"]);
+  const idsOnPage = () => panel.locator("[data-issue-id]").evaluateAll(cards => cards.map(card => card.dataset.issueId));
+  // Pages split the list in order at the measured capacity.
+  const startCapacity = await settleCapacity();
+  assert.deepEqual(await idsOnPage(), ["9001", "9002", "9003", "9004"].slice(0, startCapacity));
+  if (startCapacity < 4) {
+    await panel.getByRole("button", { name: "2번째 페이지", exact: true }).click();
+    assert.deepEqual(await idsOnPage(), ["9001", "9002", "9003", "9004"].slice(startCapacity, startCapacity * 2));
+  }
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "CONNECTED" });
   await panel.locator('[data-issue-id="9004"]').waitFor({ state: "detached" });
-  await waitForCapacity(2);
-  assert.equal(await panel.locator("[data-issue-id]").count(), 1, "the last page must show its one remaining issue");
+  assert.equal(await settleCapacity(), startCapacity, "a shorter list must not change the page size");
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9004, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
-  await panel.locator('[data-issue-id="9004"]').waitFor();
+  await page.locator('.site-unavailable-locator-panel[data-unavailable-locator-count="4"]').waitFor();
 
-  // Resize the same page repeatedly: preserve the selected issue and avoid
-  // content-driven growth or ResizeObserver feedback as the capacity changes.
+  // Resize the same page repeatedly: the page size follows the rail and
+  // returns to the same value, without content-driven growth or feedback.
+  const capacities = {};
   for (const viewport of [
-    { width: 1440, height: 900, capacity: 1 },
-    { width: 3840, height: 2021, capacity: 4 },
-    { width: 2560, height: 1256, capacity: 2 },
-    { width: 1440, height: 900, capacity: 1 },
-    { width: 2560, height: 1256, capacity: 2 }
+    { width: 1440, height: 900 },
+    { width: 3840, height: 2021 },
+    { width: 2560, height: 1256 },
+    { width: 1440, height: 900 },
+    { width: 2560, height: 1256 }
   ]) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await waitForCapacity(viewport.capacity);
-    assert.equal(await panel.locator('[data-issue-id="9003"]').count(), 1, "resizing must keep the selected issue in view");
+    const key = `${viewport.width}x${viewport.height}`;
+    const capacity = await settleCapacity();
+    if (key in capacities) assert.equal(capacity, capacities[key], `${key} must return to its page size`);
+    capacities[key] = capacity;
   }
+  assert.ok(capacities["3840x2021"] >= capacities["2560x1256"] && capacities["2560x1256"] >= capacities["1440x900"],
+    `a larger rail must not hold fewer issues: ${JSON.stringify(capacities)}`);
+  assert.ok(capacities["1440x900"] >= 2, `compact rows fit more than one issue on a laptop rail: ${JSON.stringify(capacities)}`);
   // A sibling issue panel consumes rail space without changing the viewport.
+  const beforeSibling = await settleCapacity();
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "HIDDEN_STATE", recoverable: true });
   await page.locator('.site-unavailable-locator-panel[data-locator-mode="recoverable"]').waitFor();
-  await waitForCapacity(1);
+  assert.ok(await settleCapacity() <= beforeSibling, "a sibling panel must not enlarge the page");
   await sendReplayTestMessage(frame, { type: "LOCATOR_STATUS", issueId: 9001, status: "UNAVAILABLE", reason: "FRAME_UNSUPPORTED" });
-  await waitForCapacity(2);
-  await panel.getByRole("button", { name: "1번째 페이지", exact: true }).click();
-  await panel.screenshot({ path: `${outDir}/unavailable-resize-two-cards.png` });
-  return { resizedCapacities: [2, 1, 4, 2, 1, 2], selectedIssuePreserved: true, siblingPanelResize: "PASS" };
+  await page.locator('.site-unavailable-locator-panel[data-locator-mode="recoverable"]').waitFor({ state: "detached" });
+  assert.equal(await settleCapacity(), beforeSibling, "removing the sibling panel restores the page size");
+  await panel.screenshot({ path: `${outDir}/unavailable-resize-compact.png` });
+  return { capacities, siblingPanelResize: "PASS" };
 }
 
 async function verifyMobile(page) {

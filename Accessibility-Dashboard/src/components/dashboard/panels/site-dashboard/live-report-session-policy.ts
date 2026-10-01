@@ -25,6 +25,17 @@ export function isLiveReportSessionSafelyUsable(
   );
 }
 
+// A late refresh (throttled timers in a background tab) can find the session
+// inside the safety guard. It is still renewed in place until it actually
+// expires, which keeps the open page instead of loading a new session.
+export function isLiveReportSessionRenewable(
+  session: LiveReportSession,
+  dashboardOrigin: string,
+  now = Date.now()
+): boolean {
+  return isLiveReportSessionSafe(session, dashboardOrigin, now);
+}
+
 export function isSameLiveReportSessionRenewal(
   previousSession: LiveReportSession,
   renewedSession: LiveReportSession

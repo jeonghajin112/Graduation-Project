@@ -8,6 +8,7 @@ import {
   getLiveReportSessionRefreshDelay,
   getLiveReportSessionRefreshRetryDelay,
   isSameLiveReportSessionRenewal,
+  isLiveReportSessionRenewable,
   isLiveReportSessionSafelyUsable
 } from "./live-report-session-policy";
 
@@ -38,6 +39,13 @@ describe("live report session refresh policy", () => {
       DASHBOARD_ORIGIN,
       NOW
     )).toBe(false);
+  });
+
+  it("renews a session inside the safety guard until it actually expires", () => {
+    const lateSession = createSession(LIVE_REPORT_SESSION_EXPIRY_GUARD_MS - 1_000);
+    expect(isLiveReportSessionSafelyUsable(lateSession, DASHBOARD_ORIGIN, NOW)).toBe(false);
+    expect(isLiveReportSessionRenewable(lateSession, DASHBOARD_ORIGIN, NOW)).toBe(true);
+    expect(isLiveReportSessionRenewable(createSession(0), DASHBOARD_ORIGIN, NOW)).toBe(false);
   });
 
   it("starts a background refresh thirty seconds before expiration", () => {

@@ -101,8 +101,9 @@ try {
       const name = `${viewport.width}-${theme}`;
       await page.goto(`${baseUrl}/projects/1`);
       await page.locator(".dashboard-project-card").waitFor();
-      const project = page.locator(".sidebar-tree-parent-row").first();
-      if (await project.getAttribute("aria-expanded") === "false") await project.click();
+      // The disclosure state lives on the separate chevron toggle.
+      const projectToggle = page.locator(".sidebar-tree-toggle").first();
+      if (await projectToggle.getAttribute("aria-expanded") === "false") await projectToggle.click();
       for (const selector of [".reference-sidebar-primary-row", ".sidebar-tree-parent-row", ".sidebar-tree-children .sidebar-nav-link", ".sidebar-tree-recent-list .sidebar-nav-link"]) {
         await tabTo(page, page.locator(selector).first(), `${name} sidebar ${selector}`);
       }

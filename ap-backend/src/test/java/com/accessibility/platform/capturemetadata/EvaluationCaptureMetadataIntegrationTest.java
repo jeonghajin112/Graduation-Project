@@ -20,6 +20,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -84,7 +88,10 @@ class EvaluationCaptureMetadataIntegrationTest {
                 .andExpect(jsonPath("$.data.requestId").value(request.getId()))
                 .andExpect(jsonPath("$.data.requestedUrl").value("https://example.com/requested"))
                 .andExpect(jsonPath("$.data.finalUrl").value("https://www.example.com/final"))
-                .andExpect(jsonPath("$.data.capturedAt").value("2026-09-03T10:15:30"))
+                // API timestamps carry the server offset so browsers in another zone read the same instant.
+                .andExpect(jsonPath("$.data.capturedAt").value(LocalDateTime.parse("2026-09-03T10:15:30")
+                        .atZone(ZoneId.systemDefault()).toOffsetDateTime()
+                        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)))
                 .andExpect(jsonPath("$.data.viewportWidthCssPx").value(1280))
                 .andExpect(jsonPath("$.data.viewportHeightCssPx").value(720))
                 .andExpect(jsonPath("$.data.deviceScaleFactor").value(1.25))

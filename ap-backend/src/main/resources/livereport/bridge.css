@@ -76,6 +76,8 @@ background:var(--ap-marker-color,#0b6ff4);box-shadow:0 0 0 1.5px rgba(255,255,25
 .ap-live-marker__icon{all:initial;box-sizing:border-box;display:inline-block;color:inherit;font:inherit;letter-spacing:inherit;
 white-space:nowrap;pointer-events:none}
 .ap-live-marker[hidden]{display:none!important}
+/* Findings placed on the area around a hidden element: the position is approximate. */
+.ap-live-marker--approximate{background:#48484a;border:1px dashed rgba(255,255,255,.85)}
 .ap-live-marker:hover,.ap-live-marker:focus-visible{box-shadow:0 4px 10px rgba(16,24,40,.28)}
 .ap-live-marker[aria-expanded="true"]{box-shadow:0 4px 10px rgba(16,24,40,.28)}
 .ap-live-marker:focus-visible{outline:2px solid #fff;outline-offset:2px}

@@ -1,8 +1,10 @@
 import { useId, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-function useModalLayerOwnership<TElement extends HTMLElement>() {
+function useModalLayerOwnership<TElement extends HTMLElement>(onEscape?: () => void) {
   const layerRef = useRef<TElement>(null);
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
 
   useLayoutEffect(() => {
     const layer = layerRef.current;
@@ -25,6 +27,11 @@ function useModalLayerOwnership<TElement extends HTMLElement>() {
       layer.focus({ preventScroll: true });
     });
     const keepFocusInLayer = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && onEscapeRef.current) {
+        event.preventDefault();
+        onEscapeRef.current();
+        return;
+      }
       if (event.key !== "Tab") {
         return;
       }
@@ -119,7 +126,7 @@ export function ModalErrorFallback({
   onReload: () => void;
 }) {
   const titleId = useId();
-  const dialogRef = useModalLayerOwnership<HTMLElement>();
+  const dialogRef = useModalLayerOwnership<HTMLElement>(onDismiss);
 
   return createPortal(
     <div className="dashboard-modal-layer">

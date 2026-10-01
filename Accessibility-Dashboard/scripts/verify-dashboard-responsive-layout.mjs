@@ -125,7 +125,7 @@ try {
     }
 
     await resize(page, { width: 568, height: 320 });
-    await page.locator('button[aria-haspopup="menu"]').click();
+    await page.locator(".dashboard-account-menu-trigger").click();
     await page.getByRole("menuitem", { name: "설정", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "설정", exact: true });
     await dialog.waitFor();

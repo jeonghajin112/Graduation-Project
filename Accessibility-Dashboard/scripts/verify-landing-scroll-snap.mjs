@@ -49,7 +49,7 @@ try {
     await checkUnchanged(page, input - 180);
     await page.mouse.wheel(0, 80);
     await at(page, input);
-    await page.locator('#sw-section-input[aria-hidden="false"]').waitFor();
+    await page.locator('#sw-section-input[data-sw-active="true"]').waitFor();
     await page.mouse.wheel(0, 70);
     await at(page, input + 70);
     await checkUnchanged(page, input + 70); // Leaving an anchor must not pull the user back.

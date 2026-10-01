@@ -40,11 +40,16 @@ export function selectLatestEvaluationRequest(
 
 // Submission order is distinct from result/status recency: an old job may
 // receive a late status update after a newer attempt has already failed.
+// A just-accepted placeholder has no server submission time; the server's
+// monotonically increasing ID then orders it instead of the browser clock.
 export function selectLatestAnalysisAttempt(requests: readonly EvaluationRequestModel[]): EvaluationRequestModel | null {
   return requests.reduce<EvaluationRequestModel | null>((latest, request) => {
     if (!latest) return request;
-    const left = toComparableTimestamp(request.requestedAt);
-    const right = toComparableTimestamp(latest.requestedAt);
+    const left = Date.parse(request.requestedAt);
+    const right = Date.parse(latest.requestedAt);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) {
+      return request.id > latest.id ? request : latest;
+    }
     return left > right || (left === right && request.id > latest.id) ? request : latest;
   }, null);
 }

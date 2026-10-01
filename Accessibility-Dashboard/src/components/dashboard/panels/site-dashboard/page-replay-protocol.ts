@@ -27,7 +27,17 @@ export type ReplayViewportMetrics = {
   visualWidth: number;
 };
 
+// Bounds the live viewer enforces on INIT_ISSUES (bridge-runtime.js). One
+// issue outside them makes the viewer reject every issue in the command.
+export const REPLAY_BRIDGE_LIMITS = {
+  issues: 10_000,
+  pathSteps: 128
+} as const;
+
 const DOCUMENT_TOKEN_MAX_LENGTH = 128;
+const LOCATOR_REASON_MAX_LENGTH = 128;
+const BLOCKED_LINK_HREF_MAX_LENGTH = 2_048;
+const COMMAND_TYPE_PATTERN = /^[A-Z_]{1,32}$/;
 const LEGACY_TEXT_ANALYSIS_INPUT_MAX_LENGTH = 16_384;
 
 const REPLAY_TEXT_LIMITS = {
@@ -241,6 +251,13 @@ export type PageReplayToDashboardMessage =
       type: "FORM_BLOCKED";
       documentToken: string;
       method: "GET" | "POST" | "DIALOG";
+    }
+  | {
+      /** The viewer refused a command it received in sequence. */
+      source: typeof PAGE_REPLAY_SOURCE;
+      type: "COMMAND_REJECTED";
+      documentToken: string;
+      commandType: string;
     };
 
 const locatorOwnerKinds = ["LINK", "BUTTON", "FORM_CONTROL", "TABLE", "REGION", "ELEMENT"] as const;
@@ -322,7 +339,16 @@ function isDocumentToken(value: unknown): value is string {
   );
 }
 
-export function toPageReplayIssue(row: RecentIssueRow, deviceScaleFactor?: number | null): PageReplayIssue {
+export type PageReplayIssueOptions = {
+  /** The analysis-time capture is unknown, so its coordinates cannot be placed. */
+  omitCoordinateBox?: boolean;
+};
+
+export function toPageReplayIssue(
+  row: RecentIssueRow,
+  deviceScaleFactor?: number | null,
+  { omitCoordinateBox = false }: PageReplayIssueOptions = {}
+): PageReplayIssue {
   const code = toBoundedReplayText(
     normalizeIssueCode(row.issue.issueCode),
     REPLAY_TEXT_LIMITS.code,
@@ -334,7 +360,12 @@ export function toPageReplayIssue(row: RecentIssueRow, deviceScaleFactor?: numbe
   const displayMessage = textAnalysis
     ? formatTextAnalysisMessage(textAnalysis)
     : formatIssueDescription(row.issue.message, row.analyzerType, row.issue.ruleId);
-  const box = getIssueCoordinateBox(row.issue, deviceScaleFactor);
+  const coordinateOnly = getIssueCoordinateBox(row.issue) !== null;
+  const box = omitCoordinateBox ? null : getIssueCoordinateBox(row.issue, deviceScaleFactor);
+  const pathSteps = getReplayIssuePathSteps(row.issue);
+  // The viewer rejects the whole list for one oversized path. Send such a
+  // finding without a path so only it is reported as unlocatable.
+  const pathFits = pathSteps.length <= REPLAY_BRIDGE_LIMITS.pathSteps;
 
   return {
     id: row.issue.id,
@@ -359,8 +390,10 @@ export function toPageReplayIssue(row: RecentIssueRow, deviceScaleFactor?: numbe
     ),
     textAnalysis,
     // A coordinate label must not reach the viewer as a selector fallback.
-    path: box ? null : toOptionalBoundedReplayText(row.issue.locationPath, REPLAY_TEXT_LIMITS.path),
-    pathSteps: getReplayIssuePathSteps(row.issue),
+    path: box || coordinateOnly || !pathFits
+      ? null
+      : toOptionalBoundedReplayText(row.issue.locationPath, REPLAY_TEXT_LIMITS.path),
+    pathSteps: pathFits ? pathSteps : [],
     box,
     content: getReplayIssueContent(row.issue),
     carouselContext: getReplayIssueCarouselContext(row.issue)
@@ -731,7 +764,8 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
       value.status === "HIDDEN_STATE" ||
       value.status === "UNAVAILABLE"
     ) &&
-    (value.reason === undefined || typeof value.reason === "string") &&
+    (value.reason === undefined ||
+      (typeof value.reason === "string" && value.reason.length <= LOCATOR_REASON_MAX_LENGTH)) &&
     (value.recoverable === undefined || typeof value.recoverable === "boolean") &&
     (value.recoverable === undefined || value.status === "HIDDEN_STATE") &&
     (value.ownerKind === undefined || locatorOwnerKinds.includes(value.ownerKind as LocatorOwnerKind))
@@ -771,13 +805,29 @@ export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMes
         : ["source", "type", "documentToken"]
     ) &&
     isDocumentToken(value.documentToken) &&
-    (value.href === undefined || typeof value.href === "string")
+    (value.href === undefined ||
+      (typeof value.href === "string" && value.href.length <= BLOCKED_LINK_HREF_MAX_LENGTH))
   ) {
     return {
       source: PAGE_REPLAY_SOURCE,
       type: "LINK_BLOCKED",
       documentToken: value.documentToken,
       ...(typeof value.href === "string" ? { href: value.href } : {})
+    };
+  }
+
+  if (
+    value.type === "COMMAND_REJECTED" &&
+    hasExactOwnKeys(value, ["source", "type", "documentToken", "commandType"]) &&
+    isDocumentToken(value.documentToken) &&
+    typeof value.commandType === "string" &&
+    COMMAND_TYPE_PATTERN.test(value.commandType)
+  ) {
+    return {
+      source: PAGE_REPLAY_SOURCE,
+      type: "COMMAND_REJECTED",
+      documentToken: value.documentToken,
+      commandType: value.commandType
     };
   }
 

@@ -69,7 +69,29 @@ try {
     .waitFor();
   await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "페이지 추가", exact: true });
-  await dialog.getByLabel("페이지 이름", { exact: true }).fill("Storage guarded page");
+  await dialog.waitFor();
+  assert.equal(
+    await dialog.evaluate((element) => element.closest("[data-dashboard-app-shell]")),
+    null,
+    "the dialog must be portaled outside the shell it makes inert"
+  );
+  assert.equal(await page.locator("[data-dashboard-app-shell]").getAttribute("inert"), "");
+
+  // An empty submit marks and focuses the offending field and links the message.
+  const nameInput = dialog.getByLabel("페이지 이름", { exact: true });
+  await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-invalid") === "true");
+  assert.equal(await nameInput.evaluate((element) => element === document.activeElement), true);
+  const describedBy = await nameInput.getAttribute("aria-describedby");
+  assert.ok(describedBy, "the invalid field must reference its error message");
+  assert.match(
+    await page.locator(`[id="${describedBy}"]`).innerText(),
+    /페이지 이름과 주소를 입력해주세요/
+  );
+  assert.equal(targetPosts, 0);
+
+  await nameInput.fill("Storage guarded page");
+  assert.equal(await nameInput.getAttribute("aria-invalid"), null, "editing the field clears its invalid state");
   await dialog.getByLabel("페이지 주소", { exact: true }).fill("https://example.com/storage-guard");
 
   await dialog.getByRole("button", { name: "분석 시작", exact: true }).click();

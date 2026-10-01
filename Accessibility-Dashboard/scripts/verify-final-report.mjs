@@ -98,11 +98,11 @@ async function installReportFixture(page) {
   return { fixture, session, viewerDocumentRequests: () => viewerDocumentRequests };
 }
 
-async function waitForLocatorStates(page) {
-  await page.waitForFunction(() => {
+async function waitForLocatorStates(page, unavailableCount = 2) {
+  await page.waitForFunction((expected) => {
     const preview = document.querySelector(".site-page-evidence-preview");
-    return preview?.dataset.loadingPhase === "complete" && preview.dataset.unavailableLocatorCount === "2";
-  }, null, { timeout: 20_000 });
+    return preview?.dataset.loadingPhase === "complete" && preview.dataset.unavailableLocatorCount === String(expected);
+  }, unavailableCount, { timeout: 20_000 });
 }
 
 // Router updates commit as a transition, so the URL can change first.
@@ -163,15 +163,35 @@ try {
   await waitForSelectedView(page, "report");
   console.log("PASS tabs follow the WAI-ARIA keyboard pattern and the URL");
 
-  const metrics = report.locator(".site-final-report__metrics");
-  const metricText = async (label) => (await metrics.locator("div", { has: page.getByText(label, { exact: true }) }).locator("dd").innerText()).trim();
+  const metrics = report.locator(".site-final-report__summary dl > div");
+  const metricText = async (label) => (await metrics.filter({ has: page.getByText(label, { exact: true }) }).locator("dd").innerText()).trim();
   assert.equal(await metricText("접근성 점수"), "100점");
   assert.equal(await metricText("발견된 문제"), "5건");
   assert.equal(await metricText("페이지에서 확인 가능"), "3건");
   assert.equal(await metricText("위치 표시 불가"), "2건");
+  assert.equal(await metricText("점수에서 제외"), "2건");
+  assert.match(await report.locator(".site-final-report__headline").first().innerText(), /검사 항목 3개에서 문제 5건을 발견했습니다/);
+  assert.match(await report.locator(".site-final-report__summary > .site-final-report__lead").innerText(), /심각·높음 문제 4건/);
+  assert.deepEqual(
+    (await report.getByRole("list", { name: "심각도별 문제 수" }).locator("li").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()),
+    ["심각 2건 40%", "높음 2건 40%", "중간 1건 20%", "낮음 0건 0%"]
+  );
   const firstPriority = report.locator(".site-final-report__priorities > li").first();
   assert.match(await firstPriority.innerText(), /적절한 대체 텍스트 제공[\s\S]*2건/);
   console.log("PASS summary and fix priorities");
+
+  const legend = report.getByRole("list", { name: "항목 상태별 개수" });
+  assert.deepEqual((await legend.locator("li").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()),
+    ["문제 있음 2", "문제 없음 19", "검사 못 함 0", "직접 확인 12"]);
+  assert.equal(await report.locator('.site-final-report__principle li[data-status]').count(), 33);
+  assert.match(await report.locator('.site-final-report__principle li[data-status="manual"]').first().innerText(), /5\.3\.2[\s\S]*직접 확인/);
+  assert.match(await report.locator(".site-final-report__criteria-others").innerText(), /WCAG 3\.1\.5 1건/);
+  await report.locator('.site-final-report__principle li[data-status="fail"]', { hasText: "5.4.3" }).getByRole("button").click();
+  assert.equal(await report.getByRole("button", { name: /KWCAG 5\.4\.3/ }).getAttribute("aria-expanded"), "true");
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-criterion-toggle")), "5.4.3",
+    "a criterion with issues jumps to its group in the list");
+  await page.keyboard.press("Enter");
+  console.log("PASS KWCAG criteria overview");
 
   const groupToggles = report.locator(".site-final-report__group-toggle");
   assert.deepEqual(await groupToggles.locator(".site-final-report__code").allInnerTexts(), ["KWCAG 5.1.1", "KWCAG 5.4.3", "WCAG 3.1.5"]);
@@ -182,6 +202,8 @@ try {
   const frameIssue = report.locator('.site-final-report__issue[data-issue-id="9102"]');
   assert.match(await frameIssue.innerText(), /위치 표시 불가 · 내부 프레임의 요소/);
   assert.match(await frameIssue.innerText(), /프레임 내부\s*\.banner/);
+  assert.match(await frameIssue.innerText(), /규칙 image-alt[\s\S]*문제 번호 9102/);
+  assert.match(await frameIssue.innerText(), /현재 위치\s*내부 프레임의 요소/, "the report explains why the location cannot be shown");
   assert.equal(await frameIssue.getByRole("button", { name: /페이지에서 보기/ }).count(), 0);
   await page.keyboard.press("Enter");
   assert.equal(await imageGroup.getAttribute("aria-expanded"), "false", "Enter collapses the focused group");
@@ -191,6 +213,9 @@ try {
   assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 5건 중 2건/);
   const coordinateIssue = report.locator('.site-final-report__issue[data-issue-id="9103"]');
   assert.match(await coordinateIssue.innerText(), /화면 좌표 x 803, y 13 · 39×12 \(요소 경로 없음\)/);
+  assert.match(await coordinateIssue.innerText(), /측정한 글자\s*“다운로드”[\s\S]*명도 대비\s*2\.10:1[\s\S]*기준\s*4\.5:1 이상/,
+    "visual findings read as measured values, not the raw engine string");
+  assert.doesNotMatch(await coordinateIssue.innerText(), /contrast=/);
   await report.getByLabel("위치 상태").selectOption("ALL");
   await report.getByLabel("검색").fill("footer-link");
   assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 5건 중 1건/);
@@ -259,11 +284,14 @@ try {
   const textEngine = report.locator(".site-final-report__engine-list li", { hasText: "텍스트" });
   assert.equal((await textEngine.locator("strong").innerText()).trim(), "검사 실패");
   assert.match(await report.getByRole("note").first().innerText(), /텍스트 검사가 실패해/);
+  assert.match(await report.locator('.site-final-report__principle li[data-status="skipped"]').innerText(), /5\.3\.3[\s\S]*검사 못 함/,
+    "a criterion only the failed text engine checks is not reported as clean");
   delete fixture.score.textStatus;
   console.log("PASS failed text analysis is shown as not checked");
 
-  // Findings shown on their owner, page settings, and findings the page no
-  // longer matches each get their own place and a re-analysis hint.
+  // Findings shown on their owner and page settings get their own place;
+  // findings the page no longer matches join the unavailable list and still
+  // trigger the re-analysis hint.
   issues.push(
     {
       id: 9108, requestId: 501, module: "rule_based", severity: "SERIOUS", ruleId: "meta-viewport", wcagCode: "meta-viewport",
@@ -283,13 +311,13 @@ try {
     9109: { status: "UNAVAILABLE", reason: "ELEMENT_CONTENT_CHANGED" }
   });
   await page.goto(`${baseUrl}/projects/1/pages/101`);
-  await waitForLocatorStates(page);
-  const outdatedList = page.getByRole("region", { name: "분석 이후 바뀐 문제" });
-  await outdatedList.waitFor();
-  assert.match(await outdatedList.innerText(), /1건[\s\S]*분석 이후 내용이 바뀜/);
+  // The changed finding joins the two findings that cannot be shown.
+  await waitForLocatorStates(page, 3);
   assert.match(await page.getByRole("region", { name: "페이지 전체 설정" }).innerText(), /1건[\s\S]*페이지 전체 설정/);
-  assert.equal(await page.locator(".site-page-analysis-actions__stale").isVisible(), true, "the header suggests re-analysis");
-  console.log("PASS rail separates page settings and findings the page no longer matches");
+  assert.equal(await page.getByRole("region", { name: "분석 이후 바뀐 문제" }).count(), 0,
+    "changed findings have no separate list");
+  assert.equal(await page.locator(".site-page-analysis-actions__stale").count(), 0, "the header does not claim the page changed");
+  console.log("PASS rail lists changed findings as not shown and keeps page settings apart");
 
   await reportTab.click();
   await report.waitFor();
@@ -300,8 +328,11 @@ try {
     /페이지에서 확인 가능 · 버튼의 스크린리더 전용 텍스트/);
   assert.match(await report.locator('.site-final-report__issue[data-issue-id="9108"] .site-final-report__location').innerText(),
     /페이지 전체 설정 · 화면 위치 없음/);
-  await report.getByLabel("위치 상태").selectOption("outdated");
-  assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 7건 중 1건/);
+  assert.match(await report.locator('.site-final-report__issue[data-issue-id="9109"] .site-final-report__location').innerText(),
+    /위치 표시 불가 · 분석 이후 내용이 바뀜/);
+  await report.getByLabel("위치 상태").selectOption("unavailable");
+  assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 7건 중 4건/,
+    "the filter matches the 위치 표시 불가 metric");
   await report.getByLabel("위치 상태").selectOption("ALL");
   console.log("PASS report labels moved markers, page settings and changed findings");
 

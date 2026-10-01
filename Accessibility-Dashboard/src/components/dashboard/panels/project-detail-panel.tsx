@@ -1,6 +1,6 @@
 import type { ProjectPageActions } from "../dashboard-surface.types";
-﻿import { ArrowDown, ArrowUp, ExternalLink, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ExternalLink, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,11 @@ import { buildLatestEvaluationRequestByTargetId } from "@/services/evaluation-re
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 import { formatDateTime, mapScanStatus } from "../shared/utils";
 
-type ProjectDetailSiteSortKey = "targetType" | "siteName" | "score" | "updatedAt";
-
 function ProjectFavicon({
   faviconUrl,
-  isDarkMode,
   targetType
 }: {
   faviconUrl: string | null;
-  isDarkMode: boolean;
   targetType: EvaluationTargetModel["targetType"];
 }) {
   const [loadedFaviconUrl, setLoadedFaviconUrl] = useState<string | null>(null);
@@ -38,11 +34,7 @@ function ProjectFavicon({
     <span
       className={cn(
         "dashboard-project-favicon relative inline-flex shrink-0 items-center justify-center overflow-hidden",
-        hasLoadedFavicon
-          ? "bg-transparent"
-          : isDarkMode
-            ? "border border-white/10 bg-white text-[#6e6e73]"
-            : "border border-[#e5e5ea] bg-white text-[#86868b]"
+        hasLoadedFavicon ? "bg-transparent" : "dashboard-project-favicon-fallback"
       )}
       data-favicon-loaded={hasLoadedFavicon ? "true" : "false"}
       aria-hidden="true"
@@ -77,34 +69,39 @@ function ProjectFavicon({
   );
 }
 
+function getTargetTypeInfo(type: OrganizationModel["evaluationTargets"][number]["targetType"]) {
+  if (type === "모바일 웹") {
+    return "모바일 웹";
+  }
+
+  if (type === "문서") {
+    return "문서";
+  }
+
+  return "PC 웹";
+}
+
 export function OrganizationModelDetailPanel({
   organization,
   evaluationRequests,
   scoreResults,
-  isDarkMode,
   onSiteClick,
   actions
 }: {
   organization: OrganizationModel;
   evaluationRequests: EvaluationRequestModel[];
   scoreResults: ScoreResult[];
-  isDarkMode: boolean;
   onSiteClick: (siteId: number) => void;
   actions: ProjectPageActions | null;
 }) {
   const readOnly = actions === null;
-  const [siteSortConfig, setSiteSortConfig] = useState<{
-    key: ProjectDetailSiteSortKey;
-    direction: "asc" | "desc";
-  }>({
-    key: "updatedAt",
-    direction: "desc"
-  });
   const [deletingEvaluationTargetModel, setDeletingEvaluationTargetModel] = useState<EvaluationTargetModel | null>(null);
   const [deleteEvaluationTargetError, setDeleteEvaluationTargetError] = useState("");
   const [isDeletingEvaluationTarget, setIsDeletingEvaluationTarget] = useState(false);
   const deleteEvaluationTargetLockRef = useRef(false);
   const activeDeleteEvaluationTargetOperationIdRef = useRef<symbol | null>(null);
+  const addPageButtonRef = useRef<HTMLButtonElement>(null);
+  const cardGridRef = useRef<HTMLDivElement>(null);
 
   useEffect(
     () => () => {
@@ -151,117 +148,10 @@ export function OrganizationModelDetailPanel({
     };
   });
 
-  const sortedSiteRows = [...siteRows].sort((a, b) => {
-    const updatedDiff = Date.parse(b.lastUpdatedAt) - Date.parse(a.lastUpdatedAt);
-
-    if (siteSortConfig.key === "siteName") {
-      const siteNameDiff = a.name.localeCompare(b.name, "ko");
-      if (siteNameDiff !== 0) {
-        return siteSortConfig.direction === "asc" ? siteNameDiff : -siteNameDiff;
-      }
-
-      return siteSortConfig.direction === "asc" ? -updatedDiff : updatedDiff;
-    }
-
-    if (siteSortConfig.key === "targetType") {
-      const targetTypeDiff = a.targetType.localeCompare(b.targetType, "ko");
-      if (targetTypeDiff !== 0) {
-        return siteSortConfig.direction === "asc" ? targetTypeDiff : -targetTypeDiff;
-      }
-
-      return siteSortConfig.direction === "asc" ? -updatedDiff : updatedDiff;
-    }
-
-    if (siteSortConfig.key === "score") {
-      const scoreDiff = (b.totalScore ?? -1) - (a.totalScore ?? -1);
-      if (scoreDiff !== 0) {
-        return siteSortConfig.direction === "desc" ? scoreDiff : -scoreDiff;
-      }
-
-      return siteSortConfig.direction === "desc" ? updatedDiff : -updatedDiff;
-    }
-
-    return siteSortConfig.direction === "asc" ? -updatedDiff : updatedDiff;
-  });
-
-  const handleSiteSort = (key: ProjectDetailSiteSortKey) => {
-    setSiteSortConfig((current) => {
-      if (current.key === key) {
-        return {
-          key,
-          direction: current.direction === "asc" ? "desc" : "asc"
-        };
-      }
-
-      return {
-        key,
-        direction: key === "updatedAt" || key === "score" ? "desc" : "asc"
-      };
-    });
-  };
-
-  const getSiteSortIndicator = (key: ProjectDetailSiteSortKey) => {
-    const isActive = siteSortConfig.key === key;
-
-    return (
-      <span
-        className={cn(
-          "inline-flex h-4 w-3 shrink-0 items-center justify-center leading-none",
-          isActive ? "opacity-100" : "opacity-0"
-        )}
-      >
-        {siteSortConfig.direction === "asc" ? (
-          <ArrowUp size={11} strokeWidth={2.4} className="block" />
-        ) : (
-          <ArrowDown size={11} strokeWidth={2.4} className="block" />
-        )}
-      </span>
-    );
-  };
-
-  const getCenteredSiteSortIndicator = (key: ProjectDetailSiteSortKey) => {
-    const isActive = siteSortConfig.key === key;
-
-    return (
-      <span
-        className={cn(
-          "pointer-events-none absolute left-full top-1/2 ml-0.5 inline-flex h-4 w-3 -translate-y-1/2 items-center justify-center leading-none",
-          isActive ? "opacity-100" : "opacity-0"
-        )}
-      >
-        {siteSortConfig.direction === "asc" ? (
-          <ArrowUp size={11} strokeWidth={2.4} className="block" />
-        ) : (
-          <ArrowDown size={11} strokeWidth={2.4} className="block" />
-        )}
-      </span>
-    );
-  };
-
-  const getSiteStatusBadgeClassName = (status: string) => {
-    if (status === finishedStatusLabel) {
-      return "site-status-badge site-status-badge-finished";
-    }
-    if (status === runningStatusLabel) {
-      return "site-status-badge site-status-badge-running";
-    }
-    if (status === failedStatusLabel) {
-      return "site-status-badge site-status-badge-failed";
-    }
-    return "site-status-badge site-status-badge-idle";
-  };
-
-  const getTargetTypeInfo = (type: OrganizationModel["evaluationTargets"][number]["targetType"]) => {
-    if (type === "모바일 웹") {
-      return "모바일 웹";
-    }
-
-    if (type === "문서") {
-      return "문서";
-    }
-
-    return "PC 웹";
-  };
+  // Most recently analysed (or created) pages first.
+  const sortedSiteRows = [...siteRows].sort(
+    (a, b) => Date.parse(b.lastUpdatedAt) - Date.parse(a.lastUpdatedAt)
+  );
 
   const openDeleteEvaluationTargetModel = (site: EvaluationTargetModel) => {
     setDeletingEvaluationTargetModel(site);
@@ -276,10 +166,20 @@ export function OrganizationModelDetailPanel({
     setDeleteEvaluationTargetError("");
   };
 
+  // The removed card took the dialog's opener with it; continue from the
+  // first remaining card, or the add button when the project is now empty.
+  const getDeleteFallbackFocus = useCallback(
+    () =>
+      cardGridRef.current?.querySelector<HTMLElement>(".dashboard-project-card > button") ??
+      addPageButtonRef.current,
+    []
+  );
+
   const deleteDialogRef = useDialogAccessibility({
     isOpen: deletingEvaluationTargetModel !== null,
     onClose: closeDeleteEvaluationTargetModel,
-    closeDisabled: isDeletingEvaluationTarget
+    closeDisabled: isDeletingEvaluationTarget,
+    getFallbackFocus: getDeleteFallbackFocus
   });
 
   const handleConfirmDeleteEvaluationTargetModel = async () => {
@@ -328,36 +228,27 @@ export function OrganizationModelDetailPanel({
     <div className="dashboard-project-panel overflow-visible">
       <div className="dashboard-project-add-action absolute top-[calc(var(--dashboard-fixed-top)+var(--dashboard-control-size)+1rem)] z-50">
         <button
+          ref={addPageButtonRef}
           type="button"
           onClick={actions?.onOpenCreateSiteModal}
           disabled={readOnly}
           title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
-          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[#0071e3] font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]/40 disabled:cursor-not-allowed"
+          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[var(--primary)] font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]/40 disabled:cursor-not-allowed"
         >
           페이지 추가
         </button>
       </div>
 
       {sortedSiteRows.length === 0 ? (
-        <div
-          className={`dashboard-project-content rounded-[14px] border px-5 py-10 text-center text-sm backdrop-blur-xl ${
-            isDarkMode
-              ? "border-white/[0.12] bg-white/[0.05] text-[#8e8e93] shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_10px_28px_rgba(0,0,0,0.18)]"
-              : "border-white/85 bg-white/65 text-[#6e6e73] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_10px_28px_rgba(29,29,31,0.07)]"
-          }`}
-        >
+        <div className="dashboard-project-content dashboard-project-glass rounded-[14px] border px-5 py-10 text-center text-sm text-[var(--dashboard-text-muted)] backdrop-blur-xl">
           등록된 페이지가 없습니다.
         </div>
       ) : (
-        <div className="dashboard-project-content dashboard-project-grid grid">
+        <div ref={cardGridRef} className="dashboard-project-content dashboard-project-grid grid">
           {sortedSiteRows.map((row) => (
             <article
               key={row.id}
-              className={`dashboard-project-card group relative flex flex-col overflow-hidden border backdrop-blur-xl transition-[background-color,border-color,box-shadow] ${
-                isDarkMode
-                  ? "border-white/[0.12] bg-white/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_10px_28px_rgba(0,0,0,0.18)] hover:border-white/[0.2] hover:bg-white/[0.075]"
-                  : "border-white/85 bg-white/65 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_10px_28px_rgba(29,29,31,0.07)] hover:border-white hover:bg-white/80"
-              }`}
+              className="dashboard-project-card dashboard-project-glass dashboard-project-glass--interactive group relative flex flex-col overflow-hidden border backdrop-blur-xl transition-[background-color,border-color,box-shadow]"
             >
               <button
                 type="button"
@@ -377,11 +268,7 @@ export function OrganizationModelDetailPanel({
                     }
                   }}
                   aria-label={`${row.name} 제거`}
-                  className={`dashboard-project-card-delete-button inline-flex items-center justify-center rounded-full opacity-0 transition group-hover:opacity-100 focus:opacity-100 ${
-                    isDarkMode
-                      ? "text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
-                      : "text-red-600 hover:bg-red-50 hover:text-red-700"
-                  }`}
+                  className="dashboard-project-card-delete-button inline-flex items-center justify-center rounded-full text-[var(--dashboard-danger-text)] opacity-0 transition group-hover:opacity-100 hover:bg-[var(--dashboard-danger-surface)] focus:opacity-100"
                 >
                   <Trash2 size={13} aria-hidden="true" />
                 </button>
@@ -391,20 +278,17 @@ export function OrganizationModelDetailPanel({
                 <ProjectFavicon
                   key={row.faviconUrl ?? "fallback"}
                   faviconUrl={row.faviconUrl}
-                  isDarkMode={isDarkMode}
                   targetType={row.targetType}
                 />
 
                 <div className="min-w-0">
                   <h3
-                    className={`dashboard-project-card-title truncate font-semibold ${
-                      isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-                    }`}
+                    className="dashboard-project-card-title truncate font-semibold text-[var(--dashboard-text-strong)]"
                     title={row.name}
                   >
                     {row.name}
                   </h3>
-                  <p className={`dashboard-project-card-meta mt-0.5 truncate ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}>
+                  <p className="dashboard-project-card-meta mt-0.5 truncate text-[var(--dashboard-text-muted)]">
                     {getTargetTypeInfo(row.targetType)}
                   </p>
                 </div>
@@ -416,47 +300,43 @@ export function OrganizationModelDetailPanel({
                     href={row.accessUrl}
                     target="_blank"
                     rel="noreferrer"
-                    title={row.accessUrl}
+                    title={`${row.accessUrl} (새 창에서 열림)`}
                     onClick={(event) => event.stopPropagation()}
-                    className={`dashboard-project-card-url pointer-events-auto relative z-[2] flex min-w-0 items-center gap-1 truncate hover:underline ${
-                      isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"
-                    }`}
+                    className="dashboard-project-card-url pointer-events-auto relative z-[2] flex min-w-0 items-center gap-1 truncate text-[var(--dashboard-text-muted)] hover:underline"
                   >
                     <span className="truncate">{row.accessUrl}</span>
+                    <span className="sr-only"> (새 창에서 열림)</span>
                     <ExternalLink size={10} className="shrink-0" aria-hidden="true" />
                   </a>
                 ) : row.accessUrl ? (
                   <p
                     data-copyable
-                    className={`dashboard-project-card-url min-w-0 truncate ${
-                      isDarkMode ? "text-[#a1a1a6]" : "text-[#6e6e73]"
-                    }`}
+                    className="dashboard-project-card-url min-w-0 truncate text-[var(--dashboard-text-muted)]"
                     title={row.accessUrl}
                   >
                     {row.accessUrl}
                   </p>
                 ) : (
-                  <p className={`dashboard-project-card-url min-w-0 truncate ${isDarkMode ? "text-[#6e6e73]" : "text-[#a1a1a6]"}`}>
+                  <p className="dashboard-project-card-url min-w-0 truncate text-[var(--dashboard-text-muted)]">
                     등록된 주소 없음
                   </p>
                 )}
 
-                <span
-                  className={`dashboard-project-card-score pointer-events-none shrink-0 font-semibold tabular-nums ${
-                    isDarkMode ? "text-[#f5f5f7]" : "text-[#1d1d1f]"
-                  }`}
-                  aria-label={`점수 ${row.totalScore !== null ? `${row.totalScore}점` : "없음"}`}
-                >
-                  {row.totalScore !== null ? `${row.totalScore}점` : "-"}
+                <span className="dashboard-project-card-score pointer-events-none shrink-0 font-semibold tabular-nums text-[var(--dashboard-text-strong)]">
+                  <span className="sr-only">점수 </span>
+                  {row.totalScore !== null ? (
+                    `${row.totalScore}점`
+                  ) : (
+                    <>
+                      <span aria-hidden="true">-</span>
+                      <span className="sr-only">없음</span>
+                    </>
+                  )}
                 </span>
               </div>
 
-              <div
-                className={`dashboard-project-card-footer pointer-events-none relative z-[1] mt-auto flex items-center justify-between border-t ${
-                  isDarkMode ? "border-[#38383a]" : "border-[#e5e5ea]"
-                }`}
-              >
-                <span className={`dashboard-project-card-status inline-flex min-w-0 items-center gap-1.5 ${isDarkMode ? "text-[#c7c7cc]" : "text-[#515154]"}`}>
+              <div className="dashboard-project-card-footer pointer-events-none relative z-[1] mt-auto flex items-center justify-between border-t border-[var(--dashboard-card-divider)]">
+                <span className="dashboard-project-card-status inline-flex min-w-0 items-center gap-1.5 text-[var(--dashboard-card-status-text)]">
                   <span
                     className={cn(
                       "dashboard-project-status-dot shrink-0 rounded-full",
@@ -466,14 +346,14 @@ export function OrganizationModelDetailPanel({
                       row.status !== finishedStatusLabel &&
                         row.status !== runningStatusLabel &&
                         row.status !== failedStatusLabel &&
-                        (isDarkMode ? "bg-[#6e6e73]" : "bg-[#a1a1a6]")
+                        "bg-[var(--dashboard-text-muted)]"
                     )}
                     aria-hidden="true"
                   />
                   <span className="truncate">{row.status}</span>
                 </span>
                 <time
-                  className={`dashboard-project-card-time shrink-0 tabular-nums ${isDarkMode ? "text-[#8e8e93]" : "text-[#86868b]"}`}
+                  className="dashboard-project-card-time shrink-0 tabular-nums text-[var(--dashboard-text-muted)]"
                   title={formatDateTime(row.finishedAt)}
                 >
                   {formatDateTime(row.finishedAt)}
@@ -484,182 +364,12 @@ export function OrganizationModelDetailPanel({
         </div>
       )}
 
-      <div className="hidden">
-          <div
-            className={`project-list-table overflow-hidden rounded-[18px] border ${
-              isDarkMode ? "border-[#3a3a3c] bg-[#1c1c1e]" : "border-[#d2d2d7] bg-white"
-            }`}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[800px] table-fixed text-left">
-              <colgroup>
-                <col className="w-[52px]" />
-                <col className="w-[21%]" />
-                <col className="w-[30%]" />
-                <col className="w-[72px]" />
-                <col className="w-[72px]" />
-                <col className="w-[136px]" />
-                <col className="w-11" />
-              </colgroup>
-              <thead className="project-list-head border-b border-slate-200/80 text-xs text-slate-500">
-                <tr>
-                  <th className="h-10 py-0 text-center font-medium align-middle">
-                    <button
-                      type="button"
-                      onClick={() => handleSiteSort("targetType")}
-                      className="flex h-10 w-full cursor-pointer select-none items-center justify-center px-0 text-center"
-                    >
-                      <span className="relative inline-flex items-center justify-center">
-                        종류
-                        {getCenteredSiteSortIndicator("targetType")}
-                      </span>
-                    </button>
-                  </th>
-                  <th className="h-10 py-0 font-medium align-middle">
-                    <button
-                      type="button"
-                      onClick={() => handleSiteSort("siteName")}
-                      className="flex h-10 w-full cursor-pointer select-none items-center gap-0.5 px-3 text-left"
-                    >
-                      페이지 이름
-                      {getSiteSortIndicator("siteName")}
-                    </button>
-                  </th>
-                  <th className="h-10 px-3 py-0 font-medium align-middle">주소</th>
-                  <th className="h-10 px-3 py-0 text-center font-medium align-middle">상태</th>
-                  <th className="h-10 py-0 text-center font-medium align-middle">
-                    <button
-                      type="button"
-                      onClick={() => handleSiteSort("score")}
-                      className="flex h-10 w-full cursor-pointer select-none items-center justify-center px-3 text-center"
-                    >
-                      <span className="relative inline-flex items-center justify-center">
-                        최근 점수
-                        {getCenteredSiteSortIndicator("score")}
-                      </span>
-                    </button>
-                  </th>
-                  <th className="h-10 py-0 font-medium align-middle">
-                    <button
-                      type="button"
-                      onClick={() => handleSiteSort("updatedAt")}
-                      className="flex h-10 w-full cursor-pointer select-none items-center gap-0.5 px-3 text-left"
-                    >
-                      최근 완료 시각
-                      {getSiteSortIndicator("updatedAt")}
-                    </button>
-                  </th>
-                  <th className="h-10 px-3 py-0 align-middle" aria-label="페이지 액션" />
-                </tr>
-              </thead>
-              <tbody>
-                {sortedSiteRows.length === 0 ? (
-                  <tr className="project-list-row">
-                    <td colSpan={7} className="px-4 py-6 text-center text-xs text-slate-500">
-                      등록된 페이지가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  sortedSiteRows.map((row, index) => (
-                    <tr
-                      key={row.id}
-                      onClick={() => onSiteClick(row.id)}
-                      className={`project-list-row group h-11 cursor-pointer ${
-                        index !== sortedSiteRows.length - 1
-                          ? isDarkMode
-                            ? "border-b border-[#3a3a3c]"
-                            : "border-b border-[#e5e5ea]"
-                          : ""
-                      }`}
-                    >
-                      <td className="relative px-0 py-2 align-middle text-slate-600">
-                        <div className="group/target-type relative flex items-center justify-center">
-                          <span
-                            className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition ${
-                              isDarkMode ? "group-hover/target-type:bg-white/[0.06]" : "group-hover/target-type:bg-slate-100"
-                            }`}
-                            aria-label={getTargetTypeInfo(row.targetType)}
-                          >
-                            {renderTargetTypeIcon(row.targetType)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <div className="min-w-0">
-                          <p className="truncate text-[0.8125rem] font-semibold text-slate-900">{row.name}</p>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <a
-                          href={row.accessUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={row.accessUrl}
-                          onClick={(event) => event.stopPropagation()}
-                          className="inline-block max-w-full truncate text-[0.8125rem] leading-4 text-slate-600 hover:underline"
-                        >
-                          {row.accessUrl}
-                        </a>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <div className="flex items-center justify-center">
-                          <span
-                            className={cn(
-                              "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold",
-                              getSiteStatusBadgeClassName(row.status)
-                            )}
-                          >
-                            {row.status}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-center align-middle">
-                        <span className="text-[0.8125rem] font-medium text-slate-700">
-                          {row.totalScore !== null ? `${row.totalScore}점` : "-"}
-                        </span>
-                      </td>
-                      <td className="project-list-updated px-3 py-2 align-middle text-xs tabular-nums text-slate-500">
-                        {formatDateTime(row.finishedAt)}
-                      </td>
-                      <td className="relative px-3 py-2 text-right align-middle">
-                        <div className="group/project-actions absolute right-3 top-1/2 flex h-9 w-[68px] -translate-y-1/2 items-center justify-end">
-                          <div className="pointer-events-none absolute right-9 top-1/2 inline-flex h-9 w-7 -translate-y-1/2 items-center justify-end opacity-0 transition-all duration-200 ease-out group-hover/project-actions:pointer-events-auto group-hover/project-actions:translate-x-0 group-hover/project-actions:opacity-100 translate-x-1">
-                            <div className="group/action relative flex items-center">
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  const site = evaluationTargetById.get(row.id);
-                                  if (site) {
-                                    openDeleteEvaluationTargetModel(site);
-                                  }
-                                }}
-                                aria-label="제거"
-                                className={`project-list-icon-action inline-flex h-7 w-7 items-center justify-center rounded-full bg-transparent transition ${
-                                  isDarkMode
-                                    ? "text-rose-400 hover:bg-white/[0.075] hover:text-rose-300"
-                                    : "text-red-600 hover:text-red-700"
-                                }`}
-                              >
-                                <Trash2 size={14} className={isDarkMode ? "text-rose-400" : "text-red-600"} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-              </table>
-            </div>
-          </div>
-      </div>
       {!readOnly && deletingEvaluationTargetModel
         ? createPortal(
             <div className="dashboard-modal-layer">
               <div
                 className="absolute inset-0"
+                aria-hidden="true"
                 onClick={() => {
                   if (!isDeletingEvaluationTarget) {
                     closeDeleteEvaluationTargetModel();

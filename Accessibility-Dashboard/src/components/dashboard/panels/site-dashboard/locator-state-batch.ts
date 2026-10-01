@@ -46,6 +46,21 @@ export class LocatorStateBatch {
     this.publish(next);
   }
 
+  // Gives every listed issue that has no reported state the fallback state.
+  // Queued reports are applied first so they are never overwritten.
+  settleMissing(issueIds: readonly number[], state: LocatorIssueState): void {
+    this.flush();
+    let next: Map<number, LocatorIssueState> | null = null;
+    for (const issueId of issueIds) {
+      if (this.states.has(issueId) || next?.has(issueId)) continue;
+      next ??= new Map(this.states);
+      next.set(issueId, state);
+    }
+    if (next === null) return;
+    this.states = next;
+    this.publish(next);
+  }
+
   cancelPending(): void {
     this.generation += 1;
     this.cancelScheduledFlush?.();

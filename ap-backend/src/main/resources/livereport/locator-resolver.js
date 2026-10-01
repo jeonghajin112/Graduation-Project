@@ -145,6 +145,32 @@ function createLiveLocatorResolver({document, layer, observeMarkerShadowRoot, is
     return candidates.find(candidate => !layer.contains(candidate)
       && carouselDescriptorFor(candidate, item?.carouselContext)) || null;
   };
+  // Mirrored frames load /api/live-reports/<session>/mirror/<nonce>/<base64url host><path>.
+  const upstreamOfFrame = frame => {
+    let url;
+    try { url = new URL(frame.getAttribute('src') || '', document.baseURI); } catch (_) { return null; }
+    const mirrored = /\/mirror\/[^/]+\/([A-Za-z0-9_-]+)(\/[^?#]*)?/.exec(url.pathname);
+    if (!mirrored) return url;
+    try {
+      const token = mirrored[1].replace(/-/g, '+').replace(/_/g, '/');
+      const host = atob(token + '='.repeat((4 - token.length % 4) % 4));
+      return new URL(`https://${host}${mirrored[2] || '/'}`);
+    } catch (_) { return null; }
+  };
+  // A frame whose own selector no longer matches can still be recognized by
+  // the page it loads. Only an unambiguous match is used.
+  const frameForUrl = (root, frameUrl) => {
+    if (typeof frameUrl !== 'string' || !frameUrl) return null;
+    let expected;
+    try { expected = new URL(frameUrl); } catch (_) { return null; }
+    const trim = path => path.replace(/\/+$/, '');
+    const matches = Array.from(root.querySelectorAll('iframe,frame')).filter(frame => {
+      if (layer.contains(frame)) return false;
+      const upstream = upstreamOfFrame(frame);
+      return upstream && upstream.host === expected.host && trim(upstream.pathname) === trim(expected.pathname);
+    });
+    return matches.length === 1 ? matches[0] : null;
+  };
   const resolveIssue = (item, queries = createLocatorQueryCache()) => {
     const steps = issuePathSteps(item);
     if (steps.length === 0) {
@@ -162,7 +188,15 @@ function createLiveLocatorResolver({document, layer, observeMarkerShadowRoot, is
         const context = String(step.context || 'DOCUMENT').toUpperCase();
         if (context === 'DOCUMENT') root = document;
         else if (context === 'SHADOW_ROOT') {
-          if (!current || !current.shadowRoot) return {element:null, reason:'SHADOW_ROOT_UNAVAILABLE'};
+          if (!current) return {element:null, reason:'SHADOW_ROOT_UNAVAILABLE'};
+          if (!current.shadowRoot) {
+            // A closed shadow root cannot be entered; a host that is on screen
+            // marks the finding. An empty host may still attach an open root.
+            const box = current.getBoundingClientRect();
+            return box.width > 0 && box.height > 0
+              ? {element:current, reason:null, presentation:{kind:'SHADOW_HOST'}}
+              : {element:null, reason:'SHADOW_ROOT_UNAVAILABLE'};
+          }
           root = current.shadowRoot;
           // A document observer does not cross a shadow boundary.
           // Observe each traversed root even if the target is not mounted yet.
@@ -171,8 +205,9 @@ function createLiveLocatorResolver({document, layer, observeMarkerShadowRoot, is
         } else if (context === 'FRAME') {
           // The frame document is not reachable from here. Show the finding on
           // the frame that contains it instead of dropping its location.
-          return ['IFRAME', 'FRAME'].includes(current?.tagName)
-            ? {element:current, reason:null, presentation:{kind:'FRAME_CONTENT'}}
+          const frame = ['IFRAME', 'FRAME'].includes(current?.tagName) ? current : frameForUrl(root, step.frameUrl);
+          return frame
+            ? {element:frame, reason:null, presentation:{kind:'FRAME_CONTENT'}}
             : {element:null, reason:'FRAME_UNSUPPORTED'};
         } else return {element:null, reason:'UNSUPPORTED_CONTEXT'};
         current = step.selector.includes('[data-ua-audit-')
@@ -181,6 +216,10 @@ function createLiveLocatorResolver({document, layer, observeMarkerShadowRoot, is
         if (index === steps.length - 1 && (!current || !matchesAnalyzedText(current, item))) {
           const recovered = findReorderedTextTarget(root, step.selector, item, queries);
           if (recovered) { current = recovered; reordered = true; }
+        }
+        // The frame's own selector changed; the next step enters it by its page.
+        if (!current && String(steps[index + 1]?.context || '').toUpperCase() === 'FRAME') {
+          current = frameForUrl(root, step.frameUrl || steps[index + 1].frameUrl);
         }
         if (!current) return {element:null, reason:'SELECTOR_NOT_FOUND'};
       }

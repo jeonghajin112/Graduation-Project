@@ -5,13 +5,14 @@ import type { EvaluationCaptureMetadata, LiveReportSession } from "@/types/acces
 
 import { formatIssueCodeLabel } from "./constants";
 import { PageFavicon } from "./page-favicon";
-import { getReplaySourceWidth, type EvidenceFrameKind } from "./evidence-source";
+import { getReplaySourceWidth, resolveReplayCaptureMetadataStatus, type EvidenceFrameKind } from "./evidence-source";
 import { getPageEvidenceLoadingProgress, type PageEvidenceLoadingPhase } from "./page-evidence-loading-progress";
 import {
   REPLAY_VIEW_SCALE_MIN, REPLAY_VIEW_SCALE_MAX, REPLAY_VISUAL_WIDTH_MAX,
   type ReplayViewportMetrics
 } from "./page-replay-protocol";
 import type { LocatorReport, RecentIssueRow } from "./types";
+import type { EvaluationCaptureMetadataLoadState } from "./use-evaluation-capture-metadata";
 import type { LiveReportSessionLoadState } from "./use-live-report-session";
 import { usePageEvidenceConnection } from "./use-page-evidence-connection";
 
@@ -20,6 +21,7 @@ type RenderedPageEvidenceCardProps = {
   headerActions: ReactNode;
   faviconUrl?: string | null;
   captureMetadata: EvaluationCaptureMetadata | null;
+  captureMetadataLoadState?: EvaluationCaptureMetadataLoadState;
   errorMessage: string | null;
   evaluationRequestId: number | null;
   liveSession: LiveReportSession | null;
@@ -117,6 +119,7 @@ export function RenderedPageEvidenceCard({
   headerActions,
   faviconUrl,
   captureMetadata,
+  captureMetadataLoadState = "ready",
   errorMessage,
   evaluationRequestId,
   liveSession,
@@ -143,12 +146,13 @@ export function RenderedPageEvidenceCard({
     activeFrameKind, effectiveLoadState, replayConnectionState, replayLoadingPhase,
     documentTitle, isDocumentScrolled, fallbackIssue,
     unavailableLocatorCount, recoverableHiddenLocatorCount,
-    handleFrameLoad, handleFrameError, retryFrame, enterReportFocus
+    handleFrameLoad, handleFrameError, retryFrame, enterReportFocus, resetAutomaticLiveRecovery
   } = usePageEvidenceConnection({
     evaluationRequestId, liveSession, liveSessionLoadState, onRetryLiveSession,
     onLocatorReportChange, onSelectIssue, previewRuntimeUrl, rows,
     deviceScaleFactor: captureMetadata?.deviceScaleFactor ?? null, selectedIssueId,
-    selectedIssueFocusRequestId, replayViewportMetrics, chromeHeight
+    selectedIssueFocusRequestId, replayViewportMetrics, chromeHeight,
+    captureMetadataStatus: resolveReplayCaptureMetadataStatus(captureMetadataLoadState, captureMetadata !== null)
   });
   const headerTitle = documentTitle === null ? "" : documentTitle || "제목 없음";
   const loadingFrameKind = activeFrameKind ?? "live";
@@ -267,7 +271,10 @@ export function RenderedPageEvidenceCard({
                 {errorMessage ??
                   "원본 사이트에 연결할 수 없습니다. 잠시 후 동적 화면을 다시 시도해 주세요."}
               </p>
-              <button type="button" className="site-page-evidence-retry" onClick={onRetry}>
+              <button type="button" className="site-page-evidence-retry" onClick={() => {
+                resetAutomaticLiveRecovery();
+                onRetry();
+              }}>
                 <RefreshCw aria-hidden="true" size={15} />
                 다시 시도
               </button>

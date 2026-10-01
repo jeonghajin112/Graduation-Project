@@ -60,7 +60,8 @@ export type LiveReportPortEventMessage = {
   challenge: string;
   documentToken: string;
   sequence: number;
-  payload: PageReplayToDashboardMessage;
+  /** Null for an authenticated event this dashboard does not understand. */
+  payload: PageReplayToDashboardMessage | null;
 };
 
 export type LiveReportPortCommandMessage = {
@@ -146,6 +147,35 @@ export function parseLiveReportBridgeAvailableMessage(
     sessionId: expectedSessionId,
     documentToken: value.documentToken
   };
+}
+
+// AVAILABLE carries no secret, so any script in the proxied page can post
+// it. It starts a connection when none exists, but replaces an acknowledged
+// bridge only after the iframe loaded another document (the old document's
+// unload already closes the port).
+export function shouldConnectAnnouncedLiveBridge({
+  connection,
+  sessionId,
+  viewerOrigin,
+  documentToken,
+  reconnectAllowed
+}: {
+  connection: { sessionId: string; viewerOrigin: string; documentToken: string | null } | null;
+  sessionId: string;
+  viewerOrigin: string;
+  documentToken: string;
+  reconnectAllowed: boolean;
+}): boolean {
+  if (connection?.sessionId !== sessionId) {
+    return true;
+  }
+  if (
+    connection.viewerOrigin === viewerOrigin &&
+    (connection.documentToken === null || connection.documentToken === documentToken)
+  ) {
+    return false;
+  }
+  return connection.documentToken === null || reconnectAllowed;
 }
 
 export function parseLiveReportSessionExhaustedMessage(
@@ -330,10 +360,18 @@ export function parseLiveReportPortMessage(
     return null;
   }
 
-  const payload = parsePageReplayMessage(value.payload);
-  if (!payload || payload.documentToken !== value.documentToken) {
+  // The envelope is authenticated and in order, so an unknown or newer event
+  // is skipped instead of tearing down the report. It must still belong to
+  // the acknowledged document.
+  if (
+    !isRecord(value.payload) ||
+    (Object.prototype.hasOwnProperty.call(value.payload, "documentToken") &&
+      value.payload.documentToken !== value.documentToken)
+  ) {
     return null;
   }
+  const parsedPayload = parsePageReplayMessage(value.payload);
+  const payload = parsedPayload?.documentToken === value.documentToken ? parsedPayload : null;
 
   return {
     source: LIVE_REPORT_PAGE_SOURCE,

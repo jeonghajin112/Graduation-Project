@@ -11,6 +11,7 @@ import {
   type PersistedOrganizationCreateAttempt
 } from "@/services/organization-create-recovery-storage";
 import type { RecoveryRead } from "@/services/recovery-storage";
+import { createRandomUuid } from "@/services/random-uuid";
 import { UserFacingError } from "@/services/user-facing-error";
 import type { DashboardViewModel } from "@/types/accessibility-domain";
 
@@ -210,7 +211,7 @@ export function useOrganizationModelCreateForm({
       if (pending.kind === "none") {
         const posting = persistRecovery({
           version: 2,
-          attemptId: window.crypto.randomUUID(),
+          attemptId: createRandomUuid(),
           apiScope: API_BASE_URL,
           name,
           organizationId: null,

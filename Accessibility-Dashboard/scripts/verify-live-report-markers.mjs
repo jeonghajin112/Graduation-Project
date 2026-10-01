@@ -106,6 +106,12 @@ function createIssue(id, selector, title, severity, category, code, carouselCont
   };
 }
 
+// Page-script animation frames are held while a marker is hovered or keyboard
+// focused, so waits inside the report document use the document timeline.
+function waitForReportFrames(locator) {
+  return locator.evaluate(() => document.documentElement.animate([], 34).finished.then(() => undefined));
+}
+
 function rectsOverlap(first, second) {
   return !(
     first.right <= second.left ||
@@ -1100,6 +1106,11 @@ try {
   ));
   await page.waitForTimeout(100);
   assert.equal(await frame.locator(".ap-live-marker").count(), 2, "malformed carousel context must reject INIT");
+  // The refused command still consumes its sequence and is reported, so later
+  // commands are not silently dropped and the dashboard can list the issues.
+  assert.ok(await page.evaluate(() => window.__liveEvents.some(event => event?.type === "EVENT" &&
+    event.payload?.type === "COMMAND_REJECTED" && event.payload.commandType === "INIT_ISSUES")),
+  "a rejected INIT must be reported to the dashboard");
 
   // Short controls at the document/viewport top cannot fit a chip above them.
   // Keep each label tied to its own corner, including in a scaled, scrolled viewer.
@@ -1141,7 +1152,7 @@ try {
     for (const scrollTop of [0, 220, 0]) {
       await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
       await frame.locator('.ap-live-marker[data-issue-id="301"]').waitFor({ state: "visible" });
-      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await waitForReportFrames(frame.locator("body"));
       const layout = await frame.locator("body").evaluate(() => {
         const rect = element => {
           const bounds = element.getBoundingClientRect();
@@ -1262,7 +1273,7 @@ try {
     for (const scrollTop of [0, 205, 225, 0]) {
       await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
       await frame.locator('.ap-live-marker[data-issue-id="501"]').waitFor({ state: "visible" });
-      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await waitForReportFrames(frame.locator("body"));
       const layout = await frame.locator("body").evaluate(() => {
         const rect = element => {
           const r = element.getBoundingClientRect();
@@ -1373,7 +1384,7 @@ try {
     }), scale);
     for (const scrollTop of [0, 190, 0]) {
       await frame.locator("body").evaluate((_body, value) => window.scrollTo(0, value), scrollTop);
-      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await waitForReportFrames(frame.locator("body"));
       const layout = await frame.locator("body").evaluate(() => {
         const rect = element => {
           const r = element.getBoundingClientRect();
@@ -1395,7 +1406,7 @@ try {
       await popover.locator(".ap-live-popover__title").filter({hasText:"가운데 소식의 대비"}).waitFor();
       // Hover/focus can scroll the scaled iframe to reveal its chip. Compare
       // the target and highlight together after that interaction settles.
-      await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await waitForReportFrames(frame.locator("body"));
       const focusedGeometry = await frame.locator("body").evaluate((_body, scale) => {
         const target = document.getElementById("uneven-card-1").getBoundingClientRect();
         const highlight = document.querySelector(".ap-live-highlight__fragment").getBoundingClientRect();
@@ -1467,7 +1478,7 @@ try {
       selectedIssueId: null, markersVisible: true });
   }, groupIssues);
   await frame.locator('.ap-live-marker[data-issue-id="701"]').waitFor({ state: "visible" });
-  await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await waitForReportFrames(frame.locator("body"));
   const groupLayout = await frame.locator("body").evaluate(() => [...document.querySelectorAll(".ap-live-marker")]
     .filter(marker => !marker.hidden)
     .map(marker => ({
@@ -1514,7 +1525,7 @@ try {
   await tallMarker.waitFor({ state: "visible" });
   await tallMarker.hover();
   await popover.locator(".ap-live-popover__title").filter({ hasText: "긴 영역의 대비" }).waitFor();
-  await frame.locator("body").evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await waitForReportFrames(frame.locator("body"));
   const sidePlacement = await frame.locator("body").evaluate(() => {
     const rect = element => {
       const bounds = element.getBoundingClientRect();
@@ -1537,6 +1548,57 @@ try {
   `without room above or below, the popover must sit beside the target inside the viewport: ${JSON.stringify(sidePlacement)}`);
   await page.mouse.move(980, 800);
   await popover.waitFor({ state: "hidden" });
+
+  // Auto-advancing content must hold still while a marker is being read, so the
+  // marker does not move away from under the pointer.
+  await frame.locator("body").evaluate(() => {
+    window.scrollTo(0, 0);
+    const slide = document.createElement("div");
+    slide.id = "motion-slide";
+    slide.style.cssText = "position:absolute;left:120px;top:160px;width:200px;height:80px;background:#ddd";
+    document.body.append(slide);
+    const ticks = window.__motionTicks = { interval: 0, timeout: 0, frame: 0, due: 0 };
+    ticks.intervalId = setInterval(() => { ticks.interval += 1; }, 40);
+    const chain = () => { ticks.timeout += 1; ticks.timeoutId = setTimeout(chain, 40); };
+    ticks.timeoutId = setTimeout(chain, 40);
+    const loop = () => { ticks.frame += 1; ticks.frameId = requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+    slide.animate([{ transform: "translateX(0)" }, { transform: "translateX(100px)" }], { duration: 4000 });
+  });
+  await page.evaluate(issues => window.__sendLiveCommand({ source: "accessibility-dashboard", type: "INIT_ISSUES",
+    issues, selectedIssueId: null, markersVisible: true }),
+  [createIssue(741, "#motion-slide", "자동 슬라이드 대비", "HIGH", "visual", "5.4.3")]);
+  const motionMarker = frame.locator('.ap-live-marker[data-issue-id="741"]');
+  await motionMarker.waitFor({ state: "visible" });
+  const readMotion = () => frame.locator("#motion-slide").evaluate(slide => ({
+    interval: window.__motionTicks.interval, timeout: window.__motionTicks.timeout,
+    frame: window.__motionTicks.frame, due: window.__motionTicks.due,
+    animationTime: slide.getAnimations()[0]?.currentTime ?? null
+  }));
+  await motionMarker.hover();
+  await popover.locator(".ap-live-popover__title").filter({ hasText: "자동 슬라이드 대비" }).waitFor();
+  await frame.locator("body").evaluate(() => { setTimeout(() => { window.__motionTicks.due += 1; }, 30); });
+  const pausedStart = await readMotion();
+  await page.waitForTimeout(400);
+  const pausedEnd = await readMotion();
+  assert.deepEqual(pausedEnd, pausedStart,
+    `timers, frames and animations must hold while the marker is hovered: ${JSON.stringify({ pausedStart, pausedEnd })}`);
+  await page.mouse.move(980, 800);
+  await popover.waitFor({ state: "hidden" });
+  await page.waitForTimeout(500);
+  const resumed = await readMotion();
+  assert.ok(resumed.interval > pausedEnd.interval && resumed.timeout > pausedEnd.timeout
+    && resumed.frame > pausedEnd.frame && resumed.animationTime > pausedEnd.animationTime,
+  `page motion must resume after the pointer leaves: ${JSON.stringify({ pausedEnd, resumed })}`);
+  assert.equal(resumed.due, 1, "a timeout that came due while hovered must run once after resuming");
+  await frame.locator("#motion-slide").evaluate(slide => {
+    const ticks = window.__motionTicks;
+    clearInterval(ticks.intervalId);
+    clearTimeout(ticks.timeoutId);
+    cancelAnimationFrame(ticks.frameId);
+    slide.getAnimations().forEach(animation => animation.cancel());
+    slide.remove();
+  });
 
   await frame.locator("body").evaluate(() => {
     const embedded = document.createElement("iframe");
@@ -1780,23 +1842,123 @@ try {
   await frame.locator("#shadow-text").evaluate(element => { element.textContent = "더 이상 분석 대상이 아닌 내용"; });
   assert.equal(await frame.locator(".ap-live-marker").count(), 0);
 
+  // Content in a closed tab or collapsed menu is shown on the visible area
+  // around it; the marker follows the element as its hidden reason changes.
   await frame.locator("html").evaluate(() => {
+    const area = document.createElement("div"); area.id = "approximate-area";
+    area.style.cssText = "position:fixed;left:24px;top:120px;width:320px;height:80px;background:#fff";
+    area.textContent = "탭 영역";
     const target = document.createElement("p"); target.id = "changing-hidden-reason";
     target.textContent = "숨김 원인이 바뀌는 요소"; target.style.display = "none";
-    document.querySelector("main").append(target);
+    area.append(target);
+    document.querySelector("main").append(area);
+    const loose = document.createElement("p"); loose.id = "page-level-hidden";
+    loose.textContent = "페이지 바로 아래에 숨은 요소"; loose.style.display = "none";
+    document.body.append(loose);
   });
-  await initializeLocatorIssues([createIssue(703, "#changing-hidden-reason", "숨김 이유", "HIGH", "rule", "5.1.1")]);
-  await waitForContentStatus(703, "HIDDEN_STATE", "DISPLAY_NONE");
-  // A transparent element is still read by screen readers, so its marker
-  // moves to the element it belongs to and returns when it is hidden again.
+  await initializeLocatorIssues([
+    createIssue(703, "#changing-hidden-reason", "숨김 이유", "HIGH", "rule", "5.1.1"),
+    createIssue(704, "#page-level-hidden", "가리킬 영역 없음", "HIGH", "rule", "5.1.1")
+  ]);
+  await waitForContentStatus(703, "VISIBLE", "APPROXIMATE_AREA");
+  assert.equal(await frame.locator('.ap-live-marker[data-issue-id="703"]')
+    .evaluate(marker => marker.classList.contains("ap-live-marker--approximate")), true,
+  "a marker placed on the surrounding area is drawn as approximate");
+  // Without a visible container smaller than the page there is nothing to point at.
+  await waitForContentStatus(704, "HIDDEN_STATE", "DISPLAY_NONE");
+  // A transparent element keeps its box, so its marker sits on the element
+  // itself, and moves back to the area when the element is hidden again.
   await frame.locator("#changing-hidden-reason").evaluate(element => {
     element.style.display = "block"; element.style.opacity = "0";
   });
-  await waitForContentStatus(703, "VISIBLE", "INVISIBLE_ELEMENT", 3_000);
+  await waitForContentStatus(703, "VISIBLE", "TRANSPARENT_ELEMENT", 3_000);
+  assert.equal(await frame.locator('.ap-live-marker[data-issue-id="703"]')
+    .evaluate(marker => marker.classList.contains("ap-live-marker--approximate")), false,
+  "a transparent element is marked at its exact position");
   await frame.locator("#changing-hidden-reason").evaluate(element => {
     element.style.opacity = "1"; element.hidden = true;
   });
-  await waitForContentStatus(703, "HIDDEN_STATE", "HIDDEN_ATTRIBUTE", 3_000);
+  await waitForContentStatus(703, "VISIBLE", "APPROXIMATE_AREA", 3_000);
+  await frame.locator("#changing-hidden-reason").evaluate(element => { element.hidden = false; });
+  await page.waitForFunction(() => {
+    const latest = window.__liveEvents.filter(event => event?.type === "EVENT"
+      && event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === 703).at(-1)?.payload;
+    return latest?.status === "VISIBLE" && !latest.reason;
+  }, null, { timeout: 3_000 });
+  await initializeLocatorIssues([]);
+  await frame.locator("html").evaluate(() => {
+    document.querySelector("#approximate-area").remove();
+    document.querySelector("#page-level-hidden").remove();
+  });
+
+  // Hidden panels are marked on the control that opens them, visibility:hidden
+  // text in place, a closed shadow root on its host, a renamed frame by the page
+  // it loads, and a skip link that focus cannot reveal on the area around it.
+  await frame.locator("html").evaluate(() => {
+    const fixture = document.createElement("section");
+    fixture.id = "reveal-fixture";
+    fixture.style.cssText = "position:fixed;left:400px;top:100px;width:360px;background:#fff";
+    fixture.innerHTML = `<div role="tablist"><button id="reveal-tab" type="button" role="tab" aria-selected="false">두 번째 탭</button></div>
+      <div id="reveal-panel" role="tabpanel" aria-labelledby="reveal-tab" hidden><p id="reveal-panel-text">탭 안의 공지</p></div>
+      <button id="reveal-menu-button" type="button" aria-controls="reveal-menu" aria-expanded="false">메뉴</button>
+      <ul id="reveal-menu" style="display:none"><li><a id="reveal-menu-link" href="#m">메뉴 항목</a></li></ul>
+      <details><summary id="reveal-summary">자세히</summary><p id="reveal-details-text">접힌 설명</p></details>
+      <p id="visibility-hidden-text" style="visibility:hidden">숨겨진 안내</p>
+      <div id="closed-shadow-host" style="width:120px;height:24px"></div>
+      <iframe id="renamed-frame" title="new-title" src="https://frames.example/widget" style="width:120px;height:40px"></iframe>
+      <nav id="stuck-skip-nav" style="position:relative;width:200px;height:32px">
+        <a id="stuck-skip" href="#x" style="position:absolute;left:-9999px;top:0">나타나지 않는 바로가기</a></nav>`;
+    document.body.append(fixture);
+    fixture.querySelector("#closed-shadow-host").attachShadow({ mode: "closed" }).innerHTML = "<p>닫힌 내용</p>";
+  });
+  const frameUrl = "https://frames.example/widget";
+  await initializeLocatorIssues([
+    createIssue(901, "#reveal-panel-text", "탭 안의 공지", "HIGH", "text", "3.1.5"),
+    createIssue(902, "#reveal-menu-link", "메뉴 항목", "HIGH", "rule", "6.4.3"),
+    createIssue(903, "#reveal-details-text", "접힌 설명", "HIGH", "text", "3.1.5"),
+    createIssue(904, "#visibility-hidden-text", "숨겨진 안내", "HIGH", "rule", "5.4.3"),
+    { ...createIssue(905, "#closed-shadow-host", "닫힌 Shadow DOM", "HIGH", "rule", "5.1.1"),
+      pathSteps: [{ context: "DOCUMENT", selector: "#closed-shadow-host" }, { context: "SHADOW_ROOT", selector: "p" }] },
+    { ...createIssue(906, 'iframe[title="old-title"]', "이름이 바뀐 프레임", "HIGH", "rule", "5.1.1"),
+      pathSteps: [{ context: "DOCUMENT", selector: 'iframe[title="old-title"]', frameUrl },
+        { context: "FRAME", selector: "button", frameUrl }] },
+    createIssue(907, "#stuck-skip", "나타나지 않는 바로가기", "HIGH", "rule", "6.4.1")
+  ]);
+  const latestStatusOf = issueId => page.evaluate(id => window.__liveEvents.filter(event => event?.type === "EVENT"
+    && event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === id).at(-1)?.payload ?? null, issueId);
+  const markerIsApproximate = issueId => frame.locator(`.ap-live-marker[data-issue-id="${issueId}"]`)
+    .evaluate(marker => marker.classList.contains("ap-live-marker--approximate"));
+  for (const [issueId, reason, ownerKind, approximate] of [
+    [901, "REVEALED_BY_CONTROL", "BUTTON", true],
+    [902, "REVEALED_BY_CONTROL", "BUTTON", true],
+    [903, "REVEALED_BY_CONTROL", "BUTTON", true],
+    [904, "HIDDEN_IN_PLACE", undefined, false],
+    [905, "SHADOW_HOST", undefined, true],
+    [906, "FRAME_CONTENT", undefined, false]
+  ]) {
+    await waitForContentStatus(issueId, "VISIBLE", reason);
+    assert.equal((await latestStatusOf(issueId)).ownerKind, ownerKind, `${issueId} names its control`);
+    assert.equal(await markerIsApproximate(issueId), approximate, `${issueId} marker style`);
+  }
+  // The tab marker sits on the tab, and moves to the text once the tab opens.
+  assert.equal(await frame.locator("#reveal-tab").evaluate(tab => {
+    const marker = document.querySelector('.ap-live-marker[data-issue-id="901"]').getBoundingClientRect();
+    const rect = tab.getBoundingClientRect();
+    return Math.abs(marker.top - rect.top) < 40;
+  }), true, "the hidden tab content is marked at its tab");
+  await frame.locator("#reveal-panel").evaluate(panel => { panel.hidden = false; });
+  await page.waitForFunction(() => {
+    const latest = window.__liveEvents.filter(event => event?.type === "EVENT"
+      && event.payload?.type === "LOCATOR_STATUS" && event.payload.issueId === 901).at(-1)?.payload;
+    return latest?.status === "VISIBLE" && !latest.reason;
+  }, null, { timeout: 3_000 });
+  // Focus cannot reveal this link; after trying, the surrounding nav carries it.
+  await waitForContentStatus(907, "HIDDEN_STATE", "FOCUS_TO_REVEAL");
+  await page.evaluate(() => window.__sendLiveCommand({ source: "accessibility-dashboard", type: "FOCUS_ISSUE", issueId: 907 }));
+  await waitForContentStatus(907, "VISIBLE", "APPROXIMATE_AREA");
+  await popover.locator(".ap-live-popover__note").filter({ hasText: "대략적으로" }).waitFor();
+  await initializeLocatorIssues([]);
+  await frame.locator("#reveal-fixture").evaluate(element => element.remove());
 
   // Findings that are not on screen themselves are shown where they belong.
   await frame.locator("html").evaluate(() => {
@@ -1811,7 +1973,7 @@ try {
     const section = document.createElement("section");
     section.id = "presentation-fixture";
     section.innerHTML = `<h2 id="presentation-heading" class="presentation-sr">주요 소식</h2>
-      <button id="presentation-button" style="width:48px;height:32px"><span id="presentation-label" class="presentation-sr">검색</span>?</button>
+      <button id="presentation-button" style="width:48px;height:32px"><span id="presentation-label" class="presentation-sr">검색</span>?<span id="presentation-empty-ghost" style="display:inline-block;width:0;height:0;opacity:0"></span></button>
       <p id="presentation-ghost" style="opacity:0">투명한 안내 문구</p>
       <div aria-hidden="true"><p id="presentation-decorative">장식 문구</p></div>
       <div id="presentation-carousel" class="swiper"><div class="swiper-wrapper">
@@ -1823,6 +1985,16 @@ try {
     const skip = document.createElement("a");
     skip.id = "presentation-skip"; skip.className = "presentation-skip"; skip.href = "#main"; skip.textContent = "본문 바로가기";
     document.body.prepend(skip);
+    // Skip-link lists are often a zero-height box whose links slide in on focus.
+    const skipList = document.createElement("div");
+    skipList.id = "presentation-skip-list"; skipList.style.cssText = "position:relative;height:0";
+    skipList.innerHTML = '<a class="presentation-skip" href="#main">메뉴 바로가기</a>';
+    document.body.prepend(skipList);
+    // Or a 0×0 fixed wrapper whose link waits above the page.
+    const skipWrap = document.createElement("div");
+    skipWrap.id = "presentation-skip-wrap"; skipWrap.style.cssText = "position:fixed;left:0;top:0;width:0;height:0";
+    skipWrap.innerHTML = '<a href="#main" style="position:absolute;left:0;top:-200px;width:60px;height:40px">본문 영역 바로가기</a>';
+    document.body.prepend(skipWrap);
     window.scrollTo(0, 0);
   });
   const presentationIssues = [
@@ -1836,7 +2008,11 @@ try {
     createIssue(808, 'div[data-ua-audit-slide-index="1"] > a[title=""]', "예전 슬라이드 경로", "HIGH", "rule", "6.4.3",
       { carouselId: 1, slideIndex: 1, slideCount: 3 }),
     { ...createIssue(809, "#unsupported-frame", "프레임 내부", "HIGH", "rule", "5.1.1"),
-      pathSteps: [{ context: "DOCUMENT", selector: "#unsupported-frame" }, { context: "FRAME", selector: "button" }] }
+      pathSteps: [{ context: "DOCUMENT", selector: "#unsupported-frame" }, { context: "FRAME", selector: "button" }] },
+    createIssue(810, "#presentation-skip-list", "건너뛰기 링크 목록", "HIGH", "text", "3.1.5"),
+    createIssue(811, "#presentation-skip-wrap", "건너뛰기 링크 묶음", "HIGH", "text", "3.1.5"),
+    // Transparent and without a box: nothing to mark in place, so its button carries it.
+    createIssue(812, "#presentation-empty-ghost", "크기 없는 투명 요소", "HIGH", "rule", "5.1.1")
   ];
   await initializeLocatorIssues(presentationIssues);
   const latestLocatorStatus = issueId => page.evaluate(id => window.__liveEvents.filter(event => event?.type === "EVENT"
@@ -1849,7 +2025,8 @@ try {
   for (const [issueId, reason, ownerKind] of [
     [801, "SCREEN_READER_ONLY", "BUTTON"],
     [802, "SCREEN_READER_ONLY", "REGION"],
-    [803, "INVISIBLE_ELEMENT", "ELEMENT"],
+    [803, "TRANSPARENT_ELEMENT", undefined],
+    [812, "INVISIBLE_ELEMENT", "BUTTON"],
     [804, "ASSISTIVE_HIDDEN", undefined],
     [809, "FRAME_CONTENT", undefined]
   ]) {
@@ -1860,6 +2037,12 @@ try {
   }
   await waitForContentStatus(805, "HIDDEN_STATE", "FOCUS_TO_REVEAL");
   assert.equal((await latestLocatorStatus(805)).recoverable, true);
+  await waitForContentStatus(810, "HIDDEN_STATE", "FOCUS_TO_REVEAL");
+  assert.equal((await latestLocatorStatus(810)).recoverable, true, "a zero-height skip-link list reveals its first link");
+  await waitForContentStatus(811, "HIDDEN_STATE", "FOCUS_TO_REVEAL");
+  assert.equal((await latestLocatorStatus(811)).recoverable, true, "a 0×0 skip-link wrapper reveals its link");
+  // A screen-reader-only label is not a skip link, even inside a button.
+  assert.equal((await latestLocatorStatus(801)).reason, "SCREEN_READER_ONLY");
   await waitForContentStatus(806, "UNAVAILABLE", "DOCUMENT_METADATA");
   await waitForContentStatus(807, "UNAVAILABLE", "DOCUMENT_METADATA");
   await page.waitForFunction(() => window.__liveEvents.some(event => event?.type === "EVENT"
@@ -1892,6 +2075,8 @@ try {
   await initializeLocatorIssues([]);
   await frame.locator("#presentation-fixture").evaluate(element => element.remove());
   await frame.locator("#presentation-skip").evaluate(element => element.remove());
+  await frame.locator("#presentation-skip-list").evaluate(element => element.remove());
+  await frame.locator("#presentation-skip-wrap").evaluate(element => element.remove());
 
   const locationReasonCases = [
     { issue: { ...createIssue(401, "", "프레임 내부", "HIGH", "rule", "5.1.1"),

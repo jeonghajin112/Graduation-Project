@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, Check, Loader2, Menu, Pause, X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import "@/styles/quick-analysis-progress.css";
 
@@ -16,11 +16,15 @@ const phaseLabels: Record<AnalysisPhase, string> = {
   failed: "분석 실패"
 };
 
-export function QuickAnalysisProgress({ phase, url, isBusy, children }: {
+export function QuickAnalysisProgress({ phase, url, isBusy, children, headingRef, announceStatus = true }: {
   phase: AnalysisPhase;
   url: string;
   isBusy: boolean;
   children: ReactNode;
+  /** Receives focus when the progress view replaces the control that started it. */
+  headingRef?: Ref<HTMLHeadingElement>;
+  /** Set false when the parent owns a live region that survives this view's unmount. */
+  announceStatus?: boolean;
 }) {
   const stepIndex = phase === "completed" ? 2 : phase === "requesting" || phase === "queued" ? 0 : 1;
   const ongoing = phase === "requesting" || phase === "running";
@@ -68,9 +72,11 @@ export function QuickAnalysisProgress({ phase, url, isBusy, children }: {
 
       <div className="quick-analysis-copy">
         <p className="quick-analysis-eyebrow">접근성 분석</p>
-        <h2 id="quick-analysis-heading">{ongoing ? <>페이지를 <br />분석하고 있습니다</> : title}</h2>
+        <h2 id="quick-analysis-heading" ref={headingRef} tabIndex={-1} className="focus:outline-none">{ongoing ? <>페이지를 <br />분석하고 있습니다</> : title}</h2>
         <p className="quick-analysis-url">{url}</p>
-        <p className="sr-only" role="status" aria-atomic="true">현재 상태: {phaseLabels[phase]}</p>
+        {announceStatus ? (
+          <p className="sr-only" role="status" aria-atomic="true">현재 상태: {phaseLabels[phase]}</p>
+        ) : null}
         <div role="group" aria-label="분석 진행 단계" aria-busy={isBusy}>
           <ol className="quick-analysis-steps" aria-label="URL 분석 과정">
             {steps.map((step, index) => {

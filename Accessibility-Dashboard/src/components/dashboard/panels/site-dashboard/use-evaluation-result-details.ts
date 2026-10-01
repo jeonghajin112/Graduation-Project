@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   fetchEvaluationIssueViewModels,
@@ -63,9 +63,14 @@ export function useEvaluationResultDetails(
   const fixtureIssueResults = fixture?.issueResults;
   const [retryRevision, setRetryRevision] = useState(0);
   const [state, setState] = useState<EvaluationResultDetailsState>(IDLE_STATE);
+  // Overview refreshes replace the request object without changing the
+  // request being shown; only a different request ID starts a new load.
+  const requestRef = useRef(request);
+  requestRef.current = request;
 
   useEffect(() => {
-    if (request === null) {
+    const currentRequest = requestRef.current;
+    if (currentRequest === null) {
       setState(IDLE_STATE);
       return;
     }
@@ -76,27 +81,27 @@ export function useEvaluationResultDetails(
         errorMessage: null,
         issueResults: fixtureIssueResults,
         loadState: "ready",
-        requestId: request.id
+        requestId: currentRequest.id
       });
       return;
     }
 
-    const cachedDetails = detailsCache.get(request.id);
+    const cachedDetails = detailsCache.get(currentRequest.id);
     if (cachedDetails !== undefined) {
       setState({
         ...cachedDetails,
         errorMessage: null,
         loadState: "ready",
-        requestId: request.id
+        requestId: currentRequest.id
       });
       return;
     }
 
     const controller = new AbortController();
-    const sharedRequest = sharedDetailsRequests.acquire(request.id, async (signal) => {
-      const value = await fetchEvaluationIssueViewModels(request, signal);
+    const sharedRequest = sharedDetailsRequests.acquire(currentRequest.id, async (signal) => {
+      const value = await fetchEvaluationIssueViewModels(currentRequest, signal);
       signal.throwIfAborted();
-      detailsCache.set(request.id, value, DETAILS_CACHE_TTL_MS);
+      detailsCache.set(currentRequest.id, value, DETAILS_CACHE_TTL_MS);
       return value;
     });
     setState({
@@ -104,7 +109,7 @@ export function useEvaluationResultDetails(
       errorMessage: null,
       issueResults: [],
       loadState: "loading",
-      requestId: request.id
+      requestId: currentRequest.id
     });
 
     void sharedRequest.promise
@@ -117,7 +122,7 @@ export function useEvaluationResultDetails(
           errorMessage: null,
           issueResults,
           loadState: "ready",
-          requestId: request.id
+          requestId: currentRequest.id
         });
       })
       .catch((error: unknown) => {
@@ -129,7 +134,7 @@ export function useEvaluationResultDetails(
           errorMessage: getApiErrorMessage(error, "페이지 검사 결과를 불러오지 못했어요."),
           issueResults: [],
           loadState: "error",
-          requestId: request.id
+          requestId: currentRequest.id
         });
       });
 

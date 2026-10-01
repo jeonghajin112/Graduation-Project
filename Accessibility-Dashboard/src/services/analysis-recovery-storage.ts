@@ -2,6 +2,7 @@ import { API_BASE_URL } from "@/config/api";
 import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
+  clearSessionRecoveryStorageByPrefix,
   isRecoveryTimestampStale,
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
@@ -13,9 +14,15 @@ export const QUICK_ANALYSIS_STORAGE_KEY =
 export const TARGET_RESCAN_STORAGE_KEY =
   "accessibility-dashboard.target-rescan-attempts.v1";
 
+/** Each existing page owns its rescan checkpoint, so one page never locks another. */
+export function getTargetRescanStorageKey(targetId: number): string {
+  return `${TARGET_RESCAN_STORAGE_KEY}:${targetId}`;
+}
+
 export function clearAnalysisRecoveryStorage(): void {
   clearSessionRecoveryStorage(QUICK_ANALYSIS_STORAGE_KEY);
-  clearSessionRecoveryStorage(TARGET_RESCAN_STORAGE_KEY);
+  // Also removes the legacy shared key.
+  clearSessionRecoveryStorageByPrefix(TARGET_RESCAN_STORAGE_KEY);
 }
 
 const ATTEMPT_ID_MAX_LENGTH = 100;

@@ -1,4 +1,4 @@
-import { clearSiteCreateRecovery, readSiteCreateRecovery } from "@/services/site-create-recovery-storage";
+import { retireAcceptedTargetAnalysis } from "@/services/site-create-recovery-storage";
 import { UserFacingError } from "@/services/user-facing-error";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -128,16 +128,8 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
       if (!isMutationOperationCurrent(operation) || operation.signal.aborted) return;
 
       // Retire only this accepted request's recovery record before the progress
-      // screen unmounts this component. Uncertain requests remain recoverable.
-      const recovery = readSiteCreateRecovery();
-      if (
-        recovery.kind === "blocked" ||
-        (recovery.kind === "valid" &&
-          (recovery.attempt.phase !== "poll" ||
-            recovery.attempt.targetId !== evaluationTarget.id ||
-            recovery.attempt.requestId !== requestId ||
-            !clearSiteCreateRecovery(recovery.rawValue)))
-      ) {
+      // screen unmounts this component. Unrelated work stays recoverable.
+      if (!retireAcceptedTargetAnalysis(evaluationTarget.id, requestId)) {
         throw new UserFacingError(
           "분석 요청은 접수되었지만 브라우저에 작업 완료 상태를 저장하지 못했습니다. 브라우저 저장 공간과 설정을 확인한 뒤 다시 시도해 주세요."
         );
@@ -147,7 +139,9 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
         id: requestId,
         evaluationTargetId: evaluationTarget.id,
         status: "PENDING",
-        requestedAt: new Date().toISOString(),
+        // Unknown until the server row arrives; ordering then uses the request ID
+        // instead of this browser's clock or time zone.
+        requestedAt: "",
         updatedAt: ""
       });
     } catch (error) {
@@ -292,8 +286,11 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
   }, [view]);
 
   useEffect(() => {
+    // The id signature, not the array, drives this: pending detail hooks can
+    // return a new but equivalent array on every render.
+    const latestIssueIds = latestIssueSignature ? latestIssueSignature.split(",").map(Number) : [];
     setSelectedIssueId((current) => {
-      if (current !== null && latestIssues.some((issue) => issue.id === current)) {
+      if (current !== null && latestIssueIds.includes(current)) {
         return current;
       }
 
@@ -319,13 +316,9 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     const hiddenIssueIds = new Set(currentLocatorReport?.recoverableHiddenIssueIds);
     return replayIssueRows.filter(({ issue }) => hiddenIssueIds.has(issue.id));
   }, [currentLocatorReport, replayIssueRows]);
-  const [pageSettingIssueRows, outdatedIssueRows] = useMemo(() => {
+  const pageSettingIssueRows = useMemo(() => {
     const pageSettingIds = new Set(currentLocatorReport?.pageSettingIssueIds);
-    const outdatedIds = new Set(currentLocatorReport?.outdatedIssueIds);
-    return [
-      replayIssueRows.filter(({ issue }) => pageSettingIds.has(issue.id)),
-      replayIssueRows.filter(({ issue }) => outdatedIds.has(issue.id))
-    ];
+    return replayIssueRows.filter(({ issue }) => pageSettingIds.has(issue.id));
   }, [currentLocatorReport, replayIssueRows]);
   const locationRow = replayIssueRows.find(({ issue }) => issue.id === locationIssueId);
   const evidenceLiveSessionLoadState =
@@ -346,6 +339,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     retryLiveSession();
     retryCaptureMetadata();
   };
+  const captureDeviceScaleFactor = captureMetadata?.deviceScaleFactor ?? null;
   // Severity comes from the result-details request and remains independent of
   // whether the current live page can still resolve every historical locator.
   const showsRailDetailCards = resultDetailsLoadState === "ready";
@@ -371,13 +365,13 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
               analyzedAt={latestAnalyzedAt}
               isRequestingAnalysis={isRequestingAnalysis}
               analysisRequestError={analysisRequestError}
-              outdatedIssueCount={locatorCheckState === "ready" ? outdatedIssueRows.length : 0}
               onRequestAnalysis={!previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted
                 ? handleRequestAnalysis
                 : undefined}
             />}
             faviconUrl={evaluationTarget.faviconUrl}
             captureMetadata={captureMetadata}
+            captureMetadataLoadState={captureMetadataLoadState}
             errorMessage={resultDetailsErrorMessage ?? liveSessionErrorMessage}
             evaluationRequestId={latestResultRequestId}
             liveSession={liveSession}
@@ -444,13 +438,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                     onSelectIssue={revealHiddenIssue}
                     onShowLocation={setLocationIssueId}
                     issueStates={currentLocatorReport?.issueStates}
-                  />
-                  <UnavailableLocatorPanel
-                    mode="outdated"
-                    checkState={locatorCheckState}
-                    rows={outdatedIssueRows}
-                    onShowLocation={setLocationIssueId}
-                    issueStates={currentLocatorReport?.issueStates}
+                    deviceScaleFactor={captureDeviceScaleFactor}
                   />
                   <UnavailableLocatorPanel
                     mode="page-settings"
@@ -458,14 +446,15 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                     rows={pageSettingIssueRows}
                     onShowLocation={setLocationIssueId}
                     issueStates={currentLocatorReport?.issueStates}
+                    deviceScaleFactor={captureDeviceScaleFactor}
                   />
                   <UnavailableLocatorPanel
                     checkState={locatorCheckState}
-                    hasHiddenIssues={recoverableHiddenLocatorIssueRows.length + outdatedIssueRows.length
-                      + pageSettingIssueRows.length > 0}
+                    hasHiddenIssues={recoverableHiddenLocatorIssueRows.length + pageSettingIssueRows.length > 0}
                     rows={unavailableLocatorIssueRows}
                     onShowLocation={setLocationIssueId}
                     issueStates={currentLocatorReport?.issueStates}
+                    deviceScaleFactor={captureDeviceScaleFactor}
                   />
                 </Suspense>
               </ErrorBoundary>
@@ -488,6 +477,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                 target={evaluationTarget}
                 analyzedAt={latestAnalyzedAt}
                 requestId={latestResultRequestId}
+                evaluationRequests={targetEvaluationRequests}
                 scoreResults={scoreResults}
                 resultSummaries={resultSummaries}
                 rows={replayIssueRows}
@@ -499,6 +489,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                 issueStates={currentLocatorReport?.issueStates}
                 onShowOnPage={showIssueOnPage}
                 onShowDetails={setLocationIssueId}
+                deviceScaleFactor={captureDeviceScaleFactor}
               />
             </Suspense>
           </ErrorBoundary>

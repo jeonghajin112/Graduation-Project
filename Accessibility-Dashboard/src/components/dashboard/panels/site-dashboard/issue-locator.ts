@@ -60,7 +60,10 @@ export function getIssueCoordinateBox(
     typeof deviceScaleFactor === "number" && Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0
     ? deviceScaleFactor
     : 1;
-  return { x: x / scale, y: y / scale, width: width / scale, height: height / scale };
+  const box = { x: x / scale, y: y / scale, width: width / scale, height: height / scale };
+  // A capture scale below 1 enlarges the box; the viewer rejects the whole
+  // issue list when any coordinate exceeds its bound.
+  return [box.x, box.y, box.width, box.height].every(isCoordinate) ? box : null;
 }
 
 export function getReplayIssuePathSteps(issue: IssueResultModel): IssueLocatorPathStep[] {

@@ -4,7 +4,8 @@ import type { TargetAnalysisRequestCheckpoint, UseEvaluationTargetAnalysisReques
 export function useEvaluationTargetAnalysisRequest({
   beginDirectoryRecovery,
   dashboardData,
-  endDirectoryRecovery
+  endDirectoryRecovery,
+  loadDashboard
 }: UseEvaluationTargetAnalysisRequestOptions) {
   const targetAnalysisRequestCheckpointRef =
     useRef<TargetAnalysisRequestCheckpoint | null>(null);
@@ -87,7 +88,7 @@ export function useEvaluationTargetAnalysisRequest({
     ): Promise<number> => {
       const { requestTargetAnalysis } = await import("./target-analysis-request");
       return requestTargetAnalysis({
-        beginDirectoryRecovery, dashboardData, endDirectoryRecovery,
+        beginDirectoryRecovery, dashboardData, endDirectoryRecovery, loadDashboard,
         targetAnalysisRequestCheckpointRef, releaseRequestCheckpoint, bindCheckpointToSignal
       }, targetId, signal, previousFailedRequestId);
     },
@@ -96,6 +97,7 @@ export function useEvaluationTargetAnalysisRequest({
       bindCheckpointToSignal,
       dashboardData,
       endDirectoryRecovery,
+      loadDashboard,
       releaseRequestCheckpoint
     ]
   );

@@ -5,6 +5,7 @@ import type { AnalyzerType, IssueResultModel } from "@/types/accessibility-domai
 import {
   DASHBOARD_REPLAY_SOURCE,
   PAGE_REPLAY_SOURCE,
+  REPLAY_BRIDGE_LIMITS,
   REPLAY_VIEW_SCALE_MIN,
   REPLAY_VISUAL_WIDTH_MAX,
   classifyReplayIssueCategory,
@@ -667,5 +668,74 @@ describe("legacy AI text issue presentation", () => {
     expect(issue.textAnalysis?.sourceText).toContain("<img");
     expect(issue.textAnalysis?.flags[0]).toContain("<script>");
     expect(issue.message).toContain("<script>");
+  });
+});
+
+describe("replay issues within the viewer bounds", () => {
+  function coordinateRow(locator: IssueResultModel["locator"]): RecentIssueRow {
+    return {
+      issue: { id: 9, analysisResultId: 2, issueCode: "5.4.3", issueTitle: "명도 대비", severity: "HIGH",
+        locationPath: "x=10, y=20, width=30, height=40", locator, message: "", resolved: false,
+        createdAt: "2026-08-31T00:00:00", updatedAt: "2026-08-31T00:00:00" },
+      severity: { key: "HIGH", label: "높음", color: "#fb8a3d" },
+      analyzerType: "CV_VISION"
+    };
+  }
+
+  it("sends an over-long path as no path instead of letting the viewer reject every issue", () => {
+    const steps = Array.from({ length: REPLAY_BRIDGE_LIMITS.pathSteps + 1 }, (_, index) => ({
+      context: "SHADOW_ROOT" as const, selector: `#step-${index}`
+    }));
+    const issue = replayIssue("", "RULE_BASED", { pathSteps: steps });
+    expect(issue.pathSteps).toEqual([]);
+    expect(issue.path).toBeNull();
+
+    const fitting = replayIssue("", "RULE_BASED", { pathSteps: steps.slice(0, REPLAY_BRIDGE_LIMITS.pathSteps) });
+    expect(fitting.pathSteps).toHaveLength(REPLAY_BRIDGE_LIMITS.pathSteps);
+  });
+
+  it("drops a box that a capture scale below one pushes past the coordinate bound", () => {
+    const row = coordinateRow({
+      pathSteps: [], x: 900_000, y: 10, width: 30, height: 40, coordinateSpace: "SCREENSHOT_PX"
+    });
+    expect(toPageReplayIssue(row, 1)?.box).toEqual({ x: 900_000, y: 10, width: 30, height: 40 });
+    const scaledDown = toPageReplayIssue(row, 0.5);
+    expect(scaledDown.box).toBeNull();
+    // The coordinate label is never sent as a selector.
+    expect(scaledDown.path).toBeNull();
+  });
+
+  it("omits coordinate boxes without leaking the coordinate label when the capture is unknown", () => {
+    const row = coordinateRow({
+      pathSteps: [], x: 10, y: 20, width: 30, height: 40, coordinateSpace: "SCREENSHOT_PX"
+    });
+    const issue = toPageReplayIssue(row, null, { omitCoordinateBox: true });
+    expect(issue.box).toBeNull();
+    expect(issue.path).toBeNull();
+    expect(issue.pathSteps).toEqual([]);
+  });
+});
+
+describe("viewer command rejections and bounded strings", () => {
+  it("accepts a rejected command notice with a plain command type only", () => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType: "INIT_ISSUES"
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType: "INIT_ISSUES"
+    });
+    for (const commandType of ["", "init issues", "X".repeat(33), 3]) {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType
+      })).toBeNull();
+    }
+  });
+
+  it("bounds locator reasons and blocked link addresses", () => {
+    const status = { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken: "doc_1", issueId: 1, status: "UNAVAILABLE" };
+    expect(parsePageReplayMessage({ ...status, reason: "R".repeat(128) })).not.toBeNull();
+    expect(parsePageReplayMessage({ ...status, reason: "R".repeat(129) })).toBeNull();
+    const link = { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken: "doc_1" };
+    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_048) })).not.toBeNull();
+    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_049) })).toBeNull();
   });
 });
