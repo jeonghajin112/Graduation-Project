@@ -1,6 +1,6 @@
 # 프런트 아키텍처
 
-현재 상태 소유권과 모듈 간 계약을 설명한다. 실행은 [README](../README.md), 설계 판단은 [개발 기준](engineering.md), 검증은 [테스트 가이드](testing.md)를 참고한다. 수정 범위에서 제외한 항목은 아래에 따로 기록한다.
+현재 상태 소유권과 모듈 간 계약을 설명한다. 실행은 [README](../README.md), 검증은 [테스트 가이드](testing.md)를 참고한다.
 
 ## 화면과 데이터 흐름
 
@@ -222,11 +222,11 @@ POST 시작과 종료 시 해당 세션의 리다이렉트 본문을 무효화�
 
 `POST /api/targets/{id}/favicon/refresh`는 분석을 실행하지 않는다. 외부 조회는 DB 트랜잭션 밖에서 수행하고, 조회를 시작한 URL이 여전히 같으며 삭제되지 않은 경우에만 파비콘 필드를 갱신한다. 실패하면 기존 값을 보존한다. 과거 외부 주소나 캐시에서 제거된 아이콘은 이 API로 다시 수집할 수 있다. [파비콘 브라우저 회귀](../scripts/verify-favicons.mjs)는 두 화면의 로딩·실패 표시와 외부 원본 미요청을 검증한다.
 
-## 회귀 검증과 보류 항목
+## 회귀 검증과 추이 차트
 
 재분석 실패의 작업 간 격리와 삭제 후 현재 경로 보존은 기본 CI의 [재분석 회귀](../scripts/verify-rescan-recovery-isolation.mjs)와 [삭제 회귀](../scripts/verify-directory-mutation-recovery.mjs)가 검증한다. 대량 이슈와 폼 차단은 실제 React 카드와 Java 문서를 연결하는 [리포트 경계 회귀](../scripts/verify-live-report-boundaries.mjs), Shadow DOM과 이유 변경은 [마커 회귀](../scripts/verify-live-report-markers.mjs)가 검증한다.
 
-[추이 차트](../src/components/dashboard/panels/site-dashboard/analysis-trend-panel.tsx)의 미실측 구간은 현재 0점으로 채워진다. 2026-09-09 사용자가 기존 선 그래프 동작 유지를 요청해 null 구간·단일 점 변경은 이번 수정 범위에서 제외했다. 이 항목을 수정 완료로 처리하지 않는다.
+[추이 차트](../src/components/dashboard/panels/site-dashboard/analysis-trend-panel.tsx)는 최근 기록이 부족하면 앞쪽 빈 구간을 0점 자리로 채워 선 그래프 모양을 유지한다.
 
 기록이 전혀 없으면 차트 대신 빈 상태를 표시한다. 실제 0점은 그대로 표시하고 요약의 문제 수가 없으면 `— / 미확인`으로 표시한다. 툴팁과 읽기용 설명에는 실제 기록만 사용한다.
 
@@ -242,4 +242,4 @@ POST 시작과 종료 시 해당 세션의 리다이렉트 본문을 무효화�
 
 랜딩 영상은 첫 장면(오프닝)을 페이지를 열 때 받고, 나머지는 화면에 가까운 장면만 내려받으며 화면 크기·배율에 따라 해상도를 선택한다. 첫 장면의 세 해상도는 H.264, CRF 26, 최대 8프레임 키프레임 간격, `faststart`로 압축했다. 기존 해상도·프레임 수·길이는 유지해 스크롤 탐색에 사용한다. [랜딩 검증](../scripts/verify-landing-design.mjs)은 초기 1080p 영상 한 개의 전송 예산 3MiB, 각 해상도의 프레임 탐색과 reduced-motion의 영상 미요청을 확인한다.
 
-영상 보간이 목표 프레임에 도달하면 scrub RAF를 멈추고 스크롤·영상 준비·seek 완료·화면 복귀 때 다시 실행한다. 첫 장면의 원본 해상도 선택 정책과 저장된 영상은 유지한다. 일반 데스크톱 원본 설정과 과거 문서의 1080p 초기 예산 차이는 해상도 정책 변경으로 임의 해소하지 않는다.
+영상 보간이 목표 프레임에 도달하면 scrub RAF를 멈추고 스크롤·영상 준비·seek 완료·화면 복귀 때 다시 실행한다.

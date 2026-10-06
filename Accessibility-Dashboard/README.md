@@ -62,7 +62,7 @@ npm run build
 
 값이 비었거나 `localhost`·`127.0.0.1`을 가리키거나 https origin이 아니면 `vite.config.ts`가 빌드를 멈춘다. 이 검사가 없으면 번들에 `http://localhost:9090`이 기본값으로 들어가 배포 환경의 viewer 프레임이 모두 거부되고, 점수만 보이고 페이지 렌더링은 나오지 않는다. 로컬 백엔드를 대상으로 일부러 프로덕션 빌드를 만들 때만 `LIVE_REPORT_VIEWER_ALLOW_LOCAL=true`를 함께 지정한다.
 
-`index.html`은 첫 페인트 전에 저장된 테마(`bridge-theme`)를 대시보드 경로에 적용하고, 랜딩 이미지 preload는 `/` 경로에서만 추가한다. `robots.txt`는 대시보드 경로(`/analyze`, `/projects/`, `/recent-pages/`)와 `/api/`를 크롤링 대상에서 뺀다.
+`index.html`은 첫 페인트 전에 저장된 테마(`bridge-theme`)를 대시보드 경로에 적용하고, 랜딩 이미지 preload는 `/` 경로에서만 추가한다. `robots.txt`는 대시보드 경로(`/analyze`, `/dashboard`, `/projects/`, `/recent-pages/`)와 `/api/`를 크롤링 대상에서 뺀다.
 
 ## 검사와 CI
 
@@ -90,7 +90,5 @@ npm run record:landing -- --report-only --keep-frames
 - [아키텍처](docs/architecture.md)
 - [테스트 가이드](docs/testing.md)
 - [디자인 시스템](docs/design-system.md)
-- [프런트 개발 기준](docs/engineering.md)
-- 현재 확인된 프런트 오류는 [아키텍처](docs/architecture.md)의 해당 절에 기록한다.
 
 `/product-preview`는 fixture를 사용하는 읽기 전용 화면이다. 일반 대시보드의 데이터는 백엔드에서 받는다.
