@@ -1,0 +1,9 @@
+/* Preserve the FHD layout, then grow the landing sections together above 1920px.
+   Every landing size is written as a multiple of --lp, which reads --ua-pixel here.
+   Height also caps the scale so ultrawide, short windows keep their content in view.
+   The scroll film scales itself (scroll-world-engine.js) and SVG viewBoxes keep their units. */
+@media (min-width: 1921px) {
+  .ua-landing, .ua-lnav, .ua-footer, .ua-skip-link {
+    --ua-pixel: clamp(1px, min(0.052083333vw, 0.092592593svh), 2px);
+  }
+}

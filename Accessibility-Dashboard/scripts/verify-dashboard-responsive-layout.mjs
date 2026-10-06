@@ -1,0 +1,150 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { installDashboardApiFixture } from "./fixtures/dashboard-api-fixture.mjs";
+import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
+
+const baseUrl = resolveTestBaseUrl();
+const browser = await chromium.launch({ headless: true });
+const viewports = [
+  { width: 1920, height: 1080 }, { width: 1600, height: 900 },
+  { width: 1366, height: 768 }, { width: 1280, height: 720 },
+  { width: 768, height: 1024 }, { width: 639, height: 844 },
+  { width: 390, height: 844 }, { width: 320, height: 568 }
+];
+
+async function resize(page, viewport) {
+  await page.setViewportSize(viewport);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function assertNoHorizontalOverflow(page, label) {
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, label);
+}
+
+async function verifyLongProjectNames(page, fixture, theme) {
+  const originalName = fixture.overview.organizations[0].name;
+  const phrase = "접근성 평가 프로젝트 ".repeat(8);
+  const names = [phrase.slice(0, 49), phrase, "Project".repeat(14) + "AB"];
+  const mobileViewports = [
+    { width: 320, height: 568 }, { width: 390, height: 668 }, { width: 767, height: 844 }
+  ];
+
+  for (const name of names) {
+    fixture.overview.organizations[0].name = name;
+    await page.goto(`${baseUrl}/projects/${fixture.organization.id}`, { waitUntil: "networkidle" });
+    const heading = page.getByRole("heading", { name, level: 1, exact: true });
+    await heading.waitFor();
+    for (const viewport of mobileViewports) {
+      await resize(page, viewport);
+      const action = page.getByRole("button", { name: "페이지 추가", exact: true });
+      // An unobstructed center click must open the dialog, even when no title
+      // glyph visibly overlaps the button but its H1 box covers the hit target.
+      await action.click({ timeout: 3000 });
+      const dialog = page.getByRole("dialog", { name: "페이지 추가", exact: true });
+      await dialog.waitFor();
+      await dialog.getByRole("button", { name: "취소", exact: true }).click();
+      await dialog.waitFor({ state: "hidden" });
+      assert.equal(await action.evaluate(element => element === document.activeElement), true,
+        "closing page creation must return focus to the add button");
+
+      const titleBounds = await heading.boundingBox();
+      const actionBounds = await action.boundingBox();
+      const cardBounds = await page.locator(".dashboard-project-card").first().boundingBox();
+      assert.ok(actionBounds.y >= titleBounds.y + titleBounds.height,
+        `${theme} ${viewport.width}: long project name must not overlap the add action`);
+      assert.ok(cardBounds.y >= actionBounds.y + actionBounds.height,
+        "project cards must follow the add action");
+      assert.equal(await heading.evaluate(title => title.scrollWidth > title.clientWidth + 1), false,
+        "unbroken project names must wrap within the heading, not clip inside the shell");
+      await assertNoHorizontalOverflow(page, `${theme} ${viewport.width}: long project name`);
+    }
+  }
+  fixture.overview.organizations[0].name = originalName;
+}
+
+try {
+  for (const theme of ["light", "dark"]) {
+    const context = await browser.newContext({ colorScheme: theme });
+    const page = await context.newPage();
+    const fixture = await installDashboardApiFixture(page);
+    const errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`${baseUrl}/analyze`, { waitUntil: "networkidle" });
+    await page.locator("#quick-analyze-url").waitFor();
+    for (const viewport of viewports) {
+      await resize(page, viewport);
+      const input = await page.locator("#quick-analyze-url").boundingBox();
+      const button = await page.getByRole("button", { name: "분석 시작", exact: true }).boundingBox();
+      assert.ok(input.height >= 40, `${theme} ${viewport.width}: URL input must remain usable`);
+      assert.ok(button.height >= 44, `${theme} ${viewport.width}: submit target must remain usable`);
+      assert.ok(Math.abs(input.height + 2 - button.height) < 2, "input and button must retain matching heights");
+      if (viewport.width < 640) {
+        assert.ok(button.y >= input.y + input.height, "mobile controls must stack without overlap");
+        assert.ok(button.y + button.height <= viewport.height, "the initial mobile form must fit below the fixture menu");
+      }
+      await assertNoHorizontalOverflow(page, `analysis ${viewport.width}`);
+    }
+
+    await page.goto(`${baseUrl}/projects/${fixture.organization.id}`, { waitUntil: "networkidle" });
+    for (const viewport of viewports.filter(viewport => viewport.width < 768)) {
+      await resize(page, viewport);
+      const title = await page.getByRole("heading", { name: fixture.organization.name, level: 1 }).boundingBox();
+      const action = await page.getByRole("button", { name: "페이지 추가", exact: true }).boundingBox();
+      const card = await page.locator(".dashboard-project-card").first().boundingBox();
+      assert.ok(action.y >= title.y + title.height, "mobile page action must follow the project heading");
+      assert.ok(action.y + action.height <= card.y, "mobile page action must precede the page cards");
+      await assertNoHorizontalOverflow(page, `project ${viewport.width}`);
+    }
+    await verifyLongProjectNames(page, fixture, theme);
+
+    await page.goto(`${baseUrl}/projects/${fixture.organization.id}/pages/${fixture.target.id}`, { waitUntil: "networkidle" });
+    await page.locator(".site-page-evidence-chrome").waitFor();
+    for (const viewport of viewports) {
+      await resize(page, viewport);
+      const title = await page.locator(".site-page-evidence-chrome h2").boundingBox();
+      const chrome = await page.locator(".site-page-evidence-chrome").boundingBox();
+      const actions = await page.locator(".site-page-evidence-chrome .site-page-analysis-actions").boundingBox();
+      const address = await page.locator(".site-page-evidence-chrome__address").boundingBox();
+      assert.ok(title.y < actions.y + actions.height && actions.y < title.y + title.height,
+        `${theme} ${viewport.width}: date and rescan must stay in the page title bar`);
+      assert.ok(title.x + title.width <= actions.x, "heading and actions must not overlap");
+      assert.ok(actions.x + actions.width <= chrome.x + chrome.width,
+        "the title-bar actions must remain inside the card");
+      assert.ok(Math.abs(address.x + address.width / 2 - chrome.x - chrome.width / 2) < 1,
+        `${theme} ${viewport.width}: the address box must be centered in the title bar`);
+      assert.ok(address.y >= chrome.y && address.y + address.height <= chrome.y + chrome.height,
+        "the address box must remain inside the title bar");
+      if (address.y < actions.y + actions.height && actions.y < address.y + address.height) {
+        assert.ok(title.x + title.width <= address.x && address.x + address.width <= actions.x,
+          "the address must fit between the title and rescan without overlap");
+      } else {
+        assert.ok(address.y >= Math.max(title.y + title.height, actions.y + actions.height),
+          "a narrow title bar must put the address below the title and rescan");
+      }
+      await assertNoHorizontalOverflow(page, `detail ${viewport.width}`);
+    }
+
+    await resize(page, { width: 568, height: 320 });
+    await page.locator(".dashboard-account-menu-trigger").click();
+    await page.getByRole("menuitem", { name: "설정", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "설정", exact: true });
+    await dialog.waitFor();
+    const bounds = await dialog.boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.wheel(0, 500);
+    await page.waitForFunction(() => {
+      const modal = document.querySelector('[role="dialog"]');
+      const close = [...modal.querySelectorAll("button")].find(button => button.textContent.trim() === "닫기");
+      const m = modal.getBoundingClientRect(), b = close.getBoundingClientRect();
+      return b.top >= m.top && b.bottom <= m.bottom;
+    });
+    await dialog.getByRole("button", { name: "닫기", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    fixture.assertIsolated();
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  console.log(JSON.stringify({ result: "PASS", themes: 2, viewports: viewports.length, shortSettingsHeight: 320 }));
+} finally {
+  await browser.close();
+}

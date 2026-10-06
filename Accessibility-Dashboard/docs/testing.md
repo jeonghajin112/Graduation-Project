@@ -1,0 +1,137 @@
+# 프런트 테스트 가이드
+
+실행 명령은 [package.json](../package.json), suite 구성은 [frontend-test-suites.mjs](../scripts/frontend-test-suites.mjs)가 원본이다. 문서에 테스트 전체 목록이나 개수를 중복 유지하지 않는다.
+
+## 준비
+
+프런트 디렉터리에서 다음을 실행한다.
+
+```powershell
+npm ci
+npx playwright install chromium
+```
+
+관리형 runner가 필요한 Vite 서버를 시작·공유·종료한다. 기본 CI는 API fixture를 사용하며 실행 중인 백엔드가 필요 없다. Linux의 Chromium 시스템 의존성 설치는 `npx playwright install --with-deps chromium`으로 수행한다.
+
+## 이번 변경에 맞는 명령
+
+| 명령 | 범위 |
+|---|---|
+| `npm run test:list` | suite와 테스트를 JSON으로 조회. 서버·테스트 실행 없음 |
+| `npm run test:run -- --test <파일>` | 선택한 CI 테스트만 실행. `--test` 반복 가능 |
+| `npm run test:unit -- <테스트 경로>` | 지정한 Vitest 테스트 |
+| `npm run test:unit` | 전체 단위 테스트 |
+| `npm run lint` | ESLint(typescript-eslint, React Hooks). 오류만 실패로 처리 |
+| `npm run lint:strict` | 경고까지 실패로 처리(기존 hook 의존성 경고 정리 후 기본값 목표) |
+| `npm run typecheck` | 앱과 `vite.config.ts` 타입 검사(빌드 없음) |
+| `npm run build` | TypeScript 검사와 프로덕션 빌드 |
+| `npm run test:bundle` | 새 분석 빌드와 번들 경계·예산 검사 |
+| `npm test` | 번들 검사 → 전체 단위 테스트 → 격리 CI suite |
+| `npm run test:browser` | 브라우저 suite, page evidence의 full 범위 포함 |
+| `npm run test:recovery` | 빠른 분석의 복구 시나리오 |
+| `npm run test:visual` | 랜딩 시각 검증 |
+| `npm run test:replay` | 실제 백엔드 rewriter를 이용한 리포트 회귀 |
+| `npm run test:backend` | 실행 중인 실제 백엔드를 사용하는 통합 검증 |
+
+`test:bundle`은 `--mode analyze`로 빌드하지만 `.env.production` 값을 그대로 읽으므로 배포 번들과 같은 환경을 측정한다. 라이브 리포트 viewer 주소만 접속하지 않는 검사용 origin(`https://viewer.bundle-check.invalid`)으로 대체한다.
+
+GitHub Actions([frontend.yml](../../.github/workflows/frontend.yml))는 `lint` → `typecheck` → `npm test`를 실행하고, 별도 job에서 백엔드 fixture를 Gradle로 export하는 `test:replay`를 실행한다. `test:backend`와 `scale` suite는 실제 백엔드·대용량 fixture가 필요해 수동으로 실행한다.
+
+`test:ci`는 `npm test`의 별칭이다. 개별 suite 명령에는 `npm test`의 pretest가 자동으로 붙지 않는다. 이미 실행한 검사와 같은 범위를 이유 없이 반복하지 않는다.
+
+기능별 npm 별칭은 `npm run`으로 확인한다. 먼저 목록을 보고 필요한 테스트를 한 번에 선택할 수 있다.
+
+```powershell
+npm run test:list -- --suite ci
+npm run test:run -- --test verify-dashboard-request-budget.mjs --test verify-sidebar-route-selection.mjs
+npm run test:run -- --suite scale
+```
+
+`--test`에는 해당 suite의 파일명 또는 표시명을 지정한다. 여러 선택은 manifest 순서로 실행하고 중복 선택은 한 번만 실행한다. 잘못된 옵션·누락된 값·존재하지 않는 선택은 실행 전에 거절한다. 선택 없이 `test:run`을 호출하면 도움말을 표시한다.
+
+선택 실행에는 `npm test -- ...` 대신 `test:run`을 사용한다. `npm test`는 npm의 pretest로 빌드·단위 검사를 먼저 실행하므로 부분 확인용 명령이 아니다. `--list`와 `--help`는 포트·백엔드 설정이나 Vite 준비 없이 조회할 수 있다. suite 변경은 manifest와 실제 runner 진입점으로 검증한다.
+
+## 검증할 동작
+
+- 순수 로직·파서는 실제 함수를 호출해 정상·누락·잘못된 범위와 참조 관계를 검증한다.
+- 화면 테스트는 role과 접근성 이름으로 조작하고 사용자가 보는 결과를 확인한다.
+- 생성·분석 흐름은 중복 submit, 응답 유실, 명시적 재시도, reload와 취소를 확인한다. 프로젝트 fixture는 요청 키별 같은 결과를 반환해야 한다.
+- 리포트는 실제 메시지 수신과 표시 상태를 확인한다. 프로토콜 한도는 직전·경계·직후 입력으로 검증한다.
+- 레이아웃·색상·픽셀 검증은 시각 또는 해당 레이아웃 회귀에 둔다. 일반 기능 검사를 Tailwind 클래스나 DOM 깊이에 결합하지 않는다.
+
+함수명, 변수명, 소스의 `if`문, 특정 Promise 작성 형태를 정규식으로 고정하지 않는다. 회귀를 수정할 때는 기존 기대값의 사용자 의미를 확인하고, 실제 기능을 유지하는 검증으로 바꾼다.
+
+대시보드 표시 계약을 바꾸면 기존 접근성 검사에서 미리보기 API 미호출·실제 복구 데이터 비노출·테마 비저장과 메뉴·모달 포커스를 확인한다. 번들 검사는 프로덕션의 정적 import 경로를 따라 미리보기에 실제 controller·생성 모달 host와 닫힌 모달이 포함되지 않는지 확인한다.
+
+요청 접수 전환의 단위 검사는 실제 저장 검증 함수를 사용한다. 저장 예외·rawValue 충돌·쓰기 확인 실패에서 메모리 checkpoint가 먼저 갱신되지 않는지 확인하고, 브라우저 복구 검사는 중복 POST·새로고침·취소·중첩 lease의 사용자 결과를 확인한다.
+
+재분석 복구는 기본 CI의 `verify-rescan-recovery-isolation.mjs`에서 접수 전 실패·취소, 확정 거절, 응답 유실과 다른 작업의 저장값 보존을 함께 확인한다.
+
+새 분석 계약은 `verify-analysis-protocol.mjs`에서 10,001개 이력, 빠른 분석·재분석의 접수 전후 응답 유실, 동일 키 복구, 배치 상태 조회와 장기 미확인 요청의 수동 복구를 확인한다. 실제 서버의 동시 접수·키 충돌·HTTP 계약은 백엔드 `AnalysisSubmissionIntegrationTest`가 검증한다. 서버 계약 버전을 제공하지 않는 fixture는 기존 복구 경로를 계속 검사한다.
+
+`verify-final-report.mjs`는 탭의 키보드 조작과 URL·뒤로 가기, 보기 전환 중 뷰어 유지, 요약 문장·수치·심각도 비율·우선순위·KWCAG 그룹·필터, 규칙 ID·문제 번호·현재 위치 이유, 명도 대비 측정값 표시, KWCAG 33개 항목 상태·텍스트 검사 실패 시 ‘검사 못 함’·항목에서 문제 그룹으로 이동, 위치 표시 불가 사유와 좌표 표시, 문제 상세 포커스 복원, 인쇄 시 전체 펼침과 출력 범위, ‘페이지에서 보기’의 `FOCUS_ISSUE` 전달과 재로딩 없음, 리포트 링크로 직접 열기, 광고·동적 영역 이슈가 점수 대상 집계·뷰어에 들어가지 않고 별도 항목으로만 표시되는지, 페이지 전체 설정의 목록 분리, 분석 이후 바뀐 문제가 ‘화면에 표시되지 않은 문제’에 들어가는지와 재분석 안내, ‘위치 표시 불가’ 필터와 수치의 일치, 속한 요소에 표시한 문제의 리포트 문구를 확인한다.
+
+`verify-result-hardening.mjs`는 라이브 연결 실패 상태에서 0·1·5,000·5,001·10,001개 결과의 안내, 제거된 전체 문제 버튼의 부재, 차트의 자료 없음과 실제 0개를 확인한다. 기존 개별 문제 상세의 포커스와 HTML 이스케이프는 page evidence 회귀에서 확인한다. `verify-landing-idle.mjs`는 영상의 정지 상태와 스크롤 후 재개·정지에서 RAF 호출을 측정한다.
+
+`node scripts/measure-locator-report.mjs`는 실제 보고 집계 함수를 500·5,000개 입력으로 측정하는 보조 벤치마크다. React 렌더링이나 전체 뷰어 비용 측정으로 해석하지 않는다. 화면 동작은 page evidence의 full·scale과 실제 rewriter를 사용하는 replay suite로 검증한다.
+
+라이브 리포트의 React–Java 경계는 replay suite의 `verify-live-report-boundaries.mjs`로 검사한다. 실제 rewriter 문서를 사용해 5,000개 전송 한도의 앞뒤와 10,001개 입력, 초과 문제의 상세 열람, 후속 선택 명령, 폼 차단 후 연결 유지를 확인한다. Shadow DOM 갱신과 미표시 이유 변경, 경로 없이 좌표만 있는 문제의 좌표 대상 배치·표시·해제는 같은 suite의 marker 회귀가 담당한다.
+
+## Fixture와 실제 서버
+
+`ci`, `browser`, `recovery`, `visual`, `scale`은 API를 가로채는 격리 suite다. 공용 fixture의 미등록 API 호출은 실패해야 한다. runner는 개발자 환경의 API base와 프록시 설정이 실제 DB로 연결되지 않도록 자식 프로세스 설정을 주입한다.
+
+기본 dashboard fixture와 page-evidence·rail 검사는 [api-route-fixture.mjs](../scripts/fixtures/api-route-fixture.mjs)에 HTTP method·path별 handler를 등록한다. 이 공용 경계가 요청 기록과 미등록 요청의 500 응답을 담당하며, 각 검사는 종료 전에 모든 fixture의 `assertIsolated()`를 호출한다. 데이터·지연 응답 gate·viewer HTML은 시나리오가 소유한다. 별도 `page.route`로 실패·재시도 응답을 덮어쓸 때도 method를 확인하고, 담당하지 않는 요청은 `route.fallback()`으로 공용 경계에 넘긴다.
+
+리포트 fixture는 `localhost:9090` 뷰어를 사용한다. 로컬 `.env`가 다른 뷰어 포트를 지정한 경우 테스트 명령을 실행하는 셸에서 `$env:VITE_LIVE_REPORT_VIEWER_BASE_URL = "http://localhost:9090"`을 설정한다. 실제 개발 서버의 `.env`는 변경하지 않는다.
+
+`replay`는 실제 Java rewriter를 사용한다. `AP_LIVE_REPORT_FIXTURE_PATH`가 없으면 인접한 백엔드에서 Gradle exporter를 실행한다. 미리 생성한 fixture가 있을 때만 해당 변수를 지정한다.
+
+`backend`는 실제 서버가 필요하다. `/api`를 붙이지 않은 origin을 지정한다.
+
+```powershell
+$env:TEST_BACKEND_URL = "http://127.0.0.1:9090"
+npm run test:backend
+```
+
+이 suite는 실제 데이터의 프로젝트·페이지 ID에 의존한다. 필요한 `SIDEBAR_TEST_*` 입력과 기본값은 [verify-sidebar-browser.mjs](../scripts/verify-sidebar-browser.mjs)를 확인한다. 기본 CI에 포함하지 않는다.
+
+## 포트와 제한시간
+
+| 변수 | 용도 |
+|---|---|
+| `TEST_PORT` | 기본 41901. 이미 사용 중이면 다른 포트를 명시 |
+| `TEST_TIMEOUT_MS` | 파일당 제한시간, 기본 180000ms |
+| `TEST_BACKEND_URL` | backend suite의 실제 서버 origin |
+| `AP_LIVE_REPORT_FIXTURE_PATH` | replay suite가 사용할 기존 HTML fixture |
+
+```powershell
+$env:TEST_PORT = "41911"
+npm test
+```
+
+`BASE_URL`, `SIDEBAR_TEST_BASE_URL`, `PAGE_EVIDENCE_SCOPE`는 runner가 선택한 suite에 맞춰 주입한다. 개별 테스트에서 다른 기본값을 추가하지 않는다.
+
+## 실패와 완료 판단
+
+브리지 구조를 변경할 때는 현재 Java 소스에서 생성한 fixture로 replay suite를 실행한다. 마커 성능 회귀에는 위치 이동 중 무관한 요소 교체, 선택 대상 교체·삭제, Escape, 다른 문제 선택, 선택 해제가 포함된다. `verify-page-evidence.mjs`의 full 범위는 한국어 규칙 설명과 키보드로 영어 원문 펼치기, 원문의 HTML 이스케이프도 확인한다.
+
+리다이렉트 캐시 변경은 백엔드의 `LiveReportRedirectHandoffTest`와 `LiveReportPostInvalidationTest`로 검증한다. 중첩 POST, 뒤늦은 GET, 다른 세션 격리와 POST 처리 후 응답 유실을 포함한다. 브리지 설정의 인라인 스크립트 탈출 방지는 `LiveReportBridgeAssetsTest`로 확인한다.
+
+실행마다 `artifacts/frontend-tests/<suite>-<고유값>/`에 `results.json`과 테스트별 stdout·stderr 로그를 저장한다. 실행 폴더가 분리되어 이전 결과나 다른 실행을 덮어쓰지 않는다. 기본 출력은 진행·결과와 실패 로그의 끝부분이며, 전체 출력을 실시간으로 보려면 `--verbose`를 붙인다.
+
+실행 종료 시 오래된 성공 실행의 로그만 자동 정리한다. 보관 기준은 [artifact-retention.mjs](../scripts/artifact-retention.mjs)의 `AUDIT_RETENTION`이며, 기본적으로 suite별 최근 성공 10회와 최근 14일을 모두 보존한다. `results.json`은 계속 남기고, 실패·중단·실행 중·불완전한 결과와 실행 폴더에 `.keep` 파일이 있는 기록은 정리하지 않는다. 보고서에 등록되지 않은 파일, 스크립트, DB 백업, 기존 수동 감사 폴더도 자동 삭제하지 않는다.
+
+`npm run artifacts:clean`은 같은 기준의 삭제 예정 목록과 용량만 보여 주며, `npm run artifacts:clean -- --apply`로 적용한다. 보관 정책의 회귀 검증은 `npm run test:run -- --test verify-artifact-retention.mjs`로 실행한다.
+
+```powershell
+npm run test:run -- --test verify-sidebar-route-selection.mjs --verbose
+```
+
+결과에는 선택한 테스트, 실행 시간, 종료 코드·signal, 로그 파일, 미실행 개수가 남는다. 테스트 상태는 `passed`, `failed`, `timed_out`, `interrupted`, `error`로 구분한다. suite 준비 오류도 최종 보고서에 남으며 실패·시간 초과·중단은 모두 명령 실패로 반환한다. `running`이거나 완료 시각이 없는 보고서를 최종 통과로 해석하지 않는다.
+
+시간 초과나 중단 시 하네스가 시작한 테스트의 프로세스 트리/그룹을 종료한다. 실행한 Vite 서버도 정리한다. 실패한 항목과 미실행 항목을 다시 선택할 명령은 출력에서 확인할 수 있다. 자동 재시도로 실패를 숨기지 않는다.
+
+실패한 테스트의 이름, 실제 입력·출력, 제품 결함인지 환경 문제인지를 기록한다. 전체 검사를 실행하지 않았다면 실행한 범위를 정확히 보고한다. 과거 통과 개수를 현재 검증 결과로 인용하지 않는다.
+
+인프라 검증은 등록·suite 격리·옵션·포트 해석을 확인하며, 실제 프로세스로 출력 보존·실패·시간 초과·중단도 검사한다. 폐기 테스트의 목록과 마이그레이션 이력은 Git에서 확인하며 실행 시 재검사하지 않는다.

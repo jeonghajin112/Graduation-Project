@@ -1,0 +1,183 @@
+.dashboard-analyze-view:has(.quick-analyze-layout--progress) {
+  /* The progress view has no header; center it against the full viewport. */
+  --dashboard-top-height: 0px;
+}
+
+.quick-analyze-layout--progress {
+  display: grid;
+  align-items: center;
+  padding-block: clamp(2rem, 7vh, 5rem);
+  container: quick-analysis / inline-size;
+}
+
+.quick-analyze-progress-panel {
+  width: 100%;
+  max-width: 68rem;
+  margin: auto;
+}
+
+.site-analysis-progress {
+  display: grid;
+  flex: 1 1 auto;
+  align-items: center;
+  width: 100%;
+  min-height: calc(100dvh - 3rem);
+  max-width: 68rem;
+  margin-inline: auto;
+  padding-block: 2rem;
+  container: quick-analysis / inline-size;
+}
+
+.quick-analysis-progress {
+  --analysis-accent: var(--dashboard-accent, #0071e3);
+  --analysis-ink: var(--dashboard-text-strong, #1d1d1f);
+  --analysis-accent-ink: color-mix(in srgb, var(--analysis-accent) 80%, var(--analysis-ink));
+  --analysis-muted: var(--dashboard-text-muted, #6e6e73);
+  --analysis-surface: var(--dashboard-card-bg, #fff);
+  --analysis-faint: color-mix(in srgb, var(--analysis-ink) 7%, var(--analysis-surface));
+  --analysis-ease: cubic-bezier(0.28, 0.11, 0.32, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(2rem, 4.5vh, 3rem);
+  width: 100%;
+  color: var(--analysis-ink);
+  text-align: center;
+}
+
+/* Centered eyebrow, display headline and subhead, as on the landing page. */
+.quick-analysis-copy { width: 100%; max-width: 44rem; }
+.quick-analysis-eyebrow { margin: 0 0 0.7rem; color: var(--analysis-accent-ink); font-size: 0.9375rem; font-weight: 650; letter-spacing: -0.01em; }
+.quick-analysis-copy h2 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); font-weight: 700; line-height: 1.18; letter-spacing: -0.04em; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
+.quick-analysis-url { margin: 0.9rem 0 0; color: var(--analysis-muted); font-size: 1.0625rem; line-height: 1.5; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+
+/* Horizontal stepper: a connector fills once the step it leads into is reached. */
+.quick-analysis-steps-group { width: 100%; max-width: 36rem; }
+.quick-analysis-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.quick-analysis-step { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; padding-inline: 0.25rem; }
+.quick-analysis-step:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  top: calc(1.25rem - 1px);
+  left: calc(-50% + 1.75rem);
+  right: calc(50% + 1.75rem);
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--analysis-ink) 11%, var(--analysis-surface));
+}
+.quick-analysis-step:is([data-state="completed"], [data-state="active"])::before { background: var(--analysis-accent); }
+.quick-analysis-step-icon { position: relative; z-index: 1; display: grid; flex: none; place-items: center; width: 2.5rem; height: 2.5rem; border: 1.5px solid color-mix(in srgb, var(--analysis-ink) 15%, var(--analysis-surface)); border-radius: 50%; background: var(--analysis-surface); color: var(--analysis-muted); font-size: 0.875rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.quick-analysis-step-title { margin-top: 0.8rem; font-size: 0.9375rem; font-weight: 650; letter-spacing: -0.02em; word-break: keep-all; }
+.quick-analysis-step-label { margin-top: 0.2rem; color: var(--analysis-muted); font-size: 0.8125rem; line-height: 1.45; word-break: keep-all; }
+.quick-analysis-step[data-state="pending"] .quick-analysis-step-title { color: var(--analysis-muted); font-weight: 600; }
+.quick-analysis-step[data-state="active"] .quick-analysis-step-label { color: var(--analysis-accent-ink); font-weight: 550; }
+.quick-analysis-step:is([data-state="active"], [data-state="completed"]) .quick-analysis-step-icon { border-color: var(--analysis-accent); background: var(--analysis-accent); color: var(--primary-foreground, #fff); }
+.quick-analysis-step[data-state="active"] .quick-analysis-step-icon { box-shadow: 0 0 0 6px color-mix(in srgb, var(--analysis-accent) 14%, transparent); }
+.quick-analysis-step[data-state="failed"] .quick-analysis-step-icon { border-color: currentColor; color: var(--destructive, #d70015); }
+.quick-analysis-step[data-state="failed"] .quick-analysis-step-label { color: var(--destructive, #d70015); }
+.quick-analysis-step[data-state="paused"] .quick-analysis-step-icon { border-color: currentColor; color: var(--analysis-ink); }
+.quick-analysis-spinner { display: flex; }
+
+.quick-analysis-actions:empty { display: none; }
+.quick-analysis-actions > :first-child { margin-top: 0; }
+
+/* Safari-like window standing in for the page being inspected. */
+.quick-analysis-visual {
+  overflow: hidden;
+  width: 100%;
+  max-width: 42rem;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--analysis-ink) 9%, transparent);
+  border-radius: 1rem;
+  background: var(--analysis-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 28px 60px -24px rgb(0 0 0 / 22%);
+  text-align: left;
+}
+.quick-analysis-browser-bar {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 18rem) 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  height: 2.9rem;
+  padding-inline: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--analysis-ink) 7%, transparent);
+  background: color-mix(in srgb, var(--analysis-ink) 3%, var(--analysis-surface));
+  color: var(--analysis-muted);
+}
+.quick-analysis-browser-controls { display: flex; align-items: center; gap: 1.2rem; }
+.quick-analysis-browser-dots { display: flex; gap: 0.4rem; }
+.quick-analysis-browser-dots i { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: color-mix(in srgb, var(--analysis-ink) 15%, var(--analysis-surface)); }
+.quick-analysis-browser-nav { display: flex; gap: 0.35rem; opacity: 0.7; }
+.quick-analysis-browser-address { display: flex; align-items: center; justify-content: center; gap: 0.35rem; overflow: hidden; height: 1.8rem; padding-inline: 0.75rem; border-radius: 0.5rem; background: color-mix(in srgb, var(--analysis-ink) 6%, var(--analysis-surface)); font-size: 0.78rem; font-weight: 500; white-space: nowrap; }
+.quick-analysis-browser-address > svg { flex: none; }
+.quick-analysis-browser-page { position: relative; overflow: hidden; padding: 1.9rem 1.9rem 2.1rem; }
+.quick-analysis-browser-hero { display: grid; grid-template-columns: 1fr 1.15fr; gap: 1.5rem; }
+.quick-analysis-browser-copy, .quick-analysis-browser-tile { display: flex; flex-direction: column; gap: 0.6rem; }
+.quick-analysis-browser-copy { justify-content: center; }
+.quick-analysis-placeholder { display: block; flex: none; height: 0.5rem; border-radius: 0.25rem; background: var(--analysis-faint); outline: 2px solid transparent; outline-offset: 3px; }
+.quick-analysis-placeholder--image { height: auto; min-height: 7rem; border-radius: 0.6rem; }
+.quick-analysis-placeholder--heading { width: 82%; height: 0.95rem; margin-bottom: 0.35rem; }
+.quick-analysis-placeholder--short { width: 62%; }
+.quick-analysis-placeholder--button { width: 34%; height: 1.6rem; margin-top: 0.45rem; border-radius: 999px; }
+.quick-analysis-browser-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; }
+.quick-analysis-browser-tile .quick-analysis-placeholder--image { min-height: 4rem; margin-bottom: 0.2rem; }
+
+/* This moving band denotes activity, not a measured completion percentage. */
+.quick-analysis-scan {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 30%;
+  border-bottom: 2px solid var(--analysis-accent);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--analysis-accent) 14%, transparent));
+  opacity: 0;
+  pointer-events: none;
+}
+.quick-analysis-visual[data-scanning="true"] .quick-analysis-scan { opacity: 1; transform: translateY(120%); }
+.quick-analysis-progress[data-phase="completed"] .quick-analysis-placeholder[data-mark] { outline-color: color-mix(in srgb, var(--analysis-accent) 70%, transparent); }
+
+@container quick-analysis (max-width: 40rem) {
+  .quick-analysis-progress { gap: 2rem; }
+  .quick-analysis-copy h2 { font-size: clamp(1.625rem, 7cqi, 2.125rem); }
+  .quick-analysis-url { font-size: 0.9375rem; }
+  .quick-analysis-browser-bar { grid-template-columns: auto minmax(0, 1fr); padding-inline: 0.85rem; }
+  .quick-analysis-browser-nav { display: none; }
+  .quick-analysis-browser-page { padding: 1.3rem 1.3rem 1.5rem; }
+  .quick-analysis-browser-hero { gap: 1rem; }
+  .quick-analysis-placeholder--image { min-height: 5rem; }
+  .quick-analysis-browser-grid { gap: 0.7rem; margin-top: 1.4rem; }
+  .quick-analysis-browser-tile .quick-analysis-placeholder--image { min-height: 2.8rem; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .quick-analysis-progress > * { animation: quick-analysis-enter 700ms var(--analysis-ease) both; }
+  .quick-analysis-progress > :nth-child(2) { animation-delay: 80ms; }
+  .quick-analysis-progress > :nth-child(n + 3) { animation-delay: 160ms; }
+  .quick-analysis-visual[data-scanning="true"] .quick-analysis-scan { animation: quick-analysis-sweep 4.8s ease-in-out infinite; }
+  /* Marks light up roughly as the band passes; they share the 4.8s sweep period. */
+  .quick-analysis-visual[data-scanning="true"] [data-mark] { animation: quick-analysis-mark 4.8s ease-out infinite; }
+  .quick-analysis-visual[data-scanning="true"] [data-mark="1"] { animation-delay: 0.7s; }
+  .quick-analysis-visual[data-scanning="true"] [data-mark="2"] { animation-delay: 1.8s; }
+  .quick-analysis-visual[data-scanning="true"] [data-mark="3"] { animation-delay: 2.3s; }
+  .quick-analysis-spinner[data-spinning="true"] { animation: quick-analysis-spin 1.2s linear infinite; }
+  .quick-analysis-step::before { transition: background-color 400ms var(--analysis-ease); }
+  .quick-analysis-step-icon { transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease; }
+}
+@keyframes quick-analysis-enter { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes quick-analysis-sweep {
+  0%, 8% { transform: translateY(-100%); opacity: 0; }
+  18% { opacity: 1; }
+  78% { opacity: 1; }
+  92%, 100% { transform: translateY(340%); opacity: 0; }
+}
+@keyframes quick-analysis-mark {
+  0% { outline-color: transparent; }
+  6%, 46% { outline-color: color-mix(in srgb, var(--analysis-accent) 75%, transparent); }
+  56%, 100% { outline-color: transparent; }
+}
+@keyframes quick-analysis-spin { to { transform: rotate(360deg); } }
+
+@media (forced-colors: active) {
+  .quick-analysis-step[aria-current="step"] { outline: 2px solid Highlight; outline-offset: 4px; }
+  .quick-analysis-step:not(:first-child)::before { background: CanvasText; }
+  .quick-analysis-visual { border-color: CanvasText; }
+}

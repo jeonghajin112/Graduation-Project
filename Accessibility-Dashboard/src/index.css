@@ -1,0 +1,1452 @@
+﻿@import "tailwindcss";
+
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+@import "./styles/theme-tokens.css";
+@import "./styles/dashboard-modals.css";
+@import "./styles/dashboard-selection.css";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --background: #f5f5f7; /* canvas */
+  --foreground: #1d1d1f;
+  --card: #ffffff; /* surface */
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #0071e3; /* action */
+  --primary-hover: #0066cc;
+  --primary-foreground: #ffffff; /* on-action */
+  --secondary: #f1f5f9;
+  --secondary-foreground: #1d1d1f;
+  --muted: #f3f4f6;
+  --muted-foreground: #6e6e73;
+  --accent: #f1f5f9;
+  --accent-foreground: #1d1d1f;
+  --destructive: #d70015;
+  --destructive-foreground: #ffffff;
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #0071e3; /* action focus */
+}
+
+.dark {
+  --background: #111113; /* canvas */
+  --foreground: #f5f5f7;
+  --card: #1c1c1e; /* surface */
+  --card-foreground: #f5f5f7;
+  --popover: #1c1c1e;
+  --popover-foreground: #f5f5f7;
+  --primary: #0071e3; /* action */
+  --primary-foreground: #ffffff;
+  --secondary: #242426; /* raised-adjacent surface role */
+  --secondary-foreground: #f5f5f7;
+  --muted: #242426;
+  --muted-foreground: #a1a1a6;
+  --accent: #242426;
+  --accent-foreground: #f5f5f7;
+  --destructive: #d70015;
+  --destructive-foreground: #ffffff;
+  --border: #3a3a3c;
+  --input: #3a3a3c;
+  --ring: #0071e3;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+
+  body {
+    margin: 0;
+    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
+    background: var(--background);
+    color: var(--foreground);
+    letter-spacing: -0.012em;
+  }
+
+  button,
+  input,
+  textarea,
+  select,
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+
+  svg text {
+    font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
+  }
+
+  /* Low-specificity global focus: action ring; component-level focus rules override */
+  :where(a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * Dashboard layout defaults. These stay in @layer base so Tailwind utilities
+ * and component CSS can refine them. Declarations that must beat utilities
+ * (theme surfaces, fixed control geometry) live in the unlayered override
+ * block at the end of this file — not as !important.
+ */
+@layer base {
+  .bridge-dashboard {
+    --dashboard-top-height: max(220px, 25vh);
+    --dashboard-control-size: clamp(42px, 5.1vh, 52px);
+    --dashboard-control-icon: clamp(17px, 2vh, 20px);
+    --dashboard-sidebar-width: clamp(12rem, 8rem + 6.667vw, 24rem);
+    --dashboard-sidebar-padding-inline: clamp(0.5rem, 0.3125vw, 0.75rem);
+    --dashboard-sidebar-padding-block: clamp(0.5rem, 0.3125vw, 0.75rem);
+    --dashboard-sidebar-nav-height: clamp(2.5rem, 2.0834vw, 2.75rem);
+    --dashboard-sidebar-nav-gap: clamp(0.5rem, 0.4167vw, 0.625rem);
+    --dashboard-sidebar-nav-padding: clamp(0.625rem, 0.5209vw, 0.75rem);
+    /* Account trigger: min 44px (2.75rem) row; tokenized avatar/label/chevron gaps */
+    --dashboard-account-row-height: clamp(2.75rem, 1.5625vw, 3.75rem);
+    --dashboard-account-trigger-height: clamp(2.5rem, 1.3542vw, 3.25rem);
+    --dashboard-account-avatar-size: clamp(1.5rem, 0.9375vw, 2.25rem);
+    --dashboard-account-chevron-size: clamp(0.875rem, 0.5209vw, 1.25rem);
+    --dashboard-account-inline-gap: clamp(0.5rem, 0.3646vw, 0.875rem);
+    --dashboard-account-label-gap: clamp(0.25rem, 0.2084vw, 0.5rem);
+    --dashboard-account-padding-inline: clamp(0.5rem, 0.3646vw, 0.875rem);
+    /* Pull account chrome toward top-left without leaving the sidebar edge.
+       FHD (padding 16px): target trigger (10,10). Larger padding: cap nudge so inset stays ~14px+. */
+    --dashboard-account-offset-x: clamp(-0.375rem, calc(0.625rem - var(--dashboard-sidebar-padding-inline)), -0.25rem);
+    --dashboard-account-offset-y: clamp(-0.375rem, calc(0.625rem - var(--dashboard-sidebar-padding-block)), -0.25rem);
+    --dashboard-account-name-size: clamp(0.8125rem, 0.4167vw, 1rem);
+    --dashboard-account-menu-width: clamp(180px, 6.25vw, 240px);
+    --dashboard-account-menu-item-gap: clamp(0.625rem, 0.3125vw, 0.75rem);
+    --dashboard-account-menu-item-padding-block: clamp(0.25rem, 0.1563vw, 0.375rem);
+    --dashboard-account-menu-item-padding-inline: clamp(0.75rem, 0.4167vw, 1rem);
+    --dashboard-account-menu-item-font-size: clamp(0.875rem, 0.4167vw, 1rem);
+    --dashboard-account-menu-icon-size: clamp(1rem, 0.5209vw, 1.25rem);
+    --dashboard-analyze-panel-width: clamp(48rem, 36vw, 60rem);
+    --dashboard-analyze-control-height: clamp(2.75rem, 2.9vw, 4rem);
+    --dashboard-analyze-title-size: clamp(1.5rem, 1.125rem + 0.625vw, 2.25rem);
+    --dashboard-side-gutter: clamp(16px, 3vw, 40px);
+    --dashboard-fixed-top: clamp(16px, 3vh, 40px);
+  }
+
+  .bridge-dashboard.dashboard-compact-top {
+    --dashboard-top-height: clamp(96px, 10vh, 112px);
+  }
+
+  .bridge-dashboard.dashboard-project-detail {
+    --dashboard-top-height: clamp(124px, calc(12vh + 16px), 132px);
+    --dashboard-project-content-max-width: clamp(100rem, 80vw, 187.5rem);
+    --dashboard-project-content-gap: clamp(0.5rem, calc(-0.5rem + 0.8333vw), 1.5rem);
+    --dashboard-project-grid-gap: clamp(0.75rem, calc(-0.25rem + 0.8333vw), 1.75rem);
+    --dashboard-project-card-min-height: clamp(8.5rem, 8.125vw, 17.5rem);
+    --dashboard-project-card-padding: clamp(0.875rem, 0.8333vw, 2rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-content {
+    width: 100%;
+    max-width: var(--dashboard-project-content-max-width);
+    margin-block-start: var(--dashboard-project-content-gap);
+    margin-inline: auto;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
+    right: auto;
+    left: 50%;
+    width: min(100%, var(--dashboard-project-content-max-width));
+    transform: translateX(-50%);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
+    right: max(
+    var(--dashboard-side-gutter),
+    calc(
+      (100% - var(--dashboard-sidebar-width) - var(--dashboard-project-content-max-width)) / 2
+    )
+  );
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    gap: var(--dashboard-project-grid-gap);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card {
+    min-height: var(--dashboard-project-card-min-height);
+    padding: var(--dashboard-project-card-padding);
+    border-radius: clamp(0.875rem, 0.573vw, 1.375rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-favicon {
+    width: clamp(2rem, 1.458vw, 3.5rem);
+    height: clamp(2rem, 1.458vw, 3.5rem);
+    border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-title {
+    font-size: clamp(0.875rem, 0.573vw, 1.375rem);
+    line-height: 1.2;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-meta,
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-time {
+    font-size: clamp(0.6875rem, 0.417vw, 1rem);
+    line-height: 1.35;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-url,
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-status {
+    font-size: clamp(0.75rem, 0.469vw, 1.125rem);
+    line-height: 1.35;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-score {
+    font-size: clamp(0.9375rem, 0.625vw, 1.5rem);
+    line-height: 1.25;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-add-button {
+    height: clamp(1.75rem, 1.094vw, 2.625rem);
+    padding-inline: clamp(1rem, 0.625vw, 1.5rem);
+    border-radius: clamp(0.5rem, 0.313vw, 0.75rem);
+    font-size: clamp(0.75rem, 0.417vw, 1rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-header {
+    gap: clamp(0.625rem, 0.417vw, 1rem);
+    padding-right: clamp(2.25rem, 1.25vw, 3rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-main {
+    gap: clamp(1rem, 0.625vw, 1.5rem);
+    margin-top: clamp(0.75rem, 0.5209vw, 1.25rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-footer {
+    gap: clamp(0.75rem, 0.5209vw, 1.25rem);
+    padding-top: clamp(0.75rem, 0.4688vw, 1.125rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-url svg {
+    width: clamp(0.625rem, 0.4167vw, 1rem);
+    height: clamp(0.625rem, 0.4167vw, 1rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-status-dot {
+    width: clamp(0.375rem, 0.2083vw, 0.5rem);
+    height: clamp(0.375rem, 0.2083vw, 0.5rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete {
+    top: clamp(0.625rem, 0.4167vw, 1rem);
+    right: clamp(0.625rem, 0.4167vw, 1rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button {
+    width: clamp(1.75rem, 0.9375vw, 2.25rem);
+    height: clamp(1.75rem, 0.9375vw, 2.25rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-card-delete-button svg {
+    width: clamp(0.8125rem, 0.4688vw, 1.125rem);
+    height: clamp(0.8125rem, 0.4688vw, 1.125rem);
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb {
+    height: clamp(1rem, 0.5208vw, 1.25rem);
+    gap: clamp(0.125rem, 0.1042vw, 0.25rem);
+    font-size: clamp(0.75rem, 0.4167vw, 1rem);
+    line-height: 1.25;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-label {
+    height: 100%;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-chevron {
+    width: clamp(0.625rem, 0.3125vw, 0.75rem);
+    height: clamp(0.625rem, 0.3125vw, 0.75rem);
+    transform: translateY(clamp(-0.0625rem, -0.026vw, 0rem));
+  }
+
+  .bridge-dashboard.theme-light {
+    background: var(--dashboard-page-bg);
+    color-scheme: light;
+  }
+
+  .bridge-dashboard.theme-dark {
+    background: var(--dashboard-page-bg);
+    color-scheme: dark;
+  }
+
+  .bridge-dashboard.theme-light .dashboard-top-zone,
+  .bridge-dashboard.theme-dark .dashboard-top-zone {
+    height: var(--dashboard-top-height);
+    background: var(--dashboard-top-bg);
+  }
+
+  .bridge-dashboard.theme-light .dashboard-content-zone,
+  .bridge-dashboard.theme-dark .dashboard-content-zone {
+    min-height: calc(100dvh - var(--dashboard-top-height));
+    background: var(--dashboard-content-bg);
+  }
+
+  .bridge-dashboard.theme-light .dashboard-card {
+    backdrop-filter: blur(18px);
+  }
+
+  /* Page detail: borderless glassmorphism surfaces (fills in the override block). */
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+    -webkit-backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
+    backdrop-filter: blur(var(--site-glass-blur)) saturate(180%);
+  }
+
+  /* The live page fills this shell edge to edge. Only its title bar blurs. */
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* Users who ask for less transparency, or high-contrast mode, get opaque. */
+  @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  /* Permanent sidebar rail (no floating drawer chrome) */
+  .bridge-dashboard.theme-light .dashboard-drawer {
+    backdrop-filter: none;
+  }
+
+  .bridge-dashboard .dashboard-sidebar {
+    width: 100%;
+    padding: var(--dashboard-sidebar-padding-block) var(--dashboard-sidebar-padding-inline);
+  }
+
+  @media (min-width: 768px) {
+    .bridge-dashboard .dashboard-sidebar {
+      position: sticky;
+      top: 0;
+      width: var(--dashboard-sidebar-width);
+      height: 100dvh;
+    }
+  }
+
+  .bridge-dashboard .dashboard-sidebar-wordmark {
+    width: clamp(118px, 11vw, 148px);
+    height: auto;
+    color: var(--dashboard-text-strong);
+    display: block;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .dashboard-header-account {
+    margin-left: var(--dashboard-account-offset-x);
+    margin-top: var(--dashboard-account-offset-y);
+  }
+
+  .bridge-dashboard .dashboard-account-menu-trigger {
+    display: inline-flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: flex-start;
+    box-sizing: border-box;
+    min-height: var(--dashboard-account-trigger-height);
+    height: auto;
+    /* Avatar → label uses inline-gap; name → chevron overrides via label-gap below */
+    gap: var(--dashboard-account-inline-gap);
+    padding-block: 0;
+    padding-inline: var(--dashboard-account-padding-inline);
+    line-height: 1;
+  }
+
+  .bridge-dashboard .dashboard-account-avatar {
+    display: inline-flex;
+    flex: 0 0 var(--dashboard-account-avatar-size);
+    box-sizing: border-box;
+    min-width: var(--dashboard-account-avatar-size);
+    min-height: var(--dashboard-account-avatar-size);
+    margin: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background-color: var(--dashboard-accent);
+    color: #ffffff;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-align: center;
+    overflow: hidden;
+  }
+
+  .bridge-dashboard .dashboard-account-name {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--dashboard-text-primary);
+  }
+
+  .bridge-dashboard .dashboard-account-menu-chevron {
+    display: block;
+    box-sizing: border-box;
+    min-width: var(--dashboard-account-chevron-size);
+    min-height: var(--dashboard-account-chevron-size);
+    flex: 0 0 var(--dashboard-account-chevron-size);
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--dashboard-text-secondary);
+    transform-origin: center center;
+  }
+
+  /* Name ↔ chevron spacing when both are direct trigger children */
+  .bridge-dashboard .dashboard-account-menu-trigger > .dashboard-account-name {
+    margin-inline-end: 0;
+  }
+
+  .bridge-dashboard .dashboard-account-menu-trigger > .dashboard-account-name + .dashboard-account-menu-chevron {
+    margin-inline-start: calc(var(--dashboard-account-label-gap) - var(--dashboard-account-inline-gap));
+  }
+
+  @keyframes dashboard-account-menu-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .bridge-dashboard .dashboard-account-menu.dashboard-account-menu-open {
+    animation: dashboard-account-menu-in 150ms ease-out;
+  }
+
+  .bridge-dashboard .dashboard-account-menu {
+    width: var(--dashboard-account-menu-width);
+    border: 1px solid #cbd5e1;
+  }
+
+  .bridge-dashboard .dashboard-account-menu-item {
+    gap: var(--dashboard-account-menu-item-gap);
+    padding-block: var(--dashboard-account-menu-item-padding-block);
+    padding-inline: var(--dashboard-account-menu-item-padding-inline);
+    font-size: var(--dashboard-account-menu-item-font-size);
+  }
+
+  .bridge-dashboard .dashboard-account-menu-item svg {
+    width: var(--dashboard-account-menu-icon-size);
+    height: var(--dashboard-account-menu-icon-size);
+  }
+
+  .bridge-dashboard.theme-dark .dashboard-account-menu {
+    border-color: #52525b;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  }
+
+  .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:hover {
+    background: rgba(148, 163, 184, 0.14);
+  }
+
+  .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:focus-visible,
+  .bridge-dashboard.theme-dark .dashboard-account-menu-item:focus-visible {
+    --tw-ring-offset-color: transparent;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link,
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active,
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link:hover,
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
+    /* Never pill: lock control radius for idle/selected/hover/focus */
+    line-height: 1.2;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:last-child {
+    line-height: 1.2;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:first-child {
+    width: clamp(1.25rem, 0.6771vw, 1.625rem);
+    height: clamp(1.25rem, 0.6771vw, 1.625rem);
+  }
+
+  .bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:first-child svg {
+    width: clamp(1rem, 0.5729vw, 1.375rem);
+    height: clamp(1rem, 0.5729vw, 1.375rem);
+  }
+
+  .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .quick-analyze-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article > div:first-child h2 {
+    line-height: 1.15;
+  }
+
+  #root .bridge-dashboard .dashboard-home-title:not(.dashboard-site-title) {
+    line-height: 0.95;
+  }
+
+  #root .bridge-dashboard .dashboard-home-title.dashboard-project-title {
+    line-height: 1.1;
+  }
+
+  .bridge-dashboard.theme-light .dashboard-fixed-header,
+  .bridge-dashboard.theme-dark .dashboard-fixed-header {
+    pointer-events: none;
+  }
+
+  .bridge-dashboard.theme-light .dashboard-fixed-header button,
+  .bridge-dashboard.theme-light .dashboard-fixed-header a,
+  .bridge-dashboard.theme-light .dashboard-fixed-header .dashboard-header-account,
+  .bridge-dashboard.theme-dark .dashboard-fixed-header button,
+  .bridge-dashboard.theme-dark .dashboard-fixed-header a,
+  .bridge-dashboard.theme-dark .dashboard-fixed-header .dashboard-header-account {
+    pointer-events: auto;
+  }
+
+  .bridge-dashboard .dashboard-skip-link {
+    position: absolute;
+    inset-block-start: 1rem;
+    inset-inline-start: 1rem;
+    z-index: var(--z-skip-link);
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding-inline: 1rem;
+    border: 2px solid var(--dashboard-accent);
+    border-radius: 0.5rem;
+    background: var(--dashboard-text-strong);
+    color: var(--dashboard-page-bg);
+    font-size: 0.875rem;
+    font-weight: 700;
+    text-decoration: none;
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .bridge-dashboard .dashboard-skip-link:focus-visible {
+    position: fixed;
+    outline: 2px solid var(--dashboard-accent);
+    outline-offset: 3px;
+    clip-path: none;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  .bridge-dashboard,
+  .bridge-dashboard *,
+  .bridge-dashboard *::before,
+  .bridge-dashboard *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Keep long modal content scrollable without cutting through the rounded shell. */
+.site-create-modal-scroll {
+  scrollbar-color: var(--dashboard-text-muted) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .site-create-modal-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-track,
+  .site-create-modal-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-thumb {
+    min-height: 44px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--dashboard-text-muted);
+    background-clip: padding-box;
+  }
+
+  .site-create-modal-scroll::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+/* Project tree sidebar. */
+.bridge-dashboard .reference-sidebar-body {
+  gap: 0;
+}
+
+.bridge-dashboard .reference-sidebar-account {
+  min-height: var(--dashboard-account-row-height);
+}
+
+.bridge-dashboard .reference-sidebar-content {
+  gap: clamp(1.5rem, 0.8333vw, 2rem);
+  margin-top: clamp(1.125rem, 0.625vw, 1.5rem);
+  scrollbar-gutter: auto;
+}
+
+.bridge-dashboard .reference-sidebar-primary {
+  flex: none;
+}
+
+.bridge-dashboard .dashboard-sidebar .reference-sidebar-row,
+.bridge-dashboard .dashboard-sidebar .sidebar-tree-row {
+  min-height: var(--dashboard-sidebar-nav-height);
+  height: var(--dashboard-sidebar-nav-height);
+  gap: clamp(0.375rem, 0.2344vw, 0.5625rem);
+  padding-inline: clamp(0.5rem, 0.3125vw, 0.75rem);
+  border-radius: clamp(0.5rem, 0.2604vw, 0.625rem);
+  font-size: clamp(0.8125rem, 0.4427vw, 1.0625rem);
+  line-height: clamp(1rem, 0.5209vw, 1.25rem);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-tree-row {
+  --dashboard-sidebar-nav-height: clamp(1.875rem, 1.1719vw, 2.8125rem);
+  --dashboard-sidebar-nav-padding: clamp(0.5rem, 0.3125vw, 0.75rem);
+  min-height: var(--dashboard-sidebar-nav-height);
+  height: var(--dashboard-sidebar-nav-height);
+  padding-inline: var(--dashboard-sidebar-nav-padding);
+}
+
+.bridge-dashboard .dashboard-sidebar .reference-sidebar-primary-row > span:first-child,
+.bridge-dashboard .dashboard-sidebar .sidebar-tree-folder-icon,
+.bridge-dashboard .dashboard-sidebar .sidebar-tree-page-icon {
+  color: var(--dashboard-text-primary);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link > .sidebar-tree-page-icon svg {
+  width: clamp(1rem, 0.5209vw, 1.25rem);
+  height: clamp(1rem, 0.5209vw, 1.25rem);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link > .sidebar-tree-label {
+  line-height: clamp(1.125rem, 0.625vw, 1.5rem);
+}
+
+.bridge-dashboard .dashboard-sidebar .reference-sidebar-primary-row > span:last-child,
+.bridge-dashboard .dashboard-sidebar .sidebar-tree-label {
+  font-size: clamp(0.8125rem, 0.4427vw, 1.0625rem);
+  font-weight: 500;
+  line-height: clamp(1rem, 0.5209vw, 1.25rem);
+}
+
+.bridge-dashboard .sidebar-tree-section {
+  gap: 0;
+}
+
+/* Collapsible sidebar. Collapsed desktop keeps an icon rail; collapsed mobile
+   keeps one row so the toggle stays in the same place. */
+.bridge-dashboard .dashboard-sidebar-toggle {
+  width: var(--dashboard-sidebar-nav-height);
+  height: var(--dashboard-sidebar-nav-height);
+  border-radius: clamp(0.5rem, 0.2604vw, 0.625rem);
+  color: var(--dashboard-text-secondary);
+  background: transparent;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.bridge-dashboard .dashboard-sidebar-toggle:hover {
+  color: var(--dashboard-text-strong);
+  background: var(--dashboard-sidebar-item-hover-bg);
+}
+
+.bridge-dashboard .dashboard-sidebar-toggle:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: -2px;
+}
+
+.bridge-dashboard .dashboard-sidebar-collapsed .dashboard-account-menu-trigger,
+.bridge-dashboard .dashboard-sidebar-collapsed .sidebar-tree-section {
+  display: none;
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .dashboard-header-account {
+  margin-left: 0;
+  justify-content: center;
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .reference-sidebar-row {
+  position: relative;
+  justify-content: center;
+  width: var(--dashboard-sidebar-nav-height);
+  padding-inline: 0;
+}
+
+.bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .reference-sidebar-primary-row > span:last-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The rail slides between its two widths when the user toggles it (the
+   sliding class is set only then, so resizing the window does not animate).
+   Registering the width as a length lets it transition, and everything laid
+   out from it (the rail and the content beside it) moves in step. Reduced
+   motion turns every dashboard transition off above. */
+@property --dashboard-sidebar-width {
+  syntax: "<length>";
+  inherits: true;
+  /* Must be an absolute length, or the whole registration is dropped. */
+  initial-value: 256px;
+}
+
+.bridge-dashboard.dashboard-sidebar-is-sliding {
+  transition: --dashboard-sidebar-width 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (min-width: 768px) {
+  .bridge-dashboard.dashboard-sidebar-is-collapsed {
+    --dashboard-sidebar-width: calc(
+      var(--dashboard-sidebar-nav-height) + 2 * var(--dashboard-sidebar-padding-inline)
+    );
+  }
+
+  .bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .reference-sidebar-primary {
+    align-items: center;
+  }
+}
+
+@media (max-width: 767px) {
+  .bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .bridge-dashboard .dashboard-sidebar.dashboard-sidebar-collapsed .reference-sidebar-content {
+    flex: none;
+    margin-top: 0;
+  }
+}
+
+.bridge-dashboard .sidebar-tree-section-header {
+  min-height: clamp(1.125rem, 0.625vw, 1.5rem);
+  padding-inline: clamp(0.375rem, 0.2344vw, 0.5625rem) clamp(0.25rem, 0.1563vw, 0.375rem);
+}
+
+.bridge-dashboard .sidebar-tree-add {
+  position: relative;
+  isolation: isolate;
+  width: clamp(1.5rem, 0.7813vw, 1.875rem);
+  height: clamp(1.5rem, 0.7813vw, 1.875rem);
+  border-radius: clamp(0.3125rem, 0.1823vw, 0.4375rem);
+  color: var(--dashboard-text-secondary);
+}
+
+.bridge-dashboard .sidebar-tree-add::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 0;
+  width: calc(100% - 0.25rem);
+  height: calc(100% - 0.25rem);
+  border-radius: clamp(0.25rem, 0.1563vw, 0.375rem);
+  background: transparent;
+  content: "";
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: background-color 150ms ease;
+}
+
+.bridge-dashboard .sidebar-tree-add:hover {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard .sidebar-tree-add:hover::before {
+  background: var(--dashboard-sidebar-item-hover-bg);
+}
+
+.bridge-dashboard .sidebar-tree-add:focus-visible {
+  outline: 2px solid var(--dashboard-accent);
+  outline-offset: 1px;
+}
+
+.bridge-dashboard .sidebar-tree-projects {
+  scrollbar-width: thin;
+  scrollbar-color: var(--dashboard-border-subtle) transparent;
+}
+
+.bridge-dashboard .sidebar-tree-list,
+.bridge-dashboard .sidebar-tree-recent-list {
+  gap: clamp(0.125rem, 0.1042vw, 0.25rem);
+}
+
+.bridge-dashboard .sidebar-tree-parent-row {
+  padding-left: clamp(0.25rem, 0.1563vw, 0.375rem);
+}
+
+.bridge-dashboard .sidebar-tree-chevron {
+  width: clamp(0.875rem, 0.4688vw, 1.125rem);
+  height: clamp(0.875rem, 0.4688vw, 1.125rem);
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard .sidebar-tree-chevron svg {
+  width: clamp(0.8125rem, 0.4427vw, 1.0625rem);
+  height: clamp(0.8125rem, 0.4427vw, 1.0625rem);
+}
+
+.bridge-dashboard .sidebar-tree-folder-icon,
+.bridge-dashboard .sidebar-tree-page-icon {
+  width: clamp(1.125rem, 0.625vw, 1.5rem);
+  height: clamp(1.125rem, 0.625vw, 1.5rem);
+}
+
+.bridge-dashboard .sidebar-tree-folder-icon svg,
+.bridge-dashboard .sidebar-tree-add svg {
+  width: clamp(0.875rem, 0.5209vw, 1.25rem);
+  height: clamp(0.875rem, 0.5209vw, 1.25rem);
+}
+
+.bridge-dashboard .sidebar-tree-add svg {
+  position: relative;
+  z-index: 1;
+}
+
+.bridge-dashboard .sidebar-tree-children {
+  position: relative;
+  gap: clamp(0.125rem, 0.1042vw, 0.25rem);
+  margin: clamp(0.125rem, 0.1042vw, 0.25rem) 0 clamp(0.125rem, 0.1042vw, 0.25rem)
+    clamp(0.6875rem, 0.4167vw, 1rem);
+  padding-left: clamp(1.5rem, 0.9375vw, 2.25rem);
+}
+
+.bridge-dashboard .sidebar-tree-children::before {
+  content: none;
+}
+
+.bridge-dashboard .sidebar-tree-child-row {
+  position: relative;
+}
+
+.bridge-dashboard .sidebar-tree-recent-list .sidebar-tree-page-icon {
+  margin-inline-start: clamp(1.375rem, 0.8333vw, 2rem);
+}
+
+.bridge-dashboard .sidebar-tree-empty-copy {
+  margin: 0;
+  padding: clamp(0.375rem, 0.2344vw, 0.5625rem) clamp(0.5rem, 0.3125vw, 0.75rem);
+  color: var(--dashboard-text-muted);
+  font-size: clamp(0.6875rem, 0.3646vw, 0.875rem);
+  line-height: 1.4;
+}
+
+.bridge-dashboard .sidebar-tree-recent {
+  gap: 0;
+  margin-top: clamp(1.25rem, 0.7292vw, 1.75rem);
+}
+
+@media (max-width: 767px) {
+  /* Let wrapped project names reserve space before the action and page cards. */
+  .bridge-dashboard.dashboard-project-detail .dashboard-top-zone {
+    height: auto;
+    min-height: var(--dashboard-top-height);
+    padding-top: calc(var(--dashboard-fixed-top) + var(--dashboard-control-size) - 2.25rem);
+    padding-bottom: 1rem;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-fixed-header {
+    position: static;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
+    position: static;
+    transform: none;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-title {
+    overflow-wrap: anywhere;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
+    position: static;
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.75rem;
+  }
+
+  .bridge-dashboard .dashboard-analyze-view .dashboard-top-zone {
+    height: 0;
+  }
+
+  .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone {
+    min-height: 0;
+  }
+
+  .bridge-dashboard .quick-analyze-layout:not(.quick-analyze-layout--progress) > article {
+    position: static;
+    transform: none;
+    translate: none;
+    margin-inline: auto;
+    padding-block: clamp(1.5rem, 5vh, 2.5rem);
+  }
+
+  .bridge-dashboard .reference-sidebar-content {
+    margin-top: 0.75rem;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .reference-sidebar-row,
+  .bridge-dashboard .dashboard-sidebar .sidebar-tree-row {
+    border-radius: var(--dashboard-sidebar-item-radius);
+    font-size: 0.8125rem;
+  }
+}
+
+.bridge-dashboard.dashboard-project-detail .dashboard-project-panel {
+  container-name: dashboard-project-panel;
+  container-type: inline-size;
+}
+
+/* Project cards respond to the space the panel actually owns. This keeps the
+   same card geometry in the full app, split-screen, and the embedded landing
+   preview instead of inheriting column counts from the outer browser width. */
+.bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container dashboard-project-panel (min-width: 32rem) {
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container dashboard-project-panel (min-width: 56rem) {
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container dashboard-project-panel (min-width: 80rem) {
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container dashboard-project-panel (min-width: 200rem) {
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+/* Page detail surfaces. */
+.bridge-dashboard.dashboard-site-detail {
+  --dashboard-top-height: 0px;
+  --dashboard-site-grid-gap: clamp(0.75rem, 0.8333vw, 1rem);
+  --dashboard-site-card-radius: 1.125rem;
+  /* Nested content boxes use the 8px control step. */
+  --dashboard-site-nested-radius: 0.5rem;
+}
+
+/* Glass tints darken the surface, so muted ink is bumped to hold AA 4.5:1. */
+.bridge-dashboard.dashboard-site-detail.theme-light {
+  --dashboard-text-muted: #5f5f64;
+  --dashboard-text-secondary: #5f5f64;
+}
+
+.bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone {
+  padding-top: clamp(0.875rem, 0.7292vw, 1.75rem);
+  container-type: inline-size;
+}
+
+/* Keep the route frame stable while its detail panel loads. */
+@media (min-width: 1024px) {
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/*
+ * Theme and geometry overrides that must beat Tailwind utilities.
+ * These used to be `!important` declarations inside `@layer base`
+ * (layered !important outranks everything, including component CSS and
+ * utilities). Unlayered rules already win over the utilities layer, so they
+ * are plain declarations here. Keep this block last in the file so it also
+ * wins equal-specificity ties with the rules above.
+ */
+:where(.bridge-dashboard, .bridge-dashboard *) {
+  letter-spacing: -0.012em;
+}
+
+.bridge-dashboard.theme-light > div,
+.bridge-dashboard.theme-light .dashboard-shell,
+.bridge-dashboard.theme-dark > div,
+.bridge-dashboard.theme-dark .dashboard-shell {
+  background: var(--dashboard-shell-bg);
+}
+
+.bridge-dashboard.theme-dark .dashboard-shell.bg-white {
+  background-color: var(--dashboard-shell-bg);
+}
+
+.bridge-dashboard.theme-dark .bg-white {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-dark .dashboard-card {
+  background-color: var(--dashboard-card-bg);
+  border-color: var(--dashboard-card-border);
+  border-width: 0;
+  border-radius: 28px;
+}
+
+.bridge-dashboard.theme-light .dashboard-card {
+  background: var(--dashboard-card-bg);
+  border: 1px solid var(--dashboard-card-border);
+  border-radius: 28px;
+  box-shadow:
+    0 22px 58px rgba(31, 27, 24, 0.065),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.bridge-dashboard .dashboard-content-zone .dashboard-card {
+  background: var(--dashboard-content-card-bg);
+  border-color: var(--dashboard-card-border);
+  border-width: 0;
+  box-shadow: none;
+}
+
+.bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+  border: 0;
+  border-radius: 18px;
+  background: var(--site-glass-bg);
+  box-shadow: var(--site-glass-shadow), var(--site-glass-highlight);
+}
+
+.bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .site-page-evidence-card {
+  background: transparent;
+  box-shadow: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+    background: var(--site-glass-bg-opaque);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .bridge-dashboard.dashboard-site-detail .dashboard-site-content-zone .dashboard-card {
+    background: var(--site-glass-bg-opaque);
+  }
+}
+
+.bridge-dashboard.theme-light .dashboard-card .bg-white {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-50,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/60,
+.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/70 {
+  background-color: var(--dashboard-muted-surface);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200,
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/70,
+.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/80 {
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .text-slate-900 {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .text-slate-500,
+.bridge-dashboard.theme-light .dashboard-card .text-slate-600 {
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-50:hover,
+.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-100:hover {
+  background-color: var(--dashboard-hover-surface);
+}
+
+.bridge-dashboard.theme-dark .bg-slate-50 {
+  background-color: var(--dashboard-nested-surface);
+}
+
+.bridge-dashboard.theme-dark .bg-slate-100,
+.bridge-dashboard.theme-dark .bg-slate-100\/60,
+.bridge-dashboard.theme-dark .bg-slate-100\/70 {
+  background-color: var(--dashboard-muted-surface);
+}
+
+.bridge-dashboard.theme-dark .border-slate-200,
+.bridge-dashboard.theme-dark .border-slate-200\/70,
+.bridge-dashboard.theme-dark .border-slate-200\/80,
+.bridge-dashboard.theme-dark .border-slate-300 {
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-dark .text-slate-950,
+.bridge-dashboard.theme-dark .text-slate-900 {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-dark .text-slate-800 {
+  color: #e5e5e5;
+}
+
+.bridge-dashboard.theme-dark .text-slate-700 {
+  color: #cccccc;
+}
+
+.bridge-dashboard.theme-dark .text-slate-600 {
+  color: var(--dashboard-text-secondary);
+}
+
+.bridge-dashboard.theme-dark .text-slate-500 {
+  color: var(--dashboard-text-muted);
+}
+
+.bridge-dashboard.theme-dark input:not(.dashboard-modal-input),
+.bridge-dashboard.theme-dark textarea {
+  color: #e6e6e6;
+}
+
+.bridge-dashboard.theme-dark input:not(.dashboard-modal-input)::placeholder,
+.bridge-dashboard.theme-dark textarea::placeholder {
+  color: #8f8f8f;
+}
+
+.bridge-dashboard.theme-dark .hover\:bg-slate-50:hover,
+.bridge-dashboard.theme-dark .hover\:bg-slate-100:hover {
+  background-color: var(--dashboard-hover-surface);
+}
+
+/* Without this, hover:text-slate-900 turns labels near-black on dark surfaces.
+   :where() keeps it weaker than component-specific hover colors. */
+:where(.bridge-dashboard.theme-dark) .hover\:text-slate-900:hover,
+:where(.bridge-dashboard.theme-dark) .hover\:text-slate-950:hover {
+  color: var(--dashboard-text-strong);
+}
+
+.bridge-dashboard.theme-dark .sidebar-nav-link:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+  border-color: var(--dashboard-sidebar-item-hover-border);
+  color: var(--dashboard-sidebar-hover-text);
+}
+
+.bridge-dashboard.theme-dark .project-list-row:hover {
+  background-color: var(--project-table-row-hover-bg);
+}
+
+.bridge-dashboard.theme-light aside.dashboard-sidebar {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--dashboard-border-subtle);
+}
+
+.bridge-dashboard.theme-light .dashboard-drawer {
+  background: var(--dashboard-drawer-bg);
+  border-color: var(--dashboard-border-subtle);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.bridge-dashboard.theme-dark .dashboard-drawer {
+  background: var(--dashboard-drawer-bg);
+  border-color: #222222;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.bridge-dashboard.theme-dark .dashboard-sidebar {
+  background: var(--dashboard-drawer-bg);
+}
+
+.bridge-dashboard.theme-dark .sidebar-nav-link.sidebar-nav-link-active {
+  background-color: var(--dashboard-sidebar-active-bg);
+  border-color: var(--dashboard-sidebar-item-active-border);
+  color: var(--dashboard-sidebar-active-text);
+  box-shadow: none;
+}
+
+.bridge-dashboard .dashboard-fixed-header {
+  top: var(--dashboard-fixed-top);
+  right: var(--dashboard-side-gutter);
+  left: var(--dashboard-side-gutter);
+}
+
+.bridge-dashboard .dashboard-account-avatar {
+  width: var(--dashboard-account-avatar-size);
+  height: var(--dashboard-account-avatar-size);
+  padding: 0;
+  font-size: clamp(0.75rem, 0.3646vw, 0.875rem);
+  line-height: 1;
+}
+
+.bridge-dashboard .dashboard-account-name {
+  font-size: var(--dashboard-account-name-size);
+  line-height: 1;
+}
+
+.bridge-dashboard .dashboard-account-menu-chevron {
+  width: var(--dashboard-account-chevron-size);
+  height: var(--dashboard-account-chevron-size);
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu {
+  background-color: #242424;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item {
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item svg {
+  color: #c8c8c8;
+}
+
+.bridge-dashboard.theme-dark .dashboard-account-menu-item:hover,
+.bridge-dashboard.theme-dark .dashboard-account-menu-item:focus-visible {
+  background: #333333;
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item:hover,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item:focus-visible {
+  background: #333333;
+  color: #ffffff;
+}
+
+.bridge-dashboard.theme-light .sidebar-project-context-menu-item-destructive {
+  color: #d70015;
+}
+
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:hover,
+.bridge-dashboard.theme-dark .sidebar-project-context-menu-item-destructive:focus-visible {
+  color: #ff453a;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-nav-link-active,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:hover,
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
+  height: var(--dashboard-sidebar-nav-height);
+  gap: var(--dashboard-sidebar-nav-gap);
+  padding-inline: var(--dashboard-sidebar-nav-padding);
+  border-radius: var(--dashboard-sidebar-item-radius, 0.5rem);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link:focus-visible {
+  outline-color: var(--dashboard-accent);
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link.sidebar-tree-child-row {
+  padding-inline-end: 2rem;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-nav-link > span:last-child {
+  font-size: var(--dashboard-account-name-size);
+}
+
+.bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article {
+  max-width: var(--dashboard-analyze-panel-width);
+}
+
+.bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone > .relative > article > div:first-child h2 {
+  font-size: var(--dashboard-analyze-title-size);
+}
+
+.bridge-dashboard .quick-analyze-input-shell,
+.bridge-dashboard .quick-analyze-submit {
+  height: var(--dashboard-analyze-control-height);
+}
+
+#root .bridge-dashboard .dashboard-home-title:not(.dashboard-site-title) {
+  font-size: clamp(2.85rem, 6.4vh, 4.9rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+#root .bridge-dashboard .dashboard-home-title.dashboard-project-title {
+  font-size: clamp(1.625rem, 1.667vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link {
+  color: var(--dashboard-sidebar-muted-text);
+  font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active {
+  background-color: var(--dashboard-sidebar-active-bg);
+  border-color: var(--dashboard-sidebar-item-active-border);
+  color: var(--dashboard-sidebar-active-text);
+  box-shadow: none;
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+  border-color: var(--dashboard-sidebar-item-hover-border);
+  color: var(--dashboard-sidebar-hover-text);
+}
+
+.bridge-dashboard.theme-light .sidebar-nav-link.sidebar-nav-link-active:hover {
+  background-color: var(--dashboard-sidebar-active-bg);
+  color: var(--dashboard-sidebar-active-text);
+}
+
+.bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-trigger:hover,
+.bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-item:hover,
+.bridge-dashboard.theme-light .dashboard-sidebar .sidebar-project-context-menu-item:hover {
+  background-color: var(--dashboard-sidebar-item-hover-bg);
+}
+
+.bridge-dashboard.theme-light .fixed.inset-0.bg-white {
+  background-color: #f8f6f2;
+}
+
+.bridge-dashboard.theme-dark .shadow-\[0_18px_42px_rgba\(15\,23\,42\,0\.10\)\] {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+}
+
+.bridge-dashboard.theme-light .project-list-table th {
+  color: #64748b;
+}
+
+.bridge-dashboard.theme-light .project-list-head {
+  background-color: var(--project-table-head-bg);
+  border-color: rgba(226, 232, 240, 0.8);
+}
+
+.bridge-dashboard.theme-light .project-list-row:hover {
+  background-color: var(--project-table-row-hover-bg);
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge {
+  border: none;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-finished {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-running {
+  background-color: rgba(14, 165, 233, 0.1);
+  color: #0284c7;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-failed {
+  background-color: rgba(244, 63, 94, 0.1);
+  color: #e11d48;
+}
+
+.bridge-dashboard.theme-light .project-list-table .site-status-badge-idle {
+  background-color: #f1f5f9;
+  color: #64748b;
+}
+
+.bridge-dashboard.theme-light .project-list-icon-action:hover {
+  background-color: rgba(15, 23, 42, 0.065);
+}
+
+.bridge-dashboard.theme-light .project-list-table td,
+.bridge-dashboard.theme-light .project-list-table p,
+.bridge-dashboard.theme-light .project-list-table span,
+.bridge-dashboard.theme-light .project-list-table button {
+  color: var(--dashboard-text-primary);
+}
+
+.bridge-dashboard.theme-light .project-list-table .project-list-updated {
+  color: var(--dashboard-text-secondary);
+}
+
+.bridge-dashboard.theme-dark .project-list-table th,
+.bridge-dashboard.theme-dark .project-list-table td,
+.bridge-dashboard.theme-dark .project-list-table p,
+.bridge-dashboard.theme-dark .project-list-table span,
+.bridge-dashboard.theme-dark .project-list-table button {
+  color: var(--dashboard-text-primary);
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge {
+  border: none;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-finished {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-running {
+  background-color: rgba(14, 165, 233, 0.1);
+  color: #38bdf8;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-failed {
+  background-color: rgba(244, 63, 94, 0.1);
+  color: #fb7185;
+}
+
+.bridge-dashboard.theme-dark .project-list-table .site-status-badge-idle {
+  background-color: rgba(148, 163, 184, 0.14);
+  color: #94a3b8;
+}
+
+.bridge-dashboard.theme-dark .project-list-head {
+  background-color: var(--project-table-head-bg);
+  border-color: var(--dashboard-nested-border);
+}
+
+.bridge-dashboard.theme-dark .project-list-table .project-list-updated {
+  color: var(--dashboard-text-muted);
+}

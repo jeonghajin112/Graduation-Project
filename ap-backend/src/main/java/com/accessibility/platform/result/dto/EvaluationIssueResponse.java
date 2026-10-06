@@ -1,0 +1,21 @@
+package com.accessibility.platform.result.dto;
+
+import java.time.LocalDateTime;
+
+public record EvaluationIssueResponse(
+        Long id,
+        Long requestId,
+        String module,
+        String severity,
+        String title,
+        String description,
+        String recommendation,
+        String selector,
+        String wcagCode,
+        IssueLocatorResponse locator,
+        LocalDateTime createdAt,
+        String ruleId,
+        // AD, DYNAMIC or POPUP for findings that are reported but not scored.
+        String exclusionReason
+) {
+}

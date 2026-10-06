@@ -1,0 +1,87 @@
+export type ScrollWorldAction = {
+  label: string;
+  href: string;
+  action?: "enter-app";
+  section?: string;
+};
+
+export type ScrollWorldSection = {
+  id: string;
+  label: string;
+  still: string;
+  stillMobile?: string;
+  clip?: string;
+  clipMobile?: string;
+  /** 이 장면의 해상도 선택 기준. 생략하면 전역 clipVariants를 사용한다. */
+  clipVariants?: { maxDevicePx: number; suffix: string }[];
+  layout?: "full" | "card";
+  accent?: string;
+  scroll?: number;
+  linger?: number;
+  eyebrow?: string;
+  title: string;
+  body?: string;
+  tags?: string[];
+  cta?: {
+    primary?: ScrollWorldAction;
+    secondary?: ScrollWorldAction;
+  };
+};
+
+export type ScrollWorldConfig = {
+  brand?: { name: string; href: string; wordmark?: { text: string } };
+  cta?: ScrollWorldAction;
+  skipLabel?: string;
+  mainId?: string;
+  hint?: string;
+  /** Accessible name of the scroll hint button (default: 아래로 스크롤). */
+  hintLabel?: string;
+  /** Language of the visible hint text (default: en). */
+  hintLang?: string;
+  nav?: boolean;
+  /** false: the page renders its own skip link and header; the engine adds neither. */
+  chrome?: boolean;
+  /** false 면 오른쪽 세로 진행 레일(장면 점)을 숨긴다 */
+  route?: boolean;
+  /** 필름 아래 일반 섹션으로 가는 추가 내비 링크 */
+  navLinks?: { label: string; href: string }[];
+  showSectionNumbers?: boolean;
+  mobileVideo?: boolean;
+  /** 해상도 등급: 뷰포트 디바이스 픽셀 폭이 maxDevicePx 이하이면 클립 파일명에 suffix 를 붙여 로드 */
+  clipVariants?: { maxDevicePx: number; suffix: string }[];
+  diveScroll?: number;
+  /** Cap the scroll unit independently of the displayed viewport height. */
+  maxScrollHeight?: number;
+  connScroll?: number;
+  crossfade?: number;
+  atmosphere?: boolean;
+  card?: {
+    width?: number;
+    right?: number;
+    radius?: number;
+    in?: number;
+    maxH?: number;
+  };
+  sections: ScrollWorldSection[];
+  connectors?: Array<string | null>;
+  connectorsMobile?: Array<string | null>;
+};
+
+export type ScrollWorldOptions = {
+  onEnterApp?: () => void;
+  subscribeScroll?: (listener: () => void) => (() => void) | void;
+  /** Document offset where the film starts when it sits below other page content. */
+  scrollOffset?: () => number;
+  /** Before the film starts: true keeps its layers hidden, otherwise the first frame sits in the page flow. */
+  hideBeforeStart?: () => boolean;
+  /** Receives the skip link and topbar so they sit outside the page's main landmark. */
+  chromeContainer?: HTMLElement | null;
+  /** The page supplies its own <main id={config.mainId}>; the copy layer becomes a plain div. */
+  externalMain?: boolean;
+};
+
+export function mountScrollWorld(
+  container: HTMLElement,
+  config: ScrollWorldConfig,
+  options?: ScrollWorldOptions
+): () => void;

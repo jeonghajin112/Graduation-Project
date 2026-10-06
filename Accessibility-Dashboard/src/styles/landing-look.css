@@ -1,0 +1,85 @@
+/* 라이브 리포트 자세히 보기. 크기는 --ua-pixel(1920px 이하 1px, 큰 화면은 landing-large-screen.css가 확대) 배수로 적는다. */
+.ua-look {
+  --lp: var(--ua-pixel, 1px);
+  position: relative;
+  z-index: var(--z-landing-section);
+  background: #f5f5f7;
+  color: #1c222b;
+  font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ua-look__inner { box-sizing: border-box; max-width: calc(1240 * var(--lp)); margin: 0 auto; padding: clamp(calc(80 * var(--lp)), 8vw, calc(128 * var(--lp))) clamp(calc(24 * var(--lp)), 5vw, calc(64 * var(--lp))); }
+.ua-look__eyebrow { margin: 0 0 calc(8 * var(--lp)); color: #626973; font-size: calc(21 * var(--lp)); font-weight: 600; }
+.ua-look__title { margin: 0; font-size: clamp(calc(34 * var(--lp)), 4.2vw, calc(56 * var(--lp))); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; word-break: keep-all; }
+.ua-look__body { display: grid; grid-template-columns: minmax(calc(260 * var(--lp)), calc(340 * var(--lp))) minmax(0, 1fr); align-items: center; gap: calc(48 * var(--lp)); margin-top: calc(56 * var(--lp)); }
+
+.ua-look__pills { display: flex; flex-direction: column; align-items: flex-start; gap: calc(12 * var(--lp)); }
+.ua-look__pill { box-sizing: border-box; display: grid; grid-template-columns: calc(22 * var(--lp)) minmax(0, auto); align-items: start; column-gap: calc(12 * var(--lp)); max-width: 100%; padding: calc(15 * var(--lp)) calc(22 * var(--lp)) calc(15 * var(--lp)) calc(15 * var(--lp)); border: 0; border-radius: calc(28 * var(--lp)); background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .25s, border-radius .3s; }
+.ua-look__pill:hover { background: #fafafc; }
+.ua-look__pill.is-active { border-radius: calc(24 * var(--lp)); background: #fff; }
+.ua-look__pill:focus-visible { outline: 2px solid #0071e3; outline-offset: 3px; }
+.ua-look__pill-icon { display: grid; place-items: center; width: calc(22 * var(--lp)); height: calc(22 * var(--lp)); margin-top: calc(3 * var(--lp)); border-radius: 50%; background: #0071e3; color: #fff; transition: transform .35s ease; }
+.ua-look__pill-icon svg { width: calc(12 * var(--lp)); height: calc(12 * var(--lp)); stroke-width: 2.4; }
+.ua-look__pill.is-active .ua-look__pill-icon { transform: rotate(45deg); }
+.ua-look__pill-title { font-size: calc(17 * var(--lp)); font-weight: 650; line-height: calc(28 * var(--lp)); word-break: keep-all; }
+/* 펼침 높이는 grid 0fr → 1fr 로 바꿔 내용 길이에 맞춘다. */
+.ua-look__pill-description { grid-column: 2; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s ease, margin .3s ease; }
+.ua-look__pill-clip { overflow: hidden; color: #626973; font-size: calc(15 * var(--lp)); font-weight: 400; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+.ua-look__pill-clip b { color: #1c222b; font-weight: 600; }
+.ua-look__pill.is-active .ua-look__pill-description { grid-template-rows: 1fr; margin-top: calc(6 * var(--lp)); }
+
+.ua-look__panel { min-width: 0; }
+.ua-look__video { display: block; width: 100%; aspect-ratio: 16 / 10.4; object-fit: cover; border-radius: calc(20 * var(--lp)); box-shadow: 0 calc(2 * var(--lp)) calc(6 * var(--lp)) rgba(0,0,0,.04), 0 calc(18 * var(--lp)) calc(48 * var(--lp)) rgba(0,0,0,.1); }
+
+/* 넓은 화면: 섹션이 스크롤 구간(항목당 반 화면)을 지나는 동안 내용은 상단바 아래에 고정되고,
+   스크롤 위치에 따라 항목이 차례로 펼쳐진다 (landing-look-section.tsx).
+   배치는 바로 위 스크롤 필름(scroll-world-engine.js applyCard)과 맞춘다: 글은 왼쪽 칸(필름 문구와 같은 여백·폭),
+   화면은 오른쪽에서 세로 가운데에 놓이고 폭은 화면 폭의 54%(1280px 미만은 48%), 높이는 화면의 82% 이하, 오른쪽 여백은 4%. */
+@media (min-width: 901px) {
+  .ua-look { height: calc(100vh + 5 * 50vh); }
+  .ua-look__inner {
+    --ua-look-pad-block: clamp(calc(24 * var(--lp)), 4vh, calc(64 * var(--lp)));
+    position: sticky;
+    top: calc(52 * var(--lp));
+    display: grid;
+    grid-template-columns: clamp(calc(340 * var(--lp)), 24vw, calc(460 * var(--lp))) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    column-gap: calc(48 * var(--lp));
+    max-width: none;
+    min-height: calc(100vh - 52 * var(--lp));
+    padding: var(--ua-look-pad-block) 4vw var(--ua-look-pad-block) clamp(calc(24 * var(--lp)), 5vw, calc(64 * var(--lp)));
+  }
+  .ua-look__head { grid-column: 1; grid-row: 1; }
+  .ua-look__title { font-size: clamp(calc(30 * var(--lp)), 2.8vw, calc(56 * var(--lp))); text-wrap: balance; }
+  .ua-look__body { display: contents; }
+  .ua-look__pills { grid-column: 1; grid-row: 2; margin-top: clamp(calc(16 * var(--lp)), 3vh, calc(32 * var(--lp))); }
+  .ua-look__panel {
+    --ua-look-film-width: min(54vw, 82vh * 16 / 9);
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: end;
+    width: min(var(--ua-look-film-width), (100vh - 52 * var(--lp) - 2 * var(--ua-look-pad-block)) * 16 / 10.4);
+  }
+  .ua-look__video { border-radius: calc(24 * var(--lp)); }
+}
+@media (min-width: 901px) and (max-width: 1279px) {
+  .ua-look__panel { --ua-look-film-width: min(48vw, 82vh * 16 / 9); }
+}
+/* 낮은 노트북 화면: 왼쪽 칸이 한 화면을 넘지 않도록 항목 간격을 줄인다 */
+@media (min-width: 901px) and (max-height: 800px) {
+  .ua-look__pills { gap: calc(8 * var(--lp)); }
+  .ua-look__pill { padding-block: calc(11 * var(--lp)); }
+}
+@media (max-width: 900px) {
+  .ua-look__body { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .ua-look__panel { order: -1; }
+  .ua-look__pills { align-items: stretch; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ua-look * { transition: none !important; }
+}
+@media (forced-colors: active) {
+  .ua-look__pill { border: 1px solid CanvasText; }
+}

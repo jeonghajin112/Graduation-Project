@@ -1,0 +1,48 @@
+package com.accessibility.platform.request.repository;
+
+import com.accessibility.platform.organization.domain.OrganizationStatus;
+import com.accessibility.platform.request.domain.EvaluationRequest;
+import com.accessibility.platform.target.domain.TargetStatus;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface EvaluationRequestRepository extends JpaRepository<EvaluationRequest, Long> {
+    List<EvaluationRequest> findByEvaluationTargetId(Long evaluationTargetId);
+    @Query("select request from EvaluationRequest request join fetch request.evaluationTarget target join fetch target.organization where request.id in :ids")
+    List<EvaluationRequest> findStatusRequests(@Param("ids") List<Long> ids);
+    List<EvaluationRequest> findByEvaluationTargetIdAndStatusIn(Long evaluationTargetId,
+            List<com.accessibility.platform.request.domain.EvaluationRequestStatus> statuses);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select request from EvaluationRequest request where request.id = :id")
+    Optional<EvaluationRequest> findByIdForUpdate(@Param("id") Long id);
+
+    @Query("select request.id from EvaluationRequest request where request.status in :statuses and request.requestedAt < :before order by request.id")
+    List<Long> findIdsByStatusInAndRequestedAtBefore(
+            @Param("statuses") List<com.accessibility.platform.request.domain.EvaluationRequestStatus> statuses,
+            @Param("before") java.time.LocalDateTime before
+    );
+
+    @Query("select request.evaluationTarget.accessUrl from EvaluationRequest request where request.id = :id")
+    Optional<String> findTargetUrlById(@Param("id") Long id);
+
+    @Query("""
+            select evaluationRequest
+            from EvaluationRequest evaluationRequest
+            join fetch evaluationRequest.evaluationTarget target
+            join fetch target.organization organization
+            where organization.status = :organizationStatus
+              and target.status = :targetStatus
+            order by evaluationRequest.updatedAt asc, evaluationRequest.id asc
+            """)
+    List<EvaluationRequest> findDashboardRequests(
+            @Param("organizationStatus") OrganizationStatus organizationStatus,
+            @Param("targetStatus") TargetStatus targetStatus
+    );
+}

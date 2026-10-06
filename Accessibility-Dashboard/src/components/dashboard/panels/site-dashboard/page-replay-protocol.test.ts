@@ -1,0 +1,741 @@
+import { describe, expect, it } from "vitest";
+
+import type { AnalyzerType, IssueResultModel } from "@/types/accessibility-domain";
+
+import {
+  DASHBOARD_REPLAY_SOURCE,
+  PAGE_REPLAY_SOURCE,
+  REPLAY_BRIDGE_LIMITS,
+  REPLAY_VIEW_SCALE_MIN,
+  REPLAY_VISUAL_WIDTH_MAX,
+  classifyReplayIssueCategory,
+  formatIssueDescription,
+  isMeaningfulLiveDocumentHealth,
+  isValidReplayViewportMetrics,
+  parsePageReplayMessage,
+  parseLegacyTextAnalysisMessage,
+  toPageReplayIssue
+} from "./page-replay-protocol";
+import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
+import { getReplayIssuePathSteps } from "./issue-locator";
+import { getLocatorExplanation } from "./locator-explanation";
+import type { RecentIssueRow } from "./types";
+
+describe("report keyboard exits", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT", documentToken: "live_document", direction: "forward" };
+  it.each(["forward", "backward"])("accepts a bounded %s exit", direction => {
+    expect(parsePageReplayMessage({ ...message, direction })).toEqual({ ...message, direction });
+  });
+  it.each([{direction: "up"}, {direction: null}, {documentToken: ""}, {selector: "#outside"}])(
+    "rejects malformed focus events %j", patch => {
+      expect(parsePageReplayMessage({...message, ...patch})).toBeNull();
+    });
+});
+
+describe("live document scroll state", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL", documentToken: "live_document", isScrolled: true };
+  it("accepts both scrolled and restored states", () => {
+    expect(parsePageReplayMessage(message)).toEqual(message);
+    expect(parsePageReplayMessage({ ...message, isScrolled: false })).toEqual({ ...message, isScrolled: false });
+  });
+  it.each([{ isScrolled: 1 }, { isScrolled: "true" }, { isScrolled: null }, { documentToken: "" }, { extra: true }])(
+    "rejects malformed scroll events %j", patch => {
+      expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
+    }
+  );
+});
+
+describe("live document titles", () => {
+  const message = { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE", documentToken: "live_document", title: "홍익대학교 | 공식 홈페이지" };
+  it("accepts document titles and explicitly empty titles", () => {
+    expect(parsePageReplayMessage(message)).toEqual(message);
+    expect(parsePageReplayMessage({ ...message, title: " " })).toEqual({ ...message, title: "" });
+  });
+  it.each([{ title: "x".repeat(301) }, { title: null }, { title: 42 }, { documentToken: "" }, { extra: true }])(
+    "rejects malformed title events %j", patch => {
+      expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
+    }
+  );
+});
+
+describe("blocked form notifications", () => {
+  const message = {
+    source: PAGE_REPLAY_SOURCE,
+    type: "FORM_BLOCKED",
+    documentToken: "live_document",
+    method: "POST"
+  };
+
+  it.each(["GET", "POST", "DIALOG"])("accepts the producer's %s method without treating it as connection failure", (method) => {
+    expect(parsePageReplayMessage({ ...message, method })).toEqual({ ...message, method });
+  });
+
+  it.each([
+    { method: "DELETE" }, { method: "post" }, { method: 1 }, { method: undefined },
+    { documentToken: "" }, { source: DASHBOARD_REPLAY_SOURCE }, { extra: true }
+  ])("rejects a malformed blocked-form payload: %j", (override) => {
+    expect(parsePageReplayMessage({ ...message, ...override })).toBeNull();
+  });
+});
+
+function classify(issueCode: string, analyzerType?: AnalyzerType, issueTitle = "접근성 문제") {
+  const issue: IssueResultModel = {
+    id: 1,
+    analysisResultId: 1,
+    issueCode,
+    issueTitle,
+    severity: "LOW",
+    locationPath: "#target",
+    message: "",
+    resolved: false,
+    createdAt: "2026-08-31T00:00:00",
+    updatedAt: "2026-08-31T00:00:00"
+  };
+
+  return classifyReplayIssueCategory({ issue, analyzerType });
+}
+
+function replayIssue(
+  message: string,
+  analyzerType: AnalyzerType = "AI_TEXT",
+  locator?: IssueResultModel["locator"]
+) {
+  const issue: IssueResultModel = {
+    id: 7,
+    analysisResultId: 2,
+    issueCode: "WCAG 3.1.5",
+    issueTitle: "읽기 수준",
+    severity: "LOW",
+    locationPath: "#target",
+    ...(locator !== undefined ? { locator } : {}),
+    message,
+    resolved: false,
+    createdAt: "2026-08-31T00:00:00",
+    updatedAt: "2026-08-31T00:00:00"
+  };
+  const row: RecentIssueRow = {
+    issue,
+    severity: { key: "LOW", label: "낮음", color: "#027a48" },
+    analyzerType
+  };
+  return toPageReplayIssue(row);
+}
+
+describe("replay marker issue category", () => {
+  it("prioritizes the analyzer module over an ambiguous KWCAG code", () => {
+    expect(classify("6.4.3", "AI_TEXT", "긴 링크 텍스트")).toBe("text");
+    expect(classify("7.3.2", "AI_TEXT", "긴 레이블 텍스트")).toBe("text");
+    expect(classify("5.4.3", "CV_VISION", "시각 명도 대비")).toBe("visual");
+  });
+
+  it.each([
+    ["5.1.1", "media"],
+    ["5.4.3", "visual"],
+    ["6.1.3", "interaction"],
+    ["6.4.3", "navigation"],
+    ["7.3.2", "form"],
+    ["8.1.1", "structure"]
+  ] as const)("maps rule-based KWCAG %s to %s", (code, category) => {
+    expect(classify(code, "RULE_BASED")).toBe(category);
+  });
+
+  it("supports legacy text codes and a safe unknown fallback", () => {
+    expect(classify("TEXT_DIFFICULTY")).toBe("text");
+    expect(classify("UNMAPPED_ENGINE_RULE", undefined, "알 수 없는 문제")).toBe("general");
+  });
+});
+
+describe("replay locator adaptation", () => {
+  it("forwards a validated carousel state and drops malformed state hints", () => {
+    const valid = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 1, slideCount: 4 }
+    });
+    const invalid = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 4, slideCount: 4 }
+    });
+    const oversized = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      carouselContext: { carouselId: 3, slideIndex: 1, slideCount: 10_001 }
+    });
+
+    expect(valid.carouselContext).toEqual({ carouselId: 3, slideIndex: 1, slideCount: 4 });
+    expect(invalid.carouselContext).toBeNull();
+    expect(oversized.carouselContext).toBeNull();
+  });
+
+  it("sends coordinate-only findings as a box instead of a coordinate label selector", () => {
+    const locator = {
+      pathSteps: [], x: 803, y: 13, width: 39, height: 12, coordinateSpace: "SCREENSHOT_PX"
+    };
+    const issue = replayIssue("text=다운로드", "CV_VISION", locator);
+    expect(issue.box).toEqual({ x: 803, y: 13, width: 39, height: 12 });
+    expect(issue.pathSteps).toEqual([]);
+    expect(issue.path).toBeNull();
+
+    const row: RecentIssueRow = {
+      issue: { id: 8, analysisResultId: 2, issueCode: "5.4.3", issueTitle: "명도 대비", severity: "HIGH",
+        locationPath: "x=803, y=13, width=39, height=12", locator, message: "", resolved: false,
+        createdAt: "2026-08-31T00:00:00", updatedAt: "2026-08-31T00:00:00" },
+      severity: { key: "HIGH", label: "높음", color: "#fb8a3d" },
+      analyzerType: "CV_VISION"
+    };
+    expect(toPageReplayIssue(row, 2).box).toEqual({ x: 401.5, y: 6.5, width: 19.5, height: 6 });
+    expect(getReplayIssuePathSteps(row.issue)).toEqual([]);
+  });
+
+  it("sends the analysed content of the element a visual finding was located on", () => {
+    const locator = {
+      pathSteps: [{ context: "DOCUMENT", selector: "#feed > a:nth-of-type(1) > img" }],
+      x: 140, y: 130, width: 20, height: 10, coordinateSpace: "DOCUMENT_CSS_PX",
+      content: { text: "", image: "/thumb/1.jpg?type=f" }
+    };
+    const issue = replayIssue("text=감량", "CV_VISION", locator);
+    expect(issue.pathSteps).toEqual([{ context: "DOCUMENT", selector: "#feed > a:nth-of-type(1) > img" }]);
+    expect(issue.box).toBeNull();
+    expect(issue.content).toEqual({ text: "", image: "/thumb/1.jpg?type=f" });
+
+    // Content without an element path has nothing to compare against.
+    expect(replayIssue("text=감량", "CV_VISION", { ...locator, pathSteps: [] }).content).toBeNull();
+    expect(replayIssue("", "CV_VISION", { ...locator, content: { text: "가".repeat(201), image: null } }).content)
+      .toBeNull();
+    expect(replayIssue("", "RULE_BASED", { pathSteps: locator.pathSteps }).content).toBeNull();
+  });
+
+  it("keeps DOM paths and ignores unusable coordinate boxes", () => {
+    const withPath = replayIssue("", "RULE_BASED", {
+      pathSteps: [{ context: "DOCUMENT", selector: "#target" }],
+      x: 10, y: 10, width: 20, height: 20, coordinateSpace: "DOCUMENT_CSS_PX"
+    });
+    expect(withPath.box).toBeNull();
+    expect(withPath.path).toBe("#target");
+    for (const locator of [
+      { pathSteps: [], x: 10, y: 10, width: 0, height: 20, coordinateSpace: "SCREENSHOT_PX" },
+      { pathSteps: [], x: 10, y: 10, width: 20, height: 20, coordinateSpace: null },
+      { pathSteps: [], x: null, y: 10, width: 20, height: 20, coordinateSpace: "SCREENSHOT_PX" }
+    ]) {
+      const issue = replayIssue("", "CV_VISION", locator);
+      expect(issue.box).toBeNull();
+      // Without a usable box the stored path text stays the legacy fallback.
+      expect(issue.pathSteps).toEqual([{ context: "DOCUMENT", selector: "#target" }]);
+    }
+  });
+});
+
+describe("locator explanation", () => {
+  it("describes coordinate-placed markers as approximate", () => {
+    expect(getLocatorExplanation({ status: "VISIBLE" }, { coordinateOnly: true }).label).toBe("분석 당시 좌표에 표시");
+    expect(getLocatorExplanation({ status: "OFFSCREEN" }, { coordinateOnly: true }).label).toBe("분석 당시 좌표에 표시");
+    expect(getLocatorExplanation({ status: "VISIBLE" }).label).toBe("현재 화면에서 찾음");
+    expect(getLocatorExplanation({ status: "UNAVAILABLE", reason: "EMPTY_PATH" }, { coordinateOnly: true }).label)
+      .toBe("요소 경로 없음");
+  });
+});
+
+describe("replay document and issue messages", () => {
+  it.each(["DOCUMENT_LOADING", "DOCUMENT_UNLOADING", "READY"] as const)(
+    "accepts %s only with an exact, bounded document identity",
+    (type) => {
+      const message = { source: PAGE_REPLAY_SOURCE, type, documentToken: "doc_501" };
+      expect(parsePageReplayMessage(message)).toEqual(message);
+
+      for (const overrides of [
+        { documentToken: undefined },
+        { documentToken: "" },
+        { documentToken: "bad token" },
+        { documentToken: "a".repeat(129) },
+        { source: DASHBOARD_REPLAY_SOURCE },
+        { unexpected: true }
+      ]) {
+        expect(parsePageReplayMessage({ ...message, ...overrides })).toBeNull();
+      }
+    }
+  );
+
+  it.each(["ISSUE_SELECTED", "ISSUE_DETAIL_FALLBACK"] as const)(
+    "accepts %s as an id or explicit clear, never viewer-supplied content",
+    (type) => {
+      const message = { source: PAGE_REPLAY_SOURCE, type, documentToken: "doc_501", issueId: 42 };
+      expect(parsePageReplayMessage(message)).toEqual(message);
+      expect(parsePageReplayMessage({ ...message, issueId: null })).toEqual({ ...message, issueId: null });
+
+      for (const issueId of [undefined, "42", 0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+        expect(parsePageReplayMessage({ ...message, issueId })).toBeNull();
+      }
+      expect(parsePageReplayMessage({ ...message, documentToken: undefined })).toBeNull();
+      expect(parsePageReplayMessage({ ...message, documentToken: "bad token" })).toBeNull();
+      expect(parsePageReplayMessage({ ...message, title: "Untrusted viewer content" })).toBeNull();
+    }
+  );
+});
+
+describe("replay locator status messages", () => {
+  it("accepts legacy and render-aware locator status contracts", () => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9001",
+      issueId: 9001,
+      status: "CONNECTED"
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9001",
+      issueId: 9001,
+      status: "CONNECTED"
+    });
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9002",
+      issueId: 9002,
+      status: "UNAVAILABLE",
+      reason: "SELECTOR_NOT_FOUND"
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9002",
+      issueId: 9002,
+      status: "UNAVAILABLE",
+      reason: "SELECTOR_NOT_FOUND"
+    });
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9003",
+      issueId: 9003,
+      status: "HIDDEN_STATE",
+      reason: "CAROUSEL_STATE_AVAILABLE",
+      recoverable: true
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9003",
+      issueId: 9003,
+      status: "HIDDEN_STATE",
+      reason: "CAROUSEL_STATE_AVAILABLE",
+      recoverable: true
+    });
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9005",
+      issueId: 9005,
+      status: "VISIBLE",
+      reason: "SCREEN_READER_ONLY",
+      ownerKind: "BUTTON"
+    })).toMatchObject({ status: "VISIBLE", reason: "SCREEN_READER_ONLY", ownerKind: "BUTTON" });
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_9006",
+      issueId: 9006,
+      status: "VISIBLE",
+      ownerKind: "WINDOW"
+    })).toBeNull();
+    for (const status of ["VISIBLE", "OFFSCREEN"] as const) {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE,
+        type: "LOCATOR_STATUS",
+        documentToken: "doc_9004",
+        issueId: 9004,
+        status
+      })).toMatchObject({ type: "LOCATOR_STATUS", status });
+    }
+  });
+
+  it.each([
+    { issueId: 9001, status: "OTHER" },
+    { issueId: 0, status: "UNAVAILABLE" },
+    { issueId: 1.5, status: "UNAVAILABLE" },
+    { issueId: 9001, status: "UNAVAILABLE", documentToken: "bad token" },
+    { issueId: 9001, status: "UNAVAILABLE", reason: 42 },
+    { issueId: 9001, status: "VISIBLE", recoverable: true },
+    { issueId: 9001, status: "HIDDEN_STATE", recoverable: "yes" },
+    { issueId: 9001, status: "UNAVAILABLE", extra: true }
+  ])("rejects malformed locator status payload %#", (overrides) => {
+    const payload: Record<string, unknown> = {
+      source: PAGE_REPLAY_SOURCE,
+      type: "LOCATOR_STATUS",
+      documentToken: "doc_valid",
+      issueId: 9001,
+      status: "UNAVAILABLE"
+    };
+    Object.assign(payload, overrides);
+    expect(parsePageReplayMessage(payload)).toBeNull();
+  });
+});
+
+describe("live document health messages", () => {
+  it.each(["EMPTY", "MEANINGFUL"] as const)(
+    "accepts an exact %s visible-content report",
+    (status) => {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE,
+        type: "DOCUMENT_HEALTH",
+        documentToken: "live_doc_501",
+        status,
+        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
+        visibleControlCount: 0,
+        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
+        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
+        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
+        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
+      })).toEqual({
+        source: PAGE_REPLAY_SOURCE,
+        type: "DOCUMENT_HEALTH",
+        documentToken: "live_doc_501",
+        status,
+        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
+        visibleControlCount: 0,
+        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
+        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
+        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
+        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
+      });
+    }
+  );
+
+  it.each([
+    { status: "UNKNOWN" },
+    { consecutiveMeaningfulSamples: -1 },
+    { visibleControlCount: 1.5 },
+    { visibleElementCount: -1 },
+    { visibleImageCount: 1.5 },
+    { largestVisibleVisualArea: 1.5 },
+    { largestVisibleVisualArea: 1_000_001 },
+    { visibleTextLength: Number.POSITIVE_INFINITY },
+    { visibleTextLength: 1_000_001 },
+    { unexpected: true }
+  ])("rejects malformed document health payload %#", (overrides) => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_501",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 12,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 24_000,
+      visibleTextLength: 48,
+      ...overrides
+    })).toBeNull();
+  });
+
+  it("requires the complete exact health contract", () => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_legacy",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      visibleTextLength: 0
+    })).toBeNull();
+  });
+
+  it("accepts the first substantive sample but rejects a small loading image", () => {
+    const loadingImage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_loader",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 8,
+      visibleControlCount: 0,
+      visibleElementCount: 3,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 2_304,
+      visibleTextLength: 0
+    });
+    const visualPage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_visual",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 10_000,
+      visibleTextLength: 0
+    });
+    const unstableVisualPage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_visual_loading",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 1,
+      visibleControlCount: 0,
+      visibleElementCount: 2,
+      visibleImageCount: 1,
+      largestVisibleVisualArea: 40_000,
+      visibleTextLength: 0
+    });
+    const substantivePage = parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE,
+      type: "DOCUMENT_HEALTH",
+      documentToken: "live_doc_page",
+      status: "MEANINGFUL",
+      consecutiveMeaningfulSamples: 4,
+      visibleControlCount: 0,
+      visibleElementCount: 6,
+      visibleImageCount: 0,
+      largestVisibleVisualArea: 0,
+      visibleTextLength: 40
+    });
+
+    expect(loadingImage?.type).toBe("DOCUMENT_HEALTH");
+    expect(loadingImage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(loadingImage)).toBe(false);
+    expect(unstableVisualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(unstableVisualPage)).toBe(true);
+    expect(visualPage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(visualPage)).toBe(true);
+    expect(substantivePage?.type === "DOCUMENT_HEALTH" && isMeaningfulLiveDocumentHealth(substantivePage)).toBe(true);
+  });
+});
+
+describe("replay viewport scale contract", () => {
+  it("accepts bounded finite viewport metrics and exposes the dashboard message shape", () => {
+    const message = {
+      source: DASHBOARD_REPLAY_SOURCE,
+      type: "SET_VIEW_SCALE",
+      documentToken: "doc_390",
+      scale: 0.3047,
+      visualWidth: 390
+    } satisfies DashboardToPageReplayMessage;
+
+    expect(isValidReplayViewportMetrics(message)).toBe(true);
+    expect(isValidReplayViewportMetrics({
+      scale: REPLAY_VIEW_SCALE_MIN,
+      visualWidth: REPLAY_VISUAL_WIDTH_MAX
+    })).toBe(true);
+  });
+
+  it.each([
+    { scale: 0, visualWidth: 390 },
+    { scale: REPLAY_VIEW_SCALE_MIN / 2, visualWidth: 390 },
+    { scale: 1.01, visualWidth: 390 },
+    { scale: Number.NaN, visualWidth: 390 },
+    { scale: 0.5, visualWidth: 0 },
+    { scale: 0.5, visualWidth: REPLAY_VISUAL_WIDTH_MAX + 1 },
+    { scale: 0.5, visualWidth: Number.POSITIVE_INFINITY }
+  ])("rejects unsafe metrics %#", (metrics) => {
+    expect(isValidReplayViewportMetrics(metrics)).toBe(false);
+  });
+});
+
+describe("legacy AI text issue presentation", () => {
+  it("keeps full local explanations while retaining every replay field and total limit", () => {
+    const sourceText = `${"가".repeat(820)}원문 끝`;
+    const suggestion = `${"쉬운 표현을 사용하세요. ".repeat(50)}개선 제안 마지막 안내`;
+    const revisionText = `${"나".repeat(810)}수정 예시 끝`;
+    const revisionReason = `${"다".repeat(510)}수정 이유 끝`;
+    const message = [
+      `text=${sourceText}`,
+      `flags=${JSON.stringify(Array.from({ length: 14 }, (_, index) => `${index}: ${"라".repeat(325)}지적 끝`))}`,
+      `suggestions=${JSON.stringify([suggestion, "두 번째", "세 번째", "네 번째", "다섯 번째 안내"])}`,
+      `llm_revision=${JSON.stringify({ revised_text: revisionText, reason: revisionReason, model: "internal-model" })}`
+    ].join("\n");
+    const fullDescription = formatIssueDescription(message, "AI_TEXT");
+    for (const text of [sourceText, suggestion, revisionText, revisionReason, "13: ", "다섯 번째 안내"]) {
+      expect(fullDescription).toContain(text);
+    }
+    expect(fullDescription).not.toMatch(/(?:text|flags|suggestions|llm_revision)=|internal-model/);
+    const replay = parseLegacyTextAnalysisMessage(message)!;
+    expect(replay.sourceText).toHaveLength(800);
+    expect(replay.flags.length).toBeLessThanOrEqual(12);
+    expect(replay.flags.every(flag => flag.length <= 320)).toBe(true);
+    expect(replay.suggestions.length).toBeLessThanOrEqual(4);
+    expect(replay.suggestions.every(guide => guide.length <= 600)).toBe(true);
+    expect(replay.revision?.text.length ?? 0).toBeLessThanOrEqual(800);
+    expect(replay.revision?.reason.length ?? 0).toBeLessThanOrEqual(500);
+    expect(replay.sourceText.length + replay.flags.join("").length + replay.suggestions.join("").length
+      + (replay.revision?.text.length ?? 0) + (replay.revision?.reason.length ?? 0)).toBe(2400);
+    expect(replayIssue(message).message.length).toBeLessThanOrEqual(1600);
+  });
+
+  it("formats long local AI messages without exposing internal revision fields", () => {
+    const sourceText = `${"가".repeat(16_384)}긴 원문 끝`;
+    const message = `text=${sourceText}\nflags=[]\nllm_revision={"reason":"마지막 수정 이유","model":"internal-model"}`;
+    expect(formatIssueDescription(message, "AI_TEXT")).toContain(sourceText);
+    expect(formatIssueDescription(message, "AI_TEXT")).toContain("마지막 수정 이유");
+    expect(formatIssueDescription(message, "AI_TEXT")).not.toContain("internal-model");
+    expect(parseLegacyTextAnalysisMessage(message)).toBeNull();
+  });
+
+  it("turns raw text, flags, suggestions, and revision fields into bounded sections", () => {
+    const message = [
+      "text=건축학부 제70회 졸업 전시회 개최",
+      'flags=["어려운 어휘 과다: 쉬운 단어 비율 40.0%","어려운 어휘 과다: 쉬운 단어 비율 40.0%"]',
+      "suggestions=어려운 표현을 쉬운 단어로 바꾸고 문장을 짧게 나누세요.",
+      'llm_revision={"revised_text":"건축학부 졸업 전시회가 열립니다.","reason":"짧고 쉬운 문장으로 바꿨습니다.","model":"internal-model"}'
+    ].join("\r\n");
+
+    const issue = replayIssue(message);
+
+    expect(issue.textAnalysis).toEqual({
+      kind: "text-analysis",
+      sourceText: "건축학부 제70회 졸업 전시회 개최",
+      flags: ["어려운 어휘 과다: 쉬운 단어 비율 40.0%"],
+      suggestions: ["어려운 표현을 쉬운 단어로 바꾸고 문장을 짧게 나누세요."],
+      revision: {
+        text: "건축학부 졸업 전시회가 열립니다.",
+        reason: "짧고 쉬운 문장으로 바꿨습니다."
+      }
+    });
+    expect(issue.message).toContain("분석 문장\n건축학부 제70회 졸업 전시회 개최");
+    expect(issue.message).toContain("개선 필요\n• 어려운 어휘 과다");
+    expect(issue.message).toContain("개선 제안\n• 어려운 표현을 쉬운 단어로");
+    expect(issue.message).toContain("수정 예시\n건축학부 졸업 전시회가 열립니다.");
+    expect(issue.message).not.toContain("flags=");
+    expect(issue.message).not.toContain("internal-model");
+  });
+
+  it("uses the final line-start flags marker even when the analyzed text contains marker-like text", () => {
+    const detail = parseLegacyTextAnalysisMessage(
+      'text=안내문에 flags=예시를 표시합니다.\nflags=["문장 길이 과다"]'
+    );
+
+    expect(detail?.sourceText).toBe("안내문에 flags=예시를 표시합니다.");
+    expect(detail?.flags).toEqual(["문장 길이 과다"]);
+  });
+
+  it("preserves malformed AI messages and every non-AI message without guessing", () => {
+    const malformed = 'text=검사 문장\nflags={"unexpected":true}';
+    const mixedFlags = 'text=검사 문장\nflags=["정상",{"unexpected":true}]';
+    const malformedRevision = [
+      "text=검사 문장",
+      'flags=["문장 길이 과다"]',
+      'llm_revision={"revised_text":42,"reason":"수정 이유"}'
+    ].join("\n");
+    const malformedIssue = replayIssue(malformed);
+    const ruleIssue = replayIssue(
+      'text=규칙 설명\nflags=["원시 키가 포함된 일반 메시지"]',
+      "RULE_BASED"
+    );
+
+    expect(malformedIssue.textAnalysis).toBeNull();
+    expect(malformedIssue.message).toBe(malformed);
+    expect(parseLegacyTextAnalysisMessage(mixedFlags)).toBeNull();
+    expect(parseLegacyTextAnalysisMessage(malformedRevision)).toBeNull();
+    expect(ruleIssue.textAnalysis).toBeNull();
+    expect(ruleIssue.message).toContain("flags=");
+    expect(formatIssueDescription(malformed, "AI_TEXT")).toBe(malformed);
+    expect(formatIssueDescription(mixedFlags, "AI_TEXT")).toBe(mixedFlags);
+    expect(formatIssueDescription(malformedRevision, "AI_TEXT")).toBe(malformedRevision);
+  });
+
+  it("fails closed for duplicate section markers and oversized legacy payloads", () => {
+    const duplicateMarker = [
+      "text=첫 문장",
+      'flags=["원문에 섞인 가짜 구간"]',
+      'flags=["실제 구간"]'
+    ].join("\n");
+    const oversized = `text=${"가".repeat(16_384)}\nflags=[]`;
+
+    expect(parseLegacyTextAnalysisMessage(duplicateMarker)).toBeNull();
+    expect(parseLegacyTextAnalysisMessage(oversized)).toBeNull();
+    expect(replayIssue(oversized).message).toHaveLength(1_600);
+  });
+
+  it("caps the complete structured detail independently from individual field limits", () => {
+    const message = [
+      `text=${"가".repeat(800)}`,
+      `flags=${JSON.stringify(Array.from({ length: 12 }, (_, index) => `${index}${"나".repeat(319)}`))}`,
+      `suggestions=${"다".repeat(600)}`,
+      `llm_revision=${JSON.stringify({ revised_text: "라".repeat(800), reason: "마".repeat(500) })}`
+    ].join("\n");
+    const detail = parseLegacyTextAnalysisMessage(message);
+    const totalLength = detail
+      ? detail.sourceText.length
+        + detail.flags.join("").length
+        + detail.suggestions.join("").length
+        + (detail.revision?.text.length ?? 0)
+        + (detail.revision?.reason.length ?? 0)
+      : 0;
+
+    expect(detail).not.toBeNull();
+    expect(totalLength).toBe(2_400);
+  });
+
+  it("keeps markup-shaped analyzer content as inert text data", () => {
+    const issue = replayIssue(
+      'text=<img src=x onerror="window.__xss=1">\nflags=["<script>window.__xss=2</script>"]'
+    );
+
+    expect(issue.textAnalysis?.sourceText).toContain("<img");
+    expect(issue.textAnalysis?.flags[0]).toContain("<script>");
+    expect(issue.message).toContain("<script>");
+  });
+});
+
+describe("replay issues within the viewer bounds", () => {
+  function coordinateRow(locator: IssueResultModel["locator"]): RecentIssueRow {
+    return {
+      issue: { id: 9, analysisResultId: 2, issueCode: "5.4.3", issueTitle: "명도 대비", severity: "HIGH",
+        locationPath: "x=10, y=20, width=30, height=40", locator, message: "", resolved: false,
+        createdAt: "2026-08-31T00:00:00", updatedAt: "2026-08-31T00:00:00" },
+      severity: { key: "HIGH", label: "높음", color: "#fb8a3d" },
+      analyzerType: "CV_VISION"
+    };
+  }
+
+  it("sends an over-long path as no path instead of letting the viewer reject every issue", () => {
+    const steps = Array.from({ length: REPLAY_BRIDGE_LIMITS.pathSteps + 1 }, (_, index) => ({
+      context: "SHADOW_ROOT" as const, selector: `#step-${index}`
+    }));
+    const issue = replayIssue("", "RULE_BASED", { pathSteps: steps });
+    expect(issue.pathSteps).toEqual([]);
+    expect(issue.path).toBeNull();
+
+    const fitting = replayIssue("", "RULE_BASED", { pathSteps: steps.slice(0, REPLAY_BRIDGE_LIMITS.pathSteps) });
+    expect(fitting.pathSteps).toHaveLength(REPLAY_BRIDGE_LIMITS.pathSteps);
+  });
+
+  it("drops a box that a capture scale below one pushes past the coordinate bound", () => {
+    const row = coordinateRow({
+      pathSteps: [], x: 900_000, y: 10, width: 30, height: 40, coordinateSpace: "SCREENSHOT_PX"
+    });
+    expect(toPageReplayIssue(row, 1)?.box).toEqual({ x: 900_000, y: 10, width: 30, height: 40 });
+    const scaledDown = toPageReplayIssue(row, 0.5);
+    expect(scaledDown.box).toBeNull();
+    // The coordinate label is never sent as a selector.
+    expect(scaledDown.path).toBeNull();
+  });
+
+  it("omits coordinate boxes without leaking the coordinate label when the capture is unknown", () => {
+    const row = coordinateRow({
+      pathSteps: [], x: 10, y: 20, width: 30, height: 40, coordinateSpace: "SCREENSHOT_PX"
+    });
+    const issue = toPageReplayIssue(row, null, { omitCoordinateBox: true });
+    expect(issue.box).toBeNull();
+    expect(issue.path).toBeNull();
+    expect(issue.pathSteps).toEqual([]);
+  });
+});
+
+describe("viewer command rejections and bounded strings", () => {
+  it("accepts a rejected command notice with a plain command type only", () => {
+    expect(parsePageReplayMessage({
+      source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType: "INIT_ISSUES"
+    })).toEqual({
+      source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType: "INIT_ISSUES"
+    });
+    for (const commandType of ["", "init issues", "X".repeat(33), 3]) {
+      expect(parsePageReplayMessage({
+        source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken: "doc_1", commandType
+      })).toBeNull();
+    }
+  });
+
+  it("bounds locator reasons and blocked link addresses", () => {
+    const status = { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken: "doc_1", issueId: 1, status: "UNAVAILABLE" };
+    expect(parsePageReplayMessage({ ...status, reason: "R".repeat(128) })).not.toBeNull();
+    expect(parsePageReplayMessage({ ...status, reason: "R".repeat(129) })).toBeNull();
+    const link = { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken: "doc_1" };
+    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_048) })).not.toBeNull();
+    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_049) })).toBeNull();
+  });
+});
