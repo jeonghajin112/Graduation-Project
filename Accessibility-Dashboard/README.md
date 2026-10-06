@@ -46,7 +46,7 @@ npm run preview
 
 ## 배포 설정
 
-프로덕션 빌드(`npm run build`)는 [.env.production](.env.production)과 빌드 환경 변수를 읽는다. 다음 값을 배포 환경에 맞춘다.
+프로덕션 빌드(`npm run build`)는 빌드 환경 변수와 로컬 `.env.production` 파일(저장소에 올리지 않음)을 읽는다. 다음 값을 배포 환경에 맞춘다.
 
 | 변수 | 필수 | 설명 |
 |---|---|---|

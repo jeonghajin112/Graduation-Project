@@ -33,7 +33,7 @@ npx playwright install chromium
 | `npm run test:replay` | 실제 백엔드 rewriter를 이용한 리포트 회귀 |
 | `npm run test:backend` | 실행 중인 실제 백엔드를 사용하는 통합 검증 |
 
-`test:bundle`은 `--mode analyze`로 빌드하지만 `.env.production` 값을 그대로 읽으므로 배포 번들과 같은 환경을 측정한다. 라이브 리포트 viewer 주소만 접속하지 않는 검사용 origin(`https://viewer.bundle-check.invalid`)으로 대체한다.
+`test:bundle`은 `--mode analyze`로 빌드하지만 배포 빌드와 같은 환경 변수(`.env.production` 등)를 읽으므로 배포 번들과 같은 환경을 측정한다. 라이브 리포트 viewer 주소만 접속하지 않는 검사용 origin(`https://viewer.bundle-check.invalid`)으로 대체한다.
 
 GitHub Actions([frontend.yml](../../.github/workflows/frontend.yml))는 `lint` → `typecheck` → `npm test`를 실행하고, 별도 job에서 백엔드 fixture를 Gradle로 export하는 `test:replay`를 실행한다. `test:backend`와 `scale` suite는 실제 백엔드·대용량 fixture가 필요해 수동으로 실행한다.
 
