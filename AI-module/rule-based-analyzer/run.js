@@ -60,7 +60,7 @@ const {
 } = require('./artifact');
 const { analyzeWithCarouselStates } = require('./carousel-audit');
 const { markHiddenElements } = require('./hidden-elements');
-const { collectCvAnchors, stableCvAnchors } = require('./cv-anchors');
+const { collectCvAnchors } = require('./cv-anchors');
 const {
   addPopupViolations,
   changedContentKeys,
@@ -771,6 +771,7 @@ async function run(url, outputPath, options = {}) {
   // ── 1) 브라우저 실행 & 페이지 로드 ──
   console.log('1. 브라우저 실행 중...');
   const browser = await chromium.launch({ headless: true });
+  // 동적 영역 비교용 두 번째 로딩도 같은 설정의 새 컨텍스트에서 연다.
   const contextOptions = {
     locale: 'ko-KR',                     // 한국어 환경 강제 (Accept-Language: ko-KR)
     viewport: { width: 1280, height: 720 },  // 데스크톱 대표 해상도 고정
@@ -809,7 +810,9 @@ async function run(url, outputPath, options = {}) {
     initialSnapshot = await initialResponseCapture.value();
     await initialResponseCapture.stop();
     // The second visit that reveals changing content needs only the loaded
-    // URL. Start it now so its load and settle overlap this page's settle and
+    // URL. It runs in its own cookie-free context (see
+    // loadComparisonSignatures), so it does not depend on what this visit
+    // stored. Start it now so its load and settle overlap this page's settle and
     // health checks; it is used only if the analyzed URL stays the same.
     const earlyComparisonUrl = withoutUrlFragment(page.url());
     const earlyComparison = options.compareLoad !== false && /^https?:/i.test(earlyComparisonUrl)
@@ -966,37 +969,31 @@ async function run(url, outputPath, options = {}) {
       // and are no longer clipped to a screenshot/tile boundary.
       await revalidateAxeLocators(page, axeResults);
       console.log(`5. 캡처 메타데이터 생성: ${artifactOutput}`);
-    } finally {
-      // Chromium needs rendering tasks to advance for Page.captureScreenshot.
-      // Keeping virtual time paused until after the capture can deadlock it.
-      await releaseVirtualTime();
-    }
 
-    if (cvScreenshotPath) {
-      try {
-        const anchorsBefore = await collectCvAnchors(page);
-        // CSS/Web Animations were paused before axe. Leave their current state
-        // intact: disabling them here would finish/rewind the analyzed layout.
-        // This PNG is private CV input, never persisted evidence or ingestion.
-        const cvImage = await page.screenshot({
-          type: 'png',
-          fullPage: true,
-          caret: 'hide',
-          animations: 'allow',
-          scale: 'css',
-          timeout: 60000,
-        });
-        fs.writeFileSync(cvScreenshotPath, cvImage);
-        console.log(`   CV 전용 임시 이미지 생성: ${cvScreenshotPath}`);
-        // Timers can run again. Only associate OCR boxes with elements whose
-        // content and rectangle stayed unchanged across the capture.
-        const cvAnchorsOutput = siblingOutputPath(output, '_cv_anchors.json');
-        const anchors = stableCvAnchors(anchorsBefore, await collectCvAnchors(page));
-        fs.writeFileSync(cvAnchorsOutput, JSON.stringify(anchors), 'utf-8');
-      } catch (error) {
-        console.warn(`   CV 전용 임시 이미지 생성 실패: ${error.message}`);
+      if (cvScreenshotPath) {
+        try {
+          // This raster exists only as an inter-module CV input in the OS temp
+          // directory. It is never persisted evidence or part of ingestion.
+          const cvImage = await page.screenshot({
+            type: 'png',
+            fullPage: true,
+            caret: 'hide',
+            animations: 'disabled',
+            scale: 'css',
+            timeout: 60000,
+          });
+          fs.writeFileSync(cvScreenshotPath, cvImage);
+          console.log(`   CV 전용 임시 이미지 생성: ${cvScreenshotPath}`);
+          // Elements under CV boxes, from the same page state as the image, so
+          // CV findings can follow elements instead of screenshot coordinates.
+          const cvAnchorsOutput = siblingOutputPath(output, '_cv_anchors.json');
+          fs.writeFileSync(cvAnchorsOutput, JSON.stringify(await collectCvAnchors(page)), 'utf-8');
+        } catch (error) {
+          console.warn(`   CV 전용 임시 이미지 생성 실패: ${error.message}`);
+        }
       }
-      await revalidateAxeLocators(page, axeResults);
+    } finally {
+      await releaseVirtualTime();
     }
 
     // ── 5) 어댑터 변환: axe 결과 → KWCAG 33개 항목 ──

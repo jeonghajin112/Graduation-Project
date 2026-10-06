@@ -181,7 +181,7 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:9090/api/v1").rstrip(
 # 총점 가중치
 # 규칙 기반 50%: KWCAG 33개 항목 대부분을 커버하므로 가장 높은 비중
 # 난이도 30%: 기존 도구에 없는 독창적 기능이므로 의미 있는 비중
-# CV 20%: KWCAG 5.3.3 한 항목만 검사하므로 상대적으로 낮은 비중
+# CV 20%: KWCAG 5.4.3(텍스트 명도 대비) 한 항목만 검사하므로 상대적으로 낮은 비중
 WEIGHT_RULE_BASED = 0.50
 WEIGHT_DIFFICULTY = 0.30
 WEIGHT_CV = 0.20

@@ -108,13 +108,4 @@ async function collectCvAnchors(page) {
   }).catch(() => []);
 }
 
-function stableCvAnchors(before, after) {
-  const previous = new Map(before.map(anchor => [anchor.selector, anchor]));
-  return after.filter(anchor => {
-    const original = previous.get(anchor.selector);
-    return original && original.text === anchor.text && original.image === anchor.image
-      && ['x', 'y', 'width', 'height'].every(key => original[key] === anchor[key]);
-  });
-}
-
-module.exports = { collectCvAnchors, stableCvAnchors, MAX_SIGNATURE_TEXT_LENGTH };
+module.exports = { collectCvAnchors, MAX_SIGNATURE_TEXT_LENGTH };

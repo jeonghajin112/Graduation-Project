@@ -21,11 +21,14 @@ cd AI-module
 
 ```
 AI-module/
-├── rule-based-analyzer/     # 모듈 1: 규칙 기반 코드 분석
-├── text-level-analyzer/     # 모듈 2: 문장 난이도 + 수정 제안
-├── cv-analyzer/             # 모듈 3: 시각 명암비 분석
+├── rule-based-analyzer/     # 모듈 1: 규칙 기반 코드 분석 (Node.js, 설명서 README(rule-based).md)
+├── text-level-analyzer/     # 모듈 2: 문장 난이도 + 수정 제안 (Python, 설명서 README(text-level).md)
+├── cv-analyzer/             # 모듈 3: 시각 명암비 분석 (Python, 설명서 README(CV).md)
+├── tests/                   # run_all.py 단위 테스트 (점수 계산, 팝업 처리, CV 측정)
 ├── output/                  # 결과 파일 (실행 시 자동 생성)
 ├── run_all.py               # 통합 실행기
+├── standard_mapping.py      # 파이썬 모듈이 mapping.js의 KWCAG 대조표를 읽어 오는 다리
+├── requirements.txt         # Python 패키지 (버전 고정)
 ├── .gitignore
 └── README.md
 ```
@@ -49,8 +52,9 @@ AI-module/
 | popup-layers.js | 접속 직후 본문을 가리는 레이어 팝업을 찾아 따로 검사한 뒤 닫음 |
 | artifact.js | typed locator를 만들고 annotation을 포함한 내부 분석용 DOM snapshot 직렬화 |
 | adapter.js | axe-core 결과를 KWCAG 항목으로 매핑하는 어댑터 |
-| mapping.js | KWCAG 33개 항목의 매핑 데이터 (axe 규칙 ID, 심각도, 가중치) |
-| scorer.js | 100점 감점 방식 점수 계산 (심각도 × 가중치) |
+| mapping.js | KWCAG 33개 항목의 매핑 데이터 (axe 규칙 ID, 심각도, 가중치). `standard_mapping.py`를 거쳐 텍스트·CV 모듈도 이 표를 쓴다 |
+| scorer.js | 100점 감점 방식 점수 계산 (심각도 × 가중치 × 위반 요소 수, 등급 없음) |
+| test/ | Node 테스트 8개 파일 (`npm test`, 실제 Chromium을 띄움) |
 
 **검사 예시:** 대체 텍스트 누락, heading 구조, 색 대비, 버튼 레이블 등 KWCAG 33개 항목
 
@@ -81,12 +85,17 @@ PC에서는 숨겨진 모바일 전용 공지 목록이 대표적이며, 같은 
 | 사유 | 판정 |
 |---|---|
 | `AD` | 광고 표식(`ins.adsbygoogle`, `data-ad-slot`, `aria-label="광고"` 등)이나 광고 서버 주소의 iframe. 두 번 모두 같은 광고가 나와도 제외한다. 페이지 안에 직접 그려진 광고도 대체 텍스트나 `aria-label`이 "[광고]"로 시작하면 감싸는 링크째 제외한다(네이버 상단 헤드라인 광고) |
-| `DYNAMIC` | 쿠키를 공유하지 않는 새 브라우저 컨텍스트(다른 방문자)에서 페이지를 한 번 더 불러와 비교했을 때 글자·이미지 주소·iframe 주소가 달라졌거나 한쪽 로드에만 있는 요소(방문마다 탭·레이아웃이 바뀌는 추천 피드). 하위 내용의 절반 이상이 바뀐 부모까지(페이지 면적의 25% 이하) 넓혀 목록 전체를 묶는다. 두 번째 로드가 분석 페이지 요소의 절반도 공유하지 않으면 오류·차단 화면으로 보고 비교하지 않는다. 라이브 리포트도 별도 방문자로 페이지를 열므로, 네이버 피드처럼 한 방문자에게는 고정되고 방문자마다 달라지는 영역을 같은 조건에서 찾는다 |
+| `DYNAMIC` | 쿠키·저장소가 비어 있는 새 브라우저 컨텍스트에서 페이지를 한 번 더 불러와 비교했을 때 글자·이미지 주소·iframe 주소가 달라졌거나 한쪽 로드에만 있는 요소(방문마다 탭·레이아웃이 바뀌는 추천 피드). 하위 내용의 절반 이상이 바뀐 부모까지(페이지 면적의 25% 이하) 넓혀 목록 전체를 묶는다. 두 번째 로드가 분석 페이지 요소의 절반도 공유하지 않으면 오류·차단 화면으로 보고 비교하지 않는다 |
 | `POPUP` | 접속 직후 화면의 20% 이상을 덮는 fixed/absolute, z-index 100 이상 레이어(공지·이벤트 팝업). 팝업이 열린 상태에서 **세 모듈 모두** 팝업을 따로 검사한다: 규칙 기반은 팝업만 axe 검사, 텍스트는 팝업 내용을 `result_popup.html`로 저장해 같은 추출기(`--popup-layer`)·난이도 엔진으로 검사, CV는 팝업 부분만 캡처해 같은 CV 분석기로 검사(규칙 엔진이 이미 찾은 명도 대비 요소와 겹치면 뺌). 결과는 모두 `POPUP` 사유로 따로 보고하고 점수(규칙 점수, 난이도 page_score, CV 통과율)에는 넣지 않는다. 그다음 팝업의 닫기 버튼("닫기", "오늘 하루 보지 않기" 등)을 누르고 항상 `display:none`으로 숨긴 뒤 두 번째 로딩 비교, 본문 axe 검사, DOM snapshot, CV 이미지가 팝업이 닫힌 화면을 본다 |
 
 사이트 캐러셀과 슬라이드 배너는 `carousel-audit.js`가 모든 슬라이드를 검사하므로 `DYNAMIC`으로 보지 않는다.
 바뀌지 않는 배너와 광고 신호가 없는 자체 커머스 영역도 두 번 불러와 같으면 그대로 검사한다.
 정적 fallback(`INITIAL_RESPONSE_STATIC`)은 비교할 두 번째 응답이 없어 `AD`만 적용한다.
+
+두 번째 로딩을 새 컨텍스트에서 여는 이유: 첫 로딩과 같은 컨텍스트를 쓰면 첫 방문 때 사이트가 심은 쿠키(방문 기록, "오늘 하루 보지 않기" 등)를 들고 들어가 사이트가 재방문자로 판단한다.
+그러면 "다시 오신 것을 환영합니다" 같은 재방문자용 문구나 쿠키를 보고 바꾼 스타일처럼 원래 고정된 요소가 바뀐 것으로 보여 `DYNAMIC`으로 잘못 빠지고, 쿠키가 언제 심어졌느냐에 따라 실행마다 결과도 달라진다.
+두 로딩을 모두 처음 방문한 사용자 상태로 맞춰 실제로 방문마다 바뀌는 콘텐츠(뉴스·방문자 수·추천 피드)만 `DYNAMIC`으로 잡는다.
+첫 방문마다 확인 화면을 띄우는 사이트(Cloudflare 등)는 두 번째 로딩이 다시 확인 화면일 수 있는데, 이때는 위의 공유 요소 50% 미만 조건에 걸려 비교 자체를 하지 않으므로 잘못 제외하는 일은 없다.
 
 팝업을 점수에서 빼는 이유: 팝업은 행사·공지 기간에만 떠서 점수에 넣으면 같은 사이트 점수가 측정일마다 흔들린다(동적 영역과 같은 논리). 그래도 기관이 만든 콘텐츠이고 키보드로 닫을 수 없는 팝업처럼 실제 장벽이 될 수 있어 세 모듈 모두 검사해 리포트에 따로 보여준다. 광고·동적 영역은 사이트 콘텐츠가 아니라서 검사 자체를 하지 않는다는 점이 다르다.
 
@@ -118,11 +127,28 @@ PC에서는 숨겨진 모바일 전용 공지 목록이 대표적이며, 같은 
 | 파일 | 역할 |
 |------|------|
 | text_extractor.py | HTML에서 분석 대상 텍스트를 추출하고 10개 카테고리로 분류 |
-| difficulty_engine.py | MeCab 형태소 분석 기반 난이도 점수 산출 (평균 문장 길이, 평균 어절 길이, 고난이도 단어 비율, 위치 의존 표현) |
+| difficulty_engine.py | MeCab 형태소 분석 기반 난이도 점수 산출. 문단은 Jo(2016) 이독성 공식(평균 문장 길이 + 쉬운 단어 비율 → 학년 수준 GL), UI 문구는 글자 수, 그 밖의 조각 글은 문장 길이를 본다. 위치 의존 표현과 명사 나열은 모든 글에서 탐지 |
 | suggestion_generator.py | 난이도 높은 문장에 대해 규칙 기반 + GPT-4o-mini 수정 제안 생성 |
-| korean_vocab_grades.json | 한국어 학습용 어휘 모곡 (고난이도 단어 판별용) |
+| text_standard_mapper.py | 난이도 플래그마다 WCAG 2.2 번호와 대응 KWCAG 항목을 붙임(`standard_issues`) |
+| compute_pair_difficulty.py | 설문 원문·수정문 쌍에 같은 공식을 사후 적용 |
+| export_study_pairs.py | 설문용 원문·수정문 블라인드 쌍 추출 (1차 설문 때 사용) |
+| korean_vocab_grades.json | 국립국어원 학습용 어휘 등급 사전 (A·B등급 = 쉬운 단어) |
+| test_*.py | 단위 테스트 5개 파일 (`test_difficulty_engine.py`는 MeCab 필요) |
 
-**분석 지표:** 평균 문장 길이(25어절 기준), 평균 어절 길이(4.5자 기준), 고난이도 어휘(40% 기준), 위치 의존 표현 탐지
+**위반 기준 (2026-10-02 개정):**
+
+- 문단 난이도 72.7점 이상(= GL 9, WCAG 3.1.5의 중학교 수준). 원인을 함께 적는다: 쉬운 단어 비율 60% 미만이면 "어려운 어휘 과다", 원인 플래그가 없으면 "읽기 수준 초과".
+- 일반명사 5개 미만이라 공식을 못 쓰는 짧은 문단은 어려운 단어(학습용 어휘 C등급이나 목록 밖) 2개 이상.
+- 평균 문장 길이 25어절 이상(문단·표·목록·알림·기타, 문장 끝 부호가 있는 글만).
+- 명사로만 된 어절 4개 이상 연속(명사 나열, 모든 종류, 문장 끝 부호가 있는 글만, 감점 없음).
+- 위치 의존 표현(모든 종류, "위의 버튼", "여기 클릭". 숫자 뒤 "N위"는 제외).
+- UI 문구 글자 수(버튼 20·링크 30·레이블 40·안내 50·제목 60자). 보이는 글을 그대로 담은 title·aria-label은 제외.
+
+고유명사는 어려운 단어로 세지 않는다. 버튼·링크 같은 UI 문구에는 어휘 검사를 하지 않는다(지금 어휘 목록으로는 오탐이 45%라 보류, 개수만 `metrics.hard_noun_count`에 기록). 플래그가 하나라도 붙은 블록이 수정 제안 대상(`needs_suggestion`)이고, 플래그마다 `standard_issues`에 기준 번호와 우선순위가 붙어 백엔드가 이슈의 기준 번호와 심각도로 저장한다. 기준별 근거와 실측은 `text-level-analyzer/README(text-level).md`에 있다.
+
+**텍스트 모듈 점수:** `page_score = 100 − 문단 난이도 평균 − 위치 의존 감점(건당 3, 최대 15) − UI 글자 수 감점(건당 2, 최대 20)`.
+
+**종합 난이도 v2 (검증 전):** `difficulty_score_v2 = (Jo 난이도 점수 + 명사 나열 점수) / 2`를 결과에 함께 기록한다. 2차 설문으로 검증하기 전까지 페이지 점수(`meta.page_score`)와 수정 제안 판정에는 쓰지 않는다.
 
 ---
 
@@ -341,6 +367,19 @@ MBuster와 Cloudflare 표식은 그것만으로 차단으로 본다. Cloudflare�
 
 ---
 
+## 테스트
+
+```powershell
+cd rule-based-analyzer; npm test; cd ..                                  # Node 8개 파일, 43개
+.\.venv\Scripts\python -m unittest discover -s tests                   # run_all·팝업·CV 측정, 48개
+.\.venv\Scripts\python -m unittest discover -s text-level-analyzer -p "test_*.py"   # 44개 (MeCab 필요)
+.\.venv\Scripts\python cv-analyzer\test_contrast_formula.py            # 명암비 공식 대조
+```
+
+2026-10-02 기준 모두 통과. Node 테스트는 가끔 파일 단위로 "Unable to deserialize cloned data" 오류가 나는데, 테스트 러너 쪽 오류라 다시 돌리면 통과한다.
+
+---
+
 ## 중간 결과 파일 참고
 
 디버깅이나 점수 추적용. 그냥 참고용
@@ -352,9 +391,12 @@ MBuster와 Cloudflare 표식은 그것만으로 차단으로 본다. Cloudflare�
 | result.html | 스크립트를 제거한 UTF-8 DOM snapshot (로컬 텍스트 추출 입력, 외부 미전송) |
 | result_artifact.json | 최종 JSON의 `capture_metadata`로 통합할 URL·뷰포트·문서 크기 |
 | result_text.json | 추출된 텍스트 블록 (카테고리별 분류) |
-| result_text_difficulty.json | 블록별 난이도 점수 상세 |
+| result_text_difficulty.json | 블록별 난이도 점수·플래그·`standard_issues`, `meta.page_score`, 종합 난이도 v2(참고값) |
 | result_text_suggestions.json | 블록별 수정 제안 |
 | result_cv.json | CV 텍스트별 명암비 + 수정 추천 색상 (입력 이미지 경로 미포함) |
+| result_cv_anchors.json | CV 캡처 시점의 요소 위치·선택자·내용 서명 (CV 위반을 요소에 연결) |
+| result_popup.html | 레이어 팝업이 있을 때 닫기 전에 저장한 팝업 내용 |
+| result_popup_text.json, result_popup_text_difficulty.json | 팝업 텍스트 추출·난이도 결과 (`POPUP`, 점수 제외) |
 | result_final.json | 최종 통합 결과 (백엔드 전송용) |
 
 ---
@@ -386,7 +428,7 @@ $env:AI_PYTHON_EXECUTABLE = (Resolve-Path '.\.venv\Scripts\python.exe').Path
 
 ### 선택 기능 설정
 
-- **OpenAI API 키:** `text-level-analyzer/.env` 파일에 `OPENAI_API_KEY=...`. 없으면 LLM 호출만 건너뛰고 규칙 기반 제안을 사용한다.
+- **OpenAI API 키:** `text-level-analyzer/.env` 파일에 `OPENAI_API_KEY=...`(상위 폴더 `AI-module/.env`에 두어도 읽힘, 환경변수가 있으면 그 값 우선). 없으면 LLM 호출만 건너뛰고 규칙 기반 제안을 사용한다.
 - **Google Vision 자격증명:** `GOOGLE_APPLICATION_CREDENTIALS`에 서비스 계정 JSON 경로를 지정한다. 없거나 잘못되면 CV 모듈만 실패로 기록한다.
 - **MeCab 사전:** 현재 Windows 설정은 `C:\mecab\share\mecab-ko-dic\`을 사용한다. 사전이 없으면 난이도와 수정 제안 모듈만 건너뛴다.
 

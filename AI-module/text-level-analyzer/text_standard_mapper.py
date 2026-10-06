@@ -29,6 +29,23 @@ def classify_text_flag(flag: str, category: str) -> dict[str, Any]:
         issue_type, wcag_id, wcag_name, priority = (
             "hard_vocab_ratio", "3.1.5", "읽기 수준", "medium"
         )
+    elif "어려운 어휘 포함" in flag:
+        # 2026-10-02: 짧은 문단의 어려운 단어 플래그. 예전에는 아래 else로 빠져 유형이
+        # text_analysis가 되어, 제안(short_text_hard_vocab)에 기준 번호가 붙지 않았다.
+        issue_type, wcag_id, wcag_name, priority = (
+            "short_text_hard_vocab", "3.1.5", "읽기 수준", "medium"
+        )
+    elif "읽기 수준 초과" in flag:
+        # 2026-10-02 추가. 문단 난이도 점수가 기준을 넘었는데 문장 길이·어휘 원인 플래그가
+        # 없을 때 붙는다. 예전에는 standard_issues가 비어 백엔드에서 분류되지 않았다.
+        issue_type, wcag_id, wcag_name, priority = (
+            "reading_level", "3.1.5", "읽기 수준", "medium"
+        )
+    elif "명사 나열" in flag:
+        # 2026-10-02 추가. 읽기 수준 문제로 본다(KWCAG 직접 대응 없음).
+        issue_type, wcag_id, wcag_name, priority = (
+            "noun_stacking", "3.1.5", "읽기 수준", "medium"
+        )
     elif "위치 참조" in flag or "모호한 참조" in flag:
         issue_type, wcag_id, wcag_name, priority = (
             "location_dependency", "1.3.3", "감각적 특성", "high"

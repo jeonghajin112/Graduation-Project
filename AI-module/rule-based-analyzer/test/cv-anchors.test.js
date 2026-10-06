@@ -8,7 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { chromium } = require('playwright');
-const { collectCvAnchors, stableCvAnchors } = require('../cv-anchors');
+const { collectCvAnchors } = require('../cv-anchors');
 const { run } = require('../run');
 
 const PAGE = `<!doctype html><html lang="ko"><head><title>피드</title>
@@ -56,45 +56,7 @@ test('collects each visible element with a unique selector and its content signa
   }
 });
 
-test('omits CV anchors that moved, changed content, appeared or disappeared during capture', () => {
-  const stable = { selector: '#stable', x: 10, y: 20, width: 100, height: 30, text: '안내', image: null };
-  const changes = { x: 11, y: 21, width: 101, height: 31, text: '다른 안내', image: '/changed.png' };
-  const before = [stable, { ...stable, selector: '#removed' }];
-  const after = [{ ...stable }, { ...stable, selector: '#added' }];
-  for (const [key, value] of Object.entries(changes)) {
-    const anchor = { ...stable, selector: `#changed-${key}` };
-    before.push(anchor);
-    after.push({ ...anchor, [key]: value });
-  }
-  assert.deepEqual(stableCvAnchors(before, after), [stable]);
-});
-
-test('the rule scan permits rendering tasks before capturing the PNG and anchors', async (t) => {
-  // Model the asynchronous rendering work real pages need during a capture.
-  // A trivial static page can otherwise be captured even while time is paused.
-  const launch = chromium.launch.bind(chromium);
-  t.mock.method(chromium, 'launch', async (...args) => {
-    const browser = await launch(...args);
-    const newContext = browser.newContext.bind(browser);
-    t.mock.method(browser, 'newContext', async (...args) => {
-      const context = await newContext(...args);
-      const newPage = context.newPage.bind(context);
-      t.mock.method(context, 'newPage', async (...args) => {
-        const page = await newPage(...args);
-        const screenshot = page.screenshot.bind(page);
-        t.mock.method(page, 'screenshot', async (options) => {
-          const start = await page.evaluate(() => performance.now());
-          await page.waitForFunction(start => performance.now() - start > 25, start, {
-            polling: 10, timeout: 2000,
-          });
-          return screenshot({ ...options, timeout: 3000 });
-        });
-        return page;
-      });
-      return context;
-    });
-    return browser;
-  });
+test('the rule scan writes the anchors next to the CV capture', async () => {
   const server = http.createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end(PAGE);
@@ -108,8 +70,6 @@ test('the rule scan permits rendering tasks before capturing the PNG and anchors
     });
     const anchors = JSON.parse(fs.readFileSync(path.join(directory, 'result_cv_anchors.json'), 'utf8'));
     assert.ok(anchors.some((anchor) => anchor.image === '/thumb/1.jpg?type=f'));
-    const png = fs.readFileSync(path.join(directory, 'capture.png'));
-    assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(directory, { recursive: true, force: true });

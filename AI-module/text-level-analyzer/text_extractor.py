@@ -343,6 +343,17 @@ def extract_form_guides(soup, original_positions=None) -> list:
     """
     guides = []
 
+    def guide_attributes(el, source, text):
+        # [2026-10-02] title·aria-label이 그 요소에 보이는 글을 그대로 담고 있으면
+        # (예: <a title="공고 제목 게시물로 이동">공고 제목</a>) 표시해 둔다.
+        # 난이도 엔진은 이런 블록의 글자 수 검사를 건너뛴다. 같은 제목을 보이는 글
+        # (link 등)과 속성값(form_guide)에서 두 번 감점하지 않기 위해서다.
+        attributes = {'source': source}
+        visible = clean_text(el.get_text(' '))
+        if len(visible) >= 2 and visible in text:
+            attributes['duplicates_visible_text'] = True
+        return attributes
+
     # placeholder 속성 추출
     # 예: <input placeholder="주민등록번호 13자리"> → '주민등록번호 13자리'
     for el in soup.find_all(attrs={'placeholder': True}):
@@ -367,7 +378,7 @@ def extract_form_guides(soup, original_positions=None) -> list:
                 category='form_guide',
                 tag=el.name,
                 selector=build_selector(el, original_positions),
-                attributes={'source': 'aria-label'},
+                attributes=guide_attributes(el, 'aria-label', text),
                 sentences=split_sentences(text),
             ))
 
@@ -384,7 +395,7 @@ def extract_form_guides(soup, original_positions=None) -> list:
                 category='form_guide',
                 tag=el.name,
                 selector=build_selector(el, original_positions),
-                attributes={'source': 'title'},
+                attributes=guide_attributes(el, 'title', text),
                 sentences=split_sentences(text),
             ))
 

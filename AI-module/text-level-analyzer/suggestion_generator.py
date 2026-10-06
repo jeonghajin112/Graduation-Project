@@ -47,14 +47,20 @@
   입력: result_text_difficulty.json (difficulty_engine.py 출력)
   출력: 각 위반 블록에 수정 제안(suggestions)과 LLM 수정문(llm_revision)이 추가된 JSON
 
-[difficulty_engine.py 플래그 문자열 기준 — 2026-09-23 갱신]
+[difficulty_engine.py 플래그 문자열 기준 — 2026-10-02 갱신]
   '문장 길이 과다'         : paragraph/table/list/alert/other에서 avg_sent_len >= 25어절
-  '어려운 어휘 과다'       : paragraph(명사 5개 이상)에서 easy_word_ratio < 0.60
-  '어려운 어휘 포함(표본 부족)' : paragraph(명사 5개 미만)에서 C/D등급 명사가
-                            SHORT_TEXT_MIN_HARD_NOUNS개 이상 (비율 대신 개별 단어 기준)
-  '위치 참조'              : 위/아래/옆/오른쪽/왼쪽 등 위치 의존 표현
-  '모호한 참조'            : 해당 버튼/여기 클릭 등 모호한 참조 표현
+                            (문장 끝 부호 . ? ! 가 있는 글만)
+  '어려운 어휘 과다'       : paragraph(일반명사 5개 이상)에서 easy_word_ratio < 0.60이고
+                            난이도 점수가 기준(72.7) 이상일 때만
+  '읽기 수준 초과'         : paragraph 난이도 점수가 기준(72.7) 이상인데 위 두 원인
+                            플래그가 없을 때 (2026-10-02 추가)
+  '어려운 어휘 포함(표본 부족)' : paragraph(일반명사 5개 미만)에서 C/D등급 명사가
+                            SHORT_TEXT_MIN_HARD_NOUNS(2)개 이상 (고유명사 제외)
+  '위치 참조'              : 위/아래/옆/오른쪽/왼쪽 등 위치 의존 표현 (모든 종류)
+  '모호한 참조'            : 해당 버튼/여기 클릭 등 모호한 참조 표현 (모든 종류)
   '텍스트 길이 과다'       : button/link/label/form_guide/heading 글자수 초과
+                            (보이는 글을 그대로 담은 title·aria-label은 제외)
+  '명사 나열'              : 명사로만 된 어절 4개 이상 연속 (모든 종류, 문장 끝 부호가 있는 글만)
 """
 
 import json
@@ -100,8 +106,9 @@ LLM_TIME_BUDGET_SECONDS = 80
 
 # ── 사람 평가(휴먼 스터디)용 모드 ──
 # 기존 로직은 paragraph 중 난이도 점수 50 이상(2026-09-27 복원), link/form_guide
-# 중 40자 이상만 LLM을 호출한다. 이러면 needs_suggestion=True인 블록(40~49점
-# 경계 구간, 또는 명사 5개 미만이라 difficulty_score가 None인 블록)
+# 중 40자 이상만 LLM을 호출한다. 이러면 needs_suggestion=True인 블록 중 일부(명사
+# 5개 미만이라 difficulty_score가 None인 블록, 2026-10-02 이후로는 위치 의존·명사
+# 나열로 대상이 된 50점 미만 문단 등)
 # 상당수가 실제 "수정문(revised_text)" 없이 규칙 기반 가이드만 갖게 되어,
 # "원문 vs 수정문"을 사람에게 보여주는 비교 실험에 쓸 표본이 부족해진다.
 # STUDY_MODE=1로 실행하면 needs_suggestion=True인 블록은 점수/글자수 조건 없이
@@ -130,6 +137,7 @@ OFFLINE_MODE = not bool(OPENAI_API_KEY)
 #   '위치 참조'        → location_dependency 제안
 #   '모호한 참조'      → location_dependency 제안
 #   '텍스트 길이 과다' → 카테고리별 길이 제안
+#   '명사 나열'        → noun_stacking 제안 (2026-10-02 추가)
 #
 # [제공하는 정보]
 #   각 제안에는 다음 정보가 포함:
@@ -150,6 +158,9 @@ def generate_rule_based_suggestion(block):
     [플래그 유형별 처리 — difficulty_engine.py 출력 기준]
       '문장 길이 과다'   → 문장 분리 가이드 (priority: high)
       '어려운 어휘 과다' → 쉬운 어휘 대체 가이드 + 고난이도 어휘 목록 (priority: medium)
+      '읽기 수준 초과'   → 문장 나누기 가이드 (priority: medium)
+      '어려운 어휘 포함(표본 부족)' → 쉬운 말 바꾸기 가이드 (priority: medium)
+      '명사 나열'        → 조사·서술어 넣어 풀어 쓰기 가이드 (priority: medium)
       '위치 참조'        → 구체적 이름 사용 가이드 (priority: high)
       '모호한 참조'      → 구체적 이름 사용 가이드 (priority: high)
       '텍스트 길이 과다' → 카테고리별 간결화 가이드 (priority: low~medium)
@@ -189,14 +200,16 @@ def generate_rule_based_suggestion(block):
 
         # ── 어려운 어휘 과다 ──
         # difficulty_engine: f'어려운 어휘 과다: 쉬운 단어 비율 {easy_ratio*100:.1f}% (어려운 단어 {hard_pct}%, C등급+미등재 기준)'
-        # 발생 조건: paragraph에서 쉬운 단어(A/B등급) 비율이 60% 미만
-        # 등급 기준: A(초등), B(중등) = 쉬운 단어 / C(고등), D(미등재) = 어려운 단어
+        # 발생 조건: paragraph의 난이도 점수가 기준(72.7)을 넘고, 쉬운 단어(A/B등급) 비율이 60% 미만
+        #            (2026-10-02부터 점수 초과 문단의 원인 설명으로만 붙음)
+        # 등급 기준: 국립국어원 학습용 어휘의 학습 단계(학교 학년 아님)
+        #            A(초급), B(중급) = 쉬운 단어 / C(고급), D(목록에 없음) = 어려운 단어
         # grade_detail에서 C/D등급 명사를 추출하여 issue에 포함
         elif '어려운 어휘 과다' in flag:
             easy_ratio = metrics.get('easy_word_ratio', 0) or 0
             grade_detail = metrics.get('grade_detail', {})
 
-            # C등급(고등 수준)과 D등급(미등재 단어) 명사를 최대 5개까지 추출
+            # C등급(고급 어휘)과 D등급(목록에 없는 단어) 명사를 최대 5개까지 추출
             # 너무 많으면 issue 메시지가 길어지므로 각 등급에서 최대 3개씩만 가져옴
             # 예: grade_detail = {'A': ['주민', '신청'], 'C': ['이행', '제반'], 'D': ['고시']}
             hard_nouns = grade_detail.get('C', [])[:3] + grade_detail.get('D', [])[:3]
@@ -238,7 +251,47 @@ def generate_rule_based_suggestion(block):
                 'guide': '짧은 문구라도 전문 용어·행정 용어·약어가 있으면 쉬운 말로 '
                          '바꾸거나 풀어 쓰세요. 예: "제반" → "모든", "미거출" → '
                          '"내지 않은"처럼 일상어로 대체하세요.',
-                'kwcag_ref': '3.1.1 읽기 쉬운 콘텐츠',
+                # 2026-10-02: 예전 값 'kwcag_ref': '3.1.1 읽기 쉬운 콘텐츠'는 KWCAG 2.2에
+                # 없는 번호였다. 다른 제안과 같이 WCAG 3.1.5로 적고, 기준 번호는
+                # text_standard_mapper.py의 short_text_hard_vocab 매핑으로 덮어쓴다.
+                'wcag_ref': '3.1.5 읽기 수준',
+                'priority': 'medium',
+            })
+
+        # ── 읽기 수준 초과 (2026-10-02 추가) ──
+        # difficulty_engine: f'읽기 수준 초과: 난이도 점수 {score}점 (기준: 72.7점 = GL 9)'
+        # 발생 조건: paragraph 난이도 점수가 기준 이상인데 문장 길이·어려운 어휘 플래그가
+        # 붙지 않은 경우(쉬운 단어 비율 60% 이상, 문장 끝 부호 없음 또는 평균 25어절 미만).
+        # 점수는 평균 문장 길이가 크게 움직이므로 문장을 나누는 쪽으로 안내한다.
+        elif '읽기 수준 초과' in flag:
+            score = block.get('difficulty_score')
+            avg_len = metrics.get('avg_sentence_length')
+            issue_text = f'난이도 점수가 {score}점으로 기준(72.7점, 중학교 수준)을 넘습니다.'
+            if avg_len is not None:
+                issue_text += f' 평균 문장 길이는 {avg_len}어절입니다.'
+            suggestions.append({
+                'type': 'reading_level',
+                'issue': issue_text,
+                'guide': '긴 문장을 마침표로 나누고, 한 문장에 정보 하나만 담으세요. '
+                         '마침표 없이 이어 붙인 제목·날짜·설명은 줄을 나누거나 문장으로 정리하세요.',
+                'wcag_ref': '3.1.5 읽기 수준',
+                'priority': 'medium',
+            })
+
+        # ── 명사 나열 (2026-10-02 추가) ──
+        # difficulty_engine: f'명사 나열: 조사 없이 명사만으로 된 어절 {run}개 연속 (기준: 4개)'
+        # 발생 조건: 문장 끝 부호가 있는 글에서 명사로만 된 어절이 4개 이상 이어질 때
+        # 수정 방향은 "쉬운 우리말 쓰기" 캠페인의 권고(조사·서술어를 넣어 풀어 쓰기)를 따랐다.
+        elif '명사 나열' in flag:
+            run = metrics.get('noun_eojeol_run', 0)
+            suggestions.append({
+                'type': 'noun_stacking',
+                'issue': f'조사 없이 명사만 {run}개 어절 연속으로 이어져 '
+                         '어느 말이 어느 말을 꾸미는지 알기 어렵습니다.',
+                'guide': '명사 사이에 조사(을/를, 의, 에)와 서술어를 넣어 문장으로 풀어 쓰세요. '
+                         '예: "소득 부과 건강보험료 조정 정산 제도" → "소득에 따라 건강보험료를 '
+                         '조정하고 정산하는 제도", "사후 평가 결과 반영" → "사후 평가 결과를 반영하여"',
+                'wcag_ref': '3.1.5 읽기 수준',
                 'priority': 'medium',
             })
 
@@ -392,7 +445,7 @@ def build_llm_prompt(block):
         metric_lines.append(f'- 쉬운 단어 비율: {metrics["easy_word_ratio"]*100:.1f}%')
 
     # ── grade_detail에서 어려운 어휘 추출 (C/D등급, 최대 6개) ──
-    # C등급: 고등학교 수준 어휘 (예: '이행', '제반', '의거')
+    # C등급: 학습용 어휘 고급 단계 (예: '이행', '제반', '의거')
     # D등급: 국립국어원 목록에 없는 단어 (전문 용어, 행정 용어 등)
     # LLM 프롬프트에 포함하면 LLM이 정확히 어떤 단어를 교체해야 하는지 알 수 있음
     grade_detail = metrics.get('grade_detail', {})
@@ -438,6 +491,7 @@ def build_llm_prompt(block):
    - 어려운 어휘(C/D등급)는 쉬운 단어로 바꾸세요
    - 긴 문장은 짧게 나누세요
    - 전문용어는 쉬운 말로 풀어쓰세요
+   - 명사만 이어 쓴 부분은 조사와 서술어를 넣어 풀어쓰세요
    - 원래 의미는 유지하세요
 
 2. **수정 이유**: 어떤 부분을 왜 바꿨는지 한 줄로 설명해주세요.
@@ -774,7 +828,8 @@ def generate_suggestions(input_path, output_path=None):
             #
             # STUDY_MODE: 사람 평가 실험에서는 "명백히 어려운 문장"만 보여주면
             # 실험 결과가 과대평가될 수 있으므로, needs_suggestion=True인 블록은
-            # 경계 구간(점수 40~49 등, 또는 difficulty_score가 None인 블록)도
+            # 경계 구간(점수 50 미만이지만 다른 플래그로 대상이 된 블록, 또는
+            # difficulty_score가 None인 블록)도
             # 포함해서 전부 LLM을 호출한다.
             should_call_llm = STUDY_MODE
 

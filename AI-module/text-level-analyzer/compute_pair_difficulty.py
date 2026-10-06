@@ -34,13 +34,16 @@ from difficulty_engine import (
     calc_gl_score,
     gl_to_difficulty_score,
     detect_location_dependency,
+    longest_noun_eojeol_run,
+    calc_difficulty_score_v2,
 )
 
 
 def score_text(text):
     """difficulty_engine.py의 analyze_block()과 동일한 공식을, category 분기 없이 텍스트에 직접 적용."""
     if not text or len(text.strip()) < 2:
-        return {'difficulty_score': None, 'avg_sentence_length': None, 'easy_word_ratio': None, 'flags': ''}
+        return {'difficulty_score': None, 'avg_sentence_length': None, 'easy_word_ratio': None,
+                'noun_eojeol_run': None, 'difficulty_score_v2': None, 'flags': ''}
 
     avg_sent_len, _ = calc_avg_sentence_length(text)
     easy_ratio, _, all_nouns, _ = calc_easy_word_ratio(text)
@@ -57,10 +60,15 @@ def score_text(text):
     loc_deps = detect_location_dependency(text)
     flags.extend(loc_deps)
 
+    # 2026-10-02: 명사 나열 길이와 종합 난이도 v2도 함께 기록 (2차 설문 검증용)
+    noun_run = longest_noun_eojeol_run(text)
+
     return {
         'difficulty_score': difficulty_score,
         'avg_sentence_length': avg_sent_len,
         'easy_word_ratio': easy_ratio,
+        'noun_eojeol_run': noun_run,
+        'difficulty_score_v2': calc_difficulty_score_v2(difficulty_score, noun_run),
         'flags': '; '.join(flags),
     }
 
@@ -80,7 +88,9 @@ def main():
 
     # 새 컬럼: 원문 점수는 기존 difficulty_score/avg_sentence_length/easy_word_ratio 칸을 채우고,
     # 수정문 점수는 별도 컬럼으로 추가 (엔진이 실제로 "더 쉽게" 만들었는지 자체 검증에도 쓸 수 있음)
-    extra_cols = ['revised_difficulty_score', 'revised_avg_sentence_length', 'revised_easy_word_ratio']
+    extra_cols = ['revised_difficulty_score', 'revised_avg_sentence_length', 'revised_easy_word_ratio',
+                  'noun_eojeol_run', 'difficulty_score_v2',
+                  'revised_noun_eojeol_run', 'revised_difficulty_score_v2']
     for col in extra_cols:
         if col not in fieldnames:
             fieldnames.append(col)
@@ -92,6 +102,8 @@ def main():
         row['difficulty_score'] = orig_scores['difficulty_score']
         row['avg_sentence_length'] = orig_scores['avg_sentence_length']
         row['easy_word_ratio'] = orig_scores['easy_word_ratio']
+        row['noun_eojeol_run'] = orig_scores['noun_eojeol_run']
+        row['difficulty_score_v2'] = orig_scores['difficulty_score_v2']
         if orig_scores['flags']:
             existing_flags = row.get('flags', '')
             row['flags'] = (existing_flags + '; ' if existing_flags else '') + orig_scores['flags']
@@ -100,6 +112,8 @@ def main():
         row['revised_difficulty_score'] = rev_scores['difficulty_score']
         row['revised_avg_sentence_length'] = rev_scores['avg_sentence_length']
         row['revised_easy_word_ratio'] = rev_scores['easy_word_ratio']
+        row['revised_noun_eojeol_run'] = rev_scores['noun_eojeol_run']
+        row['revised_difficulty_score_v2'] = rev_scores['difficulty_score_v2']
 
         if orig_scores['difficulty_score'] is not None:
             n_scored += 1

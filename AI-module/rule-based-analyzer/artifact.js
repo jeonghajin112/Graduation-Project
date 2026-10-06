@@ -468,10 +468,9 @@ async function pausePageVirtualTime(page) {
 
   return async () => {
     await Promise.all(sessions.map(async session => {
-      // A finite budget pauses the renderer again when it expires. Release
-      // without a budget so a later screenshot can finish painting.
       await session.send('Emulation.setVirtualTimePolicy', {
         policy: 'advance',
+        budget: 1,
       }).catch(() => {});
       await session.detach().catch(() => {});
     }));

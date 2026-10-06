@@ -194,10 +194,13 @@ async function collectContentSignatures(page) {
   return page.evaluate(inspectRegions, inspectionOptions('collect')).catch(() => null);
 }
 
-// Loads the page again as another visitor and returns its content signatures,
-// or null when the comparison load fails. The live report opens the page
-// without the analysis' cookies, so a feed that a site keeps fixed for one
-// visitor (the Naver feed) must be compared across visitors, not within one.
+// Loads the page again in a new browser context and returns its content
+// signatures, or null when the comparison load fails. The new context has none
+// of the first visit's cookies or storage, so the site treats both loads as a
+// first-time visitor. Sharing the analysed page's context would make the site
+// see a returning visitor (visit-recording cookies, "welcome back" text,
+// cookie-driven styles) and mark that stable content DYNAMIC, and whether the
+// cookie existed yet would depend on timing.
 async function loadComparisonSignatures(browser, contextOptions, url, { settleMs = 5000 } = {}) {
   const context = await browser.newContext(contextOptions);
   try {
