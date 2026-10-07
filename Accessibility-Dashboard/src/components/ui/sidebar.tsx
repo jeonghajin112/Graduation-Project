@@ -20,7 +20,7 @@ export function SidebarBody({
         "dashboard-drawer dashboard-sidebar z-20 flex shrink-0 flex-col overflow-hidden border-b md:border-b-0 md:border-r",
         className
       )}
-      style={{ backfaceVisibility: "hidden", contain: "layout paint style" }}
+      style={{ backfaceVisibility: "hidden" }}
       {...props}
     >
       {children}

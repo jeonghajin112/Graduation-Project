@@ -240,6 +240,103 @@
 }
 
 /*
+ * Sidebar containment. Desktop paints the rail in isolation; phones drop it
+ * because the drawer and its backdrop are fixed to the viewport, and paint
+ * containment would clip them to the bar.
+ */
+@media (min-width: 768px) {
+  .dashboard-sidebar {
+    contain: layout paint style;
+  }
+}
+
+/*
+ * Phone navigation: the sidebar is a sticky bar (account + menu button) and
+ * its content opens as a drawer under it. useMobileSidebarDrawer in
+ * dashboard-surface-hooks.ts uses the same 767px breakpoint.
+ */
+@media (max-width: 767px) {
+  .bridge-dashboard {
+    --dashboard-mobile-bar-height: 3.5rem;
+  }
+
+  .bridge-dashboard .dashboard-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    flex-direction: row;
+    align-items: center;
+    height: var(--dashboard-mobile-bar-height);
+    padding-block: 0;
+    overflow: visible;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .dashboard-header-account {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .dashboard-sidebar-toggle {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .reference-sidebar-content {
+    display: none;
+  }
+
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
+    position: fixed;
+    top: var(--dashboard-mobile-bar-height);
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    width: min(20rem, 86vw);
+    margin-top: 0;
+    padding: 0.75rem var(--dashboard-sidebar-padding-inline) 1.5rem;
+    /* The rail colour is translucent; lay it over the opaque card surface. */
+    background: linear-gradient(var(--dashboard-drawer-bg), var(--dashboard-drawer-bg)), var(--card);
+    box-shadow: 12px 0 32px rgb(0 0 0 / 18%);
+    overscroll-behavior: contain;
+  }
+
+  .dashboard-mobile-drawer-backdrop {
+    position: fixed;
+    inset: var(--dashboard-mobile-bar-height) 0 0;
+    z-index: 1;
+    background: rgb(0 0 0 / 40%);
+  }
+}
+
+@media (max-width: 767px) and (prefers-reduced-motion: no-preference) {
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
+    animation: dashboard-mobile-drawer-in 180ms ease-out;
+  }
+
+  .dashboard-mobile-drawer-backdrop {
+    animation: dashboard-mobile-drawer-fade 180ms ease-out;
+  }
+}
+
+@keyframes dashboard-mobile-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes dashboard-mobile-drawer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 767px) and (forced-colors: active) {
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
+    border-right: 1px solid CanvasText;
+  }
+}
+
+/*
  * Status and error cards in the dashboard body (load failures, route
  * fallbacks). A theme card surface with greys; only the error title is red.
  */

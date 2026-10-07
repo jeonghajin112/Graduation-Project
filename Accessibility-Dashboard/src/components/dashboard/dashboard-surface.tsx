@@ -1,8 +1,10 @@
 import { SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import {
   CircleAlert,
+  Menu,
   PanelLeft,
-  RotateCcw
+  RotateCcw,
+  X
 } from "lucide-react";
 import { Suspense, lazy, useCallback, useId, useRef, useState } from "react";
 
@@ -14,7 +16,12 @@ import {
 import { ModalErrorFallback, ModalLoadFallback } from "./shared/modal-load-fallback";
 import { AccountMenu, AccountMenuTrigger, AccountRailTrigger, useAccountMenu } from "./dashboard-account-menu";
 import { DashboardRoutePanels } from "./dashboard-route-panels";
-import { useDashboardDocumentTitle, useRouteHeadingFocus, useSidebarCollapse } from "./dashboard-surface-hooks";
+import {
+  useDashboardDocumentTitle,
+  useMobileSidebarDrawer,
+  useRouteHeadingFocus,
+  useSidebarCollapse
+} from "./dashboard-surface-hooks";
 import { PROJECT_HEADER_ACTIONS_ID, type DashboardSurfaceProps } from "./dashboard-surface.types";
 import { SidebarProjectsSection } from "./sidebar-projects";
 import "@/styles/dashboard-a11y.css";
@@ -47,7 +54,30 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
   const accountMenu = useAccountMenu();
   const [isAccountSettingsOpen, setIsAccountSettingsOpen] = useState(false);
   const sidebar = useSidebarCollapse(isPreview, accountMenu.close);
-  const sidebarToggleLabel = sidebar.isCollapsed ? "사이드바 펼치기" : "사이드바 접기";
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
+  const drawer = useMobileSidebarDrawer({
+    routeKey: routePanelKey,
+    toggleRef: sidebarToggleRef,
+    drawerRef: sidebarContentRef,
+    mainRef: mainContentRef
+  });
+  // Phones use the drawer; the desktop rail preference is kept but not applied.
+  const isSidebarCollapsed = sidebar.isCollapsed && !drawer.isMobile;
+  const sidebarToggleLabel = drawer.isMobile
+    ? drawer.isOpen ? "메뉴 닫기" : "메뉴 열기"
+    : isSidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기";
+  const { close: closeAccountMenu } = accountMenu;
+  const { isMobile: isMobileSidebar, toggle: toggleDrawer } = drawer;
+  const { toggle: toggleRail } = sidebar;
+  const handleSidebarToggle = useCallback(() => {
+    if (isMobileSidebar) {
+      closeAccountMenu();
+      toggleDrawer();
+    } else {
+      toggleRail();
+    }
+  }, [closeAccountMenu, isMobileSidebar, toggleDrawer, toggleRail]);
 
   useDashboardDocumentTitle(
     isPreview,
@@ -99,9 +129,9 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
         dashboard.isDarkMode ? "" : "bg-white"
       } ${dashboard.isDarkMode ? "theme-dark" : "theme-light"} ${
         isPreview ? "dashboard-embedded-preview" : ""
-      } ${sidebar.isCollapsed ? "dashboard-sidebar-is-collapsed" : ""} ${
+      } ${isSidebarCollapsed ? "dashboard-sidebar-is-collapsed" : ""} ${
         sidebar.isSliding ? "dashboard-sidebar-is-sliding" : ""
-      }`}
+      } ${drawer.isOpen ? "dashboard-mobile-drawer-open" : ""}`}
       data-dashboard-product-preview={isPreview ? "true" : undefined}
     >
       <a className="dashboard-skip-link" href={`#${mainContentId}`}>
@@ -113,7 +143,7 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
         {accountMenu.isRailMenu ? accountMenuPopup : null}
         <SidebarBody
           className={`reference-sidebar-body justify-start gap-0 ${
-            sidebar.isCollapsed ? "dashboard-sidebar-collapsed" : ""
+            isSidebarCollapsed ? "dashboard-sidebar-collapsed" : ""
           }`}
         >
           <div className="dashboard-header-account reference-sidebar-account relative z-30 flex shrink-0 items-center justify-between gap-1 p-0">
@@ -122,27 +152,37 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
             {accountMenu.isRailMenu ? null : accountMenuPopup}
 
             <button
+              ref={sidebarToggleRef}
               type="button"
               className="dashboard-sidebar-toggle inline-flex shrink-0 items-center justify-center"
               aria-label={sidebarToggleLabel}
               title={sidebarToggleLabel}
-              aria-expanded={!sidebar.isCollapsed}
+              aria-expanded={drawer.isMobile ? drawer.isOpen : !isSidebarCollapsed}
               aria-controls={sidebarContentId}
-              onClick={sidebar.toggle}
+              onClick={handleSidebarToggle}
             >
-              <PanelLeft size={18} strokeWidth={2} aria-hidden="true" />
+              {drawer.isMobile ? (
+                drawer.isOpen ? (
+                  <X size={20} strokeWidth={2} aria-hidden="true" />
+                ) : (
+                  <Menu size={20} strokeWidth={2} aria-hidden="true" />
+                )
+              ) : (
+                <PanelLeft size={18} strokeWidth={2} aria-hidden="true" />
+              )}
             </button>
 
             <AccountRailTrigger menu={accountMenu} userName={userName} />
           </div>
 
           <div
+            ref={sidebarContentRef}
             id={sidebarContentId}
             className="reference-sidebar-content flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
           >
             <div className="reference-sidebar-primary flex flex-col gap-1">
               {dashboard.sidebarLinks.map((link) => (
-                <SidebarLink key={link.label} link={link} title={sidebar.isCollapsed ? link.label : undefined} />
+                <SidebarLink key={link.label} link={link} title={isSidebarCollapsed ? link.label : undefined} />
               ))}
             </div>
 
@@ -169,6 +209,13 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               }
             />
           </div>
+          {drawer.isOpen ? (
+            <div
+              className="dashboard-mobile-drawer-backdrop"
+              aria-hidden="true"
+              onClick={() => drawer.close(true)}
+            />
+          ) : null}
         </SidebarBody>
 
         <main
