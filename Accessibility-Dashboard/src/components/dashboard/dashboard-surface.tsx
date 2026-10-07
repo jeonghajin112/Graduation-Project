@@ -161,6 +161,13 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               } : null}
               onSelectPage={({ pageId }) => dashboard.goToSite(pageId)}
               quickAnalysisResultsOverride={previewQuickAnalysisResults}
+              listState={
+                isPreview || dashboard.dashboardData
+                  ? "ready"
+                  : dashboard.dashboardError.length > 0
+                    ? "error"
+                    : "loading"
+              }
             />
           </div>
         </SidebarBody>
@@ -222,18 +229,18 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               <article
                 role="alert"
                 aria-busy={dashboard.isDashboardLoading}
-                className="mb-4 flex flex-col items-start gap-3 rounded-[28px] border border-rose-200 bg-rose-50 p-5 text-sm"
+                className="dashboard-status-card mb-4"
               >
-                <p className="flex items-center gap-2 font-semibold text-rose-700">
+                <p className="dashboard-status-card-title">
                   <CircleAlert className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
                   대시보드를 불러오지 못했습니다
                 </p>
-                <p className="text-rose-600">{dashboard.dashboardError}</p>
+                <p>{dashboard.dashboardError}</p>
                 <button
                   type="button"
                   disabled={dashboard.isDashboardLoading}
                   onClick={() => void handleDashboardRetry()}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-rose-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-wait disabled:opacity-60"
+                  className="dashboard-status-card-button dashboard-status-card-button--primary"
                 >
                   <RotateCcw size={13} strokeWidth={2.4} aria-hidden="true" />
                   {dashboard.isDashboardLoading

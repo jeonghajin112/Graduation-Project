@@ -23,7 +23,7 @@ import type {
   ScoreResult
 } from "@/types/accessibility-domain";
 
-import { formatDateTime } from "../../shared/utils";
+import { formatDateTime, formatScore } from "../../shared/utils";
 import {
   analyzerLabels,
   canShowOnPage,
@@ -77,10 +77,6 @@ type FinalReportPanelProps = {
 
 function formatCount(count: number): string {
   return `${count.toLocaleString("ko-KR")}건`;
-}
-
-function formatScore(value: number): string {
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
 }
 
 /** Positive means better for the reader: a higher score or fewer issues. */

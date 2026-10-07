@@ -143,6 +143,15 @@ describe("criterion groups", () => {
     expect(group!.severityCounts.map(({ key, count }) => [key, count])).toEqual([["HIGH", 1], ["LOW", 2]]);
     expect(group!.analyzers).toEqual(["RULE_BASED", "CV_VISION"]);
   });
+
+  it("titles a group with the criterion's Korean name, like the 33-criteria overview", () => {
+    const groups = groupByCriterion([
+      row(1, { code: "meta-viewport", title: "Zooming and scaling must not be disabled" }),
+      row(2, { code: "KWCAG 6.4.3", title: "Links must have discernible text" }),
+      row(3, { code: "unknown-rule", title: "Engine title" })
+    ]);
+    expect(groups.map(({ title }) => title)).toEqual(["적절한 링크 텍스트", "화면 확대 제한", "Engine title"]);
+  });
 });
 
 describe("contrast messages", () => {

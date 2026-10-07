@@ -6,7 +6,7 @@ import { isLazyChunkLoadError } from "@/components/shared/error-boundary";
 export function RoutePanelFallback() {
   return (
     <article
-      className="rounded-[28px] border border-slate-200 bg-white p-5 text-sm text-slate-600"
+      className="dashboard-status-card"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -31,22 +31,22 @@ export function RoutePanelErrorFallback({
     <article
       role="alert"
       aria-labelledby={titleId}
-      className="rounded-[28px] border border-rose-200 bg-rose-50 p-5 text-sm"
+      className="dashboard-status-card"
     >
-      <h2 id={titleId} className="font-bold text-rose-800">
+      <h2 id={titleId} className="dashboard-status-card-title">
         화면을 표시할 수 없습니다
       </h2>
-      <p className="mt-2 leading-6 text-rose-700">
+      <p>
         {isChunkError
           ? "필요한 화면 파일을 불러오지 못했습니다. 네트워크를 확인한 뒤 페이지를 새로고침해 주세요."
           : "화면을 표시하는 중 문제가 발생했습니다. 다시 시도하거나 페이지를 새로고침해 주세요."}
       </p>
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="dashboard-status-card-actions">
         {!isChunkError ? (
           <button
             type="button"
             onClick={resetErrorBoundary}
-            className="rounded-lg bg-rose-700 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+            className="dashboard-status-card-button dashboard-status-card-button--primary"
           >
             다시 시도
           </button>
@@ -54,7 +54,7 @@ export function RoutePanelErrorFallback({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="rounded-lg bg-white px-4 py-2 text-xs font-bold text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+          className="dashboard-status-card-button"
         >
           페이지 새로고침
         </button>

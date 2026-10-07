@@ -17,7 +17,7 @@ import type {
 import { PanelMessage, renderTargetTypeIcon } from "../shared/display";
 import { buildLatestEvaluationRequestByTargetId } from "@/services/evaluation-request-selection";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
-import { formatDateTime, mapScanStatus } from "../shared/utils";
+import { formatDateTime, formatScore, mapScanStatus } from "../shared/utils";
 
 function ProjectFavicon({
   faviconUrl,
@@ -325,7 +325,7 @@ export function OrganizationModelDetailPanel({
                 <span className="dashboard-project-card-score pointer-events-none shrink-0 font-semibold tabular-nums text-[var(--dashboard-text-strong)]">
                   <span className="sr-only">점수 </span>
                   {row.totalScore !== null ? (
-                    `${row.totalScore}점`
+                    `${formatScore(row.totalScore)}점`
                   ) : (
                     <>
                       <span aria-hidden="true">-</span>

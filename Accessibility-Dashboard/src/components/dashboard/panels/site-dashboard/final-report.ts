@@ -3,6 +3,7 @@ import type { AnalyzerType, IssueResultModel, SeverityLevel } from "@/types/acce
 
 import { formatIssueCodeLabel, normalizeIssueCode, severityChartItems } from "./constants";
 import { getIssueCoordinateBox } from "./issue-locator";
+import { nameCriterion } from "./kwcag-criteria";
 import type { LocatorCheckState, LocatorIssueState, RecentIssueRow, SeverityChartItem } from "./types";
 
 export const analyzerLabels: Record<AnalyzerType, string> = {
@@ -135,7 +136,9 @@ export function groupByCriterion(rows: readonly RecentIssueRow[]): ReportCriteri
     .map(([code, group]) => ({
       code,
       codeLabel: formatIssueCodeLabel(code),
-      title: mostFrequent(group.map((row) => row.issue.issueTitle)),
+      // The criterion's own name keeps the list in step with the 33-criteria
+      // overview; engine titles (often English for axe rules) are the fallback.
+      title: nameCriterion(code) ?? mostFrequent(group.map((row) => row.issue.issueTitle)),
       severity: highestSeverity(group),
       severityCounts: summarizeReport(group).severities.filter((item) => item.count > 0),
       analyzers: analyzerOrder.filter((analyzer) => group.some((row) => row.analyzerType === analyzer)),

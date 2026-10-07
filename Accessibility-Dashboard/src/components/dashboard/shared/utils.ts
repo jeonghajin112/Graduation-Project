@@ -12,6 +12,15 @@ export function mapScanStatus(status: string): ScanStatus {
   return "진행중";
 }
 
+/**
+ * A 0–100 score as every dashboard view prints it: rounded to one decimal,
+ * whole numbers without ".0" (86.25 → "86.3", 99.96 → "100", 75 → "75").
+ */
+export function formatScore(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 export function formatDateTime(value: string | null): string {
   if (!value) {
     return "-";

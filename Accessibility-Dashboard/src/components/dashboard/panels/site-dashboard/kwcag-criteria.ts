@@ -135,6 +135,17 @@ const descriptions = new Map<string, string>([
   ...Object.entries(OTHER_DESCRIPTIONS)
 ]);
 
+const names = new Map<string, string>([
+  ...KWCAG_PRINCIPLES.flatMap((principle) => principle.criteria.map((criterion) => [criterion.code, criterion.name] as const)),
+  ...Object.entries(OTHER_NAMES)
+]);
+
+/** The Korean name the report gives a criterion, or null for a code without one. */
+export function nameCriterion(issueCode: string): string | null {
+  const code = normalizeIssueCode(issueCode).replace(/^KWCAG\s+/i, "");
+  return names.get(code) ?? null;
+}
+
 /** What a criterion asks of a page, or null for a code without one. */
 export function describeCriterion(issueCode: string): string | null {
   const code = normalizeIssueCode(issueCode).replace(/^KWCAG\s+/i, "");
