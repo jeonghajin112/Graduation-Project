@@ -103,6 +103,10 @@ try {
       const name = `${viewport.width}-${theme}`;
       await page.goto(`${baseUrl}/projects/1`);
       await page.locator(".dashboard-project-card").waitFor();
+      // Phones keep the sidebar in a drawer behind the menu button.
+      const openMenu = page.getByRole("button", { name: "메뉴 열기", exact: true });
+      const isDrawer = await openMenu.isVisible();
+      if (isDrawer) await openMenu.click();
       // The disclosure state lives on the separate chevron toggle.
       const projectToggle = page.locator(".sidebar-tree-toggle").first();
       if (await projectToggle.getAttribute("aria-expanded") === "false") await projectToggle.click();
@@ -110,6 +114,10 @@ try {
         await tabTo(page, page.locator(selector).first(), `${name} sidebar ${selector}`);
       }
       await page.locator(".dashboard-sidebar").screenshot({ path: `${output}/${name}-sidebar.png` });
+      if (isDrawer) {
+        await page.keyboard.press("Escape");
+        await openMenu.waitFor();
+      }
       const card = page.getByRole("button", { name: "CI Fixture Page 상세 보기", exact: true });
       await tabTo(page, card, `${name} page card`);
       await page.locator(".dashboard-project-card").screenshot({ path: `${output}/${name}-card.png` });

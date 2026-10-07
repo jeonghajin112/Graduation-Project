@@ -46,6 +46,10 @@ async function verifyTheme(theme, viewport) {
     await dialog.screenshot({ path: path.join(outDir, `${theme}-${viewport.width}-${name}.png`) });
     await dialog.getByRole("button", { name: closeName, exact: true }).click();
   }
+  // Phones keep the sidebar in a drawer; its dialogs open over the drawer.
+  const openMenu = page.getByRole("button", { name: "메뉴 열기", exact: true });
+  const isDrawer = await openMenu.isVisible();
+  if (isDrawer) await openMenu.click();
   await page.getByRole("button", { name: "프로젝트 추가", exact: true }).click();
   await capture("project-create", "프로젝트 추가", "취소");
   const project = page.getByRole("complementary").getByRole("button", { name: fixture.organization.name, exact: true });
@@ -55,6 +59,10 @@ async function verifyTheme(theme, viewport) {
   await project.click({ button: "right" });
   await page.getByRole("menuitem", { name: "삭제", exact: true }).click();
   await capture("project-delete", "프로젝트 제거", "아니요");
+  if (isDrawer) {
+    await page.keyboard.press("Escape");
+    await openMenu.waitFor();
+  }
   await page.getByRole("button", { name: "페이지 추가", exact: true }).click();
   await capture("page-create", "페이지 추가", "취소");
   await page.getByRole("button", { name: `${fixture.target.name} 제거`, exact: true }).click();
