@@ -15,6 +15,7 @@ import {
   type IssueCoordinateBox
 } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
+import { hasExactOwnKeys, isDocumentToken, isObjectRecord } from "@/lib/guards";
 
 export const DASHBOARD_REPLAY_SOURCE = "accessibility-dashboard" as const;
 export const PAGE_REPLAY_SOURCE = "accessibility-page-replay" as const;
@@ -34,7 +35,6 @@ export const REPLAY_BRIDGE_LIMITS = {
   pathSteps: 128
 } as const;
 
-const DOCUMENT_TOKEN_MAX_LENGTH = 128;
 const LOCATOR_REASON_MAX_LENGTH = 128;
 const BLOCKED_LINK_HREF_MAX_LENGTH = 2_048;
 const COMMAND_TYPE_PATTERN = /^[A-Z_]{1,32}$/;
@@ -289,14 +289,10 @@ export function isMeaningfulLiveDocumentHealth(
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
 export function isValidReplayViewportMetrics(
   value: unknown
 ): value is ReplayViewportMetrics {
-  if (!isRecord(value)) return false;
+  if (!isObjectRecord(value)) return false;
   const { scale, visualWidth } = value;
   return (
     typeof scale === "number"
@@ -318,25 +314,8 @@ function isBoundedCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
 }
 
-function hasExactOwnKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
-  const ownKeys = Reflect.ownKeys(value);
-  return (
-    ownKeys.length === expectedKeys.length &&
-    expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
-  );
-}
-
 function hasOwnKey(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-function isDocumentToken(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= DOCUMENT_TOKEN_MAX_LENGTH &&
-    /^[A-Za-z0-9_-]+$/.test(value)
-  );
 }
 
 export type PageReplayIssueOptions = {
@@ -506,7 +485,7 @@ function parseTextAnalysisSuggestions(value: string): string[] {
       if (Array.isArray(parsed)) {
         const guides = parsed.map((entry) => {
           if (typeof entry === "string") return entry;
-          if (isRecord(entry) && typeof entry.guide === "string") return entry.guide;
+          if (isObjectRecord(entry) && typeof entry.guide === "string") return entry.guide;
           return "";
         });
         return normalizeTextAnalysisList(guides);
@@ -525,7 +504,7 @@ function parseTextAnalysisRevision(
 ): ReplayTextAnalysisDetail["revision"] {
   try {
     const parsed: unknown = JSON.parse(value.trim());
-    if (!isRecord(parsed)) return null;
+    if (!isObjectRecord(parsed)) return null;
     if (
       (hasOwnKey(parsed, "revised_text") && typeof parsed.revised_text !== "string")
       || (hasOwnKey(parsed, "reason") && typeof parsed.reason !== "string")
@@ -633,203 +612,147 @@ function toOptionalBoundedReplayText(
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
-export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMessage | null {
-  if (!isRecord(value) || value.source !== PAGE_REPLAY_SOURCE || typeof value.type !== "string") {
-    return null;
-  }
+type ReplayMessageType = PageReplayToDashboardMessage["type"];
+type ReplayMessageFields = Record<string, unknown>;
+// A parser sees a message whose source and document token are already checked
+// and accepts it only when the fields its type adds are exactly right.
+type ReplayMessageParser = (value: ReplayMessageFields, documentToken: string) => PageReplayToDashboardMessage | null;
 
-  if (value.type === "REPORT_FOCUS_EXIT" &&
-      hasExactOwnKeys(value, ["source", "type", "documentToken", "direction"]) &&
-      isDocumentToken(value.documentToken) &&
-      (value.direction === "forward" || value.direction === "backward")) {
-    return { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT",
-      documentToken: value.documentToken, direction: value.direction };
-  }
+const locatorConnectionStatuses: readonly unknown[] = ["CONNECTED", "VISIBLE", "OFFSCREEN", "HIDDEN_STATE", "UNAVAILABLE"];
+const documentHealthCounts = [
+  "consecutiveMeaningfulSamples",
+  "visibleControlCount",
+  "visibleElementCount",
+  "visibleImageCount",
+  "largestVisibleVisualArea",
+  "visibleTextLength"
+] as const;
 
-  if (value.type === "DOCUMENT_SCROLL" &&
-      hasExactOwnKeys(value, ["source", "type", "documentToken", "isScrolled"]) &&
-      isDocumentToken(value.documentToken) && typeof value.isScrolled === "boolean") {
-    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL",
-      documentToken: value.documentToken, isScrolled: value.isScrolled };
-  }
+/** The message carries the common header, then exactly `fields`. */
+function hasMessageFields(value: ReplayMessageFields, fields: readonly string[] = []): boolean {
+  return hasExactOwnKeys(value, ["source", "type", "documentToken", ...fields]);
+}
 
-  if (value.type === "DOCUMENT_TITLE" &&
-      hasExactOwnKeys(value, ["source", "type", "documentToken", "title"]) &&
-      isDocumentToken(value.documentToken) &&
-      typeof value.title === "string" && value.title.length <= 300) {
-    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE",
-      documentToken: value.documentToken, title: value.title.trim() };
-  }
+/** The optional fields among `keys` that the message actually carries. */
+function presentFields(value: ReplayMessageFields, keys: readonly string[]): string[] {
+  return keys.filter((key) => hasOwnKey(value, key));
+}
 
-  if (
-    (value.type === "DOCUMENT_LOADING" ||
-      value.type === "DOCUMENT_UNLOADING" ||
-      value.type === "READY") &&
-    hasExactOwnKeys(value, ["source", "type", "documentToken"]) &&
-    isDocumentToken(value.documentToken)
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: value.type,
-      documentToken: value.documentToken
-    };
+function readBoundedCounts<K extends string>(value: ReplayMessageFields, keys: readonly K[]): Record<K, number> | null {
+  const counts = {} as Record<K, number>;
+  for (const key of keys) {
+    const count = value[key];
+    if (!isBoundedCount(count)) return null;
+    counts[key] = count;
   }
+  return counts;
+}
 
-  if (
-    value.type === "DOCUMENT_HEALTH" &&
-    hasExactOwnKeys(value, [
-      "source",
-      "type",
-      "documentToken",
-      "status",
-      "consecutiveMeaningfulSamples",
-      "visibleControlCount",
-      "visibleElementCount",
-      "visibleImageCount",
-      "largestVisibleVisualArea",
-      "visibleTextLength"
-    ]) &&
-    isDocumentToken(value.documentToken) &&
-    (value.status === "EMPTY" || value.status === "MEANINGFUL") &&
-    isBoundedCount(value.consecutiveMeaningfulSamples) &&
-    isBoundedCount(value.visibleControlCount) &&
-    isBoundedCount(value.visibleElementCount) &&
-    isBoundedCount(value.visibleImageCount) &&
-    isBoundedCount(value.largestVisibleVisualArea) &&
-    isBoundedCount(value.visibleTextLength)
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "DOCUMENT_HEALTH",
-      documentToken: value.documentToken,
-      status: value.status,
-      consecutiveMeaningfulSamples: value.consecutiveMeaningfulSamples,
-      visibleControlCount: value.visibleControlCount,
-      visibleElementCount: value.visibleElementCount,
-      visibleImageCount: value.visibleImageCount,
-      largestVisibleVisualArea: value.largestVisibleVisualArea,
-      visibleTextLength: value.visibleTextLength
-    };
-  }
+function parseDocumentLifecycle(type: "DOCUMENT_LOADING" | "DOCUMENT_UNLOADING" | "READY"): ReplayMessageParser {
+  return (value, documentToken) =>
+    hasMessageFields(value) ? { source: PAGE_REPLAY_SOURCE, type, documentToken } : null;
+}
 
-  if (
-    value.type === "ISSUE_SELECTED" &&
-    hasExactOwnKeys(value, ["source", "type", "documentToken", "issueId"]) &&
-    isDocumentToken(value.documentToken) &&
-    (value.issueId === null || isIssueId(value.issueId))
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "ISSUE_SELECTED",
-      documentToken: value.documentToken,
-      issueId: value.issueId
-    };
-  }
+function parseIssueReference(type: "ISSUE_SELECTED" | "ISSUE_DETAIL_FALLBACK"): ReplayMessageParser {
+  return (value, documentToken) => {
+    const { issueId } = value;
+    if (!hasMessageFields(value, ["issueId"]) || (issueId !== null && !isIssueId(issueId))) return null;
+    return { source: PAGE_REPLAY_SOURCE, type, documentToken, issueId };
+  };
+}
 
-  if (
-    value.type === "ISSUE_DETAIL_FALLBACK" &&
-    hasExactOwnKeys(value, ["source", "type", "documentToken", "issueId"]) &&
-    isDocumentToken(value.documentToken) &&
-    (value.issueId === null || isIssueId(value.issueId))
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "ISSUE_DETAIL_FALLBACK",
-      documentToken: value.documentToken,
-      issueId: value.issueId
-    };
-  }
+const pageReplayMessageParsers: Readonly<Record<ReplayMessageType, ReplayMessageParser>> = {
+  REPORT_FOCUS_EXIT: (value, documentToken) => {
+    const { direction } = value;
+    if (!hasMessageFields(value, ["direction"]) || (direction !== "forward" && direction !== "backward")) return null;
+    return { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT", documentToken, direction };
+  },
 
-  if (
-    value.type === "LOCATOR_STATUS" &&
-    hasExactOwnKeys(
-      value,
-      [
-        "source",
-        "type",
-        "documentToken",
-        "issueId",
-        "status",
-        ...(hasOwnKey(value, "reason") ? ["reason"] : []),
-        ...(hasOwnKey(value, "recoverable") ? ["recoverable"] : []),
-        ...(hasOwnKey(value, "ownerKind") ? ["ownerKind"] : [])
-      ]
-    ) &&
-    isDocumentToken(value.documentToken) &&
-    isIssueId(value.issueId) &&
-    (
-      value.status === "CONNECTED" ||
-      value.status === "VISIBLE" ||
-      value.status === "OFFSCREEN" ||
-      value.status === "HIDDEN_STATE" ||
-      value.status === "UNAVAILABLE"
-    ) &&
-    (value.reason === undefined ||
-      (typeof value.reason === "string" && value.reason.length <= LOCATOR_REASON_MAX_LENGTH)) &&
-    (value.recoverable === undefined || typeof value.recoverable === "boolean") &&
-    (value.recoverable === undefined || value.status === "HIDDEN_STATE") &&
-    (value.ownerKind === undefined || locatorOwnerKinds.includes(value.ownerKind as LocatorOwnerKind))
-  ) {
+  DOCUMENT_SCROLL: (value, documentToken) => {
+    const { isScrolled } = value;
+    if (!hasMessageFields(value, ["isScrolled"]) || typeof isScrolled !== "boolean") return null;
+    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_SCROLL", documentToken, isScrolled };
+  },
+
+  DOCUMENT_TITLE: (value, documentToken) => {
+    const { title } = value;
+    if (!hasMessageFields(value, ["title"]) || typeof title !== "string" || title.length > 300) return null;
+    return { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_TITLE", documentToken, title: title.trim() };
+  },
+
+  DOCUMENT_LOADING: parseDocumentLifecycle("DOCUMENT_LOADING"),
+  DOCUMENT_UNLOADING: parseDocumentLifecycle("DOCUMENT_UNLOADING"),
+  READY: parseDocumentLifecycle("READY"),
+
+  DOCUMENT_HEALTH: (value, documentToken) => {
+    const { status } = value;
+    if (!hasMessageFields(value, ["status", ...documentHealthCounts]) || (status !== "EMPTY" && status !== "MEANINGFUL")) {
+      return null;
+    }
+    const counts = readBoundedCounts(value, documentHealthCounts);
+    return counts && { source: PAGE_REPLAY_SOURCE, type: "DOCUMENT_HEALTH", documentToken, status, ...counts };
+  },
+
+  ISSUE_SELECTED: parseIssueReference("ISSUE_SELECTED"),
+  ISSUE_DETAIL_FALLBACK: parseIssueReference("ISSUE_DETAIL_FALLBACK"),
+
+  LOCATOR_STATUS: (value, documentToken) => {
+    const { issueId, status, reason, recoverable, ownerKind } = value;
+    const valid =
+      hasMessageFields(value, ["issueId", "status", ...presentFields(value, ["reason", "recoverable", "ownerKind"])]) &&
+      isIssueId(issueId) &&
+      locatorConnectionStatuses.includes(status) &&
+      (reason === undefined || (typeof reason === "string" && reason.length <= LOCATOR_REASON_MAX_LENGTH)) &&
+      // Only a hidden-state finding can be brought back on screen.
+      (recoverable === undefined || (typeof recoverable === "boolean" && status === "HIDDEN_STATE")) &&
+      (ownerKind === undefined || locatorOwnerKinds.includes(ownerKind as LocatorOwnerKind));
+    if (!valid) return null;
     return {
       source: PAGE_REPLAY_SOURCE,
       type: "LOCATOR_STATUS",
-      documentToken: value.documentToken,
-      issueId: value.issueId,
-      status: value.status,
-      ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
-      ...(typeof value.recoverable === "boolean" ? { recoverable: value.recoverable } : {}),
-      ...(typeof value.ownerKind === "string" ? { ownerKind: value.ownerKind as LocatorOwnerKind } : {})
+      documentToken,
+      issueId,
+      status: status as LocatorConnectionStatus,
+      ...(typeof reason === "string" ? { reason } : {}),
+      ...(typeof recoverable === "boolean" ? { recoverable } : {}),
+      ...(ownerKind !== undefined ? { ownerKind: ownerKind as LocatorOwnerKind } : {})
     };
-  }
+  },
 
+  FORM_BLOCKED: (value, documentToken) => {
+    const { method } = value;
+    if (!hasMessageFields(value, ["method"]) || (method !== "GET" && method !== "POST" && method !== "DIALOG")) return null;
+    return { source: PAGE_REPLAY_SOURCE, type: "FORM_BLOCKED", documentToken, method };
+  },
+
+  LINK_BLOCKED: (value, documentToken) => {
+    const { href } = value;
+    if (!hasMessageFields(value, presentFields(value, ["href"])) ||
+        (href !== undefined && (typeof href !== "string" || href.length > BLOCKED_LINK_HREF_MAX_LENGTH))) {
+      return null;
+    }
+    return { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken, ...(href !== undefined ? { href } : {}) };
+  },
+
+  COMMAND_REJECTED: (value, documentToken) => {
+    const { commandType } = value;
+    if (!hasMessageFields(value, ["commandType"]) || typeof commandType !== "string" || !COMMAND_TYPE_PATTERN.test(commandType)) {
+      return null;
+    }
+    return { source: PAGE_REPLAY_SOURCE, type: "COMMAND_REJECTED", documentToken, commandType };
+  }
+};
+
+export function parsePageReplayMessage(value: unknown): PageReplayToDashboardMessage | null {
   if (
-    value.type === "FORM_BLOCKED" &&
-    hasExactOwnKeys(value, ["source", "type", "documentToken", "method"]) &&
-    isDocumentToken(value.documentToken) &&
-    (value.method === "GET" || value.method === "POST" || value.method === "DIALOG")
+    !isObjectRecord(value) ||
+    value.source !== PAGE_REPLAY_SOURCE ||
+    typeof value.type !== "string" ||
+    // Own keys only: "toString" or "constructor" is not a message type.
+    !hasOwnKey(pageReplayMessageParsers, value.type) ||
+    !isDocumentToken(value.documentToken)
   ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "FORM_BLOCKED",
-      documentToken: value.documentToken,
-      method: value.method
-    };
+    return null;
   }
-
-  if (
-    value.type === "LINK_BLOCKED" &&
-    hasExactOwnKeys(
-      value,
-      hasOwnKey(value, "href")
-        ? ["source", "type", "documentToken", "href"]
-        : ["source", "type", "documentToken"]
-    ) &&
-    isDocumentToken(value.documentToken) &&
-    (value.href === undefined ||
-      (typeof value.href === "string" && value.href.length <= BLOCKED_LINK_HREF_MAX_LENGTH))
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "LINK_BLOCKED",
-      documentToken: value.documentToken,
-      ...(typeof value.href === "string" ? { href: value.href } : {})
-    };
-  }
-
-  if (
-    value.type === "COMMAND_REJECTED" &&
-    hasExactOwnKeys(value, ["source", "type", "documentToken", "commandType"]) &&
-    isDocumentToken(value.documentToken) &&
-    typeof value.commandType === "string" &&
-    COMMAND_TYPE_PATTERN.test(value.commandType)
-  ) {
-    return {
-      source: PAGE_REPLAY_SOURCE,
-      type: "COMMAND_REJECTED",
-      documentToken: value.documentToken,
-      commandType: value.commandType
-    };
-  }
-
-  return null;
+  return pageReplayMessageParsers[value.type as ReplayMessageType](value, value.documentToken);
 }

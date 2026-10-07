@@ -38,6 +38,9 @@ export type IssueCoordinateBox = { x: number; y: number; width: number; height: 
 
 const COORDINATE_LIMIT = 1_000_000;
 
+// The visual engine labels its findings "x=803, y=13, width=39, height=12".
+const COORDINATE_LABEL = /^x\s*=\s*-?[\d.]+\s*,\s*y\s*=/i;
+
 function isCoordinate(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= COORDINATE_LIMIT;
 }
@@ -76,7 +79,8 @@ export function getReplayIssuePathSteps(issue: IssueResultModel): IssueLocatorPa
   }
 
   const fallbackSelector = typeof issue.locationPath === "string" ? issue.locationPath.trim() : "";
-  return fallbackSelector.length > 0
+  // Without a usable box a coordinate label still names no element.
+  return fallbackSelector.length > 0 && !COORDINATE_LABEL.test(fallbackSelector)
     ? [{ context: "DOCUMENT", selector: fallbackSelector }]
     : [];
 }

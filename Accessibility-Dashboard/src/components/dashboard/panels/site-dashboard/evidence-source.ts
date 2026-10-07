@@ -25,13 +25,15 @@ export function getEvidenceFrameIdentity({
 }
 
 // Coordinate markers need the capture's width and pixel scale. Wait while it
-// loads; once it is known to be absent, coordinates cannot be placed.
+// loads; once it is known to be absent, coordinates cannot be placed. A failed
+// lookup is kept apart: the capture may exist, and a retry can place them.
 export function resolveReplayCaptureMetadataStatus(
   loadState: EvaluationCaptureMetadataLoadState,
   hasCaptureMetadata: boolean
-): "pending" | "ready" | "missing" {
+): "pending" | "ready" | "missing" | "error" {
   if (hasCaptureMetadata) return "ready";
-  return loadState === "loading" ? "pending" : "missing";
+  if (loadState === "loading") return "pending";
+  return loadState === "error" ? "error" : "missing";
 }
 
 export function shouldAwaitLiveDocumentHealthAfterFrameLoad({

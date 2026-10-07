@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EvaluationRequestModel } from "@/types/accessibility-domain";
 import {
   buildLatestEvaluationRequestByTargetId,
+  selectRepresentativeRequestByTarget,
   compareEvaluationRequestRecency,
   selectLatestAnalysisAttempt,
   selectLatestEvaluationRequest
@@ -92,5 +93,31 @@ describe("evaluation request selection", () => {
       expect(selectLatestEvaluationRequest(requests)).toBe(higherId);
       expect(buildLatestEvaluationRequestByTargetId(requests).get(101)).toBe(higherId);
     }
+  });
+});
+
+describe("sidebar representative request", () => {
+  const make = (id: number, target: number, status: EvaluationRequestModel["status"], requestedAt: string) =>
+    ({ id, evaluationTargetId: target, status, requestedAt } as EvaluationRequestModel);
+
+  it("prefers a running job, then a queued one, then the latest submission", () => {
+    const done = make(1, 7, "COMPLETED", "2026-10-07T10:09:00Z");
+    const queued = make(2, 7, "PENDING", "2026-10-07T10:01:00Z");
+    const running = make(3, 7, "IN_PROGRESS", "2026-10-07T10:00:00Z");
+    expect(selectRepresentativeRequestByTarget([done, queued]).get(7)).toBe(queued);
+    expect(selectRepresentativeRequestByTarget([queued, running, done]).get(7)).toBe(running);
+    const older = make(4, 8, "FAILED", "2026-10-07T10:00:00Z");
+    const newer = make(5, 8, "COMPLETED", "2026-10-07T10:05:00Z");
+    expect(selectRepresentativeRequestByTarget([newer, older]).get(8)).toBe(newer);
+  });
+
+  it("breaks equal or unreadable times by the higher id, page by page", () => {
+    const first = make(10, 9, "COMPLETED", "2026-10-07T10:00:00Z");
+    const second = make(11, 9, "COMPLETED", "2026-10-07T10:00:00Z");
+    const undated = make(12, 9, "COMPLETED", "");
+    const map = selectRepresentativeRequestByTarget([first, second, make(13, 6, "FAILED", "")]);
+    expect(map.get(9)).toBe(second);
+    expect(map.get(6)?.id).toBe(13);
+    expect(selectRepresentativeRequestByTarget([second, undated]).get(9)).toBe(undated);
   });
 });

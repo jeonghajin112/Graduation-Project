@@ -48,7 +48,7 @@ import type { LiveReportSessionLoadState } from "./use-live-report-session";
 type ReplayConnectionState = "loading" | "ready" | "error";
 
 /** Whether the analysis-time capture (width and pixel scale) is known. */
-export type ReplayCaptureMetadataStatus = "pending" | "ready" | "missing";
+export type ReplayCaptureMetadataStatus = "pending" | "ready" | "missing" | "error";
 
 type LiveReportPortConnection = {
   challenge: string;
@@ -162,7 +162,7 @@ export function usePageEvidenceConnection({
     createLiveReportAutomaticRecoveryState(evaluationRequestId)
   );
 
-  const omitCoordinateBoxes = captureMetadataStatus === "missing";
+  const omitCoordinateBoxes = captureMetadataStatus === "missing" || captureMetadataStatus === "error";
   const replayIssues = useMemo(
     () => rows.map((row) => toPageReplayIssue(row, deviceScaleFactor, { omitCoordinateBox: omitCoordinateBoxes })),
     [deviceScaleFactor, omitCoordinateBoxes, rows]
@@ -398,10 +398,17 @@ export function usePageEvidenceConnection({
     }
   }
 
+  /**
+   * Forgets the replay document: its token (retired, so its late messages are
+   * ignored), title, scroll, health, initialization and the locator results
+   * it reported. Every path that loses or replaces the document goes through
+   * here. At most one of the active and pending tokens is ever set.
+   */
   function invalidateReplayDocumentSession({ resetRetiredTokens = false } = {}) {
     clearLocatorStatusTimeout();
     setDocumentTitle(null);
     setIsDocumentScrolled(false);
+    setFallbackIssueId(null);
     resetLocatorStates();
     retireDocumentToken(activeDocumentTokenRef.current);
     retireDocumentToken(pendingDocumentTokenRef.current);
@@ -416,6 +423,13 @@ export function usePageEvidenceConnection({
     if (resetRetiredTokens) {
       retiredDocumentTokensRef.current.clear();
     }
+  }
+
+  /** The viewer is between documents: show loading until the next one loads. */
+  function awaitNextReplayDocument() {
+    setReplayConnectionState("loading");
+    clearReplayReadyTimeout();
+    armReplayFrameLoadTimeout();
   }
 
   function postToReplay(message: DashboardToPageReplayMessage) {
@@ -634,8 +648,6 @@ export function usePageEvidenceConnection({
     closeLiveReportPort();
     invalidateReplayDocumentSession({ resetRetiredTokens: true });
     liveReconnectAllowedRef.current = false;
-    setFallbackIssueId(null);
-    resetLocatorStates();
     setReplayLoadingPhase(
       effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null
         ? "source-ready"
@@ -686,28 +698,14 @@ export function usePageEvidenceConnection({
 
       const replacesKnownDocument =
         activeDocumentTokenRef.current !== null || pendingDocumentTokenRef.current !== null;
-      retireDocumentToken(activeDocumentTokenRef.current);
-      retireDocumentToken(pendingDocumentTokenRef.current);
-      activeDocumentTokenRef.current = null;
+      invalidateReplayDocumentSession();
       pendingDocumentTokenRef.current = message.documentToken;
-      setDocumentTitle(null);
-      setIsDocumentScrolled(false);
-      confirmedLiveDocumentTokenRef.current = null;
-      readyAwaitingFrameLoadRef.current = null;
-      frameLoadObservedRef.current = false;
-      initializedReplayRef.current = null;
-      replayOriginSelectionRef.current = null;
-      setFallbackIssueId(null);
-      resetLocatorStates();
       if (replacesKnownDocument) {
         setReplayLoadingPhase("source-ready");
       } else {
         advanceReplayLoadingPhase("source-ready");
       }
-      setReplayConnectionState("loading");
-      clearReplayReadyTimeout();
-      clearLocatorStatusTimeout();
-      armReplayFrameLoadTimeout();
+      awaitNextReplayDocument();
       return;
     }
 
@@ -719,23 +717,9 @@ export function usePageEvidenceConnection({
         return;
       }
 
-      retireDocumentToken(message.documentToken);
-      setDocumentTitle(null);
-      setIsDocumentScrolled(false);
-      activeDocumentTokenRef.current = null;
-      pendingDocumentTokenRef.current = null;
-      confirmedLiveDocumentTokenRef.current = null;
-      readyAwaitingFrameLoadRef.current = null;
-      frameLoadObservedRef.current = false;
-      initializedReplayRef.current = null;
-      replayOriginSelectionRef.current = null;
-      setFallbackIssueId(null);
-      resetLocatorStates();
+      invalidateReplayDocumentSession();
       setReplayLoadingPhase("source-ready");
-      setReplayConnectionState("loading");
-      clearReplayReadyTimeout();
-      clearLocatorStatusTimeout();
-      armReplayFrameLoadTimeout();
+      awaitNextReplayDocument();
       if (activeFrameKindRef.current === "live") {
         closeLiveReportPort();
       }
@@ -876,7 +860,8 @@ export function usePageEvidenceConnection({
       const captureMissing = message.status === "UNAVAILABLE" && coordinateOmittedIssueIds.has(message.issueId);
       enqueueLocatorState(message.issueId, {
         status: message.status,
-        reason: captureMissing ? "CAPTURE_METADATA_MISSING" : message.reason,
+        reason: !captureMissing ? message.reason
+          : captureMetadataStatus === "error" ? "CAPTURE_METADATA_FAILED" : "CAPTURE_METADATA_MISSING",
         recoverable: message.recoverable,
         ownerKind: message.ownerKind
       });
@@ -1051,8 +1036,6 @@ export function usePageEvidenceConnection({
       clearReplayReadyTimeout();
       closeLiveReportPort();
       invalidateReplayDocumentSession();
-      setFallbackIssueId(null);
-      resetLocatorStates();
       setReplayConnectionState("loading");
       connectLiveReportBridge(undefined, true);
       return;
@@ -1079,8 +1062,6 @@ export function usePageEvidenceConnection({
     clearReplayReadyTimeout();
     invalidateReplayDocumentSession();
     frameLoadObservedRef.current = true;
-    setFallbackIssueId(null);
-    resetLocatorStates();
     setReplayConnectionState("loading");
     armReplayReadyTimeout();
     requestReplayDocumentState();

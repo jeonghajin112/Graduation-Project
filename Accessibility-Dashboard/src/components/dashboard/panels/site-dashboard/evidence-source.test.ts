@@ -15,9 +15,11 @@ describe("replay capture metadata status", () => {
     expect(resolveReplayCaptureMetadataStatus("ready", true)).toBe("ready");
     // A cached value stays usable while a retry reloads it.
     expect(resolveReplayCaptureMetadataStatus("loading", true)).toBe("ready");
-    for (const loadState of ["error", "empty", "idle"] as const) {
+    for (const loadState of ["empty", "idle"] as const) {
       expect(resolveReplayCaptureMetadataStatus(loadState, false)).toBe("missing");
     }
+    // A failed lookup says nothing about whether the capture exists.
+    expect(resolveReplayCaptureMetadataStatus("error", false)).toBe("error");
   });
 });
 

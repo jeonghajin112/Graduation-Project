@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { Pause, Play, Plus } from "lucide-react";
 import "@/styles/landing-look.css";
 
 /**
@@ -66,6 +66,10 @@ const SCROLL_QUERY = "(min-width: 901px)";
 export function LandingLookSection() {
   const [active, setActive] = useState(0);
   const [nearView, setNearView] = useState(false);
+  // 움직이는 화면은 사용자가 멈출 수 있어야 하고(WCAG 2.2.2), 섹션을 벗어나면 재생하지 않는다.
+  const [inView, setInView] = useState(false);
+  const [userPaused, setUserPaused] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
 
@@ -78,14 +82,26 @@ export function LandingLookSection() {
     const section = sectionRef.current;
     let observer: IntersectionObserver | undefined;
     if (section && typeof IntersectionObserver !== "undefined") {
-      observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) setNearView(true); }, { rootMargin: "50% 0px" });
+      observer = new IntersectionObserver(([entry]) => {
+        if (entry.isIntersecting) setNearView(true);
+        setInView(entry.isIntersecting);
+      }, { rootMargin: "50% 0px" });
       observer.observe(section);
     } else {
       setNearView(true);
+      setInView(true);
     }
     return () => { reduced.removeEventListener("change", syncMotion); observer?.disconnect(); };
   }, []);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const showVideo = nearView && !reducedMotion;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (inView && !userPaused) void video.play().catch(() => {});
+    else video.pause();
+  }, [inView, userPaused, showVideo, active]);
   const item = ITEMS[active];
 
   // 스크롤 구간 안의 진행도로 펼칠 항목을 고른다.
@@ -172,9 +188,15 @@ export function LandingLookSection() {
           </div>
 
           <div className="ua-look__panel" id="ua-look-panel" role="tabpanel" aria-labelledby={`ua-look-tab-${item.id}`}>
-            {nearView && !reducedMotion ? (
-              <video className="ua-look__video" key={item.video} src={item.video} poster={item.poster}
-                autoPlay muted loop playsInline preload="auto" aria-hidden="true" />
+            {showVideo ? (
+              <>
+                <video className="ua-look__video" key={item.video} ref={videoRef} src={item.video} poster={item.poster}
+                  muted loop playsInline preload="auto" aria-hidden="true" />
+                <button className="ua-look__playback" type="button" onClick={() => setUserPaused((paused) => !paused)}
+                  aria-label={userPaused ? "예시 영상 재생" : "예시 영상 일시정지"}>
+                  {userPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+                </button>
+              </>
             ) : (
               <img className="ua-look__video" src={item.poster} alt="" width="1920" height="1248" decoding="async" />
             )}

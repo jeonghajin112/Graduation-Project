@@ -340,6 +340,8 @@ export function mountScrollWorld(container, config, options = {}) {
   function onActionClick(event) {
     const action = event.currentTarget.dataset.swAction;
     if (action !== 'enter-app' || typeof options.onEnterApp !== 'function') return;
+    // New tab / window / download stay with the browser, as for the page's own links.
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     options.onEnterApp();
   }
@@ -732,7 +734,7 @@ function injectCSS() {
   #sw-section-opening .sw-copy__title{color:#fff;font-size:min(6vw,clamp(3.375rem,2.52rem + 2.8005vw,5.85rem));white-space:nowrap;text-shadow:none;}
   .sw-copy__tags{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 0;padding:0;}
   .sw-copy__tags li{font-size:.82rem;font-weight:600;color:#fff;padding:7px 14px;border-radius:999px;background:var(--sw-ink);border:1px solid var(--sw-ink);}
-  .sw-copy__cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px;pointer-events:auto;}
+  .sw-copy__cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px;}
   .sw-btn{display:inline-flex;min-height:48px;align-items:center;justify-content:center;text-decoration:none;font-weight:700;font-size:.95rem;padding:13px 24px;border-radius:999px;transition:background-color .2s;}
   .sw-btn--primary{color:#fff;background:var(--sw-accent);} .sw-btn--primary:hover{background:var(--primary-hover);}
   .sw-btn--ghost{color:var(--sw-ink);border:1.5px solid color-mix(in srgb,var(--sw-ink) 25%,transparent);}

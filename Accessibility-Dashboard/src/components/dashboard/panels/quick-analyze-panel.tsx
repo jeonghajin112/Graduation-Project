@@ -39,6 +39,7 @@ import {
 import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { toRequestStatus } from "./quick-analysis-status";
+import { isPositiveSafeInteger } from "@/lib/guards";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
@@ -100,10 +101,6 @@ function normalizeUrl(raw: string): string {
 
 function isLikelyUrl(value: string): boolean {
   return isValidEvaluationTargetAccessUrl(value);
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 function toComparableUrl(value: string): string | null {
@@ -303,7 +300,7 @@ export function QuickAnalyzePanel({
   const persistCheckpoint = (
     checkpoint: QuickAnalysisCheckpoint | PersistedQuickAnalysisAttempt,
     expectedRawValue = checkpointRawValueRef.current
-  ): boolean => {
+  ): void => {
     const attempt = "kind" in checkpoint
       ? persistedAttemptFromQuickAnalysisCheckpoint(checkpoint)
       : checkpoint;
@@ -321,7 +318,6 @@ export function QuickAnalyzePanel({
       throw new UserFacingError(failureMessage);
     }
     checkpointRawValueRef.current = stored.rawValue;
-    return true;
   };
 
   const clearPersistedCheckpoint = (): boolean => {
@@ -461,9 +457,7 @@ export function QuickAnalyzePanel({
           serverKey: supportsIdempotency ? true : undefined,
           knownRequestIds
         };
-        if (!persistCheckpoint(postingAttempt, null)) {
-          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-        }
+        persistCheckpoint(postingAttempt, null);
 
         const reconcilingCheckpoint: Extract<
           QuickAnalysisCheckpoint,
@@ -501,9 +495,7 @@ export function QuickAnalyzePanel({
           }
 
           if (commitOutcome.kind === "accepted") {
-            if (!persistCheckpoint(commitOutcome.value)) {
-              throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-            }
+            persistCheckpoint(commitOutcome.value);
             checkpointRef.current = commitOutcome.value;
             checkpoint = commitOutcome.value;
           }
@@ -518,13 +510,7 @@ export function QuickAnalyzePanel({
           throw error;
         }
 
-        if (checkpoint.kind === "reconciling") {
-          if (
-            !persistCheckpoint(checkpoint)
-          ) {
-            throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-          }
-        }
+        if (checkpoint.kind === "reconciling") persistCheckpoint(checkpoint);
       }
 
       if (checkpoint.kind === "reconciling") {
@@ -570,9 +556,7 @@ export function QuickAnalyzePanel({
             "분석 요청의 처리 결과를 아직 확인하지 못했습니다. 잠시 후 다시 시도해 주세요. 새 분석 요청은 보내지 않습니다."
           );
         }
-        if (!persistCheckpoint(recoveredCheckpoint)) {
-          throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
-        }
+        persistCheckpoint(recoveredCheckpoint);
         checkpointRef.current = recoveredCheckpoint;
         checkpoint = recoveredCheckpoint;
       }
@@ -593,7 +577,7 @@ export function QuickAnalyzePanel({
         }
         checkpoint = recovered;
         checkpointRef.current = recovered;
-        if (!persistCheckpoint(recovered)) throw new UserFacingError(QUICK_ANALYSIS_PERSISTENCE_FAILURE_MESSAGE);
+        persistCheckpoint(recovered);
       }
       onAnalysisAccepted({
         id: checkpoint.requestId,

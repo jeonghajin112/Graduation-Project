@@ -28,3 +28,8 @@ export function formatDateLabel(value: string): string {
 
   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
+
+/** A score as the trend charts print it: whole numbers plain, others to one decimal. */
+export function formatScore(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}

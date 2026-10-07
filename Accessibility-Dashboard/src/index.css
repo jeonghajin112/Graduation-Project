@@ -361,12 +361,7 @@
     }
   }
 
-  .bridge-dashboard .dashboard-sidebar-wordmark {
-    width: clamp(118px, 11vw, 148px);
-    height: auto;
-    color: var(--dashboard-text-strong);
-    display: block;
-  }
+  
 
   .bridge-dashboard .dashboard-sidebar .dashboard-header-account {
     margin-left: var(--dashboard-account-offset-x);
@@ -1119,10 +1114,6 @@
   background-color: var(--dashboard-hover-surface);
 }
 
-.bridge-dashboard.theme-dark .bg-slate-50 {
-  background-color: var(--dashboard-nested-surface);
-}
-
 .bridge-dashboard.theme-dark .bg-slate-100,
 .bridge-dashboard.theme-dark .bg-slate-100\/60,
 .bridge-dashboard.theme-dark .bg-slate-100\/70 {
@@ -1131,18 +1122,13 @@
 
 .bridge-dashboard.theme-dark .border-slate-200,
 .bridge-dashboard.theme-dark .border-slate-200\/70,
-.bridge-dashboard.theme-dark .border-slate-200\/80,
-.bridge-dashboard.theme-dark .border-slate-300 {
+.bridge-dashboard.theme-dark .border-slate-200\/80 {
   border-color: var(--dashboard-nested-border);
 }
 
 .bridge-dashboard.theme-dark .text-slate-950,
 .bridge-dashboard.theme-dark .text-slate-900 {
   color: var(--dashboard-text-strong);
-}
-
-.bridge-dashboard.theme-dark .text-slate-800 {
-  color: #e5e5e5;
 }
 
 .bridge-dashboard.theme-dark .text-slate-700 {
@@ -1183,10 +1169,6 @@
   background-color: var(--dashboard-sidebar-item-hover-bg);
   border-color: var(--dashboard-sidebar-item-hover-border);
   color: var(--dashboard-sidebar-hover-text);
-}
-
-.bridge-dashboard.theme-dark .project-list-row:hover {
-  background-color: var(--project-table-row-hover-bg);
 }
 
 .bridge-dashboard.theme-light aside.dashboard-sidebar {
@@ -1365,17 +1347,8 @@
   color: #64748b;
 }
 
-.bridge-dashboard.theme-light .project-list-head {
-  background-color: var(--project-table-head-bg);
-  border-color: rgba(226, 232, 240, 0.8);
-}
-
 .bridge-dashboard.theme-light .project-list-row:hover {
   background-color: var(--project-table-row-hover-bg);
-}
-
-.bridge-dashboard.theme-light .project-list-table .site-status-badge {
-  border: none;
 }
 
 .bridge-dashboard.theme-light .project-list-table .site-status-badge-finished {
@@ -1383,51 +1356,21 @@
   color: #059669;
 }
 
-.bridge-dashboard.theme-light .project-list-table .site-status-badge-running {
-  background-color: rgba(14, 165, 233, 0.1);
-  color: #0284c7;
-}
-
 .bridge-dashboard.theme-light .project-list-table .site-status-badge-failed {
   background-color: rgba(244, 63, 94, 0.1);
   color: #e11d48;
-}
-
-.bridge-dashboard.theme-light .project-list-table .site-status-badge-idle {
-  background-color: #f1f5f9;
-  color: #64748b;
 }
 
 .bridge-dashboard.theme-light .project-list-icon-action:hover {
   background-color: rgba(15, 23, 42, 0.065);
 }
 
-.bridge-dashboard.theme-light .project-list-table td,
-.bridge-dashboard.theme-light .project-list-table p,
-.bridge-dashboard.theme-light .project-list-table span,
-.bridge-dashboard.theme-light .project-list-table button {
-  color: var(--dashboard-text-primary);
-}
-
 .bridge-dashboard.theme-light .project-list-table .project-list-updated {
   color: var(--dashboard-text-secondary);
 }
 
-.bridge-dashboard.theme-dark .project-list-table th,
-.bridge-dashboard.theme-dark .project-list-table td,
-.bridge-dashboard.theme-dark .project-list-table p,
-.bridge-dashboard.theme-dark .project-list-table span,
-.bridge-dashboard.theme-dark .project-list-table button {
-  color: var(--dashboard-text-primary);
-}
-
 .bridge-dashboard.theme-dark .project-list-table .site-status-badge {
   border: none;
-}
-
-.bridge-dashboard.theme-dark .project-list-table .site-status-badge-finished {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: #34d399;
 }
 
 .bridge-dashboard.theme-dark .project-list-table .site-status-badge-running {
@@ -1435,19 +1378,9 @@
   color: #38bdf8;
 }
 
-.bridge-dashboard.theme-dark .project-list-table .site-status-badge-failed {
-  background-color: rgba(244, 63, 94, 0.1);
-  color: #fb7185;
-}
-
 .bridge-dashboard.theme-dark .project-list-table .site-status-badge-idle {
   background-color: rgba(148, 163, 184, 0.14);
   color: #94a3b8;
-}
-
-.bridge-dashboard.theme-dark .project-list-head {
-  background-color: var(--project-table-head-bg);
-  border-color: var(--dashboard-nested-border);
 }
 
 .bridge-dashboard.theme-dark .project-list-table .project-list-updated {

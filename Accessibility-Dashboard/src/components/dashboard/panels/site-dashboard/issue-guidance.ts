@@ -68,7 +68,9 @@ export function buildSharedGuidance(
   const partitions = new Map<string, RecentIssueRow[]>();
   for (const row of rows) {
     const key = row.analyzerType ?? "OTHER";
-    partitions.set(key, [...(partitions.get(key) ?? []), row]);
+    const members = partitions.get(key);
+    if (members) members.push(row);
+    else partitions.set(key, [row]);
   }
   const sharedKeys = new Map<string, Map<string, string>>();
   const entries: SharedGuidance["entries"] = [];

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getApiErrorMessage } from "@/services/backend-api";
 import type { DashboardSidebarSelection } from "@/services/dashboard-route";
+import { selectRepresentativeRequestByTarget } from "@/services/evaluation-request-selection";
 import {
   buildRecentAnalyzedPages,
   getQuickAnalysisRegistryServerSnapshot,
@@ -107,13 +108,7 @@ export function SidebarProjectsSection({
     setAcknowledgedAnalyses(next);
     try { localStorage.setItem(ANALYSIS_ACKNOWLEDGED_KEY, JSON.stringify(next)); } catch { /* Keep the dismissal for this session. */ }
   };
-  const pageAnalysisRequests = useMemo(() => {
-    const priority = (request: EvaluationRequestModel) => request.status === "IN_PROGRESS" ? 2 : request.status === "PENDING" ? 1 : 0;
-    const sorted = [...evaluationRequests].sort((a, b) => priority(b) - priority(a) || Date.parse(b.requestedAt) - Date.parse(a.requestedAt) || b.id - a.id);
-    const byTarget = new Map<number, EvaluationRequestModel>();
-    for (const request of sorted) if (!byTarget.has(request.evaluationTargetId)) byTarget.set(request.evaluationTargetId, request);
-    return byTarget;
-  }, [evaluationRequests]);
+  const pageAnalysisRequests = useMemo(() => selectRepresentativeRequestByTarget(evaluationRequests), [evaluationRequests]);
   const autoExpandedPageProjectId = useRef<number | null>(null);
   const hasQuickAnalysisResultsOverride = quickAnalysisResultsOverride !== undefined;
   const staticQuickAnalysisResults = quickAnalysisResultsOverride ?? EMPTY_QUICK_ANALYSIS_RESULTS;

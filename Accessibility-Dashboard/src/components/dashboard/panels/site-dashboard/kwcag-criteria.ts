@@ -101,10 +101,12 @@ export const KWCAG_PRINCIPLES: Array<{ name: string; criteria: Criterion[] }> = 
 
 /**
  * fail: issues were found. pass: an engine that checks it finished without
- * finding any. skipped: every engine that checks it failed or did not run.
- * manual: no engine checks it, so a person must.
+ * finding any. unknown: no engine that checks it is known to have finished,
+ * and at least one has no recorded outcome (older analyses). skipped: every
+ * engine that checks it failed or did not run. manual: no engine checks it,
+ * so a person must.
  */
-export type CriterionStatus = "fail" | "pass" | "skipped" | "manual";
+export type CriterionStatus = "fail" | "pass" | "unknown" | "skipped" | "manual";
 
 export type CriterionResult = Criterion & { status: CriterionStatus; count: number };
 
@@ -141,7 +143,8 @@ export function describeCriterion(issueCode: string): string | null {
 
 export function buildCriteriaOverview(
   rows: readonly RecentIssueRow[],
-  completedEngines: ReadonlySet<AnalyzerType>
+  completedEngines: ReadonlySet<AnalyzerType>,
+  unknownEngines: ReadonlySet<AnalyzerType> = new Set()
 ): CriteriaOverview {
   const issueCounts = new Map<string, number>();
   const titles = new Map<string, string>();
@@ -150,7 +153,7 @@ export function buildCriteriaOverview(
     issueCounts.set(code, (issueCounts.get(code) ?? 0) + 1);
     if (!titles.has(code) && row.issue.issueTitle) titles.set(code, row.issue.issueTitle);
   }
-  const counts: Record<CriterionStatus, number> = { fail: 0, pass: 0, skipped: 0, manual: 0 };
+  const counts: Record<CriterionStatus, number> = { fail: 0, pass: 0, unknown: 0, skipped: 0, manual: 0 };
   const known = new Set<string>();
   const principles = KWCAG_PRINCIPLES.map((principle) => ({
     name: principle.name,
@@ -160,7 +163,8 @@ export function buildCriteriaOverview(
       const status: CriterionStatus = count > 0 ? "fail"
         : criterion.engines.length === 0 ? "manual"
           : criterion.engines.some((engine) => completedEngines.has(engine)) ? "pass"
-            : "skipped";
+            : criterion.engines.some((engine) => unknownEngines.has(engine)) ? "unknown"
+              : "skipped";
       counts[status] += 1;
       return { ...criterion, status, count };
     })

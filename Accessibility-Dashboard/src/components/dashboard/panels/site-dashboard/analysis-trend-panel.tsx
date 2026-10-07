@@ -8,7 +8,7 @@ import type {
 
 import { buildScoreTrend, padScoreTrend } from "./score-trend";
 import type { ScoreChartItem } from "./types";
-import { formatDateLabel } from "./utils";
+import { formatDateLabel, formatScore } from "./utils";
 
 type AnalysisTrendPanelProps = {
   evaluationRequests: EvaluationRequestModel[];
@@ -16,10 +16,6 @@ type AnalysisTrendPanelProps = {
   resultSummaries: EvaluationResultSummary[];
   scoreResults: ScoreResult[];
 };
-
-function formatScore(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
 
 export function AnalysisTrendPanel({
   evaluationRequests,

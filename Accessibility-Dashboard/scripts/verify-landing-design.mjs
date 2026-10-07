@@ -448,7 +448,8 @@ async function verifyRefreshedMediaVariants(browser) {
       { suffix: "-1440", width: 2560, height: 1440 },
       { suffix: "", width: 3840, height: 2160 }
     ]) {
-      for (const scene of [{ id: "opening" }, ...refreshedScenes]) {
+      // The opening scene ships only its 4K original (it sets no clip variants).
+      for (const scene of [...(variant.suffix ? [] : [{ id: "opening" }]), ...refreshedScenes]) {
         const path = `/landing/scroll-world/vid/${scene.id}${variant.suffix}.mp4`;
         const facts = await page.evaluate(async (src) => {
           const video = document.createElement("video");

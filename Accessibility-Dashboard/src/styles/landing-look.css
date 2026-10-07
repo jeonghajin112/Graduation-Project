@@ -28,7 +28,11 @@
 .ua-look__pill-clip b { color: #1c222b; font-weight: 600; }
 .ua-look__pill.is-active .ua-look__pill-description { grid-template-rows: 1fr; margin-top: calc(6 * var(--lp)); }
 
-.ua-look__panel { min-width: 0; }
+.ua-look__panel { position: relative; min-width: 0; }
+/* 예시 영상을 멈추고 다시 트는 버튼(WCAG 2.2.2). 영상 오른쪽 아래 모서리에 둔다. */
+.ua-look__playback { position: absolute; right: calc(14 * var(--lp)); bottom: calc(14 * var(--lp)); display: grid; place-items: center; width: calc(44 * var(--lp)); height: calc(44 * var(--lp)); padding: 0; border: 0; border-radius: 50%; background: rgba(29, 29, 31, .72); color: #fff; cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.ua-look__playback:hover { background: rgba(29, 29, 31, .88); }
+.ua-look__playback svg { width: calc(18 * var(--lp)); height: calc(18 * var(--lp)); }
 .ua-look__video { display: block; width: 100%; aspect-ratio: 16 / 10.4; object-fit: cover; border-radius: calc(20 * var(--lp)); box-shadow: 0 calc(2 * var(--lp)) calc(6 * var(--lp)) rgba(0,0,0,.04), 0 calc(18 * var(--lp)) calc(48 * var(--lp)) rgba(0,0,0,.1); }
 
 /* 넓은 화면: 섹션이 스크롤 구간(항목당 반 화면)을 지나는 동안 내용은 상단바 아래에 고정되고,

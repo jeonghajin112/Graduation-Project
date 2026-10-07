@@ -8,6 +8,7 @@ import {
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 import type { RecoveryRead, RecoveryWriteFailure } from "@/services/recovery-storage";
+import { isObjectRecord, isPositiveSafeInteger } from "@/lib/guards";
 
 export const QUICK_ANALYSIS_STORAGE_KEY =
   "accessibility-dashboard.quick-analysis-attempt.v1";
@@ -65,14 +66,6 @@ export type StoredQuickAnalysisAttempt = {
   rawValue: string;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
-function isPositiveSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) > 0;
-}
-
 function normalizeAttemptBase(
   value: Record<string, unknown>
 ): PersistedAttemptBase | null {
@@ -119,7 +112,7 @@ function normalizeNullableShortString(value: unknown): string | null | undefined
 function normalizeQuickAnalysisAttempt(
   value: unknown
 ): PersistedQuickAnalysisAttempt | null {
-  if (!isRecord(value) || value.version !== 1) {
+  if (!isObjectRecord(value) || value.version !== 1) {
     return null;
   }
   const base = normalizeAttemptBase(value);

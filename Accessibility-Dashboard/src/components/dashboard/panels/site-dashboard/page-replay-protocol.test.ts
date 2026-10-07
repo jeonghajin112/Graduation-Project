@@ -18,7 +18,6 @@ import {
 } from "./page-replay-protocol";
 import type { DashboardToPageReplayMessage } from "./page-replay-protocol";
 import { getReplayIssuePathSteps } from "./issue-locator";
-import { getLocatorExplanation } from "./locator-explanation";
 import type { RecentIssueRow } from "./types";
 
 describe("report keyboard exits", () => {
@@ -185,6 +184,16 @@ describe("replay locator adaptation", () => {
     expect(getReplayIssuePathSteps(row.issue)).toEqual([]);
   });
 
+  it("never sends a coordinate label as a selector when the box cannot be used", () => {
+    const issue = {
+      id: 31, analysisResultId: 2, issueCode: "5.4.3", issueTitle: "명도 대비", severity: "HIGH", ruleId: null,
+      locationPath: "x=803, y=13, width=39, height=12", locator: null, message: "", recommendation: null,
+      resolved: false, createdAt: "", updatedAt: ""
+    } as unknown as Parameters<typeof getReplayIssuePathSteps>[0];
+    expect(getReplayIssuePathSteps(issue)).toEqual([]);
+    expect(getReplayIssuePathSteps({ ...issue, locationPath: "#main > a" })).toEqual([{ context: "DOCUMENT", selector: "#main > a" }]);
+  });
+
   it("sends the analysed content of the element a visual finding was located on", () => {
     const locator = {
       pathSteps: [{ context: "DOCUMENT", selector: "#feed > a:nth-of-type(1) > img" }],
@@ -223,16 +232,6 @@ describe("replay locator adaptation", () => {
   });
 });
 
-describe("locator explanation", () => {
-  it("describes coordinate-placed markers as approximate", () => {
-    expect(getLocatorExplanation({ status: "VISIBLE" }, { coordinateOnly: true }).label).toBe("분석 당시 좌표에 표시");
-    expect(getLocatorExplanation({ status: "OFFSCREEN" }, { coordinateOnly: true }).label).toBe("분석 당시 좌표에 표시");
-    expect(getLocatorExplanation({ status: "VISIBLE" }).label).toBe("현재 화면에서 찾음");
-    expect(getLocatorExplanation({ status: "UNAVAILABLE", reason: "EMPTY_PATH" }, { coordinateOnly: true }).label)
-      .toBe("요소 경로 없음");
-  });
-});
-
 describe("replay document and issue messages", () => {
   it.each(["DOCUMENT_LOADING", "DOCUMENT_UNLOADING", "READY"] as const)(
     "accepts %s only with an exact, bounded document identity",
@@ -266,6 +265,13 @@ describe("replay document and issue messages", () => {
       expect(parsePageReplayMessage({ ...message, documentToken: undefined })).toBeNull();
       expect(parsePageReplayMessage({ ...message, documentToken: "bad token" })).toBeNull();
       expect(parsePageReplayMessage({ ...message, title: "Untrusted viewer content" })).toBeNull();
+    }
+  );
+
+  it.each(["UNKNOWN", "toString", "constructor", "__proto__", "hasOwnProperty"])(
+    "rejects the message type %s",
+    (type) => {
+      expect(parsePageReplayMessage({ source: PAGE_REPLAY_SOURCE, type, documentToken: "doc_501" })).toBeNull();
     }
   );
 });

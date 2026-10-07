@@ -34,6 +34,7 @@ import type {
   Organization,
   OrganizationModel
 } from "@/types/accessibility-domain";
+import { isPlainRecord } from "@/lib/guards";
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -132,13 +133,9 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
   return (
-    isRecord(value) &&
+    isPlainRecord(value) &&
     Object.prototype.hasOwnProperty.call(value, "success") &&
     typeof value.success === "boolean" &&
     Object.prototype.hasOwnProperty.call(value, "data") &&
@@ -149,7 +146,7 @@ function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
 }
 
 function getErrorMessage(payload: unknown, fallback: string): string {
-  if (!isRecord(payload)) {
+  if (!isPlainRecord(payload)) {
     return fallback;
   }
 
@@ -217,7 +214,7 @@ function unwrapSuccessfulPayload(
   }
 ): { value: unknown; fieldPath: string } {
   if (!isApiEnvelope(payload)) {
-    if (!isRecord(payload)) {
+    if (!isPlainRecord(payload)) {
       throw new ApiContractValidationError({
         fieldPath: "$",
         expected: "{ success, data, message } API 응답 envelope",

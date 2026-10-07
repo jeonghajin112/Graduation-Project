@@ -3,6 +3,7 @@ import {
   CalendarClock,
   ChevronDown,
   CircleCheck,
+  CircleHelp,
   Minus,
   Plus,
   Printer,
@@ -87,6 +88,31 @@ function direction(better: number): "better" | "worse" | "same" {
   return better > 0 ? "better" : better < 0 ? "worse" : "same";
 }
 
+type EngineState = "done" | "failed" | "not-measured" | "unknown";
+type EngineOutcome = { state: Exclude<EngineState, "done">; label: string };
+
+const engineOutcomeLabels: Record<EngineOutcome["state"], string> = {
+  failed: "검사 실패",
+  "not-measured": "측정 안 됨",
+  unknown: "확인 안 됨"
+};
+
+function engineState(status: string | null | undefined): EngineState {
+  if (status === "SUCCESS") return "done";
+  if (status === "FAILED") return "failed";
+  if (status === "NOT_MEASURED") return "not-measured";
+  return "unknown";
+}
+
+function describeEngineScope(outcomes: Array<EngineOutcome | null>): string {
+  const unfinished = outcomes.filter((outcome) => outcome && outcome.state !== "unknown").length;
+  const unknown = outcomes.filter((outcome) => outcome?.state === "unknown").length;
+  if (unfinished && unknown) return `${unfinished}개 검사를 마치지 못했고, ${unknown}개는 결과가 기록되지 않았습니다`;
+  if (unfinished) return `${unfinished}개 검사를 마치지 못했습니다`;
+  if (unknown) return `${unknown}개 검사는 결과가 기록되지 않았습니다`;
+  return "모든 검사를 마쳤습니다";
+}
+
 function severityStyle(color: string): CSSProperties {
   return { "--site-report-severity-color": color } as CSSProperties;
 }
@@ -126,13 +152,21 @@ export function FinalReportPanel({
   const score = scoreResult?.totalScore ??
     resultSummaries.find((summary) => summary.requestId === requestId)?.totalScore ?? null;
   const cvStatus = scoreResult?.cvStatus ?? null;
-  const textFailed = scoreResult?.textStatus === "FAILED";
-  const cvIncomplete = cvStatus === "NOT_MEASURED" || cvStatus === "FAILED";
+  // Only a recorded SUCCESS counts as done. Older analyses stored no outcome
+  // (null), which is neither a pass nor a failure: it is shown as unknown.
+  const textState = engineState(scoreResult?.textStatus);
+  const cvState = engineState(cvStatus);
+  const textFailed = textState === "failed";
+  const cvIncomplete = cvState === "failed" || cvState === "not-measured";
+  const unknownEngines: AnalyzerType[] = [
+    ...(textState === "unknown" ? ["AI_TEXT" as const] : []),
+    ...(cvState === "unknown" ? ["CV_VISION" as const] : [])
+  ];
   // An engine that did not run reports no issues; show that instead of "0건".
-  const engineOutcome = (analyzer: AnalyzerType): string | null =>
-    analyzer === "CV_VISION" && cvIncomplete ? (cvStatus === "FAILED" ? "검사 실패" : "측정 안 됨")
-      : analyzer === "AI_TEXT" && textFailed ? "검사 실패"
-        : null;
+  const engineOutcome = (analyzer: AnalyzerType): EngineOutcome | null => {
+    const state = analyzer === "CV_VISION" ? cvState : analyzer === "AI_TEXT" ? textState : "done";
+    return state === "done" ? null : { state, label: engineOutcomeLabels[state] };
+  };
 
   const locationOf = useMemo(() => {
     return (row: RecentIssueRow) => getReportLocationStatus(issueStates?.[row.issue.id], locatorCheckState);
@@ -147,9 +181,12 @@ export function FinalReportPanel({
   const scoreChange = useMemo(() => compareWithPrevious(trend, requestId), [trend, requestId]);
   const criteriaOverview = useMemo(() => buildCriteriaOverview(rows, new Set<AnalyzerType>([
     "RULE_BASED",
-    ...(textFailed ? [] : ["AI_TEXT" as const]),
-    ...(cvIncomplete ? [] : ["CV_VISION" as const])
-  ])), [rows, textFailed, cvIncomplete]);
+    ...(textState === "done" ? ["AI_TEXT" as const] : []),
+    ...(cvState === "done" ? ["CV_VISION" as const] : [])
+  ]), new Set<AnalyzerType>([
+    ...(textState === "unknown" ? ["AI_TEXT" as const] : []),
+    ...(cvState === "unknown" ? ["CV_VISION" as const] : [])
+  ])), [rows, textState, cvState]);
   const effectiveFilters = useMemo(
     () => getEffectiveReportFilters(filters, locatorCheckState),
     [filters, locatorCheckState]
@@ -158,7 +195,10 @@ export function FinalReportPanel({
     () => filterReportRows(rows, effectiveFilters, locationOf),
     [rows, effectiveFilters, locationOf]
   );
-  const groups = useMemo(() => groupByCriterion(filteredRows), [filteredRows]);
+  const filteredGroups = useMemo(() => groupByCriterion(filteredRows), [filteredRows]);
+  // Paper always carries every issue: the search and severity filters are a
+  // screen convenience, and the printed summary counts the whole report.
+  const groups = isPrinting ? allGroups : filteredGroups;
   const filtersActive = effectiveFilters.severity !== "ALL" || effectiveFilters.analyzer !== "ALL" ||
     effectiveFilters.location !== "ALL" || effectiveFilters.query.trim().length > 0;
 
@@ -368,17 +408,16 @@ export function FinalReportPanel({
                     <dd>{engines.filter((item) => !item.outcome).length}<small>/{engines.length} 완료</small></dd>
                   </div>
                 </dl>
-                <p className="site-final-report__delta">
-                  {engines.some((item) => item.outcome)
-                    ? `${engines.filter((item) => item.outcome).length}개 검사를 마치지 못했습니다`
-                    : "모든 검사를 마쳤습니다"}
-                </p>
+                <p className="site-final-report__delta">{describeEngineScope(engines.map((item) => item.outcome))}</p>
                 <ul className="site-final-report__engine-list" aria-label="검사별 문제 수">
                   {engines.map((item) => (
-                    <li key={item.analyzer} data-outcome={item.outcome ? "incomplete" : "done"}>
-                      {item.outcome ? <TriangleAlert size={16} aria-hidden="true" /> : <CircleCheck size={16} aria-hidden="true" />}
+                    <li key={item.analyzer}
+                      data-outcome={!item.outcome ? "done" : item.outcome.state === "unknown" ? "unknown" : "incomplete"}>
+                      {!item.outcome ? <CircleCheck size={16} aria-hidden="true" />
+                        : item.outcome.state === "unknown" ? <CircleHelp size={16} aria-hidden="true" />
+                          : <TriangleAlert size={16} aria-hidden="true" />}
                       <span>{item.label} 검사</span>
-                      <strong>{item.outcome ?? formatCount(item.count)}</strong>
+                      <strong>{item.outcome?.label ?? formatCount(item.count)}</strong>
                     </li>
                   ))}
                 </ul>
@@ -396,6 +435,15 @@ export function FinalReportPanel({
                 <span>시각 검사가 {cvStatus === "FAILED" ? "실패해" : "측정되지 않아"} 명도 대비 등 화면 기반 문제는 이 리포트에 포함되지 않았을 수 있습니다.</span>
               </p>
             )}
+            {unknownEngines.length > 0 && (
+              <p className="site-final-report__notice" role="note">
+                <CircleHelp size={16} aria-hidden="true" />
+                <span>
+                  {unknownEngines.map((analyzer) => `${analyzerLabels[analyzer]} 검사`).join("·")} 결과가 기록되지 않은 예전 분석이라
+                  이 검사가 맡은 항목은 ‘확인 안 됨’으로 표시했습니다. 다시 분석하면 확인할 수 있어요.
+                </span>
+              </p>
+            )}
           </section>
 
           <section className="site-final-report__section site-final-report__criteria" aria-labelledby="site-final-report-criteria">
@@ -406,8 +454,8 @@ export function FinalReportPanel({
             <section className="site-final-report__section" aria-labelledby="site-final-report-empty">
               <h3 id="site-final-report-empty" className="site-final-report__title">전체 문제</h3>
               <p className="site-final-report__state" role="status">
-                {textFailed || cvIncomplete
-                  ? "완료된 검사에서 발견된 문제가 없습니다. 일부 검사를 하지 못했으니 위 안내를 확인해 주세요."
+                {textFailed || cvIncomplete || unknownEngines.length > 0
+                  ? "완료된 검사에서 발견된 문제가 없습니다. 일부 검사의 결과를 확인할 수 없으니 위 안내를 확인해 주세요."
                   : "이번 분석에서 발견된 문제가 없습니다. 자동 검사로 확인할 수 없는 항목은 직접 점검해 주세요."}
               </p>
             </section>
@@ -547,7 +595,9 @@ function CriterionGroup({
     const byAnalyzer = new Map<string, RecentIssueRow[]>();
     for (const row of group.rows) {
       const key = row.analyzerType ?? "OTHER";
-      byAnalyzer.set(key, [...(byAnalyzer.get(key) ?? []), row]);
+      const members = byAnalyzer.get(key);
+      if (members) members.push(row);
+      else byAnalyzer.set(key, [row]);
     }
     if (byAnalyzer.size < 2) return [{ key: "all", label: null, rows: group.rows, shared }];
     return [...byAnalyzer].sort(([left], [right]) => bundleOrder.indexOf(left) - bundleOrder.indexOf(right)).map(([key, rows]) => ({

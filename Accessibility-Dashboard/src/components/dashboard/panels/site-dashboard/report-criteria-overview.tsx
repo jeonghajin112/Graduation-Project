@@ -1,4 +1,4 @@
-import { CircleCheck, CircleSlash, TriangleAlert, UserRound } from "lucide-react";
+import { CircleCheck, CircleHelp, CircleSlash, TriangleAlert, UserRound } from "lucide-react";
 
 import { formatIssueCodeLabel } from "./constants";
 import type { CriteriaOverview, CriterionResult, CriterionStatus } from "./kwcag-criteria";
@@ -6,12 +6,14 @@ import type { CriteriaOverview, CriterionResult, CriterionStatus } from "./kwcag
 const statusLabels: Record<CriterionStatus, string> = {
   fail: "문제 있음",
   pass: "문제 없음",
+  unknown: "확인 안 됨",
   skipped: "검사 못 함",
   manual: "직접 확인"
 };
 
 function StatusIcon({ status }: { status: CriterionStatus }) {
-  const Icon = status === "fail" ? TriangleAlert : status === "pass" ? CircleCheck : status === "skipped" ? CircleSlash : UserRound;
+  const Icon = status === "fail" ? TriangleAlert : status === "pass" ? CircleCheck : status === "skipped" ? CircleSlash
+    : status === "unknown" ? CircleHelp : UserRound;
   return <Icon size={14} aria-hidden="true" className="site-final-report__criterion-icon" />;
 }
 

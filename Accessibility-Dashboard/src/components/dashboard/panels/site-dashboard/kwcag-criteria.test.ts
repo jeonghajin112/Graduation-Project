@@ -28,6 +28,16 @@ describe("KWCAG criteria overview", () => {
     expect(new Set(codes).size).toBe(33);
   });
 
+  it("marks criteria of an engine with no recorded outcome as unknown, not clean", () => {
+    const overview = buildCriteriaOverview([], new Set<AnalyzerType>(["RULE_BASED"]), new Set<AnalyzerType>(["AI_TEXT", "CV_VISION"]));
+    // Only the text engine checks 5.3.3; the rule engine still covers 5.4.3.
+    expect(status(overview, "5.3.3")?.status).toBe("unknown");
+    expect(status(overview, "5.4.3")?.status).toBe("pass");
+    expect(overview.counts.unknown).toBeGreaterThan(0);
+    // A failed engine is still "not checked", not unknown.
+    expect(status(buildCriteriaOverview([], new Set<AnalyzerType>(["RULE_BASED"])), "5.3.3")?.status).toBe("skipped");
+  });
+
   it("explains every criterion, whatever form the issue code takes", () => {
     const criteria = KWCAG_PRINCIPLES.flatMap((principle) => principle.criteria);
     expect(criteria.every((criterion) => criterion.description.length > 0)).toBe(true);
@@ -43,7 +53,7 @@ describe("KWCAG criteria overview", () => {
     expect(status(overview, "6.4.3")).toMatchObject({ status: "fail", count: 1 });
     expect(status(overview, "7.1.1")?.status).toBe("pass");
     expect(status(overview, "6.1.2")?.status).toBe("manual");
-    expect(overview.counts).toEqual({ fail: 2, pass: 19, skipped: 0, manual: 12 });
+    expect(overview.counts).toEqual({ fail: 2, pass: 19, unknown: 0, skipped: 0, manual: 12 });
   });
 
   it("treats a legacy issue code as its criterion", () => {

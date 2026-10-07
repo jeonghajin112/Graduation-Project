@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import {
   isValidEvaluationTargetAccessUrl,
   readSiteCreateRecovery
 } from "@/services/site-create-recovery-storage";
-import type { PersistedSiteCreateAttempt } from "@/services/site-create-recovery-storage";
 import { UserFacingError } from "@/services/user-facing-error";
 import type {
   CreateEvaluationTargetInput as CreateEvaluationTargetModelInput,
@@ -21,97 +20,22 @@ import type {
   OrganizationModel
 } from "@/types/accessibility-domain";
 
-import { EVALUATION_REQUEST_FAILED_MESSAGE } from "../shared/evaluation-request-status";
+import {
+  EMPTY_RECOVERY_FORM,
+  SITE_RECOVERY_BLOCKED_MESSAGE,
+  SITE_RECOVERY_PERSISTENCE_MESSAGE,
+  initialResumePoint,
+  phaseAfterFailedRequest,
+  recoveryFormFromRead,
+  type AnalysisRecoveryPhase,
+  type AnalysisResumePoint,
+  type SiteCreateRecoveryForm
+} from "./site-create-recovery-form";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
 import { useMutationOperation } from "../shared/use-mutation-operation";
 
 
-const SITE_RECOVERY_PERSISTENCE_MESSAGE =
-  "브라우저에 이전 작업 상태를 저장하지 못해 요청을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
-const SITE_RECOVERY_BLOCKED_MESSAGE =
-  "확인할 수 없는 이전 페이지 작업이 남아 있어 중복 요청을 막았습니다. 이미 페이지가 추가되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
-const SITE_RECOVERY_STALE_MESSAGE =
-  "오래된 페이지 작업 정보가 남아 있습니다. 목록에서 완료 여부를 확인한 뒤 이전 작업 정보를 삭제할 수 있습니다.";
-const SITE_RECOVERY_CONFLICT_MESSAGE =
-  "다른 프로젝트에서 완료 여부를 확인하지 못한 페이지 작업이 남아 있어 새 요청을 시작하지 않았습니다. 해당 프로젝트에서 작업을 이어가거나 로그아웃한 뒤 다시 시도해 주세요.";
-const TARGET_RECOVERY_MESSAGE =
-  "이전 페이지 등록 결과를 확인하고 있습니다. 중복 등록을 막기 위해 새 요청은 보내지 않습니다.";
-const REQUEST_READY_MESSAGE =
-  "페이지 등록이 완료되었습니다. 준비가 되면 분석을 시작해 주세요.";
-const REQUEST_RECONCILING_MESSAGE =
-  "이전 분석 요청이 시작되었는지 확인이 필요합니다. 중복 분석을 막기 위해 새 요청은 보내지 않습니다.";
-const REQUEST_STATUS_RECOVERY_MESSAGE =
-  "기존 분석 요청의 상태를 다시 확인할 수 있습니다. 새 분석 요청은 보내지 않습니다.";
-
-
-
-type AnalysisRecoveryPhase = "ready" | "paused" | "failed" | null;
 type SiteCreateField = "name" | "url";
-
-type AnalysisResumePoint =
-  | { kind: "create" }
-  | { kind: "request"; targetId: number; previousFailedRequestId?: number }
-  | { kind: "poll"; targetId: number; requestId: number };
-
-const initialResumePoint: AnalysisResumePoint = { kind: "create" };
-
-function resumePointFromPersistedAttempt(
-  attempt: PersistedSiteCreateAttempt
-): AnalysisResumePoint {
-  if (attempt.phase === "target-reconciling") {
-    return initialResumePoint;
-  }
-  if (attempt.phase === "request-ready") {
-    return {
-      kind: "request",
-      targetId: attempt.targetId,
-      ...(attempt.previousFailedRequestId !== null
-        ? { previousFailedRequestId: attempt.previousFailedRequestId }
-        : {})
-    };
-  }
-  if (attempt.phase === "request-reconciling") {
-    return {
-      kind: "request",
-      targetId: attempt.targetId,
-      ...(attempt.previousFailedRequestId !== null
-        ? { previousFailedRequestId: attempt.previousFailedRequestId }
-        : {})
-    };
-  }
-  return {
-    kind: "poll",
-    targetId: attempt.targetId,
-    requestId: attempt.requestId
-  };
-}
-
-function recoveryPhaseFromPersistedAttempt(
-  attempt: PersistedSiteCreateAttempt
-): AnalysisRecoveryPhase {
-  if (attempt.phase === "target-reconciling") {
-    return null;
-  }
-  if (attempt.phase === "request-ready") {
-    return attempt.previousFailedRequestId === null ? "ready" : "failed";
-  }
-  return "paused";
-}
-
-function messageFromPersistedAttempt(attempt: PersistedSiteCreateAttempt): string {
-  if (attempt.phase === "target-reconciling") {
-    return TARGET_RECOVERY_MESSAGE;
-  }
-  if (attempt.phase === "request-ready") {
-    return attempt.previousFailedRequestId === null
-      ? REQUEST_READY_MESSAGE
-      : EVALUATION_REQUEST_FAILED_MESSAGE;
-  }
-  if (attempt.phase === "request-reconciling") {
-    return REQUEST_RECONCILING_MESSAGE;
-  }
-  return REQUEST_STATUS_RECOVERY_MESSAGE;
-}
 
 export function SiteCreateModal({
   isOpen,
@@ -167,6 +91,17 @@ export function SiteCreateModal({
   const isAnalysisNotice =
     recoveryPhase === "ready" || recoveryPhase === "paused";
 
+  const applyRecoveryForm = useCallback((form: SiteCreateRecoveryForm) => {
+    recoveryRawValueRef.current = form.rawValue;
+    setIsRecoveryBlocked(form.isBlocked);
+    setCanDiscardRecovery(form.canDiscard);
+    setResumePoint(form.resumePoint);
+    setRecoveryPhase(form.phase);
+    setSiteName(form.siteName);
+    setBaseUrl(form.baseUrl);
+    setSiteCreateError(form.message);
+  }, []);
+
   const focusField = (field: SiteCreateField) => {
     window.requestAnimationFrame(() => {
       (field === "name" ? nameInputRef : urlInputRef).current?.focus({ preventScroll: false });
@@ -221,59 +156,11 @@ export function SiteCreateModal({
     }
 
     const recovery = readSiteCreateRecovery();
-    if (recovery.kind === "blocked") {
-      recoveryRawValueRef.current = recovery.rawValue;
-      setIsRecoveryBlocked(true);
-      setCanDiscardRecovery(recovery.rawValue !== null);
-      setResumePoint(initialResumePoint);
-      setRecoveryPhase(null);
-      setSiteName("");
-      setBaseUrl("");
-      setSiteCreateError(SITE_RECOVERY_BLOCKED_MESSAGE);
-      return;
+    applyRecoveryForm(recoveryFormFromRead(recovery, project.id));
+    if (recovery.kind === "none") {
+      setInvalidField(null);
     }
-
-    if (recovery.kind === "valid" && recovery.attempt.projectId === project.id) {
-      const restoredResumePoint = resumePointFromPersistedAttempt(recovery.attempt);
-      recoveryRawValueRef.current = recovery.rawValue;
-      setIsRecoveryBlocked(false);
-      setCanDiscardRecovery(recovery.isStale);
-      setSiteName(recovery.attempt.name);
-      setBaseUrl(recovery.attempt.accessUrl);
-      setResumePoint(restoredResumePoint);
-      setRecoveryPhase(recoveryPhaseFromPersistedAttempt(recovery.attempt));
-      setSiteCreateError(
-        recovery.isStale
-          ? SITE_RECOVERY_STALE_MESSAGE
-          : messageFromPersistedAttempt(recovery.attempt)
-      );
-      return;
-    }
-
-    if (recovery.kind === "valid") {
-      recoveryRawValueRef.current = recovery.rawValue;
-      setIsRecoveryBlocked(true);
-      setCanDiscardRecovery(recovery.isStale);
-      setResumePoint(initialResumePoint);
-      setRecoveryPhase(null);
-      setSiteName("");
-      setBaseUrl("");
-      setSiteCreateError(
-        recovery.isStale ? SITE_RECOVERY_STALE_MESSAGE : SITE_RECOVERY_CONFLICT_MESSAGE
-      );
-      return;
-    }
-
-    recoveryRawValueRef.current = null;
-    setIsRecoveryBlocked(false);
-    setCanDiscardRecovery(false);
-    setResumePoint(initialResumePoint);
-    setRecoveryPhase(null);
-    setSiteName("");
-    setBaseUrl("");
-    setSiteCreateError("");
-    setInvalidField(null);
-  }, [isOpen, project.id]);
+  }, [applyRecoveryForm, isOpen, project.id]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -319,14 +206,7 @@ export function SiteCreateModal({
       return;
     }
 
-    recoveryRawValueRef.current = null;
-    setIsRecoveryBlocked(false);
-    setCanDiscardRecovery(false);
-    setResumePoint(initialResumePoint);
-    setRecoveryPhase(null);
-    setSiteName("");
-    setBaseUrl("");
-    setSiteCreateError("");
+    applyRecoveryForm(EMPTY_RECOVERY_FORM);
     setInvalidField(null);
     discardLockRef.current = false;
   };
@@ -437,11 +317,7 @@ export function SiteCreateModal({
         throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
 
-      setRecoveryPhase(null);
-      setResumePoint(initialResumePoint);
-      setSiteName("");
-      setBaseUrl("");
-
+      applyRecoveryForm(EMPTY_RECOVERY_FORM);
       onClose();
     } catch (error) {
       if (isAbortError(error) || !isActiveOperation()) {
@@ -473,15 +349,7 @@ export function SiteCreateModal({
           persistedRecovery.attempt.projectId === project.id
             ? persistedRecovery.attempt
             : null;
-        const nextRecoveryPhase: AnalysisRecoveryPhase = persistedAttempt?.phase === "request-reconciling" ||
-              persistedAttempt?.phase === "poll" ||
-              nextResumePoint.kind === "poll"
-            ? "paused"
-            : persistedAttempt?.phase === "request-ready" &&
-                persistedAttempt.previousFailedRequestId === null
-              ? "ready"
-              : "failed";
-        setRecoveryPhase(nextRecoveryPhase);
+        setRecoveryPhase(phaseAfterFailedRequest(persistedAttempt, nextResumePoint));
       }
     } finally {
       // The request-recovery hook binds its in-memory directory lease to this

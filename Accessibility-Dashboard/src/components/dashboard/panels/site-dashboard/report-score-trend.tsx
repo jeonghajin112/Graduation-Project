@@ -2,11 +2,7 @@ import { Area, ComposedChart, LabelList, ResponsiveContainer, usePlotArea, XAxis
 
 import { trendAxisLabels, type TrendAxisLabel } from "./score-trend";
 import type { ScoreChartItem } from "./types";
-import { formatDateLabel, formatShortTime } from "./utils";
-
-function formatScore(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
+import { formatDateLabel, formatShortTime, formatScore } from "./utils";
 
 /**
  * The report's score history. The current analysis keeps its score label;

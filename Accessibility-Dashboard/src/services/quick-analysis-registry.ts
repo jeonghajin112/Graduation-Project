@@ -27,17 +27,13 @@ let registrySnapshot: readonly QuickAnalysisResultRecord[] = EMPTY_REGISTRY;
 let isRegistryHydrated = false;
 let isStorageListenerAttached = false;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
 function normalizeRegistryRecord(value: unknown): QuickAnalysisResultRecord | null {
   if (
-    !isRecord(value) ||
+    !isObjectRecord(value) ||
     !isPositiveInteger(value.projectId) ||
     !isPositiveInteger(value.pageId) ||
     typeof value.timestamp !== "number" ||
@@ -56,7 +52,7 @@ function normalizeRegistryRecord(value: unknown): QuickAnalysisResultRecord | nu
 
 function normalizeRegistryPayload(value: unknown): readonly QuickAnalysisResultRecord[] {
   if (
-    !isRecord(value) ||
+    !isObjectRecord(value) ||
     value.version !== QUICK_ANALYSIS_REGISTRY_VERSION ||
     !Array.isArray(value.records)
   ) {
@@ -85,6 +81,12 @@ function normalizeRegistryPayload(value: unknown): readonly QuickAnalysisResultR
   }
 
   return Object.freeze(deduplicatedRecords);
+}
+
+// Kept local: scripts/verify-sidebar-selection.mjs loads this module directly
+// in Node, which does not resolve the "@/" alias.
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 export function parseQuickAnalysisRegistry(
@@ -178,48 +180,48 @@ export function buildRecentAnalyzedPages({
 }): RecentAnalyzedPage[] {
   const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : MAX_RECENT_ANALYZED_PAGES;
 
+  // Look projects up once instead of scanning every project per record.
+  const projectById = new Map<number, OrganizationModel>();
+  const projectByPageId = new Map<number, OrganizationModel>();
+  for (const organization of organizations) {
+    if (!projectById.has(organization.id)) projectById.set(organization.id, organization);
+    for (const target of organization.evaluationTargets) {
+      if (!projectByPageId.has(target.id)) projectByPageId.set(target.id, organization);
+    }
+  }
+
+  // Each page keeps only its latest record (ties: the lower project id), so
+  // the sort below covers at most one entry per page.
+  const latestByPage = new Map<number, RecentAnalyzedPage>();
+  const consider = (projectId: number, pageId: number, timestamp: number) => {
+    const project = projectById.get(projectId);
+    const page = project?.evaluationTargets.find((candidate) => candidate.id === pageId);
+    if (!project || !page) return;
+    const current = latestByPage.get(page.id);
+    if (current && (current.sortTimestamp > timestamp ||
+      (current.sortTimestamp === timestamp && current.projectId <= project.id))) return;
+    latestByPage.set(page.id, {
+      pageId: page.id,
+      pageName: page.name,
+      projectId: project.id,
+      projectName: project.name,
+      systemManaged: project.systemManaged,
+      sortTimestamp: timestamp
+    });
+  };
+
   // Server receipts survive reloads while jobs are pending. Keep old local
   // records as a compatibility source, but never infer quick analyses from all
   // project requests or completion status alone.
-  const records = [...quickAnalysisResults];
+  for (const result of quickAnalysisResults) consider(result.projectId, result.pageId, result.timestamp);
   for (const request of evaluationRequests) {
     if (!request.quickAnalysis) continue;
-    const project = organizations.find((organization) =>
-      organization.evaluationTargets.some((target) => target.id === request.evaluationTargetId));
+    const project = projectByPageId.get(request.evaluationTargetId);
     const timestamp = Date.parse(request.requestedAt);
-    if (project && Number.isFinite(timestamp)) {
-      records.push({ projectId: project.id, pageId: request.evaluationTargetId, timestamp });
-    }
+    if (project && Number.isFinite(timestamp)) consider(project.id, request.evaluationTargetId, timestamp);
   }
-  const seenPages = new Set<number>();
-  return records
-    .map((result): RecentAnalyzedPage | null => {
-      const project = organizations.find((candidate) => candidate.id === result.projectId);
-      const page = project?.evaluationTargets.find((candidate) => candidate.id === result.pageId);
-      if (!project || !page) {
-        return null;
-      }
 
-      return {
-        pageId: page.id,
-        pageName: page.name,
-        projectId: project.id,
-        projectName: project.name,
-        systemManaged: project.systemManaged,
-        sortTimestamp: result.timestamp
-      };
-    })
-    .filter((page): page is RecentAnalyzedPage => page !== null)
-    .sort(
-      (left, right) =>
-        right.sortTimestamp - left.sortTimestamp ||
-        left.pageId - right.pageId ||
-        left.projectId - right.projectId
-    )
-    .filter((page) => {
-      if (seenPages.has(page.pageId)) return false;
-      seenPages.add(page.pageId);
-      return true;
-    })
+  return [...latestByPage.values()]
+    .sort((left, right) => right.sortTimestamp - left.sortTimestamp || left.pageId - right.pageId)
     .slice(0, safeLimit);
 }

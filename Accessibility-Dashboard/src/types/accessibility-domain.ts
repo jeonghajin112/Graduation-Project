@@ -1,7 +1,6 @@
 export type MenuType = "analyze" | "projects";
 
 export type RequestStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
-export type EvaluationStatus = RequestStatus | "RUNNING";
 export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR";
 export type EvaluationModule = "rule_based" | "text_difficulty" | "cv_visual";
 export type AnalysisStatus = "SUCCESS" | "FAILED";

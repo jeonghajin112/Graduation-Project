@@ -7,6 +7,7 @@ import {
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
+import { isObjectRecord } from "@/lib/guards";
 
 export const SITE_CREATE_RECOVERY_STORAGE_KEY =
   "accessibility-dashboard.site-create-attempt.v1";
@@ -64,10 +65,6 @@ export type StoredSiteCreateAttempt = {
   rawValue: string;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
 function isPositiveId(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) > 0;
 }
@@ -119,7 +116,7 @@ export function isValidEvaluationTargetAccessUrl(value: string): boolean {
 function normalizePersistedSiteCreateAttempt(
   value: unknown
 ): PersistedSiteCreateAttempt | null {
-  if (!isRecord(value)) {
+  if (!isObjectRecord(value)) {
     return null;
   }
 

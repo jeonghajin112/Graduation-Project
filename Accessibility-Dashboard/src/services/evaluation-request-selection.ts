@@ -73,3 +73,30 @@ export function buildLatestEvaluationRequestByTargetId(
 
   return latestRequestByTargetId;
 }
+
+function sidebarPriority(request: EvaluationRequestModel): number {
+  return request.status === "IN_PROGRESS" ? 2 : request.status === "PENDING" ? 1 : 0;
+}
+
+// True when `candidate` should represent its page instead of `current`: a
+// running job first, then a queued one, then the latest submission, then the
+// higher id. One pass over the history instead of sorting all of it.
+function representsPageBefore(candidate: EvaluationRequestModel, current: EvaluationRequestModel): boolean {
+  const byPriority = sidebarPriority(candidate) - sidebarPriority(current);
+  if (byPriority !== 0) return byPriority > 0;
+  const byTime = Date.parse(candidate.requestedAt) - Date.parse(current.requestedAt);
+  if (byTime) return byTime > 0;
+  return candidate.id > current.id;
+}
+
+/** The request each page shows in the sidebar: its running, queued or latest analysis. */
+export function selectRepresentativeRequestByTarget(
+  requests: readonly EvaluationRequestModel[]
+): Map<number, EvaluationRequestModel> {
+  const byTarget = new Map<number, EvaluationRequestModel>();
+  for (const request of requests) {
+    const current = byTarget.get(request.evaluationTargetId);
+    if (!current || representsPageBefore(request, current)) byTarget.set(request.evaluationTargetId, request);
+  }
+  return byTarget;
+}

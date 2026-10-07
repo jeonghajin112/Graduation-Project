@@ -286,7 +286,6 @@
   .bridge-dashboard.dashboard-site-detail .site-page-evidence-chrome { transition: none; }
 }
 
-
 .bridge-dashboard.dashboard-site-detail .site-page-evidence-retry {
   display: flex;
   align-items: center;
@@ -1186,9 +1185,6 @@
 }
 
 /* Restorable issues also carry a "문제 위치로 이동" action. */
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel--recoverable {
-  --site-unavailable-issue-height: clamp(10.5rem, 20dvh, 11.5rem);
-}
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reasons {
   display: flex;
@@ -1219,27 +1215,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts {
-  display: grid;
-  gap: 0.125rem;
-  margin: 0;
-  min-width: 0;
-  color: var(--dashboard-text-muted);
-  font-size: calc(var(--site-rail-caption-size) + 0.0625rem);
-  line-height: 1.45;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__facts p {
   min-width: 0;
   margin: 0;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__where {
-  overflow: hidden;
-  color: var(--dashboard-text-muted);
-  font-size: var(--site-rail-caption-size);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__where code {
@@ -1347,7 +1325,6 @@
   gap: 0.375rem;
 }
 
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__severity,
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__code {
   display: inline-flex;
@@ -1409,28 +1386,12 @@
   word-break: keep-all;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__message {
-  flex: none;
-  min-height: 0;
-  min-width: 0;
-  color: var(--dashboard-text-muted);
-  font-size: var(--site-rail-caption-size);
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-  word-break: keep-all;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue-header {
   display: flex;
   flex: none;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue-header .site-unavailable-locator-panel__meta {
-  flex-wrap: wrap;
-  padding-top: 0.25rem;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__issue-header .site-unavailable-locator-panel__code {
@@ -1457,34 +1418,14 @@
 }
 
 /* Text links in the key color, the secondary one in grey. */
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__link {
-  min-height: 1.75rem;
-  padding: 0;
-  border: 0;
-  color: var(--dashboard-text-muted);
-  background: transparent;
-  font: inherit;
-  font-size: calc(var(--site-rail-caption-size) + 0.0625rem);
-  font-weight: 500;
-  cursor: pointer;
-}
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__link--primary {
   color: var(--dashboard-accent);
 }
 
-.bridge-dashboard.dashboard-site-detail.theme-dark .site-unavailable-locator-panel__link--primary {
-  color: #4da3ff;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__link:focus-visible {
-  outline: 2px solid var(--dashboard-accent);
-  outline-offset: 2px;
 }
 
 /* Issue details, in the final report's style: a large title with
@@ -1725,32 +1666,8 @@
   .site-issue-location-dialog__coordinates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal {
-  display: inline-flex;
-  width: fit-content;
-  min-height: 2rem;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  margin-top: 0.125rem;
-  padding: 0.375rem 0.625rem;
-  color: #000000;
-  border: 0;
-  border-radius: 9999px;
-  background: #ffffff;
-  font-size: var(--site-rail-caption-size);
-  font-weight: 750;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal:hover {
   background: #eeeeee;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__reveal:focus-visible {
-  outline: 2px solid var(--dashboard-accent);
-  outline-offset: 2px;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__pagination {
@@ -1763,31 +1680,10 @@
   margin-top: var(--site-rail-section-space);
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__pager {
-  position: relative;
-  display: flex;
-  flex: none;
-  min-height: 0.375rem;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dots {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot {
-  display: block;
-  height: 0.375rem;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  cursor: pointer;
-  transition: none;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__location {
@@ -1795,32 +1691,9 @@
   white-space: nowrap;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot-shape {
-  display: block;
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--dashboard-text-strong) 18%, transparent);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot-shape {
-    transition: width 180ms ease;
-  }
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot:hover:not(:disabled) .site-unavailable-locator-panel__dot-shape {
-  background: color-mix(in srgb, var(--dashboard-text-strong) 40%, transparent);
-}
-
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot[data-active="true"] .site-unavailable-locator-panel__dot-shape {
   width: 1rem;
   background: var(--dashboard-text-strong);
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__dot:focus-visible {
-  outline: 2px solid var(--dashboard-accent);
-  outline-offset: 2px;
 }
 
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation {
@@ -1842,24 +1715,12 @@
   transition: color 0.15s, background-color 0.15s;
 }
 
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation--previous { left: 0; }
 .bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation--next { right: 0; }
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation:disabled {
-  cursor: default;
-}
 
 .bridge-dashboard.dashboard-site-detail
   .site-unavailable-locator-panel__navigation:not(:disabled):hover {
   color: var(--dashboard-accent);
   background: var(--site-row-surface);
-}
-
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__navigation:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-  outline: 2px solid var(--dashboard-accent);
-  outline-offset: 2px;
 }
 
 @media (min-width: 3200px) and (min-height: 1400px) {
@@ -2153,7 +2014,8 @@ html:has(.bridge-dashboard.dashboard-site-detail) {
   outline-offset: 2px;
 }
 
-/* The header fills its card edge to edge, so its ring sits just inside. */
-.bridge-dashboard.dashboard-site-detail .site-unavailable-locator-panel__group-toggle:focus-visible {
+/* The header fills its card edge to edge, and a finding line sits flush with
+   the top of its group's clipping body, so both draw their ring just inside. */
+.bridge-dashboard.dashboard-site-detail :is(.site-unavailable-locator-panel__group-toggle, .site-unavailable-locator-panel__line):focus-visible {
   outline-offset: -2px;
 }

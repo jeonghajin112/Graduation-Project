@@ -62,11 +62,15 @@ function filterKey(entry: Entry): string {
  * and lists one short line per finding. Chips filter by why a finding is not
  * on screen; findings in another screen state are one of those reasons.
  */
+// One shared empty list, so a panel without recoverable findings keeps its
+// memoized entries between renders.
+const NO_ROWS: RecentIssueRow[] = [];
+
 export function UnavailableLocatorPanel({
   checkState,
   hasHiddenIssues = false,
   mode = "unavailable",
-  recoverableRows = [],
+  recoverableRows = NO_ROWS,
   onSelectIssue,
   onShowLocation,
   issueStates,
@@ -93,7 +97,10 @@ export function UnavailableLocatorPanel({
     return ordered.length > 1 ? [[ALL_FILTER, entries.length] as const, ...ordered] : [];
   }, [entries, mode]);
   const activeFilter = filters.some(([key]) => key === filter) ? filter : ALL_FILTER;
-  const shown = activeFilter === ALL_FILTER ? entries : entries.filter((entry) => filterKey(entry) === activeFilter);
+  const shown = useMemo(
+    () => activeFilter === ALL_FILTER ? entries : entries.filter((entry) => filterKey(entry) === activeFilter),
+    [activeFilter, entries]
+  );
 
   const entryById = useMemo(() => new Map(entries.map((entry) => [entry.row.issue.id, entry])), [entries]);
   const groups = useMemo(() => groupByCriterion(shown.map((entry) => entry.row))

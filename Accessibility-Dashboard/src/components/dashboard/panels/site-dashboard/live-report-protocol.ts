@@ -9,14 +9,13 @@ import {
   type DashboardToPageReplayMessage,
   type PageReplayToDashboardMessage
 } from "./page-replay-protocol";
+import { hasExactOwnKeys, isDocumentToken, isPlainRecord } from "@/lib/guards";
 
 export const LIVE_REPORT_PROTOCOL_VERSION = 1 as const;
 export const LIVE_REPORT_DASHBOARD_SOURCE = "accessibility-dashboard-live-report" as const;
 export const LIVE_REPORT_PAGE_SOURCE = "accessibility-page-live-report" as const;
 
 const LIVE_REPORT_TOKEN_MAX_LENGTH = 256;
-const LIVE_REPORT_DOCUMENT_TOKEN_MAX_LENGTH = 128;
-
 export type LiveReportConnectMessage = {
   source: typeof LIVE_REPORT_DASHBOARD_SOURCE;
   type: "CONNECT";
@@ -84,32 +83,11 @@ type ParseLiveReportPortMessageOptions = {
   expectedDocumentToken: string | null;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactOwnKeys(value: Record<string, unknown>, expectedKeys: readonly string[]): boolean {
-  const ownKeys = Reflect.ownKeys(value);
-  return (
-    ownKeys.length === expectedKeys.length &&
-    expectedKeys.every((key) => Object.prototype.hasOwnProperty.call(value, key))
-  );
-}
-
 function isUrlSafeToken(value: unknown, maximumLength = LIVE_REPORT_TOKEN_MAX_LENGTH): value is string {
   return (
     typeof value === "string" &&
     value.length >= 32 &&
     value.length <= maximumLength &&
-    /^[A-Za-z0-9_-]+$/.test(value)
-  );
-}
-
-function isDocumentToken(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= LIVE_REPORT_DOCUMENT_TOKEN_MAX_LENGTH &&
     /^[A-Za-z0-9_-]+$/.test(value)
   );
 }
@@ -123,7 +101,7 @@ export function parseLiveReportBridgeAvailableMessage(
   expectedSessionId: string
 ): LiveReportBridgeAvailableMessage | null {
   if (
-    !isRecord(value) ||
+    !isPlainRecord(value) ||
     !hasExactOwnKeys(value, [
       "source",
       "type",
@@ -183,7 +161,7 @@ export function parseLiveReportSessionExhaustedMessage(
   session: Pick<LiveReportSession, "sessionId" | "bridgeSecret">
 ): LiveReportSessionExhaustedMessage | null {
   if (
-    !isRecord(value) ||
+    !isPlainRecord(value) ||
     !hasExactOwnKeys(value, [
       "source",
       "type",
@@ -306,7 +284,7 @@ export function parseLiveReportPortMessage(
   }: ParseLiveReportPortMessageOptions
 ): LiveReportPortMessage | null {
   if (
-    !isRecord(value) ||
+    !isPlainRecord(value) ||
     value.source !== LIVE_REPORT_PAGE_SOURCE ||
     value.protocolVersion !== LIVE_REPORT_PROTOCOL_VERSION ||
     value.bridgeSecret !== session.bridgeSecret ||
@@ -364,7 +342,7 @@ export function parseLiveReportPortMessage(
   // is skipped instead of tearing down the report. It must still belong to
   // the acknowledged document.
   if (
-    !isRecord(value.payload) ||
+    !isPlainRecord(value.payload) ||
     (Object.prototype.hasOwnProperty.call(value.payload, "documentToken") &&
       value.payload.documentToken !== value.documentToken)
   ) {

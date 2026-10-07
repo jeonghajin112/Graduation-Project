@@ -276,9 +276,12 @@ try {
   assert.match(await report.locator('.site-final-report__issue[data-issue-id="9101"]').innerText(), /코드 위치/);
   console.log("PASS findings open in place without a detail dialog");
 
+  // A search that leaves one issue on screen still prints all of them.
+  await report.getByLabel("검색").fill("footer-link");
+  assert.equal(await report.locator(".site-final-report__issue").count(), 1);
   await report.getByRole("button", { name: "인쇄 · PDF 저장" }).click();
   assert.deepEqual(await page.evaluate(() => window.__printSnapshots), [{ collapsed: 0, issues: 5 }],
-    "printing renders every group and issue");
+    "printing renders every group and issue, whatever the screen filter shows");
   await page.emulateMedia({ media: "print" });
   assert.equal(await page.locator(".dashboard-sidebar").first().isVisible(), false, "print hides the dashboard chrome");
   assert.equal(await page.getByRole("tablist").isVisible(), false, "print hides the tabs");
@@ -297,7 +300,11 @@ try {
   assert.equal(await report.locator(".site-final-report__list-bar").isVisible(), false, "paper drops the list toolbar");
   await page.emulateMedia({ media: "screen" });
   await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
-  console.log("PASS print includes only the expanded report");
+  assert.equal(await report.locator(".site-final-report__issue").count(), 1, "the screen keeps its filter after printing");
+  await report.getByLabel("검색").fill("");
+  // Searching opened only the matching group; open the rest again.
+  await report.getByRole("button", { name: "모두 펼치기" }).click();
+  console.log("PASS print includes the whole report regardless of filters");
 
   const visibleIssue = report.locator('.site-final-report__issue[data-issue-id="9101"]');
   await visibleIssue.getByRole("button", { name: /페이지에서 보기/ }).click();
@@ -331,8 +338,28 @@ try {
   assert.match(await report.getByRole("note").first().innerText(), /텍스트 검사가 실패해/);
   assert.match(await report.locator('.site-final-report__principle li[data-status="skipped"]').innerText(), /5\.3\.3[\s\S]*검사 못 함/,
     "a criterion only the failed text engine checks is not reported as clean");
-  delete fixture.score.textStatus;
+  fixture.score.textStatus = "SUCCESS";
   console.log("PASS failed text analysis is shown as not checked");
+
+  // Older analyses recorded no outcome for the text and visual engines. That
+  // is neither a pass nor a failure: the report says it is unknown.
+  delete fixture.score.textStatus;
+  delete fixture.score.cvStatus;
+  await page.goto(`${baseUrl}/projects/1/pages/101?view=report`);
+  await report.waitFor();
+  for (const engine of ["텍스트", "시각"]) {
+    const row = report.locator(".site-final-report__engine-list li", { hasText: engine });
+    assert.equal((await row.locator("strong").innerText()).trim(), "확인 안 됨");
+    assert.equal(await row.getAttribute("data-outcome"), "unknown");
+  }
+  assert.match(await report.locator(".site-final-report__delta").last().innerText(), /2개 검사는 결과가 기록되지 않았습니다/);
+  assert.match(await report.locator(".site-final-report__figure dd").filter({ hasText: "완료" }).innerText(), /^1\s*\/3 완료$/);
+  assert.match(await report.getByRole("note").filter({ hasText: "예전 분석" }).innerText(), /텍스트 검사·시각 검사/);
+  assert.match(await report.locator('.site-final-report__principle li[data-status="unknown"]').first().innerText(), /5\.3\.3[\s\S]*확인 안 됨/,
+    "a criterion only an unrecorded engine checks is not reported as clean");
+  fixture.score.textStatus = "SUCCESS";
+  fixture.score.cvStatus = "SUCCESS";
+  console.log("PASS unrecorded engine outcomes are shown as unknown");
 
   // Findings shown on their owner and page settings get their own place;
   // findings the page no longer matches join the unavailable list and still
@@ -358,7 +385,7 @@ try {
   await page.goto(`${baseUrl}/projects/1/pages/101`);
   // The changed finding joins the two findings that cannot be shown.
   await waitForLocatorStates(page, 3);
-  assert.match(await page.getByRole("region", { name: "페이지 전체 설정" }).innerText(), /1건[\s\S]*페이지 전체 설정/);
+  assert.match(await page.getByRole("region", { name: "페이지 전체 설정" }).innerText(), /페이지 전체 설정[\s\S]*1건/);
   assert.equal(await page.getByRole("region", { name: "분석 이후 바뀐 문제" }).count(), 0,
     "changed findings have no separate list");
   assert.equal(await page.locator(".site-page-analysis-actions__stale").count(), 0, "the header does not claim the page changed");

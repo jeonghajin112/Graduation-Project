@@ -89,6 +89,9 @@ export async function installDashboardApiFixture(page) {
     ruleScore: 100,
     aiScore: 100,
     cvScore: 100,
+    // A current analysis records every engine's outcome.
+    cvStatus: "SUCCESS",
+    textStatus: "SUCCESS",
     createdAt: timestamp,
     updatedAt: timestamp
   };

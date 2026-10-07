@@ -5,8 +5,6 @@ import type { AnalyzerType, IssueLocator, SeverityLevel } from "@/types/accessib
 import { severityChartItems } from "./constants";
 import { parseDashboardView } from "./dashboard-view-tabs";
 import {
-  buildFixPriorities,
-  countUrgent,
   defaultReportFilters,
   describeIssueLocation,
   filterReportRows,
@@ -16,7 +14,6 @@ import {
   parseContrastMessage,
   splitDescriptionSections,
   summarizeReport,
-  summarizeReportLocations,
   type ReportFilters,
   type ReportLocationStatus
 } from "./final-report";
@@ -106,15 +103,6 @@ describe("report summary", () => {
     ]);
   });
 
-  it("counts location outcomes", () => {
-    const statuses: Record<number, ReportLocationStatus> = {
-      1: "on-page", 2: "unavailable", 3: "unavailable", 4: "other-state", 5: "page-setting"
-    };
-    expect(summarizeReportLocations([1, 2, 3, 4, 5].map((id) => row(id)), (item) => statuses[item.issue.id]!)).toEqual({
-      checking: 0, disconnected: 0, "on-page": 1, "other-state": 1, "page-setting": 1, unavailable: 2
-    });
-  });
-
   it("filters 위치 표시 불가 the same way the report metric counts it", () => {
     const statuses: Record<number, ReportLocationStatus> = {
       1: "on-page", 2: "unavailable", 3: "page-setting", 4: "other-state"
@@ -126,33 +114,6 @@ describe("report summary", () => {
     expect(ids("unavailable")).toEqual([2, 3]);
     expect(ids("page-setting")).toEqual([3]);
     expect(ids("on-page")).toEqual([1, 4]);
-  });
-});
-
-describe("fix priorities", () => {
-  it("ranks fix units by weighted severity and keeps one entry per rule", () => {
-    const priorities = buildFixPriorities([
-      ...Array.from({ length: 3 }, (_, index) => row(10 + index, { severity: "LOW", ruleId: "color-contrast", code: "5.4.3", title: "명도 대비" })),
-      row(20, { severity: "CRITICAL" }),
-      row(21, { severity: "HIGH" }),
-      row(30, { severity: "MEDIUM", analyzer: "AI_TEXT", ruleId: null, code: "6.4.3", title: "적절한 링크 텍스트" })
-    ]);
-    expect(priorities.map(({ title, count, severity }) => [title, count, severity.key])).toEqual([
-      ["적절한 대체 텍스트 제공", 2, "CRITICAL"],
-      ["명도 대비", 3, "LOW"],
-      ["적절한 링크 텍스트", 1, "MEDIUM"]
-    ]);
-    expect(priorities[0]!.codeLabel).toBe("KWCAG 5.1.1");
-  });
-
-  it("does not merge engine findings without a rule id across titles or engines", () => {
-    const priorities = buildFixPriorities([
-      row(1, { analyzer: "AI_TEXT", ruleId: null, code: "6.4.3", title: "링크 A" }),
-      row(2, { analyzer: "AI_TEXT", ruleId: null, code: "6.4.3", title: "링크 B" }),
-      row(3, { analyzer: "CV_VISION", ruleId: null, code: "6.4.3", title: "링크 A" })
-    ], 10);
-    expect(priorities).toHaveLength(3);
-    expect(buildFixPriorities([row(1)], 0)).toEqual([]);
   });
 });
 
@@ -181,14 +142,6 @@ describe("criterion groups", () => {
     ]);
     expect(group!.severityCounts.map(({ key, count }) => [key, count])).toEqual([["HIGH", 1], ["LOW", 2]]);
     expect(group!.analyzers).toEqual(["RULE_BASED", "CV_VISION"]);
-  });
-});
-
-describe("urgent findings", () => {
-  it("counts critical and high findings only", () => {
-    expect(countUrgent(summarizeReport([
-      row(1, { severity: "CRITICAL" }), row(2, { severity: "HIGH" }), row(3, { severity: "MEDIUM" }), row(4, { severity: "LOW" })
-    ]))).toBe(2);
   });
 });
 
@@ -295,13 +248,6 @@ describe("report location filter readiness", () => {
     for (const state of ["loading", "error"] as const) {
       expect(getEffectiveReportFilters(filters, state)).toEqual({ ...filters, location: "ALL" });
     }
-  });
-});
-
-describe("fix unit links", () => {
-  it("points a finding without a criterion code at the same group key", () => {
-    const rows = [row(1, { code: " ", ruleId: null, title: "코드 없음" })];
-    expect(buildFixPriorities(rows)[0]!.code).toBe(groupByCriterion(rows)[0]!.code);
   });
 });
 

@@ -235,6 +235,9 @@ try {
   for (const button of await failureButtons.all()) {
     assert.equal(await button.evaluate(node => !!node.parentElement.closest("button, a")), false,
       "project and recent-page failure controls must not be nested inside navigation controls");
+    // A recent-page row's icon steps left of the more button once the row is
+    // hovered, so point at the row first, as a person reaching for it does.
+    await button.locator("xpath=..").hover();
     await button.click();
     await reason.waitFor();
     assert.equal(await reason.innerText(), "대상 페이지 접근 실패");

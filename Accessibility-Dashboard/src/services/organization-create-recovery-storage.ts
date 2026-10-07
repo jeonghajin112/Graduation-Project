@@ -7,6 +7,7 @@ import {
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 import type { RecoveryRead } from "@/services/recovery-storage";
+import { isObjectRecord } from "@/lib/guards";
 
 export const ORGANIZATION_CREATE_STORAGE_KEY =
   "accessibility-dashboard.organization-create-attempt.v1";
@@ -26,15 +27,11 @@ export type StoredOrganizationCreateAttempt = {
   rawValue: string;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
-}
-
 function normalizePersistedOrganizationCreateAttempt(
   value: unknown
 ): PersistedOrganizationCreateAttempt | null {
   if (
-    !isRecord(value) ||
+    !isObjectRecord(value) ||
     // Keep the storage key so pre-idempotency attempts are blocked, never replayed.
     value.version !== 2 ||
     typeof value.attemptId !== "string" ||

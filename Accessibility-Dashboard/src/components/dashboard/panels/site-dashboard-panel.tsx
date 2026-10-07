@@ -151,8 +151,11 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
       if (finishMutationOperation(operation)) setIsRequestingAnalysis(false);
     }
   }
-  const targetEvaluationRequests = evaluationRequests.filter(
-    (request) => request.evaluationTargetId === evaluationTarget.id
+  // Stable while the overview is unchanged, so the report's trend is not rebuilt
+  // on every marker selection.
+  const targetEvaluationRequests = useMemo(
+    () => evaluationRequests.filter((request) => request.evaluationTargetId === evaluationTarget.id),
+    [evaluationRequests, evaluationTarget.id]
   );
   const latestResultRequest = selectLatestEvaluationRequest(
     // A status receipt can arrive before the refreshed overview's score rows.
