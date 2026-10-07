@@ -157,14 +157,25 @@
   outline-offset: -2px;
 }
 
-/* Recent rows keep their analysis status icon left of the more button. */
+/* Recent rows: at rest the analysis status icon sits at the row's edge, as in
+   the project tree, and the label runs up to it. While the more button shows
+   (hover, focus, open menu) the icon steps left of it and the label makes room. */
 .bridge-dashboard .sidebar-row-has-more > [data-analysis-status] {
+  right: 0.25rem;
+  transition: right 150ms ease;
+}
+
+.bridge-dashboard .sidebar-row-has-more:is(:hover, :focus-within, :has(> .sidebar-row-more[aria-expanded="true"])) > [data-analysis-status] {
   right: 1.875rem;
 }
 
 /* More specific than the tree row padding-inline rule so labels truncate
    before the status icon and the more button instead of running under them. */
 .bridge-dashboard .dashboard-sidebar .sidebar-row-has-more > .sidebar-nav-link.sidebar-tree-child-row {
+  padding-right: 2rem;
+}
+
+.bridge-dashboard .dashboard-sidebar .sidebar-row-has-more:is(:hover, :focus-within, :has(> .sidebar-row-more[aria-expanded="true"])) > .sidebar-nav-link.sidebar-tree-child-row {
   padding-right: 3.5rem;
 }
 
@@ -176,10 +187,19 @@
   .bridge-dashboard .sidebar-row-more {
     opacity: 1;
   }
+
+  /* The more button always shows, so the icon and label always leave it room. */
+  .bridge-dashboard .sidebar-row-has-more > [data-analysis-status] {
+    right: 1.875rem;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .sidebar-row-has-more > .sidebar-nav-link.sidebar-tree-child-row {
+    padding-right: 3.5rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bridge-dashboard .sidebar-row-more {
+  .bridge-dashboard :is(.sidebar-row-more, .sidebar-row-has-more > [data-analysis-status]) {
     transition: none;
   }
 }

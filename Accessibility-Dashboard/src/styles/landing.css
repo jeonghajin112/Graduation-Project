@@ -47,8 +47,9 @@
 #tour, #look, #report, #engine, #faq { scroll-margin-top: calc(52 * var(--lp)); }
 
 /* ---- 건너뛰기 링크·상단바 ---- */
-.ua-skip-link { position: fixed; z-index: 1000; top: 12px; left: 16px; padding: 12px 16px; border-radius: 10px; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.16); color: var(--ua-ink); font-weight: 700; text-decoration: none; transform: translateY(-180%); transition: transform .18s ease; }
-.ua-skip-link:focus-visible { transform: none; outline: 3px solid var(--ua-accent); outline-offset: 3px; }
+.ua-skip-link { position: fixed; z-index: 1000; top: 12px; left: 16px; padding: 12px 16px; border-radius: 10px; background: #fff; color: var(--ua-ink); font-weight: 700; text-decoration: none; transform: translateY(-180%); transition: transform .18s ease; }
+/* 그림자는 보일 때만 준다: 숨어 있을 때 주면 화면 위쪽 가장자리로 번져 얼룩이 생긴다 */
+.ua-skip-link:focus-visible { transform: none; box-shadow: 0 8px 30px rgba(0,0,0,.16); outline: 3px solid var(--ua-accent); outline-offset: 3px; }
 .ua-lnav { position: sticky; top: 0; z-index: 50; border-bottom: 1px solid rgba(210, 210, 215, .6); background: rgba(255, 255, 255, .8); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
 /* 상단바는 본문 폭에 묶지 않고 화면 양 끝까지 펼친다: 워드마크는 왼쪽, 버튼은 오른쪽 */
 .ua-lnav__inner { box-sizing: border-box; display: flex; align-items: center; gap: calc(24 * var(--lp)); min-height: calc(52 * var(--lp)); padding-inline: clamp(calc(18 * var(--lp)), 4vw, calc(64 * var(--lp))); }
