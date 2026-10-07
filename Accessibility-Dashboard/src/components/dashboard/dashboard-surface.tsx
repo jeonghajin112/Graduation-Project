@@ -1,6 +1,5 @@
 import { SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import {
-  ChevronRight,
   CircleAlert,
   PanelLeft,
   RotateCcw
@@ -16,7 +15,7 @@ import { ModalErrorFallback, ModalLoadFallback } from "./shared/modal-load-fallb
 import { AccountMenu, AccountMenuTrigger, AccountRailTrigger, useAccountMenu } from "./dashboard-account-menu";
 import { DashboardRoutePanels } from "./dashboard-route-panels";
 import { useDashboardDocumentTitle, useRouteHeadingFocus, useSidebarCollapse } from "./dashboard-surface-hooks";
-import type { DashboardSurfaceProps } from "./dashboard-surface.types";
+import { PROJECT_HEADER_ACTIONS_ID, type DashboardSurfaceProps } from "./dashboard-surface.types";
 import { SidebarProjectsSection } from "./sidebar-projects";
 import "@/styles/dashboard-a11y.css";
 
@@ -185,25 +184,18 @@ export function DashboardSurface(props: DashboardSurfaceProps) {
               {isProjectDetailView && (
                 <div className="dashboard-project-header-content pointer-events-auto absolute top-[calc(var(--dashboard-control-size)-2.25rem)] flex min-w-0 items-start justify-between gap-6">
                   <div className="min-w-0">
-                    <nav
-                      aria-label="프로젝트 경로"
-                      className="dashboard-project-breadcrumb mb-1 flex items-center overflow-visible gap-0.5 font-semibold text-[var(--dashboard-text-muted)]"
-                    >
-                      <span className="dashboard-project-breadcrumb-label inline-flex items-center">프로젝트</span>
-                      <ChevronRight
-                        className="dashboard-project-breadcrumb-chevron block shrink-0"
-                        strokeWidth={2}
-                        aria-hidden="true"
-                      />
-                    </nav>
+                    <p className="dashboard-project-eyebrow mb-1 font-semibold text-[var(--dashboard-text-muted)]">
+                      프로젝트
+                    </p>
                     <h1
                       ref={routeHeadingRef}
                       tabIndex={-1}
-                      className="dashboard-home-title dashboard-project-title shrink-0 font-black tracking-tight text-slate-900 focus:outline-none"
+                      className="dashboard-home-title dashboard-project-title shrink-0 font-black tracking-tight text-[var(--dashboard-text-strong)] focus:outline-none"
                     >
                       {dashboard.headerTitle}
                     </h1>
                   </div>
+                  <div id={PROJECT_HEADER_ACTIONS_ID} className="dashboard-project-header-actions" />
                 </div>
               )}
 

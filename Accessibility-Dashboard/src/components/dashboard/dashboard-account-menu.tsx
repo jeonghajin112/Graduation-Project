@@ -167,7 +167,7 @@ export function useAccountMenu() {
 export type AccountMenuController = ReturnType<typeof useAccountMenu>;
 
 const MENU_ITEM_CLASS =
-  "dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium text-slate-700 outline-none transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset";
+  "dashboard-account-menu-item flex w-full items-center rounded-lg text-left font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-inset";
 
 export function AccountMenu({
   menu,
@@ -191,7 +191,7 @@ export function AccountMenu({
       aria-label="계정 메뉴"
       onKeyDown={menu.handleMenuKeyDown}
       style={menu.railMenuPosition ?? undefined}
-      className={`dashboard-account-menu dashboard-account-menu-open z-40 origin-top rounded-2xl bg-white p-1.5 shadow-lg ${
+      className={`dashboard-account-menu dashboard-account-menu-open z-40 origin-top rounded-2xl p-1.5 shadow-lg ${
         menu.railMenuPosition ? "" : "absolute left-0 right-auto top-full mt-1.5"
       }`}
     >
@@ -204,7 +204,7 @@ export function AccountMenu({
         className={MENU_ITEM_CLASS}
         onClick={onOpenSettings}
       >
-        <Settings size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
+        <Settings size={16} aria-hidden="true" className="dashboard-account-menu-icon shrink-0" />
         설정
       </button>
       <button
@@ -224,7 +224,7 @@ export function AccountMenu({
           onLogout?.();
         }}
       >
-        <LogOut size={16} aria-hidden="true" className="shrink-0 text-slate-500" />
+        <LogOut size={16} aria-hidden="true" className="dashboard-account-menu-icon shrink-0" />
         로그아웃
       </button>
     </div>
@@ -236,7 +236,7 @@ export function AccountMenuTrigger({ menu, userName }: { menu: AccountMenuContro
     <button
       ref={menu.triggerRef}
       type="button"
-      className="dashboard-account-menu-trigger w-fit min-w-0 max-w-full rounded-lg text-left outline-none transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-offset-2"
+      className="dashboard-account-menu-trigger w-fit min-w-0 max-w-full rounded-lg text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--dashboard-accent)]/60 focus-visible:ring-offset-2"
       aria-expanded={menu.isOpen && !menu.isRailMenu}
       aria-controls={menu.menuId}
       aria-haspopup="menu"

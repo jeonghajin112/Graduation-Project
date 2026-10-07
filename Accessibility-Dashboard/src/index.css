@@ -163,7 +163,7 @@
   }
 
   .bridge-dashboard.dashboard-project-detail {
-    --dashboard-top-height: clamp(124px, calc(12vh + 16px), 132px);
+    --dashboard-top-height: clamp(100px, calc(10vh + 12px), 124px); /* heading row only; the add action shares it */
     --dashboard-project-content-max-width: clamp(100rem, 80vw, 187.5rem);
     --dashboard-project-content-gap: clamp(0.5rem, calc(-0.5rem + 0.8333vw), 1.5rem);
     --dashboard-project-grid-gap: clamp(0.75rem, calc(-0.25rem + 0.8333vw), 1.75rem);
@@ -185,13 +185,17 @@
     transform: translateX(-50%);
   }
 
+  /* "페이지 추가" sits at the end of the heading row, level with the title. */
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-actions {
+    display: flex;
+    flex: none;
+    align-self: flex-end;
+  }
+
+  /* Fallback spot when the heading row is not rendered (never in the app shell). */
   .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
-    right: max(
-    var(--dashboard-side-gutter),
-    calc(
-      (100% - var(--dashboard-sidebar-width) - var(--dashboard-project-content-max-width)) / 2
-    )
-  );
+    display: flex;
+    justify-content: flex-end;
   }
 
   .bridge-dashboard.dashboard-project-detail .dashboard-project-grid {
@@ -279,21 +283,10 @@
     height: clamp(0.8125rem, 0.4688vw, 1.125rem);
   }
 
-  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb {
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-eyebrow {
     height: clamp(1rem, 0.5208vw, 1.25rem);
-    gap: clamp(0.125rem, 0.1042vw, 0.25rem);
     font-size: clamp(0.75rem, 0.4167vw, 1rem);
     line-height: 1.25;
-  }
-
-  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-label {
-    height: 100%;
-  }
-
-  .bridge-dashboard.dashboard-project-detail .dashboard-project-breadcrumb-chevron {
-    width: clamp(0.625rem, 0.3125vw, 0.75rem);
-    height: clamp(0.625rem, 0.3125vw, 0.75rem);
-    transform: translateY(clamp(-0.0625rem, -0.026vw, 0rem));
   }
 
   .bridge-dashboard.theme-light {
@@ -451,6 +444,21 @@
   .bridge-dashboard .dashboard-account-menu {
     width: var(--dashboard-account-menu-width);
     border: 1px solid #cbd5e1;
+    background: var(--dashboard-card-bg);
+  }
+
+  /* Menu rows hover like sidebar rows: a neutral grey from the sidebar tokens. */
+  .bridge-dashboard .dashboard-account-menu-item {
+    color: var(--dashboard-text-strong);
+  }
+
+  .bridge-dashboard .dashboard-account-menu-item:hover,
+  .bridge-dashboard .dashboard-account-menu-trigger:hover {
+    background: var(--dashboard-sidebar-item-hover-bg);
+  }
+
+  .bridge-dashboard .dashboard-account-menu-icon {
+    color: var(--dashboard-text-secondary);
   }
 
   .bridge-dashboard .dashboard-account-menu-item {
@@ -467,11 +475,13 @@
 
   .bridge-dashboard.theme-dark .dashboard-account-menu {
     border-color: #52525b;
+    background: var(--dashboard-nested-surface);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
   }
 
+  .bridge-dashboard.theme-dark .dashboard-account-menu-item:hover,
   .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:hover {
-    background: rgba(148, 163, 184, 0.14);
+    background: rgba(255, 255, 255, 0.08);
   }
 
   .bridge-dashboard.theme-dark .dashboard-account-menu-trigger:focus-visible,
@@ -902,9 +912,17 @@
     position: static;
   }
 
+  /* On phones the action wraps below the (possibly long) title. */
   .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
     position: static;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
     transform: none;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-actions {
+    align-self: flex-end;
   }
 
   .bridge-dashboard.dashboard-project-detail .dashboard-project-title {
@@ -912,9 +930,6 @@
   }
 
   .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
-    position: static;
-    display: flex;
-    justify-content: flex-end;
     margin-bottom: 0.75rem;
   }
 

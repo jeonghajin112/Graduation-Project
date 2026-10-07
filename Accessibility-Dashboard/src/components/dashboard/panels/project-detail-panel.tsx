@@ -1,6 +1,6 @@
-import type { ProjectPageActions } from "../dashboard-surface.types";
+import { PROJECT_HEADER_ACTIONS_ID, type ProjectPageActions } from "../dashboard-surface.types";
 import { ExternalLink, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -102,6 +102,13 @@ export function OrganizationModelDetailPanel({
   const activeDeleteEvaluationTargetOperationIdRef = useRef<symbol | null>(null);
   const addPageButtonRef = useRef<HTMLButtonElement>(null);
   const cardGridRef = useRef<HTMLDivElement>(null);
+  // "페이지 추가" belongs on the heading row, which the dashboard shell renders.
+  // Found before paint, so the button never shows in its fallback spot first.
+  const [headerActionsSlot, setHeaderActionsSlot] = useState<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    setHeaderActionsSlot(document.getElementById(PROJECT_HEADER_ACTIONS_ID));
+  }, []);
 
   useEffect(
     () => () => {
@@ -224,20 +231,26 @@ export function OrganizationModelDetailPanel({
   const failedStatusLabel = mapScanStatus("failed");
   const runningStatusLabel = mapScanStatus("queued");
 
+  const addPageButton = (
+    <button
+      ref={addPageButtonRef}
+      type="button"
+      onClick={actions?.onOpenCreateSiteModal}
+      disabled={readOnly}
+      title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
+      className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[var(--primary)] font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]/40 disabled:cursor-not-allowed"
+    >
+      페이지 추가
+    </button>
+  );
+
   return (
     <div className="dashboard-project-panel overflow-visible">
-      <div className="dashboard-project-add-action absolute top-[calc(var(--dashboard-fixed-top)+var(--dashboard-control-size)+1rem)] z-50">
-        <button
-          ref={addPageButtonRef}
-          type="button"
-          onClick={actions?.onOpenCreateSiteModal}
-          disabled={readOnly}
-          title={readOnly ? "읽기 전용 미리보기에서는 페이지를 추가할 수 없습니다" : undefined}
-          className="dashboard-project-add-button inline-flex shrink-0 items-center bg-[var(--primary)] font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]/40 disabled:cursor-not-allowed"
-        >
-          페이지 추가
-        </button>
-      </div>
+      {headerActionsSlot ? (
+        createPortal(addPageButton, headerActionsSlot)
+      ) : (
+        <div className="dashboard-project-add-action">{addPageButton}</div>
+      )}
 
       {sortedSiteRows.length === 0 ? (
         <div className="dashboard-project-content dashboard-project-glass rounded-[14px] border px-5 py-10 text-center text-sm text-[var(--dashboard-text-muted)] backdrop-blur-xl">

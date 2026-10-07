@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 
+/** The project heading row's action slot; the lazily loaded project panel portals "페이지 추가" into it. */
+export const PROJECT_HEADER_ACTIONS_ID = "dashboard-project-header-actions";
+
 import type { SidebarItem } from "@/components/ui/sidebar";
 import type { DashboardSidebarSelection } from "@/services/dashboard-route";
 import type { QuickAnalysisResultRecord } from "@/services/quick-analysis-registry";
