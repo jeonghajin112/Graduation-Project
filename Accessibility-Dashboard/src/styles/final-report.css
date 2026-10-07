@@ -503,6 +503,17 @@
   font-weight: 750;
 }
 
+.bridge-dashboard.dashboard-site-detail .site-final-report__trend-tick {
+  fill: var(--dashboard-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-dashboard.dashboard-site-detail .site-final-report__trend-tick-day {
+  fill: var(--dashboard-text-strong);
+  font-weight: 650;
+}
+
 /* Past scores and their dots show only while their date is hovered; print
    shows them all. */
 .site-final-report__trend-chart :is(.site-final-report__trend-label--resting, .site-final-report__trend-hover-dot) {

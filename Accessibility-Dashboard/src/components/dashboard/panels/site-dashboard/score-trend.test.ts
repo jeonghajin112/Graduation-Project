@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { EvaluationRequestModel, EvaluationResultSummary, ScoreResult } from "@/types/accessibility-domain";
 
-import { buildScoreTrend, compareWithPrevious, padScoreTrend } from "./score-trend";
+import { buildScoreTrend, compareWithPrevious, padScoreTrend, trendAxisLabels } from "./score-trend";
+import type { ScoreChartItem } from "./types";
 
 function request(id: number, requestedAt: string, targetId = 7): EvaluationRequestModel {
   return { id, evaluationTargetId: targetId, status: "COMPLETED", requestedAt, updatedAt: requestedAt };
@@ -36,6 +37,19 @@ describe("score trend", () => {
     const padded = padScoreTrend(buildScoreTrend(requests, 7, summaries, scores), 6);
     expect(padded.map(({ isPlaceholder, slot }) => [Boolean(isPlaceholder), slot])).toEqual([
       [true, 0], [true, 1], [false, 2], [false, 3], [false, 4], [false, 5]
+    ]);
+  });
+
+  it("labels each analysis by time and shows the date only where a day starts", () => {
+    // Local times, so the labels don't depend on the test machine's time zone.
+    const item = (slot: number, date: string): ScoreChartItem => ({ slot, date, label: "", score: 50, issueCount: null });
+    const items = [
+      item(0, "2026-09-28T09:05:00"), item(1, "2026-09-28T14:30:00"), item(2, "2026-09-28T17:45:00"),
+      item(3, "2026-10-06T08:00:00"), item(4, "2026-10-06T08:00:00")
+    ];
+    expect(trendAxisLabels(items)).toEqual([
+      { time: "09:05", day: "9.28" }, { time: "14:30", day: null }, { time: "17:45", day: null },
+      { time: "08:00", day: "10.6" }, { time: "08:00", day: null }
     ]);
   });
 

@@ -5,7 +5,7 @@ import type {
 } from "@/types/accessibility-domain";
 
 import type { ScoreChartItem } from "./types";
-import { formatShortDate } from "./utils";
+import { formatShortDate, formatShortTime } from "./utils";
 
 export const TREND_SLOT_COUNT = 7;
 
@@ -54,6 +54,24 @@ export function padScoreTrend(items: readonly ScoreChartItem[], slotCount = TREN
     } satisfies ScoreChartItem)),
     ...items.map((item, index) => ({ ...item, slot: emptySlotCount + index }))
   ];
+}
+
+export type TrendAxisLabel = {
+  time: string;
+  /** Set where the day changes, so same-day re-analyses don't repeat it. */
+  day: string | null;
+};
+
+/** The time of every analysis, and its date where a new day starts. */
+export function trendAxisLabels(items: readonly ScoreChartItem[]): TrendAxisLabel[] {
+  const dayKey = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value.slice(0, 10) : date.toDateString();
+  };
+  return items.map((item, index) => ({
+    time: formatShortTime(item.date),
+    day: index > 0 && dayKey(items[index - 1]!.date) === dayKey(item.date) ? null : formatShortDate(item.date)
+  }));
 }
 
 export type ScoreChange = {

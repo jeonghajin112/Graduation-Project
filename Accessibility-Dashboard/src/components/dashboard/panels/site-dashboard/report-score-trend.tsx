@@ -1,7 +1,8 @@
 import { Area, ComposedChart, LabelList, ResponsiveContainer, usePlotArea, XAxis, YAxis } from "recharts";
 
+import { trendAxisLabels, type TrendAxisLabel } from "./score-trend";
 import type { ScoreChartItem } from "./types";
-import { formatDateLabel } from "./utils";
+import { formatDateLabel, formatShortTime } from "./utils";
 
 function formatScore(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -20,6 +21,9 @@ const PRINT_SIZE = { width: 460, height: 96 };
 // A small dot marks each score without crowding its label.
 const DOT_RADIUS = 2.5;
 
+// Room under the plot for the time line and, below it, the date line.
+const AXIS_HEIGHT = 36;
+
 export function ReportScoreTrend({ items, currentRequestId, printing = false }: {
   items: ScoreChartItem[];
   currentRequestId: number | null;
@@ -32,6 +36,8 @@ export function ReportScoreTrend({ items, currentRequestId, printing = false }: 
       </p>
     );
   }
+
+  const axisLabels = trendAxisLabels(items);
 
   return (
     <figure className="site-final-report__trend" aria-label={`최근 ${items.length}회 점수 추이`}>
@@ -50,8 +56,10 @@ export function ReportScoreTrend({ items, currentRequestId, printing = false }: 
                 <stop offset="100%" stopColor="var(--site-score-line-color)" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <XAxis dataKey="label" axisLine={false} tickLine={false} interval={0} tickMargin={8}
-              tick={{ fill: "var(--dashboard-text-muted)", fontSize: 12 }} />
+            <XAxis dataKey="slot" axisLine={false} tickLine={false} tickSize={0} interval={0} tickMargin={8} height={AXIS_HEIGHT}
+              tick={(props: { x?: number | string; y?: number | string; index?: number }) => (
+                <TrendTick key={props.index} x={Number(props.x)} y={Number(props.y)} label={axisLabels[props.index ?? -1]} />
+              )} />
             <YAxis hide domain={[0, 100]} />
             <Area type="monotone" dataKey="score" stroke="var(--site-score-line-color)" strokeWidth={2.5}
               fill="url(#site-report-trend-fill)" isAnimationActive={false}
@@ -71,7 +79,7 @@ export function ReportScoreTrend({ items, currentRequestId, printing = false }: 
       <figcaption className="sr-only">
         <ol>
           {items.map((item) => (
-            <li key={item.slot}>{formatDateLabel(item.date)} {formatScore(item.score)}점</li>
+            <li key={item.slot}>{formatDateLabel(item.date)} {formatShortTime(item.date)} {formatScore(item.score)}점</li>
           ))}
         </ol>
       </figcaption>
@@ -97,7 +105,7 @@ function TrendLabel({ x, y, value, pointCount, current }: {
     <g className="site-final-report__trend-point">
       {plot && step > 0 && (
         <rect className="site-final-report__trend-hit" x={x - step / 2} y={0}
-          width={step} height={plot.y + plot.height + 28} fill="transparent" />
+          width={step} height={plot.y + plot.height + AXIS_HEIGHT} fill="transparent" />
       )}
       {/* Same dot as the current point's marker (TrendDot), minus the pulse. */}
       {!current && (
@@ -109,6 +117,18 @@ function TrendLabel({ x, y, value, pointCount, current }: {
         {formatScore(value)}
       </text>
     </g>
+  );
+}
+
+// Same-day re-analyses are common (analyse, fix, analyse again), so each
+// point is labelled by its time, with the date beneath only where a day starts.
+function TrendTick({ x, y, label }: { x: number; y: number; label?: TrendAxisLabel }) {
+  if (!label || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return (
+    <text x={x} y={y} textAnchor="middle" className="site-final-report__trend-tick">
+      <tspan x={x} dy="0.71em">{label.time}</tspan>
+      {label.day && <tspan x={x} dy="1.25em" className="site-final-report__trend-tick-day">{label.day}</tspan>}
+    </text>
   );
 }
 
