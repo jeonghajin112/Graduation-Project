@@ -66,18 +66,18 @@ export function LandingLookSection() {
         </div>
         <div className="ua-look__stage" role="tabpanel" id="ua-look-panel" aria-labelledby="ua-look-tab-locate" data-demo="panel">
           <div className="ua-demo-app" data-demo="app">
-            <div className="ua-demo-view" data-demo="view" aria-label="분석 결과 화면">
+            <div className="ua-demo-view" data-demo="view" role="group" aria-label="분석 결과 화면">
               <div className="ua-demo-content" data-demo="content">
                 <img className="ua-demo-bg" src={`${ASSET_ROOT}/app.webp`} alt="분석 결과 화면. 가운데 국세청 페이지, 오른쪽 점수 추이·심각도 분포·화면에 표시되지 않은 문제" decoding="async" loading="lazy" />
                 <div className="ua-demo-tabs-hot" data-demo="tabs-hot" aria-hidden="true" />
                 <div className="ua-demo-frame" data-demo="frame">
-                  <div className="ua-demo-page-scroll" data-demo="page-scroll" aria-label="분석한 국세청 페이지">
+                  <div className="ua-demo-page-scroll" data-demo="page-scroll" role="group" aria-label="분석한 국세청 페이지">
                     <div className="ua-demo-page" data-demo="page">
                       <img className="ua-demo-bg" src={`${ASSET_ROOT}/page.webp`} alt="국세청 누리집 (분석 당시 모습)" decoding="async" loading="lazy" />
                     </div>
                   </div>
                 </div>
-                <div className="ua-demo-rail" data-demo="rail" aria-label="분석 요약 패널" />
+                <div className="ua-demo-rail" data-demo="rail" role="group" aria-label="분석 요약 패널" />
                 <div className="ua-demo-spot" data-demo="spot" aria-hidden="true" />
                 <div className="ua-demo-ring" data-demo="ring" aria-hidden="true" />
               </div>
