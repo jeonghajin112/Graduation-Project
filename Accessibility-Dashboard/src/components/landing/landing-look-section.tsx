@@ -14,10 +14,10 @@ const ASSET_ROOT = "/landing/look-demo";
 const SNAPSHOT_URL = `${ASSET_ROOT}/snapshot.json?v=20261008-nts`;
 // 장면 순서는 look-demo-engine.js 의 ITEMS 와 같다
 const FEATURES = [
-  { id: "locate", title: "문제 위치에 마커를" },
-  { id: "cluster", title: "가까운 문제는 하나로" },
-  { id: "approx", title: "숨은 요소는 대략적 위치로" },
-  { id: "offscreen", title: "표시 못 한 문제도 빠짐없이" }
+  { id: "locate", title: "문제마다 마커" },
+  { id: "cluster", title: "가까우면 하나로" },
+  { id: "approx", title: "숨은 것은 대략" },
+  { id: "offscreen", title: "빠짐없이 목록으로" }
 ] as const;
 
 export function LandingLookSection() {

@@ -3,11 +3,11 @@
 .ua-landing, .ua-lnav, .ua-footer, .ua-skip-link {
   --lp: var(--ua-pixel, 1px);
   --ua-ink: #1d1d1f;
-  --ua-sub: #6e6e73;
+  --ua-sub: #515154;
   --ua-line: #d2d2d7;
   --ua-tile: #f5f5f7;
   --ua-accent: #0071e3;
-  --ua-link: #0066cc;
+  --ua-link: #0055b8;
   --ua-problem: #d70015;
   --ua-sev-critical: #f35f63;
   --ua-sev-high: #fb8a3d;
@@ -98,9 +98,11 @@
 
 /* ---- 메시지 ---- */
 .ua-message__title { margin: 0; font-size: clamp(calc(32 * var(--lp)), 5.4vw, calc(64 * var(--lp))); font-weight: 800; line-height: 1.16; letter-spacing: -.045em; }
-.ua-message__phrase { color: #c7c7cc; transition: color .5s ease; }
-.ua-message__phrase.is-lit { color: var(--ua-ink); }
-.ua-message__phrase.is-accent.is-lit { color: var(--ua-accent); }
+/* 회색 글자 대신 투명·흐림에서 떠오른다: 보이는 글자는 늘 최종 색이다 (inline 이라 transform 대신 top) */
+.ua-message__phrase { position: relative; top: .3em; opacity: 0; filter: blur(calc(10 * var(--lp))); color: var(--ua-ink); transition: opacity .6s ease, filter .6s ease, top .7s cubic-bezier(.2, .7, .2, 1); }
+.ua-message__phrase.is-accent { color: var(--ua-accent); }
+.ua-message__phrase.is-lit { top: 0; opacity: 1; filter: none; }
+@media (prefers-reduced-motion: reduce) { .ua-message__phrase { transition: none; } }
 
 /* ---- 숫자 ---- */
 .ua-stats__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(40 * var(--lp)) calc(32 * var(--lp)); margin: calc(64 * var(--lp)) 0 0; }
@@ -248,7 +250,7 @@
 .ua-faq__item:last-child { border-bottom: 1px solid var(--ua-line); }
 .ua-faq__item summary { display: flex; align-items: center; justify-content: space-between; gap: calc(16 * var(--lp)); min-height: calc(44 * var(--lp)); padding: calc(22 * var(--lp)) 0; list-style: none; cursor: pointer; font-size: calc(19 * var(--lp)); font-weight: 700; letter-spacing: -.02em; }
 .ua-faq__item summary::-webkit-details-marker { display: none; }
-.ua-faq__item summary i { display: grid; flex: none; place-items: center; width: calc(32 * var(--lp)); height: calc(32 * var(--lp)); border-radius: 50%; background: var(--ua-accent); color: #fff; transition: transform .3s ease; }
+.ua-faq__item summary i { display: grid; flex: none; place-items: center; width: calc(32 * var(--lp)); height: calc(32 * var(--lp)); border-radius: 50%; background: var(--ua-link); color: #fff; transition: transform .3s ease; }
 .ua-faq__item summary i svg { width: calc(14 * var(--lp)); height: calc(14 * var(--lp)); }
 .ua-faq__item[open] summary i { transform: rotate(45deg); }
 .ua-faq__item summary:hover { color: var(--ua-accent); }

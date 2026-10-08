@@ -55,7 +55,7 @@ export function LandingReportSection() {
       <div className="ua-shell">
         <p className="ua-eyebrow">최종 리포트</p>
         <h2 className="ua-heading" id="ua-report-title">33개 항목을 한 장에.<br /><span className="ua-heading__soft">인쇄해도 그대로.</span></h2>
-        <p className="ua-lede">분석이 끝나면 KWCAG 2.2의 모든 검사 항목을 원칙별로 정리한 리포트가 만들어져요. 항목마다 <b>문제가 몇 건인지, 직접 확인할 항목인지</b> 바로 보여요.</p>
+        <p className="ua-lede">검사가 끝나면 KWCAG 2.2의 모든 기준을 한 장에 모아 보여 줘요. 기준마다 <b>문제가 몇 건인지</b> 바로 보여요.</p>
 
         <figure className="ua-report__paper">
           <div className="ua-report__head">
@@ -120,8 +120,8 @@ export function LandingReportSection() {
 
         <ul className="ua-report__features">
           <li><Printer size={26} strokeWidth={1.6} aria-hidden="true" /><b>필터와 관계없이 전체 인쇄</b><span>화면에서 거른 결과와 상관없이 모든 문제가 인쇄돼요.</span></li>
-          <li><ListTree size={26} strokeWidth={1.6} aria-hidden="true" /><b>항목별로 묶은 상세 문제</b><span>공통 설명은 한 번만, 문제는 한 줄씩. 펼치면 HTML과 측정값까지 보여요.</span></li>
-          <li><TrendingUp size={26} strokeWidth={1.6} aria-hidden="true" /><b>지난 분석과 비교</b><span>점수와 문제 수가 지난 분석보다 어떻게 바뀌었는지 최근 분석 추이와 함께 보여요.</span></li>
+          <li><ListTree size={26} strokeWidth={1.6} aria-hidden="true" /><b>항목별로 묶은 상세 문제</b><span>같은 설명은 한 번만, 문제는 한 줄씩. 펼치면 HTML과 값까지 보여요.</span></li>
+          <li><TrendingUp size={26} strokeWidth={1.6} aria-hidden="true" /><b>지난 분석과 비교</b><span>점수와 문제 수가 지난번보다 어떻게 바뀌었는지 보여요.</span></li>
         </ul>
       </div>
     </section>

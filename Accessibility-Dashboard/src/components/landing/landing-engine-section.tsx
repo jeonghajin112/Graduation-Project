@@ -8,7 +8,7 @@ const ENGINES = [
   {
     id: "rule",
     title: "규칙 기반 분석",
-    body: "이미지 설명, 제목 구조, 버튼 이름처럼 페이지를 쓰는 데 필요한 요소를 검사하고 KWCAG 항목에 연결해요.",
+    body: "그림 설명, 제목, 버튼 이름처럼 꼭 필요한 것을 검사해요.",
     weight: 50,
     tool: "axe-core",
     icon: <svg {...icon} aria-hidden="true"><path d="M8 4 4 12l4 8" /><path d="m16 4 4 8-4 8" /><path d="m14 4-4 16" /></svg>
@@ -16,7 +16,7 @@ const ENGINES = [
   {
     id: "text",
     title: "텍스트 난이도 분석",
-    body: "문장을 형태소로 나눠 길이와 어휘 난이도를 재고, 길고 복잡한 문장을 쉬운 표현으로 바꿔 제안해요.",
+    body: "문장 길이와 단어를 살펴, 어려운 문장은 쉬운 말로 바꿔 줘요.",
     weight: 30,
     tool: "MeCab",
     icon: <svg {...icon} aria-hidden="true"><path d="M4 6h16" /><path d="M4 12h10" /><path d="M4 18h13" /></svg>
@@ -24,7 +24,7 @@ const ENGINES = [
   {
     id: "contrast",
     title: "시각 명암비 분석",
-    body: "화면의 글자를 읽어 배경과의 명도 대비를 판정하고, 기준에 맞는 색 조합을 추천해요.",
+    body: "글자와 배경의 색 차이를 재고, 잘 보이는 색을 알려 줘요.",
     weight: 20,
     tool: "OCR",
     icon: <svg {...icon} aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none" /></svg>
@@ -37,7 +37,7 @@ const STEPS = [
   { title: "텍스트 난이도", body: "길이와 어휘 난이도 측정" },
   { title: "시각 명암비", body: "글자와 배경 대비 판정" },
   { title: "총점과 등급", body: "50·30·20 비중으로 합산" },
-  { title: "리포트", body: "페이지 위 마커와 최종 리포트" }
+  { title: "리포트", body: "마커와 최종 리포트" }
 ] as const;
 
 export function LandingEngineSection() {

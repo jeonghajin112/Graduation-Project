@@ -9,7 +9,11 @@ const PHRASES = [
   { text: "이제, 이해하고 개선하세요.", accent: false }
 ] as const;
 
-/** 필름 다음의 큰 문장. 스크롤에 맞춰 구절이 회색에서 진한 색으로 차례로 바뀐다. 모션 축소 설정에서는 처음부터 모두 진하다. */
+/**
+ * 필름 다음의 큰 문장. 스크롤에 맞춰 구절이 흐릿하고 투명한 상태에서 또렷하게 차례로 떠오른다.
+ * 글자색은 처음부터 최종 색이라 어느 순간에도 명도 대비가 낮은 글자가 화면에 남지 않는다.
+ * 모션 축소 설정에서는 처음부터 모두 보인다.
+ */
 export function LandingMessageSection() {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [lit, setLit] = useState(0);

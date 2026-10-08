@@ -50,7 +50,7 @@ export function LandingHero({ onEnterApp }: { onEnterApp: EnterAppHandler }) {
     <>
       <section className="ua-hero" aria-labelledby="ua-hero-title">
         <h1 className="ua-hero__title" id="ua-hero-title">공공 서비스의 웹 접근성,<br />이제 한눈에.</h1>
-        <p className="ua-hero__lede">누구나 써야 하는 정부·공공기관 누리집, 주소 하나면 충분해요. KWCAG 2.2 기준으로 문제를 찾아 <b>실제 페이지 위에</b> 표시하고, 고칠 방법까지 알려 줘요.</p>
+        <p className="ua-hero__lede">주소만 넣으면 돼요. 문제를 찾아 <b>그 자리에 바로</b> 보여 주고, 고치는 방법도 알려 줘요.</p>
         <div className="ua-hero__actions">
           <a className="ua-button" href="/analyze" onClick={onEnterApp}>새 페이지 분석</a>
         </div>

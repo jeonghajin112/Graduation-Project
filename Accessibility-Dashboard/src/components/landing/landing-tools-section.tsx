@@ -17,27 +17,27 @@ export function LandingToolsSection() {
           <article className="ua-tile ua-tile--wide">
             <span className="ua-tile__kicker">텍스트 난이도</span>
             <h3>어려운 문장은 쉬운 표현으로.</h3>
-            <p>문장 길이와 어려운 낱말을 살펴 읽기 부담스러운 문장을 찾고, 짧고 쉬운 표현을 제안해요.</p>
+            <p>길고 어려운 문장을 찾아 짧고 쉬운 말로 바꿔 줘요.</p>
             <div className="ua-tools__rewrite">
-              <div className="is-before"><small>분석한 문장</small>본 페이지는 이용자의 정보 접근성 향상을 도모하기 위하여 다양한 편의 기능을 제공하고 있습니다.</div>
-              <div className="is-after"><small>쉬운 표현 제안</small>이 페이지는 누구나 정보를 쉽게 찾을 수 있도록 여러 편의 기능을 제공해요.</div>
+              <div className="is-before"><small>원래 문장</small>편의 증진을 도모합니다.</div>
+              <div className="is-after"><small>바꾼 문장</small>누구나 쓰기 편해요.</div>
             </div>
             <span className="ua-tile__note">예시 문장</span>
           </article>
           <article className="ua-tile ua-tile--wide">
-            <span className="ua-tile__kicker">시각 명암비</span>
+            <span className="ua-tile__kicker">글자 색</span>
             <h3>기준에 맞는 색을 추천해요.</h3>
-            <p>글자와 배경의 명도 대비를 재고, 이미지 속 글자도 읽어서 함께 검사해요.</p>
+            <p>글자와 배경의 색 차이를 재고, 사진 속 글자도 읽어요.</p>
             <div className="ua-tools__swatches">
               <div><span className="ua-tools__chip" style={{ background: "#7cb7ff" }}>신청하기</span><span className="ua-tools__ratio">2.08:1<small className="is-problem">기준 미달</small></span><code>#FFFFFF / #7CB7FF</code></div>
               <div><span className="ua-tools__chip" style={{ background: "#0071e3" }}>신청하기</span><span className="ua-tools__ratio">4.70:1<small className="is-pass">추천 색</small></span><code>#FFFFFF / #0071E3</code></div>
             </div>
-            <span className="ua-tile__note">예시 색상 · 기준 4.5:1</span>
+            <span className="ua-tile__note">예로 든 색 · 기준 4.5:1</span>
           </article>
           <article className="ua-tile">
             <span className="ua-tile__kicker">재분석</span>
             <h3>고칠 때마다 추이가 쌓여요.</h3>
-            <p>재분석하면 점수가 기록되고, 지난 분석보다 나아졌는지 바로 보여요.</p>
+            <p>다시 검사하면 점수가 쌓이고, 지난번보다 나아졌는지 바로 보여요.</p>
             <LandingTrend className="ua-tools__trend" width={260} height={110} labels />
           </article>
           <article className="ua-tile">
@@ -52,7 +52,7 @@ export function LandingToolsSection() {
           <article className="ua-tile">
             <span className="ua-tile__kicker">사용 환경</span>
             <h3>라이트·다크, 키보드까지.</h3>
-            <p>테마를 바꿔도 같은 정보를 보여 주고, 모든 조작은 키보드로도 할 수 있어요.</p>
+            <p>밝은 화면, 어두운 화면 모두 같은 내용을 보여 주고, 키보드로도 모두 쓸 수 있어요.</p>
             <div className="ua-tools__themes" aria-hidden="true">
               <div className="is-light"><i /><i /><i /></div>
               <div className="is-dark"><i /><i /><i /></div>
