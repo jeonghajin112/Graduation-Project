@@ -93,7 +93,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
     const stage = document.querySelector(".sw-stage");
     const film = document.getElementById("tour");
     const hero = document.querySelector(".ua-hero");
-    const controls = [...document.querySelectorAll(".ua-hero__actions a, .ua-look__pill, .ua-faq__item summary, .ua-footer__wordmark")]
+    const controls = [...document.querySelectorAll(".ua-hero__actions a, .ua-look__tab, .ua-faq__item summary, .ua-footer__wordmark")]
       .filter(isVisible)
       .map((element) => ({ label: element.textContent?.trim(), height: element.getBoundingClientRect().height }));
     const sectionOrder = [...main.children]
@@ -135,7 +135,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(facts.ready, true, `${label}: scroll world did not initialize`);
   assert.equal(facts.mainCount, 1, `${label}: landing must expose one main landmark`);
   assert.equal(facts.h1Count, 1, `${label}: landing must expose one h1`);
-  assert.equal(facts.h1Text, "복잡한 웹 접근성,이제 한눈에.", `${label}: hero heading changed`);
+  assert.equal(facts.h1Text, "공공 서비스의 웹 접근성,이제 한눈에.", `${label}: hero heading changed`);
   assert.equal(facts.headerOutsideMain, true, `${label}: the header must stay outside the main landmark`);
   assert.equal(facts.headerWithinViewport, true, `${label}: header exceeds the viewport`);
   assert.equal(facts.headerSticky, "sticky", `${label}: header must stay pinned while scrolling`);
@@ -161,7 +161,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.deepEqual(facts.sectionOrder, SECTION_ORDER, `${label}: landing sections are out of order`);
   assert.equal(facts.kwcagRows, 33, `${label}: the report grid must list all 33 KWCAG items`);
   assert.deepEqual(facts.statValues.slice(0, 3), ["3", "33", "21"], `${label}: scope numbers changed`);
-  assert.equal(facts.lookTabs, 5, `${label}: expected five live-report features`);
+  assert.equal(facts.lookTabs, 4, `${label}: expected four live-report features`);
   assert.equal(facts.faqCount, 6, `${label}: expected six questions`);
   if (viewport.width >= 3840 && viewport.height >= 2000) {
     assert.ok(facts.titleFontSize >= 155 && facts.titleFontSize <= 161, `${label}: 4K hero title did not scale (${facts.titleFontSize}px)`);
@@ -385,13 +385,12 @@ async function verifyDesktopMotionPath(browser) {
     scenes.push(facts);
   }
 
-  // The live-report features play their real recordings once the section is near.
+  // The live-report demo loads its fixed snapshot once the section is near and starts its cursor demo in view.
   await page.locator("#look").evaluate((section) => window.scrollTo(0, section.getBoundingClientRect().top + scrollY));
-  await page.waitForFunction(() => {
-    const video = document.querySelector(".ua-look__panel video");
-    return video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.paused && video.videoWidth === 1920;
-  }, null, { timeout: 15_000 });
-  assert.ok(videoRequests.includes("/landing/look/locate.mp4"), "the first feature recording was not requested");
+  await page.locator(".ua-demo-app").evaluate((app) => app.scrollIntoView({ block: "center" }));
+  await page.waitForFunction(() => document.querySelectorAll(".ua-demo-mk").length === 14, null, { timeout: 15_000 });
+  await page.waitForFunction(() => window.__lookDemo?.open?.id === "6516", null, { timeout: 5_000 });
+  assert.equal(videoRequests.some((path) => path.startsWith("/landing/look/")), false, "the old feature recordings must not load");
 
   // The message after the film lights up phrase by phrase as it scrolls in.
   await page.locator(".ua-message").evaluate((element) => window.scrollTo(0, element.getBoundingClientRect().top + scrollY - innerHeight * 0.2));
@@ -403,42 +402,41 @@ async function verifyDesktopMotionPath(browser) {
 }
 
 async function verifyLookTabs(browser) {
-  // Click, arrow keys and scroll position all select the same item.
+  // The live-report demo: arrow keys and clicks select scenes; reduced motion shows each scene's final state.
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   try {
     const page = await context.newPage();
     await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
     await page.locator('[data-scroll-world-ready="true"]').waitFor();
-    // Start at the top of the pinned section, where the first item is open.
     await page.locator("#look").evaluate((section) => window.scrollTo(0, section.getBoundingClientRect().top + scrollY));
-    await page.waitForFunction(() => document.querySelector('.ua-look [role="tab"][aria-selected="true"]')?.id === "ua-look-tab-locate");
+    await page.locator(".ua-demo-app").evaluate((app) => app.scrollIntoView({ block: "center" }));
+    await page.waitForFunction(() => document.querySelectorAll(".ua-demo-mk").length === 14, null, { timeout: 15_000 });
     const selected = () => page.locator('.ua-look [role="tab"][aria-selected="true"]').getAttribute("id");
     assert.equal(await selected(), "ua-look-tab-locate");
+    // Reduced motion: no cursor demo, the scene's last state (the search-box popover) is shown at once.
+    assert.equal(await page.evaluate(() => window.__lookDemo.paused), true, "reduced motion must not autoplay the demo");
+    assert.equal(await page.locator(".ua-demo-pop").count(), 1, "reduced motion must show the scene's final popover");
     await page.locator("#ua-look-tab-locate").focus();
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    assert.equal(await selected(), "ua-look-tab-pause");
-    assert.equal(await page.evaluate(() => document.activeElement?.id), "ua-look-tab-pause");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    assert.equal(await selected(), "ua-look-tab-approx");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "ua-look-tab-approx");
     await page.keyboard.press("End");
     assert.equal(await selected(), "ua-look-tab-offscreen");
-    // Reduced motion shows each recording's poster instead of playing it.
-    assert.match(await page.locator(".ua-look__panel img").getAttribute("src"), /\/landing\/look\/offscreen\.webp$/);
-    assert.equal(await page.locator(".ua-look__panel video").count(), 0, "reduced motion must not play the feature recordings");
     assert.equal(await page.locator("#ua-look-panel").getAttribute("aria-labelledby"), "ua-look-tab-offscreen");
+    assert.match(await page.locator(".ua-demo-rail__state").getAttribute("src"), /\/landing\/look-demo\/rail-f2-g1\.webp$/);
     await page.keyboard.press("Home");
     assert.equal(await selected(), "ua-look-tab-locate");
-    // Scrolling through the pinned section opens the items in order.
-    await page.evaluate(() => {
-      const section = document.querySelector(".ua-look");
-      const top = section.getBoundingClientRect().top + scrollY;
-      window.scrollTo(0, top + (section.offsetHeight - innerHeight) * 0.7);
-    });
-    await page.waitForFunction(() => document.querySelector('.ua-look [role="tab"][aria-selected="true"]')?.id === "ua-look-tab-approx");
-    const pinned = await page.evaluate(() => Math.round(document.querySelector(".ua-look__inner").getBoundingClientRect().top));
-    assert.equal(pinned, 52, "the live-report feature stage must stay pinned under the header while scrolling");
     await page.locator("#ua-look-tab-cluster").click();
-    assert.match(await page.locator(".ua-look__panel img").getAttribute("src"), /\/landing\/look\/cluster\.webp$/);
+    assert.equal(await selected(), "ua-look-tab-cluster");
+    assert.equal(await page.locator(".ua-demo-pop__pager").count(), 1, "the cluster scene must open a paged popover");
     assert.equal(await page.locator('.ua-look [role="tab"][tabindex="0"]').count(), 1, "only the selected tab may be in the Tab order");
+    // The sidebar and the report tabs only show hover states; clicking them changes nothing.
+    const railBefore = await page.locator(".ua-demo-rail__state").getAttribute("src");
+    await page.locator(".ua-demo-tabs-hot .ua-demo-hot").nth(1).click({ force: true });
+    await page.locator(".ua-demo-side-hot .ua-demo-hot").nth(3).click({ force: true });
+    assert.equal(await page.locator(".ua-demo-rail__state").getAttribute("src"), railBefore);
+    assert.equal(new URL(page.url()).pathname, "/", "demo hover areas must not navigate");
     await page.locator(".ua-look").screenshot({ path: `${outDir}/look-cluster-1440.png` });
   } finally {
     await context.close();

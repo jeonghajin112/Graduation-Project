@@ -4,14 +4,14 @@ import { LandingTrend } from "@/components/landing/landing-trend";
 
 /**
  * 최종 리포트 소개. 실제 리포트처럼 항상 흰 용지 위에 요약과 KWCAG 33개 항목 그리드를 그린다.
- * 점수·문제 수·심각도는 2026-09-16 홍익대 분석 결과이고, 항목별 건수와 추이는 예시다 (아래 각주로 밝힌다).
+ * 점수·문제 수·심각도·항목별 건수·추이는 모두 2026-10-08 국세청 누리집 실제 분석 결과다 (아래 각주로 밝힌다).
  */
 
 const SEVERITY = [
   { label: "심각", count: 0, tone: "critical" },
-  { label: "높음", count: 3, tone: "high" },
-  { label: "중간", count: 48, tone: "medium" },
-  { label: "낮음", count: 71, tone: "low" }
+  { label: "높음", count: 12, tone: "high" },
+  { label: "중간", count: 125, tone: "medium" },
+  { label: "낮음", count: 24, tone: "low" }
 ] as const;
 
 function CriterionStatus({ criterion }: { criterion: LandingCriterion }) {
@@ -60,21 +60,21 @@ export function LandingReportSection() {
         <figure className="ua-report__paper">
           <div className="ua-report__head">
             <div className="ua-report__site">
-              <strong>홍익대학교</strong>
-              <span>https://www.hongik.ac.kr/kr/index.do</span>
+              <strong>국세청</strong>
+              <span>https://www.nts.go.kr/</span>
             </div>
             <dl className="ua-report__meta">
               <dt>진단 기준</dt><dd>KWCAG 2.2 · 33개 항목</dd>
-              <dt>진단 일자</dt><dd>2026-09-16 15:26</dd>
+              <dt>진단 일자</dt><dd>2026-10-08 19:49</dd>
               <dt>분석기</dt><dd>규칙 · 텍스트 · 시각</dd>
             </dl>
           </div>
 
           <div className="ua-report__summary">
             <div className="ua-report__tile">
-              <span className="ua-report__label">접근성 점수 · 최근 7회</span>
+              <span className="ua-report__label">접근성 점수 · 최근 5회</span>
               <div className="ua-report__score-row">
-                <span className="ua-report__value">89.4<small>점</small><span className="ua-report__delta">+2.1</span></span>
+                <span className="ua-report__value">64.8<small>점</small><span className="ua-report__delta">+0.6</span></span>
                 <LandingTrend className="ua-report__trend" width={300} height={70} />
               </div>
             </div>
@@ -115,13 +115,13 @@ export function LandingReportSection() {
               );
             })}
           </div>
-          <figcaption className="ua-report__note">예시 화면이에요. 점수, 문제 수, 심각도는 2026년 9월 16일 홍익대 분석 결과이고, 항목별 건수와 점수 추이는 이해를 돕기 위한 예시예요.</figcaption>
+          <figcaption className="ua-report__note">2026년 10월 8일 국세청 누리집 분석 결과예요. 문제 161건 가운데 21건은 KWCAG 항목 밖의 읽기 수준(WCAG 3.1.5) 문제예요.</figcaption>
         </figure>
 
         <ul className="ua-report__features">
           <li><Printer size={26} strokeWidth={1.6} aria-hidden="true" /><b>필터와 관계없이 전체 인쇄</b><span>화면에서 거른 결과와 상관없이 모든 문제가 인쇄돼요.</span></li>
           <li><ListTree size={26} strokeWidth={1.6} aria-hidden="true" /><b>항목별로 묶은 상세 문제</b><span>공통 설명은 한 번만, 문제는 한 줄씩. 펼치면 HTML과 측정값까지 보여요.</span></li>
-          <li><TrendingUp size={26} strokeWidth={1.6} aria-hidden="true" /><b>지난 분석과 비교</b><span>점수와 문제 수가 지난 분석보다 어떻게 바뀌었는지 최근 7회 추이와 함께 보여요.</span></li>
+          <li><TrendingUp size={26} strokeWidth={1.6} aria-hidden="true" /><b>지난 분석과 비교</b><span>점수와 문제 수가 지난 분석보다 어떻게 바뀌었는지 최근 분석 추이와 함께 보여요.</span></li>
         </ul>
       </div>
     </section>

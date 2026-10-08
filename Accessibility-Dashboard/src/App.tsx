@@ -38,7 +38,7 @@ function AppRouteFallback() {
 
 function getInitialDocumentTitle(pathname: string): string {
   if (pathname === "/") {
-    return "UNI ACCESS | 웹 접근성 결과를 명확하게";
+    return "UNI ACCESS | 공공 서비스 웹 접근성 평가";
   }
   if (pathname === "/product-preview") {
     return "UNI ACCESS 제품 미리보기";

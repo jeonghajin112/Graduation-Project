@@ -16,7 +16,7 @@ const STATS: readonly Stat[] = [
 
 /**
  * 검사 범위를 큰 숫자로. 항목 수는 landing-kwcag.ts 표에서 계산한다.
- * 숫자는 섹션이 화면에 들어올 때마다 0에서 빠르게 차오른다. 모션 축소 설정에서는 바로 최종 값을 보여 준다.
+ * 숫자는 섹션이 처음 화면에 들어올 때 한 번만 0에서 빠르게 차오른다. 모션 축소 설정에서는 바로 최종 값을 보여 준다.
  * 보조 기술에는 차오르는 중간 값 대신 최종 값만 전달한다.
  */
 export function LandingStatsSection() {
@@ -39,9 +39,11 @@ export function LandingStatsSection() {
       };
       raf = requestAnimationFrame(tick);
     };
+    // 처음 화면에 들어올 때 한 번만 차오르고, 그 뒤로는 최종 값 그대로 둔다
     const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) run();
-      else if (entry.boundingClientRect.top > 0) { cancelAnimationFrame(raf); setProgress(0); }
+      if (!entry.isIntersecting) return;
+      observer.disconnect();
+      run();
     }, { threshold: 0.4 });
     observer.observe(grid);
     return () => { observer.disconnect(); cancelAnimationFrame(raf); };

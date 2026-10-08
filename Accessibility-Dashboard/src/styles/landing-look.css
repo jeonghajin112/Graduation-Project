@@ -1,89 +1,121 @@
-/* 라이브 리포트 자세히 보기. 크기는 --ua-pixel(1920px 이하 1px, 큰 화면은 landing-large-screen.css가 확대) 배수로 적는다. */
+/* 라이브 리포트 자세히 보기 (landing-look-section.tsx, look-demo-engine.js).
+   위에는 기능 탭, 가운데는 1920×1080 으로 찍은 앱 화면을 16:9 로 줄여 보여 준다.
+   앱 화면 안의 크기는 --u(앱 1픽셀) 배수, 섹션 글자는 --lp 배수로 적는다. */
 .ua-look {
   --lp: var(--ua-pixel, 1px);
+  --ua-demo-accent: #0071e3;
+  --ua-demo-accent-soft: rgba(0, 113, 227, .16);
   position: relative;
   z-index: var(--z-landing-section);
-  background: #f5f5f7;
-  color: #1c222b;
+  box-sizing: border-box;
+  padding: clamp(calc(80 * var(--lp)), 8vw, calc(120 * var(--lp))) clamp(16px, 2.5vw, calc(32 * var(--lp)));
+  background: #fff;
+  color: #1d1d1f;
   font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-.ua-look__inner { box-sizing: border-box; max-width: calc(1240 * var(--lp)); margin: 0 auto; padding: clamp(calc(80 * var(--lp)), 8vw, calc(128 * var(--lp))) clamp(calc(24 * var(--lp)), 5vw, calc(64 * var(--lp))); }
-.ua-look__eyebrow { margin: 0 0 calc(8 * var(--lp)); color: #626973; font-size: calc(21 * var(--lp)); font-weight: 600; }
-.ua-look__title { margin: 0; font-size: clamp(calc(34 * var(--lp)), 4.2vw, calc(56 * var(--lp))); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; word-break: keep-all; }
-.ua-look__body { display: grid; grid-template-columns: minmax(calc(260 * var(--lp)), calc(340 * var(--lp))) minmax(0, 1fr); align-items: center; gap: calc(48 * var(--lp)); margin-top: calc(56 * var(--lp)); }
+.ua-look__head { max-width: calc(1100 * var(--lp)); margin: 0 auto; text-align: center; }
+.ua-look__eyebrow { margin: 0 0 calc(8 * var(--lp)); color: #6e6e73; font-size: calc(21 * var(--lp)); font-weight: 600; }
+.ua-look__title { margin: 0; font-size: clamp(calc(34 * var(--lp)), 4.2vw, calc(56 * var(--lp))); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; word-break: keep-all; text-wrap: balance; }
+.ua-look__lede { margin: calc(14 * var(--lp)) 0 0; color: #6e6e73; font-size: calc(19 * var(--lp)); font-weight: 500; line-height: 1.45; word-break: keep-all; }
+.ua-look__stack { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: calc(22 * var(--lp)); margin-top: calc(34 * var(--lp)); }
 
-.ua-look__pills { display: flex; flex-direction: column; align-items: flex-start; gap: calc(12 * var(--lp)); }
-.ua-look__pill { box-sizing: border-box; display: grid; grid-template-columns: calc(22 * var(--lp)) minmax(0, auto); align-items: start; column-gap: calc(12 * var(--lp)); max-width: 100%; padding: calc(15 * var(--lp)) calc(22 * var(--lp)) calc(15 * var(--lp)) calc(15 * var(--lp)); border: 0; border-radius: calc(28 * var(--lp)); background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .25s, border-radius .3s; }
-.ua-look__pill:hover { background: #fafafc; }
-.ua-look__pill.is-active { border-radius: calc(24 * var(--lp)); background: #fff; }
-.ua-look__pill:focus-visible { outline: 2px solid #0071e3; outline-offset: 3px; }
-.ua-look__pill-icon { display: grid; place-items: center; width: calc(22 * var(--lp)); height: calc(22 * var(--lp)); margin-top: calc(3 * var(--lp)); border-radius: 50%; background: #0071e3; color: #fff; transition: transform .35s ease; }
-.ua-look__pill-icon svg { width: calc(12 * var(--lp)); height: calc(12 * var(--lp)); stroke-width: 2.4; }
-.ua-look__pill.is-active .ua-look__pill-icon { transform: rotate(45deg); }
-.ua-look__pill-title { font-size: calc(17 * var(--lp)); font-weight: 650; line-height: calc(28 * var(--lp)); word-break: keep-all; }
-/* 펼침 높이는 grid 0fr → 1fr 로 바꿔 내용 길이에 맞춘다. */
-.ua-look__pill-description { grid-column: 2; display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s ease, margin .3s ease; }
-.ua-look__pill-clip { overflow: hidden; color: #626973; font-size: calc(15 * var(--lp)); font-weight: 400; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
-.ua-look__pill-clip b { color: #1c222b; font-weight: 600; }
-.ua-look__pill.is-active .ua-look__pill-description { grid-template-rows: 1fr; margin-top: calc(6 * var(--lp)); }
+/* 기능 탭 */
+.ua-look__tabs { display: flex; gap: calc(2 * var(--lp)); max-width: 100%; min-width: 0; padding: calc(4 * var(--lp)); border-radius: 999px; background: #f2f2f4; overflow-x: auto; scrollbar-width: none; }
+.ua-look__tabs::-webkit-scrollbar { display: none; }
+.ua-look__tab { flex: none; display: inline-flex; align-items: center; min-height: calc(44 * var(--lp)); padding: 0 calc(18 * var(--lp)); border: 0; border-radius: 999px; background: transparent; color: #6e6e73; font: inherit; font-size: calc(14 * var(--lp)); font-weight: 700; white-space: nowrap; cursor: pointer; transition: background .25s, color .25s, box-shadow .25s; }
+.ua-look__tab:hover { color: #1d1d1f; }
+.ua-look__tab[aria-selected="true"] { background: #fff; color: #1d1d1f; box-shadow: 0 1px 3px rgba(30, 30, 40, .12); }
+.ua-look__tab:focus-visible { outline: 2px solid var(--ua-demo-accent); outline-offset: 2px; }
+/* 탭과 화면이 한 화면 높이 안에 들어오는 크기 */
+.ua-look__stage { width: min(calc(1360 * var(--lp)), 100%, calc((100svh - 140px) * 16 / 9)); }
 
-.ua-look__panel { position: relative; min-width: 0; }
-/* 예시 영상을 멈추고 다시 트는 버튼(WCAG 2.2.2). 영상 오른쪽 아래 모서리에 둔다. */
-.ua-look__playback { position: absolute; right: calc(14 * var(--lp)); bottom: calc(14 * var(--lp)); display: grid; place-items: center; width: calc(44 * var(--lp)); height: calc(44 * var(--lp)); padding: 0; border: 0; border-radius: 50%; background: rgba(29, 29, 31, .72); color: #fff; cursor: pointer; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-.ua-look__playback:hover { background: rgba(29, 29, 31, .88); }
-.ua-look__playback svg { width: calc(18 * var(--lp)); height: calc(18 * var(--lp)); }
-.ua-look__video { display: block; width: 100%; aspect-ratio: 16 / 10.4; object-fit: cover; border-radius: calc(20 * var(--lp)); box-shadow: 0 calc(2 * var(--lp)) calc(6 * var(--lp)) rgba(0,0,0,.04), 0 calc(18 * var(--lp)) calc(48 * var(--lp)) rgba(0,0,0,.1); }
+/* 앱 화면 */
+/* 앱 화면 안은 랜딩의 자간·줄바꿈 규칙을 물려받지 않는다 (실제 런타임처럼 기본값) */
+.ua-demo-app { position: relative; aspect-ratio: 16 / 9; container-type: inline-size; overflow: hidden; --u: calc(100cqw / 1920); background: #f5f5f7; letter-spacing: normal; word-break: normal;
+  border-radius: clamp(10px, 1.4vw, 18px); box-shadow: 0 0 0 1px rgba(0, 0, 0, .07), 0 40px 90px -40px rgba(30, 30, 40, .45), 0 12px 30px -18px rgba(30, 30, 40, .2); }
+.ua-demo-view { position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgba(99, 99, 102, .5) transparent; }
+.ua-demo-content { position: relative; width: 100%; height: calc(1080 * var(--u)); background: #f5f5f7; }
+.ua-demo-bg { position: absolute; left: 0; top: 0; display: block; width: 100%; max-width: none; user-select: none; -webkit-user-drag: none; }
+.ua-demo-content > .ua-demo-bg { height: calc(1080 * var(--u)); }
+.ua-demo-sidebar { position: absolute; z-index: 5; left: 0; top: 0; height: 100%; max-width: none; object-fit: cover; object-position: left top; pointer-events: none; }
+.ua-demo-side-hot { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.ua-demo-tabs-hot { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.ua-demo-frame { position: absolute; overflow: hidden; background: #fff; }
+.ua-demo-page-scroll { position: absolute; inset: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(99, 99, 102, .6) transparent; }
+.ua-demo-page { position: relative; width: 100%; }
+.ua-demo-page > .ua-demo-bg { height: 100%; }
 
-/* 넓은 화면: 섹션이 스크롤 구간(항목당 반 화면)을 지나는 동안 내용은 상단바 아래에 고정되고,
-   스크롤 위치에 따라 항목이 차례로 펼쳐진다 (landing-look-section.tsx).
-   배치는 바로 위 스크롤 필름(scroll-world-engine.js applyCard)과 맞춘다: 글은 왼쪽 칸(필름 문구와 같은 여백·폭),
-   화면은 오른쪽에서 세로 가운데에 놓이고 폭은 화면 폭의 54%(1280px 미만은 48%), 높이는 화면의 82% 이하, 오른쪽 여백은 4%. */
-@media (min-width: 901px) {
-  .ua-look { height: calc(100vh + 5 * 50vh); }
-  .ua-look__inner {
-    --ua-look-pad-block: clamp(calc(24 * var(--lp)), 4vh, calc(64 * var(--lp)));
-    position: sticky;
-    top: calc(52 * var(--lp));
-    display: grid;
-    grid-template-columns: clamp(calc(340 * var(--lp)), 24vw, calc(460 * var(--lp))) minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    align-content: center;
-    column-gap: calc(48 * var(--lp));
-    max-width: none;
-    min-height: calc(100vh - 52 * var(--lp));
-    padding: var(--ua-look-pad-block) 4vw var(--ua-look-pad-block) clamp(calc(24 * var(--lp)), 5vw, calc(64 * var(--lp)));
-  }
-  .ua-look__head { grid-column: 1; grid-row: 1; }
-  .ua-look__title { font-size: clamp(calc(30 * var(--lp)), 2.8vw, calc(56 * var(--lp))); text-wrap: balance; }
-  .ua-look__body { display: contents; }
-  .ua-look__pills { grid-column: 1; grid-row: 2; margin-top: clamp(calc(16 * var(--lp)), 3vh, calc(32 * var(--lp))); }
-  .ua-look__panel {
-    --ua-look-film-width: min(54vw, 82vh * 16 / 9);
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
-    justify-self: end;
-    width: min(var(--ua-look-film-width), (100vh - 52 * var(--lp) - 2 * var(--ua-look-pad-block)) * 16 / 10.4);
-  }
-  .ua-look__video { border-radius: calc(24 * var(--lp)); }
-}
-@media (min-width: 901px) and (max-width: 1279px) {
-  .ua-look__panel { --ua-look-film-width: min(48vw, 82vh * 16 / 9); }
-}
-/* 낮은 노트북 화면: 왼쪽 칸이 한 화면을 넘지 않도록 항목 간격을 줄인다 */
-@media (min-width: 901px) and (max-height: 800px) {
-  .ua-look__pills { gap: calc(8 * var(--lp)); }
-  .ua-look__pill { padding-block: calc(11 * var(--lp)); }
-}
-@media (max-width: 900px) {
-  .ua-look__body { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .ua-look__panel { order: -1; }
-  .ua-look__pills { align-items: stretch; }
+/* 호버 조각: 실제 앱에서 마우스를 올린 모습을 그 자리에 겹친다. 사이드바·분석 결과/최종 리포트 탭은 호버만, 클릭 없음 */
+.ua-demo-hot { position: absolute; display: block; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.ua-demo-hot > img { position: absolute; max-width: none; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.ua-demo-hot:hover > img, .ua-demo-hot:focus-visible > img { opacity: 1; }
+:is(.ua-demo-side-hot, .ua-demo-tabs-hot) .ua-demo-hot { pointer-events: auto; cursor: default; }
+.ua-demo-rail .ua-demo-hot { cursor: pointer; }
+.ua-demo-rail .ua-demo-hot:focus-visible { outline: 2px solid var(--ua-demo-accent); outline-offset: 1px; border-radius: calc(12 * var(--u)); }
+
+/* 마커·설명창·강조: bridge.css 값을 앱 픽셀로 옮김 (런타임이 확대 배율과 무관하게 화면 크기를 고정해 그린다) */
+.ua-demo-mk { all: unset; box-sizing: border-box; position: absolute; z-index: 3; display: inline-flex; align-items: center; justify-content: center; gap: calc(5 * var(--u));
+  min-width: calc(56 * var(--u)); height: calc(18 * var(--u)); padding: 0 calc(8 * var(--u)) 0 calc(7 * var(--u)); border-radius: 999px; background: #1d1d1f; color: #fff;
+  box-shadow: 0 2px 6px rgba(16, 24, 40, .22); cursor: pointer; white-space: nowrap; font: 700 calc(10 * var(--u))/1 system-ui, -apple-system, "Segoe UI", sans-serif; transform: translate(0, -50%); }
+.ua-demo-mk::before { content: ""; flex: none; width: calc(6 * var(--u)); height: calc(6 * var(--u)); border-radius: 50%; background: var(--c, #0b6ff4); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .18); }
+.ua-demo-mk.is-approx { border: 1px dashed rgba(255, 255, 255, .85); background: #48484a; }
+.ua-demo-mk:hover, .ua-demo-mk[aria-expanded="true"] { box-shadow: 0 4px 10px rgba(16, 24, 40, .28); }
+.ua-demo-mk:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.ua-demo-mk__n { position: absolute; right: calc(-6 * var(--u)); top: calc(-6 * var(--u)); display: grid; place-items: center; min-width: calc(13 * var(--u)); height: calc(13 * var(--u)); padding: 0 calc(3 * var(--u));
+  border-radius: 999px; background: #ff3b30; color: #fff; font: 700 calc(8 * var(--u))/1 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 1px 3px rgba(16, 24, 40, .25); }
+.ua-demo-hl { position: absolute; z-index: 1; box-sizing: border-box; border-style: solid; border-width: max(1px, calc(2 * var(--u))); border-radius: calc(7.7 * var(--u)); background: transparent; pointer-events: none; }
+.ua-demo-pop { position: absolute; z-index: 4; box-sizing: border-box; overflow: hidden; border: 1px solid rgba(16, 24, 40, .1); border-radius: calc(14 * var(--u)); background: #fff; color: #101828;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, .16); font: 400 calc(13 * var(--u))/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; text-align: left; -webkit-user-select: text; user-select: text; }
+.ua-demo-pop * { box-sizing: border-box; }
+.ua-demo-pop__bar { display: flex; align-items: center; gap: calc(8 * var(--u)); min-height: calc(36 * var(--u)); padding: calc(12 * var(--u)) calc(12 * var(--u)) 0; }
+.ua-demo-pop__tags { display: flex; align-items: center; gap: calc(6 * var(--u)); min-width: 0; }
+.ua-demo-pop__sev, .ua-demo-pop__code { display: inline-flex; align-items: center; padding: calc(4 * var(--u)) calc(8 * var(--u)); border-radius: 999px; white-space: nowrap; font: 700 calc(11 * var(--u))/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.ua-demo-pop__sev { color: #101828; }
+.ua-demo-pop__code { max-width: calc(140 * var(--u)); overflow: hidden; background: #101828; color: #fff; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.ua-demo-pop__pager { display: inline-flex; align-items: center; gap: calc(8 * var(--u)); margin-left: auto; }
+.ua-demo-pop__pager button { all: unset; box-sizing: border-box; display: grid; place-items: center; width: calc(24 * var(--u)); height: calc(24 * var(--u)); border-radius: 50%; background: #f2f4f7; color: #475467; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s; }
+.ua-demo-pop__pager button:not(:disabled):hover, .ua-demo-pop__pager button.is-press { background: #fff; color: #101828; box-shadow: 0 1px 3px rgba(16, 24, 40, .18); }
+.ua-demo-pop__pager button:disabled { color: #c0c6cf; cursor: default; }
+.ua-demo-pop__pager button:focus-visible { outline: 2px solid #0b6ff4; outline-offset: 1px; }
+.ua-demo-pop__pager svg { width: calc(12 * var(--u)); height: calc(12 * var(--u)); }
+.ua-demo-pop__pager path { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.ua-demo-pop__detail { min-height: calc(142 * var(--u)); max-height: calc(270 * var(--u)); overflow: auto; padding: calc(8 * var(--u)) calc(12 * var(--u)) calc(12 * var(--u)); scrollbar-width: none; }
+.ua-demo-pop .ap-live-popover__title { margin: 0 0 calc(6 * var(--u)); color: #101828; font: 700 calc(14 * var(--u))/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+.ua-demo-pop .ap-live-popover__note { margin: 0 0 calc(8 * var(--u)); padding: calc(6 * var(--u)) calc(8 * var(--u)); border-radius: calc(7 * var(--u)); background: #eef4ff; color: #1d3f8f; font-size: calc(12 * var(--u)); line-height: 1.45; }
+.ua-demo-pop .ap-live-popover__message { margin: 0 0 calc(8 * var(--u)); color: #344054; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
+.ua-demo-pop .ap-live-popover__heading { color: #101828; font-weight: 700; }
+.ua-demo-pop .ap-live-popover__path { display: block; margin: 0; padding: calc(7 * var(--u)) calc(8 * var(--u)); border: 1px solid #eaecf0; border-radius: calc(7 * var(--u)); background: #f8fafc; color: #344054;
+  font: 500 calc(11 * var(--u))/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 오른쪽 분석 요약 패널 */
+.ua-demo-rail { position: absolute; z-index: 2; }
+.ua-demo-rail__state { display: block; width: 100%; max-width: none; }
+.ua-demo-trend-hit { position: absolute; z-index: 2; cursor: default; }
+.ua-demo-trend-tip { position: absolute; z-index: 1; display: none; max-width: none; pointer-events: none; }
+
+/* 장면 연출 */
+.ua-demo-spot { position: absolute; z-index: 6; border-radius: calc(18 * var(--u)); box-shadow: 0 0 0 2px var(--ua-demo-accent), 0 0 0 200vmax rgba(24, 24, 28, .38); opacity: 0; pointer-events: none; transition: opacity .45s ease; }
+.ua-demo-ring { position: absolute; z-index: 7; border-radius: 999px; box-shadow: 0 0 0 2px var(--ua-demo-accent), 0 0 0 6px var(--ua-demo-accent-soft); opacity: 0; pointer-events: none; transition: opacity .3s; }
+.ua-demo-spot.is-on, .ua-demo-ring.is-on { opacity: 1; }
+.ua-demo-cursor { position: absolute; z-index: 20; left: 72%; top: 88%; width: 20px; height: 20px; margin: -3px 0 0 -4px; opacity: 0; pointer-events: none;
+  transition: left 1s cubic-bezier(.5, 0, .25, 1), top 1s cubic-bezier(.5, 0, .25, 1), opacity .3s; }
+.ua-demo-cursor.is-on { opacity: 1; }
+.ua-demo-cursor svg { width: 100%; height: 100%; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .3)); }
+.ua-demo-cursor::after { content: ""; position: absolute; left: 4px; top: 3px; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: rgba(0, 113, 227, .35); opacity: 0; transform: scale(0); }
+.ua-demo-cursor.is-click::after { animation: ua-demo-tap .45s ease-out; }
+@keyframes ua-demo-tap { from { opacity: 1; transform: scale(.2); } to { opacity: 0; transform: scale(1.2); } }
+.ua-demo-try { position: absolute; z-index: 19; left: 50%; bottom: 14px; display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(29, 29, 31, .88);
+  color: #fff; font-size: 12.5px; font-weight: 700; white-space: nowrap; pointer-events: none; transform: translateX(-50%); transition: opacity .4s; }
+.ua-demo-try.is-gone { opacity: 0; }
+.ua-demo-try svg { width: 14px; height: 14px; }
+
+@media (max-width: 600px) {
+  .ua-demo-try { bottom: 8px; padding: 5px 10px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ua-look * { transition: none !important; }
+  .ua-look *, .ua-look *::after { transition: none !important; animation: none !important; }
 }
 @media (forced-colors: active) {
-  .ua-look__pill { border: 1px solid CanvasText; }
+  .ua-look__tab[aria-selected="true"] { border: 1px solid CanvasText; }
 }

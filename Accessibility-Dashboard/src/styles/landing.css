@@ -248,7 +248,7 @@
 .ua-faq__item:last-child { border-bottom: 1px solid var(--ua-line); }
 .ua-faq__item summary { display: flex; align-items: center; justify-content: space-between; gap: calc(16 * var(--lp)); min-height: calc(44 * var(--lp)); padding: calc(22 * var(--lp)) 0; list-style: none; cursor: pointer; font-size: calc(19 * var(--lp)); font-weight: 700; letter-spacing: -.02em; }
 .ua-faq__item summary::-webkit-details-marker { display: none; }
-.ua-faq__item summary i { display: grid; flex: none; place-items: center; width: calc(32 * var(--lp)); height: calc(32 * var(--lp)); border-radius: 50%; background: var(--ua-tile); transition: transform .3s ease; }
+.ua-faq__item summary i { display: grid; flex: none; place-items: center; width: calc(32 * var(--lp)); height: calc(32 * var(--lp)); border-radius: 50%; background: var(--ua-accent); color: #fff; transition: transform .3s ease; }
 .ua-faq__item summary i svg { width: calc(14 * var(--lp)); height: calc(14 * var(--lp)); }
 .ua-faq__item[open] summary i { transform: rotate(45deg); }
 .ua-faq__item summary:hover { color: var(--ua-accent); }

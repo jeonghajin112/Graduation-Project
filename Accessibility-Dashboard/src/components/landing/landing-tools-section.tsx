@@ -2,10 +2,9 @@ import { LandingTrend } from "@/components/landing/landing-trend";
 
 /** 개선 도구 타일. 문장·색상 예시는 화면에 '예시'로 밝힌다. 프로젝트 점수는 실제 프로젝트 화면의 값이다. */
 const PROJECTS = [
-  { name: "정부24", score: "96.9", color: "#c4314b" },
-  { name: "홍익대", score: "84.8", color: "#1747c6" },
-  { name: "토스", score: "83.1", color: "#3182f6" },
-  { name: "서울대학교", score: "64.5", color: "#2b2f8f" }
+  { name: "정부24", score: "96.5", color: "#0b50d0" },
+  { name: "국세청", score: "64.8", color: "#1d4fa3" },
+  { name: "복지로", score: "62.2", color: "#1aa3e8" }
 ] as const;
 
 export function LandingToolsSection() {

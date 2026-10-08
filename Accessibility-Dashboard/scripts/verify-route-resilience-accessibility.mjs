@@ -213,7 +213,7 @@ async function verifyTitlesHeadingAndThemeCleanup() {
   await page.getByRole("menuitem", { name: "로그아웃" }).click();
   await page.waitForURL(`${baseUrl}/`);
   await page.waitForFunction(() => !document.documentElement.classList.contains("dark"));
-  assert.equal(await page.title(), "UNI ACCESS | 웹 접근성 결과를 명확하게");
+  assert.equal(await page.title(), "UNI ACCESS | 공공 서비스 웹 접근성 평가");
   assert.deepEqual(pageErrors, []);
   fixture.assertIsolated();
   await context.close();

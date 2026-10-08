@@ -16,6 +16,7 @@
  * The report scene includes the current header, rendered page and summary rail.
  * --with-findings also captures a real issue popover; set LANDING_ISSUE_ID to
  * an issue on the selected page. Inspect the capture before publishing it.
+ * LANDING_SIDEBAR_PROJECT_ONLY=1 keeps only the recorded page's project in the sidebar.
  */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -108,6 +109,35 @@ const context = await browser.newContext({
   colorScheme: "light", reducedMotion: "no-preference", locale: "ko-KR", timezoneId: "Asia/Seoul",
   serviceWorkers: "block"
 });
+// LANDING_SIDEBAR_PROJECT_ONLY=1 shows only the recorded page's project in the
+// sidebar (no other projects, no recent-page list). The real sidebar entry is
+// shown again only for the moment the flow clicks it.
+const sidebarProjectOnly = process.env.LANDING_SIDEBAR_PROJECT_ONLY === "1";
+if (sidebarProjectOnly) {
+  await context.addInitScript(projectName => {
+    const css = ".sidebar-tree-list > li:not([data-landing-project]), .sidebar-tree-recent { display: none !important; }";
+    const apply = () => {
+      document.querySelectorAll(".sidebar-tree-list > li").forEach(item => {
+        if (item.querySelector(".sidebar-tree-row")?.textContent.trim() === projectName) item.setAttribute("data-landing-project", "");
+      });
+      if (window.__landingSidebarVisible || document.getElementById("landing-sidebar-only")) return;
+      const style = document.createElement("style");
+      style.id = "landing-sidebar-only"; style.textContent = css;
+      document.head.appendChild(style);
+    };
+    new MutationObserver(apply).observe(document, { childList: true, subtree: true });
+  }, project.name);
+}
+const showFullSidebar = visible => sidebarProjectOnly && page.evaluate(visible => {
+  window.__landingSidebarVisible = visible;
+  if (visible) document.getElementById("landing-sidebar-only")?.remove();
+  else if (!document.getElementById("landing-sidebar-only")) {
+    const style = document.createElement("style");
+    style.id = "landing-sidebar-only";
+    style.textContent = ".sidebar-tree-list > li:not([data-landing-project]), .sidebar-tree-recent { display: none !important; }";
+    document.head.appendChild(style);
+  }
+}, visible);
 const page = await context.newPage();
 const pageErrors = [];
 const upstreamWarnings = [];
@@ -118,7 +148,11 @@ page.on("pageerror", error => {
   const knownUpstreamMismatch = new URL(target.accessUrl).hostname === "www.hongik.ac.kr"
     && error.message === "Bootstrap's JavaScript requires jQuery version 1.9.1 or higher, but lower than version 3"
     && /bootstrap\.min\.js/.test(error.stack || "");
-  if (knownUpstreamMismatch) upstreamWarnings.push(error.message);
+  // The analysed page's own scripts may touch window.top from inside the live
+  // report frame; the browser blocks that with this exact SecurityError. It
+  // comes from the upstream page, not the app or bridge, so keep it as a warning.
+  const upstreamFrameAccess = /^Blocked a frame with origin "http:\/\/[0-9a-f]+\.localhost:\d+" from accessing a cross-origin frame\.$/.test(error.message);
+  if (knownUpstreamMismatch || upstreamFrameAccess) upstreamWarnings.push(error.message);
   else pageErrors.push(error.message);
 });
 const previousCapture = resumeResults || resumeAnalysis ? JSON.parse(await readFile(join(output, "capture-manifest.json"), "utf8")) : null;
@@ -187,7 +221,9 @@ async function verifyScene(scene) {
       `The recording must retain the desktop rail proportions and readable type: ${JSON.stringify(layout)}`);
   } else {
     assert.ok(await page.locator(".dashboard-project-card").count() >= 1, "Overview must contain loaded page cards.");
-    assert.ok(await page.locator('.dashboard-project-card [aria-label^="점수 "]:not([aria-label="점수 없음"])').count() >= 1);
+    // Scores are read out as "점수 64.8점"; a card without a score shows "-" with "없음".
+    const scores = await page.locator(".dashboard-project-card-score").allInnerTexts();
+    assert.ok(scores.some(text => /\d+(\.\d+)?점/.test(text)), "Overview must show at least one real page score.");
   }
   assert.equal(await page.getByRole("alert").count(), 0, scene + ": unexpected error UI");
   assert.deepEqual(pageErrors, [], scene + ": browser error");
@@ -270,9 +306,11 @@ try {
   }
   // Accepted requests leave the URL form ready for the next page. Open the
   // real sidebar entry just as a user does to view this page's live status.
+  await showFullSidebar(true);
   await page.locator(".sidebar-tree-recent-list").getByRole("button", {
     name: target.name + " 페이지 열기 (" + project.name + " 프로젝트)", exact: true
   }).click();
+  await showFullSidebar(false);
   await page.locator('.quick-analysis-progress[data-phase="running"]').waitFor({ timeout: 60_000 });
   await page.waitForFunction(() => getComputedStyle(document.querySelector(".quick-analysis-progress")).opacity === "1");
   await captureScene("analyze", async () => {}, 24);
