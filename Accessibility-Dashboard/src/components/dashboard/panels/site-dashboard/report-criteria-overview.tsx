@@ -39,8 +39,14 @@ export function ReportCriteriaOverview({ overview, onShowCriterion }: {
         {overview.principles.map((principle, index) => {
           const fails = principle.criteria.filter((criterion) => criterion.status === "fail").length;
           const headingId = `site-final-report-principle-${index}`;
+          // 운용의 용이성 (15 criteria) is as long as two other principles together.
+          const isTall = principle.criteria.length >= 12;
           return (
-            <section key={principle.name} className="site-final-report__principle" aria-labelledby={headingId}>
+            <section
+              key={principle.name}
+              className={`site-final-report__principle${isTall ? " site-final-report__principle--tall" : ""}`}
+              aria-labelledby={headingId}
+            >
               <h4 id={headingId}>
                 {principle.name}
                 <span>{principle.criteria.length}개 중 문제 {fails}개</span>

@@ -602,11 +602,21 @@
   .bridge-dashboard.dashboard-site-detail .site-final-report__principles {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  /* In two columns the long principle spans two rows, so the shorter ones
+     stack beside it instead of leaving a hole under each short card. */
+  .bridge-dashboard.dashboard-site-detail .site-final-report__principle--tall {
+    grid-row: span 2;
+  }
 }
 
 @container (max-width: 40rem) {
   .bridge-dashboard.dashboard-site-detail .site-final-report__principles {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bridge-dashboard.dashboard-site-detail .site-final-report__principle--tall {
+    grid-row: auto;
   }
 }
 
