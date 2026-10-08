@@ -58,7 +58,8 @@ export function LandingHero({ onEnterApp }: { onEnterApp: EnterAppHandler }) {
       <div className="ua-dive" ref={diveRef} aria-hidden="true">
         <div className="ua-dive__sticky">
           <div className="ua-dive__frame" ref={frameRef}>
-            <img src={OPENING_STILL} width="1800" height="1013" alt="" decoding="async" />
+            {/* lazy: phones hide this card, so they never fetch it; desktops get it from the preload in index.html. */}
+            <img src={OPENING_STILL} width="1800" height="1013" alt="" decoding="async" loading="lazy" />
           </div>
         </div>
       </div>

@@ -140,8 +140,13 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(facts.headerWithinViewport, true, `${label}: header exceeds the viewport`);
   assert.equal(facts.headerSticky, "sticky", `${label}: header must stay pinned while scrolling`);
   assert.equal(facts.engineChromeCount, 0, `${label}: the film must not add its own header, skip link or scroll cue`);
-  assert.equal(facts.copyCount, 5, `${label}: expected five film scenes`);
-  assert.equal(facts.activeCopyCount, 1, `${label}: exactly one scene copy must be active`);
+  // Phones (<=760px) skip the opening photo, whose 16:9 frame crops badly in portrait.
+  const expectedScenes = viewport.width <= 760 ? 4 : 5;
+  assert.equal(facts.copyCount, expectedScenes, `${label}: expected ${expectedScenes} film scenes`);
+  // At the top of the page only the opening scene's (title-less) copy is live;
+  // a phone film starts on a card whose copy appears once it is scrolled to.
+  assert.equal(facts.activeCopyCount, expectedScenes === 5 ? 1 : 0,
+    `${label}: unexpected number of active scene copies before the film`);
   assert.equal(facts.hiddenCopyCount, 0, `${label}: scene copy must stay readable by assistive technology`);
   assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy controls escaped the Tab order`);
   assert.equal(facts.routeVisible, false, `${label}: side progress bar must stay hidden`);
@@ -193,13 +198,16 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.notEqual(focus.style, "none", `${label}: CTA focus outline is missing`);
 
   // Film distances are capped at the FHD unit even when media fills a taller viewport.
-  await scrollFilm(page, 5.15);
+  // Without the opening scene (scroll 1.6) every later scene starts that much earlier.
+  const filmShift = expectedScenes === 5 ? 0 : 1.6;
+  const reportSceneIndex = expectedScenes === 5 ? 3 : 2;
+  await scrollFilm(page, 5.15 - filmShift);
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
   );
   await settle(page);
-  const report = await page.evaluate(() => {
-    const scene = document.querySelectorAll(".sw-scene")[3];
+  const report = await page.evaluate((sceneIndex) => {
+    const scene = document.querySelectorAll(".sw-scene")[sceneIndex];
     const media = scene?.querySelector(".sw-scene__video, .sw-scene__still");
     const copy = document.querySelector('.sw-copy[data-sw-active="true"]');
     const rect = media?.getBoundingClientRect();
@@ -213,7 +221,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
       stageFixed: getComputedStyle(document.querySelector(".sw-stage")).position === "fixed",
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
     };
-  });
+  }, reportSceneIndex);
   assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
   assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
   assert.equal(report.stageFixed, true, `${label}: the film stage must be pinned while it plays`);
@@ -227,7 +235,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
   );
   assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
 
-  await scrollFilm(page, 6.75);
+  await scrollFilm(page, 6.75 - filmShift);
   await page.waitForFunction(
     () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
   );

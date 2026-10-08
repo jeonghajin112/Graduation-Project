@@ -14,8 +14,13 @@
         var root = document.documentElement;
 
         // The landing hero still is only used on "/". Other routes skip it so
-        // dashboard deep links do not spend bandwidth on a landing image.
+        // dashboard deep links do not spend bandwidth on a landing image, and
+        // phones skip it because their film starts after the opening scene
+        // (PHONE_FILM_QUERY in src/components/landing/landing-page.tsx).
         if (path === "/") {
+          if (window.matchMedia("(max-width: 760px)").matches) {
+            return;
+          }
           var preload = document.createElement("link");
           preload.rel = "preload";
           preload.as = "image";

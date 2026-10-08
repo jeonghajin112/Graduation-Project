@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { useScroll } from "framer-motion";
 
 import {
@@ -25,6 +25,12 @@ import "@/styles/landing-large-screen.css";
 
 const ASSET_ROOT = "/landing/scroll-world";
 const STATIC_HERO_QUERY = "(max-width: 760px), (prefers-reduced-motion: reduce)";
+// 휴대폰 세로 화면은 16:9 오프닝 사진을 크게 잘라 내므로, 필름을 제품 화면 카드부터 시작한다.
+const PHONE_FILM_QUERY = "(max-width: 760px)";
+
+function matchesPhoneFilm() {
+  return typeof window !== "undefined" && window.matchMedia(PHONE_FILM_QUERY).matches;
+}
 
 /**
  * 제품 소개 랜딩.
@@ -132,6 +138,11 @@ const LANDING_CONFIG = {
   connectors: []
 } satisfies ScrollWorldConfig;
 
+const PHONE_LANDING_CONFIG = {
+  ...LANDING_CONFIG,
+  sections: LANDING_CONFIG.sections.filter((section) => section.id !== "opening")
+} satisfies ScrollWorldConfig;
+
 type LandingPageProps = {
   onEnterApp: () => void;
 };
@@ -142,6 +153,15 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const onEnterAppRef = useRef(onEnterApp);
   const { scrollY } = useScroll();
+  const [isPhoneFilm, setIsPhoneFilm] = useState(matchesPhoneFilm);
+
+  useEffect(() => {
+    const query = window.matchMedia(PHONE_FILM_QUERY);
+    const update = () => setIsPhoneFilm(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
 
   useEffect(() => {
     onEnterAppRef.current = onEnterApp;
@@ -159,15 +179,21 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
     enterApp();
   }, [enterApp]);
 
+  // 처음 열 때만 맨 위로 올린다. 화면 폭이 휴대폰 기준을 넘나들어 필름을 다시 만들 때는 위치를 지킨다.
+  const hasMountedFilmRef = useRef(false);
+
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
-    window.scrollTo({ top: 0, behavior: "auto" });
+    if (!hasMountedFilmRef.current) {
+      hasMountedFilmRef.current = true;
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
     // landing.css 와 같은 조건: 이때는 히어로 카드가 없으므로 필름 첫 장면이 히어로 바로 아래에 놓인다.
     const staticHero = window.matchMedia(STATIC_HERO_QUERY);
 
-    return mountScrollWorld(root, LANDING_CONFIG, {
+    return mountScrollWorld(root, isPhoneFilm ? PHONE_LANDING_CONFIG : LANDING_CONFIG, {
       externalMain: true,
       // 필름은 히어로 아래에서 시작하므로, 필름 맨 위를 스크롤 0으로 삼는다.
       scrollOffset: () => root.getBoundingClientRect().top + window.scrollY,
@@ -176,7 +202,7 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
       subscribeScroll: (listener) => scrollY.on("change", listener),
       onEnterApp: enterApp
     });
-  }, [scrollY, enterApp]);
+  }, [scrollY, enterApp, isPhoneFilm]);
 
   return (
     <>
