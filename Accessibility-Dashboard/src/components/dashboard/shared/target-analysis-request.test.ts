@@ -14,7 +14,12 @@ import {
 } from "@/services/site-create-recovery-storage";
 import type { DashboardViewModel, EvaluationRequestModel, EvaluationTarget } from "@/types/accessibility-domain";
 
-import { requestTargetAnalysis, type TargetAnalysisRequestCheckpoint } from "./target-analysis-request";
+import {
+  ABANDONED_RESCAN_RECONCILE_ATTEMPTS,
+  ABANDONED_RESCAN_RECONCILE_INTERVAL_MS,
+  requestTargetAnalysis,
+  type TargetAnalysisRequestCheckpoint
+} from "./target-analysis-request";
 
 const timestamp = "2026-10-01T00:00:00Z";
 
@@ -143,6 +148,30 @@ describe("per-page rescan recovery", () => {
     expect(submit).toHaveBeenCalledTimes(1);
     expect(loadDashboard).toHaveBeenCalledWith({ background: true, refreshAfterInFlight: true });
   });
+
+  it("keeps the key of an abandoned rescan the server has not shown yet", async () => {
+    // The POST may still commit after the background wait. Reusing its key on
+    // the next rescan lets the server return that request instead of a duplicate.
+    const submit = vi.spyOn(protocolApi, "submitEvaluationTargetRescan")
+      .mockImplementationOnce((_id, signal) => stalled(signal!))
+      .mockImplementationOnce(async (id) => request(906, id));
+    const { context } = createContext();
+
+    const controller = new AbortController();
+    const pending = requestTargetAnalysis(context, 101, controller.signal);
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(protocolApi.fetchAnalysisAttempt).toHaveBeenCalledTimes(ABANDONED_RESCAN_RECONCILE_ATTEMPTS),
+      { timeout: ABANDONED_RESCAN_RECONCILE_ATTEMPTS * ABANDONED_RESCAN_RECONCILE_INTERVAL_MS + 2_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(readTargetRescanRecovery(101)).toMatchObject({ kind: "valid", attempt: { phase: "request-reconciling" } });
+
+    await expect(requestTargetAnalysis(context, 101)).resolves.toBe(906);
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls[1]![2]).toBe(submit.mock.calls[0]![2]);
+    expect(window.sessionStorage.getItem(getTargetRescanStorageKey(101))).toBeNull();
+  }, 15_000);
 
   it("does not let a day-old checkpoint block a new rescan", async () => {
     seedRescan(101, { startedAt: Date.now() - 25 * 60 * 60 * 1_000 });

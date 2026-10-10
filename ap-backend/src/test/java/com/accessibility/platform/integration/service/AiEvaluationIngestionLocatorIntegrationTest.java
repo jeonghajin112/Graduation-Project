@@ -326,9 +326,11 @@ class AiEvaluationIngestionLocatorIntegrationTest {
                         tuple("x=10, y=20, width=60, height=18", "AD")
                 );
 
+        // Ad and changing-region findings are never counted; popup findings stay
+        // out of the score but are counted like the rest.
         EvaluationResultSummaryResponse summary = resultQueryService.getSummary(request.getId());
-        assertThat(summary.totalIssueCount()).isEqualTo(1);
-        assertThat(summary.criticalIssueCount()).isEqualTo(1);
+        assertThat(summary.totalIssueCount()).isEqualTo(4);
+        assertThat(summary.criticalIssueCount()).isEqualTo(2);
     }
 
     @Test

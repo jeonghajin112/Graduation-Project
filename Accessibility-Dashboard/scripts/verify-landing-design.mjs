@@ -250,7 +250,9 @@ async function verifyReducedMotionViewport(browser, viewport) {
   await settle(page);
   const covered = await page.evaluate(() => {
     const paper = document.querySelector(".ua-report__paper").getBoundingClientRect();
-    const hit = document.elementFromPoint(paper.left + paper.width / 2, Math.max(paper.top + 10, 80));
+    // The report can be taller than the viewport, so probe below the fixed nav rather than at a set height.
+    const navBottom = document.querySelector(".ua-lnav")?.getBoundingClientRect().bottom ?? 0;
+    const hit = document.elementFromPoint(paper.left + paper.width / 2, Math.max(paper.top + 10, navBottom + 10, 80));
     return Boolean(hit?.closest(".ua-report"));
   });
   assert.equal(covered, true, `${label}: the final report section is hidden behind the film`);
@@ -430,6 +432,27 @@ async function verifyLookTabs(browser) {
     await page.locator("#ua-look-tab-cluster").click();
     assert.equal(await selected(), "ua-look-tab-cluster");
     assert.equal(await page.locator(".ua-demo-pop__pager").count(), 1, "the cluster scene must open a paged popover");
+    // Keyboard users keep their place: paging redraws the popover and a filter
+    // redraws the rail, but focus stays on the matching button, so Escape still works.
+    const focusInfo = () => page.evaluate(() => {
+      const active = document.activeElement;
+      return {
+        inPager: Boolean(active?.closest(".ua-demo-pop__pager")),
+        marker: active?.classList.contains("ua-demo-mk") ?? false,
+        key: active?.dataset?.key ?? null
+      };
+    });
+    await page.locator(".ua-demo-pop__pager button:not([disabled])").first().focus();
+    await page.keyboard.press("Enter");
+    assert.equal((await focusInfo()).inPager, true, "paging must keep focus on a pager button");
+    await page.keyboard.press("Escape");
+    assert.equal((await focusInfo()).marker, true, "Escape after paging must return focus to the marker");
+    const railFilter = page.locator('[data-demo="rail"] .ua-demo-hot[aria-pressed="false"]').first();
+    const filterKey = await railFilter.getAttribute("data-key");
+    await railFilter.focus();
+    await page.keyboard.press("Enter");
+    assert.equal((await focusInfo()).key, filterKey, "a rail filter must keep focus after the rail redraws");
+    assert.equal(await page.locator(`[data-demo="rail"] .ua-demo-hot[data-key="${filterKey}"]`).getAttribute("aria-pressed"), "true");
     assert.equal(await page.locator('.ua-look [role="tab"][tabindex="0"]').count(), 1, "only the selected tab may be in the Tab order");
     // The sidebar and the report tabs only show hover states; clicking them changes nothing.
     const railBefore = await page.locator(".ua-demo-rail__state").getAttribute("src");

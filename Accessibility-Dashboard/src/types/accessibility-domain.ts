@@ -3,7 +3,8 @@ export type MenuType = "analyze" | "projects";
 export type RequestStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
 export type EvaluationIssueSeverity = "CRITICAL" | "SERIOUS" | "MODERATE" | "MINOR";
 export type EvaluationModule = "rule_based" | "text_difficulty" | "cv_visual";
-export type AnalysisStatus = "SUCCESS" | "FAILED";
+/** Mirrors the backend `AnalysisStatus` enum. */
+export type AnalysisStatus = "READY" | "RUNNING" | "SUCCESS" | "FAILED";
 export type AnalyzerType = "RULE_BASED" | "AI_TEXT" | "CV_VISION";
 export type SeverityLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 

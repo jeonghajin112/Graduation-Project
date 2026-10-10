@@ -17,7 +17,7 @@ const PRINT_SIZE = { width: 460, height: 96 };
 // A small dot marks each score without crowding its label.
 const DOT_RADIUS = 2.5;
 
-// Room under the plot for the time line and, below it, the date line.
+// Room under the plot for the date line and, below it, the time line.
 const AXIS_HEIGHT = 36;
 
 export function ReportScoreTrend({ items, currentRequestId, printing = false }: {
@@ -116,14 +116,14 @@ function TrendLabel({ x, y, value, pointCount, current }: {
   );
 }
 
-// Same-day re-analyses are common (analyse, fix, analyse again), so each
-// point is labelled by its time, with the date beneath only where a day starts.
+// Same-day re-analyses are common (analyse, fix, analyse again), so every
+// point shows its date with its time beneath; the time tells them apart.
 function TrendTick({ x, y, label }: { x: number; y: number; label?: TrendAxisLabel }) {
   if (!label || !Number.isFinite(x) || !Number.isFinite(y)) return null;
   return (
     <text x={x} y={y} textAnchor="middle" className="site-final-report__trend-tick">
-      <tspan x={x} dy="0.71em">{label.time}</tspan>
-      {label.day && <tspan x={x} dy="1.25em" className="site-final-report__trend-tick-day">{label.day}</tspan>}
+      <tspan x={x} dy="0.71em" className="site-final-report__trend-tick-day">{label.day}</tspan>
+      <tspan x={x} dy="1.25em">{label.time}</tspan>
     </text>
   );
 }

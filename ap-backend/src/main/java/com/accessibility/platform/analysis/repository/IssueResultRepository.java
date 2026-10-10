@@ -48,8 +48,9 @@ public interface IssueResultRepository extends JpaRepository<IssueResult, Long> 
         long getCriticalIssueCount();
     }
 
-    // Findings in advertising, changing or popup regions (exclusionReason set) are
-    // reported separately and never counted.
+    // Findings in advertising or changing regions (exclusionReason AD/DYNAMIC) are
+    // never counted; popup findings (exclusionReason POPUP) are left out of the
+    // score by the AI module but counted like any other finding.
     @Query("""
             select count(issue.id) as totalIssueCount,
                    coalesce(sum(case when issue.severity = :criticalSeverity then 1 else 0 end), 0)
@@ -57,7 +58,7 @@ public interface IssueResultRepository extends JpaRepository<IssueResult, Long> 
             from IssueResult issue
             join issue.analysisResult analysisResult
             where analysisResult.evaluationRequest.id = :requestId
-              and issue.exclusionReason is null
+              and (issue.exclusionReason is null or issue.exclusionReason = 'POPUP')
             """)
     RequestIssueSummaryProjection summarizeRequestIssues(
             @Param("requestId") Long requestId,
@@ -76,7 +77,7 @@ public interface IssueResultRepository extends JpaRepository<IssueResult, Long> 
             where organization.status = :organizationStatus
               and target.status = :targetStatus
               and evaluationRequest.status = :requestStatus
-              and issue.exclusionReason is null
+              and (issue.exclusionReason is null or issue.exclusionReason = 'POPUP')
             group by analysisResult.evaluationRequest.id, issue.severity
             """)
     List<RequestSeverityCountProjection> findDashboardSeverityCounts(
@@ -94,7 +95,7 @@ public interface IssueResultRepository extends JpaRepository<IssueResult, Long> 
             from IssueResult issue
             join issue.analysisResult analysisResult
             where analysisResult.evaluationRequest.id in :requestIds
-              and issue.exclusionReason is null
+              and (issue.exclusionReason is null or issue.exclusionReason = 'POPUP')
             group by analysisResult.evaluationRequest.id,
                      issue.issueCode,
                      issue.issueTitle,

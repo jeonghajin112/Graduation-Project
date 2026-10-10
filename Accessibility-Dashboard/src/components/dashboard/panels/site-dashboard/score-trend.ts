@@ -27,7 +27,9 @@ export function buildScoreTrend(
     .filter((request) => request.evaluationTargetId === evaluationTargetId)
     .map((request) => {
       const summary = summaryByRequestId.get(request.id);
-      const score = summary?.totalScore ?? scoreByRequestId.get(request.id) ?? null;
+      // Only a score result is a score. The overview summary reports 0 for a
+      // completed request that has none, so it supplies the issue count only.
+      const score = scoreByRequestId.get(request.id) ?? null;
       if (score === null || !Number.isFinite(score)) return null;
       const date = summary?.requestedAt ?? request.requestedAt ?? request.updatedAt;
       return {
@@ -57,21 +59,16 @@ export function padScoreTrend(items: readonly ScoreChartItem[], slotCount = TREN
 }
 
 export type TrendAxisLabel = {
+  day: string;
   time: string;
-  /** Set where the day changes, so same-day re-analyses don't repeat it. */
-  day: string | null;
 };
 
-/** The time of every analysis, and its date where a new day starts. */
+/**
+ * The date and time of every analysis. Each point repeats its date, even on
+ * the same day, so no time is left without the day it belongs to.
+ */
 export function trendAxisLabels(items: readonly ScoreChartItem[]): TrendAxisLabel[] {
-  const dayKey = (value: string) => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value.slice(0, 10) : date.toDateString();
-  };
-  return items.map((item, index) => ({
-    time: formatShortTime(item.date),
-    day: index > 0 && dayKey(items[index - 1]!.date) === dayKey(item.date) ? null : formatShortDate(item.date)
-  }));
+  return items.map((item) => ({ day: formatShortDate(item.date), time: formatShortTime(item.date) }));
 }
 
 export type ScoreChange = {

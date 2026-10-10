@@ -194,10 +194,13 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     () => new Map(analysisResults.map((analysisResult) => [analysisResult.id, analysisResult])),
     [analysisResults]
   );
-  // Findings in advertising or changing regions are not scored: they stay out
-  // of the page view, the counts and the report.
+  // Findings in advertising or changing regions stay out of the page view, the
+  // counts and the report. Popup findings are left out of the score only: they
+  // are listed, counted and located like any other finding, and join the
+  // not-shown list when the page lacks the popup.
   const latestIssues = useMemo(() => latestResultRequestId === null ? [] : issueResults.filter((issue) =>
-    !issue.exclusionReason && requestIdByAnalysisResultId.get(issue.analysisResultId) === latestResultRequestId
+    (!issue.exclusionReason || issue.exclusionReason === "POPUP")
+    && requestIdByAnalysisResultId.get(issue.analysisResultId) === latestResultRequestId
   ), [issueResults, latestResultRequestId, requestIdByAnalysisResultId]);
   const {
     captureMetadata,

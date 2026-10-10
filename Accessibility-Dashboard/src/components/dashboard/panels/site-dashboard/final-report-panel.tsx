@@ -143,10 +143,11 @@ export function FinalReportPanel({
   const [isPrinting, setIsPrinting] = useState(false);
   const [focusRequest, setFocusRequest] = useState<{ code: string } | null>(null);
   const reportRef = useRef<HTMLElement>(null);
-  // A measured zero is a real score; only a missing result is unknown.
+  // A measured zero is a real score; only a missing result is unknown. The
+  // overview summary reports 0 for a request without a score result, so it is
+  // not used as a fallback.
   const scoreResult = requestId === null ? undefined : scoreResults.find((result) => result.evaluationRequestId === requestId);
-  const score = scoreResult?.totalScore ??
-    resultSummaries.find((summary) => summary.requestId === requestId)?.totalScore ?? null;
+  const score = scoreResult?.totalScore ?? null;
   const cvStatus = scoreResult?.cvStatus ?? null;
   // Only a recorded SUCCESS counts as done. Older analyses stored no outcome
   // (null), which is neither a pass nor a failure: it is shown as unknown.

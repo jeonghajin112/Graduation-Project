@@ -116,6 +116,9 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
   function step(d) { if (!open) return; open.i = Math.max(0, Math.min(open.m.pages.length - 1, open.i + d)); open.m.sel = open.i; render(); }
   function render() {
     const { m, i, el } = open; const p = m.pages[i]; const n = m.pages.length;
+    // 다시 그리면 이전·다음 버튼이 바뀌므로, 초점이 창 안에 있었으면 같은 방향의 버튼으로 되돌린다
+    const hadFocus = el.contains(document.activeElement);
+    const focusedStep = hadFocus ? document.activeElement.dataset?.d : undefined;
     // 심각도·항목 코드는 글자로, 설명 본문은 실제 런타임이 만든 마크업(스냅샷)을 그대로 넣는다
     el.innerHTML = `<div class="ua-demo-pop__bar"><div class="ua-demo-pop__tags"><span class="ua-demo-pop__sev"></span><span class="ua-demo-pop__code"></span></div>` +
       (n > 1 ? `<div class="ua-demo-pop__pager" role="group" aria-label="같은 요소의 접근성 문제 이동"><button type="button" data-d="-1" aria-label="이전 문제" ${i === 0 ? "disabled" : ""}>${GLYPH("M15 6l-6 6 6 6")}</button><button type="button" data-d="1" aria-label="다음 문제" ${i === n - 1 ? "disabled" : ""}>${GLYPH("M9 6l6 6-6 6")}</button></div>` : "") +
@@ -125,10 +128,16 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
     const title = el.querySelector(".ap-live-popover__title")?.textContent.trim() || "";
     el.dataset.pos = n > 1 ? `총 ${n}개 중 ${i + 1}번째 문제: ${title}` : "";
     el.setAttribute("aria-label", n > 1 ? el.dataset.pos : title);
-    el.querySelectorAll(".ua-demo-pop__pager button").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); step(Number(b.dataset.d)); }));
+    const pager = [...el.querySelectorAll(".ua-demo-pop__pager button")];
+    pager.forEach(b => b.addEventListener("click", e => { e.stopPropagation(); step(Number(b.dataset.d)); }));
     const [x, y, w] = p.box;
     Object.assign(el.style, { left: pct(x, L.PW), top: pct(y, L.PH), width: pct(w, L.PW) });
     drawHl(p);
+    if (hadFocus) {
+      // 첫·마지막 문제에서 누른 쪽이 비활성이 되면 반대쪽 버튼, 버튼이 없으면 마커로 보낸다
+      const target = pager.find(b => b.dataset.d === focusedStep && !b.disabled) ?? pager.find(b => !b.disabled) ?? markerEls.get(m.id);
+      target.focus({ preventScroll: true });
+    }
   }
   on(pageEl, "pointerdown", e => { if (open && !open.el.contains(e.target) && !e.target.closest(".ua-demo-mk")) close(); }, true);
   on(document, "keydown", e => { if (e.key === "Escape" && open && root.contains(document.activeElement)) { const b = markerEls.get(open.m.id); close(); b.focus({ preventScroll: true }); } });
@@ -141,16 +150,19 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
     railState = name;
     railImg.src = asset(`rail-${name}.webp`); railImg.style.height = ru(s.h);
     content.style.height = ru(Math.max(L.docH, L.rail.y + s.h + 16));
+    // 버튼을 새로 만들므로, 초점이 패널 안에 있었으면 같은 필터·그룹 버튼으로 되돌린다
+    const focusedKey = railEl.contains(document.activeElement) ? document.activeElement.dataset?.key : undefined;
     railEl.querySelectorAll(".ua-demo-hot").forEach(h => h.remove());
-    const add = (c, label, pressed, attr, fn) => {
+    const add = (c, key, label, pressed, attr, fn) => {
       const r = c.r;
       const el = c.hov ? hoverPiece(railEl, r, c.hov.clip, c.hov.img, "button") : Object.assign(document.createElement("button"), { className: "ua-demo-hot" });
       if (!c.hov) { place(el, r[0], r[1], r[2], r[3]); railEl.appendChild(el); }
-      el.type = "button"; el.setAttribute("aria-label", label); el.setAttribute(attr, String(pressed));
+      el.type = "button"; el.dataset.key = key; el.setAttribute("aria-label", label); el.setAttribute(attr, String(pressed));
       el.addEventListener("click", e => { e.stopPropagation(); fn(); });
+      if (key === focusedKey) el.focus({ preventScroll: true });
     };
-    s.filters.forEach((f, i) => add(f, f.label + " 필터", f.on, "aria-pressed", () => setRail("f" + i)));
-    s.groups.forEach(g => add(g, g.label + (g.open ? " 접기" : " 펼치기"), g.open, "aria-expanded", () => {
+    s.filters.forEach((f, i) => add(f, "filter:" + f.label, f.label + " 필터", f.on, "aria-pressed", () => setRail("f" + i)));
+    s.groups.forEach(g => add(g, "group:" + g.label, g.label + (g.open ? " 접기" : " 펼치기"), g.open, "aria-expanded", () => {
       if (g.open) return setRail("f" + s.filter);
       const next = Object.keys(RAIL.states).find(n => RAIL.states[n].filter === s.filter && RAIL.states[n].groups.some(y => y.open && y.label === g.label));
       if (next) setRail(next);

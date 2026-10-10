@@ -53,7 +53,10 @@ try {
       const requests = Array.from({ length: records }, (_, i) => ({ ...completed, id: 501 + i }));
       if (pathname === "/api/dashboard/overview") return fulfillJson(route, createDashboardOverview({
         organizations: [organization], evaluationTargets: [target], evaluationRequests: requests,
-        resultSummaries: requests.map(request => ({ requestId: request.id, totalScore: 87, totalIssueCount: 0, requestedAt: timestamp }))
+        resultSummaries: requests.map(request => ({ requestId: request.id, totalScore: 87, totalIssueCount: 0, requestedAt: timestamp })),
+        // The overview sends a score result for every scored request; the
+        // trend draws only those, not a summary's placeholder score.
+        scoreResults: requests.map(request => ({ id: request.id, evaluationRequestId: request.id, totalScore: 87, ruleScore: 87, aiScore: 87, cvScore: null }))
       }));
       if (pathname === "/api/targets/101") return fulfillJson(route, target);
       if (pathname.endsWith("/issues")) return fulfillJson(route, []);

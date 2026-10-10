@@ -43,8 +43,8 @@ const issues = [
     title: "읽기 수준", description: "문장이 어렵습니다.", recommendation: "쉬운 단어로 바꾸세요.", selector: "#notice",
     locator: domLocator([{ context: "DOCUMENT", selector: "#notice", frameUrl: null }], '<p id="notice">공지</p>'), createdAt
   },
-  // Findings in an ad and in content that changed between two loads: reported
-  // separately, never scored, counted or sent to the live viewer.
+  // Findings in an ad and in content that changed between two loads: never
+  // scored, counted, reported or sent to the live viewer.
   {
     id: 9106, requestId: 501, module: "rule_based", severity: "CRITICAL", ruleId: "image-alt", wcagCode: "5.1.1",
     exclusionReason: "AD", title: "적절한 대체 텍스트 제공", description: "Images must have alternative text", recommendation: null,
@@ -56,6 +56,14 @@ const issues = [
     title: "텍스트 콘텐츠의 명도 대비", description: "text=오늘의 뉴스, contrast=2.40:1, required=4.5", recommendation: null,
     selector: "x=40, y=900, width=120, height=16",
     locator: { kind: "BOUNDING_BOX", pathSteps: [], x: 40, y: 900, width: 120, height: 16, coordinateSpace: "SCREENSHOT_PX", visible: true, htmlSnippet: null },
+    createdAt
+  },
+  // A finding in a popup that was open during analysis: never scored, but
+  // listed, counted and located like any other finding.
+  {
+    id: 9110, requestId: 501, module: "rule_based", severity: "CRITICAL", ruleId: "image-alt", wcagCode: "5.1.1",
+    exclusionReason: "POPUP", title: "적절한 대체 텍스트 제공", description: "Images must have alternative text", recommendation: null,
+    selector: "#popup img", locator: domLocator([{ context: "DOCUMENT", selector: "#popup img", frameUrl: null }], '<img src="popup.png">'),
     createdAt
   }
 ];
@@ -177,18 +185,18 @@ try {
   const shown = ["on-page", "other-state"];
   const notShown = ["unavailable", "page-setting"];
   assert.equal(await metricText("접근성 점수"), "100점");
-  assert.equal(await metricText("발견된 문제"), "5건");
+  assert.equal(await metricText("발견된 문제"), "6건");
   // The scope card no longer totals locations; count each issue's location
   // status instead, restoring the expand state for the steps that follow.
   assert.equal(await report.locator(".site-final-report__metrics").count(), 0, "the scope card dropped location totals");
-  assert.equal(await locationCount(shown), 3);
+  assert.equal(await locationCount(shown), 4);
   assert.equal(await locationCount(notShown), 2);
   // The summary opens straight on the figures; the result sentences were dropped.
   assert.equal(await report.locator(".site-final-report__summary > .site-final-report__headline").count(), 0);
   assert.equal(await report.locator(".site-final-report__summary > .site-final-report__lead").count(), 0);
   assert.deepEqual(
     (await report.getByRole("list", { name: "심각도별 문제 수" }).locator("li").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()),
-    ["심각 2건", "높음 2건", "중간 1건", "낮음 0건"]
+    ["심각 3건", "높음 2건", "중간 1건", "낮음 0건"]
   );
   // The fix-priority table was dropped; the issue list's filters cover it.
   assert.equal(await report.locator(".site-final-report__priorities").count(), 0);
@@ -259,15 +267,20 @@ try {
     "visual findings read as measured values, not the raw engine string");
   assert.doesNotMatch(await coordinateIssue.innerText(), /contrast=/);
   await report.getByLabel("검색").fill("footer-link");
-  assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 5건 중 1건/);
+  assert.match(await report.locator(".site-final-report__result-count").innerText(), /전체 6건 중 1건/);
   await report.getByLabel("검색").fill("");
   console.log("PASS filters by text");
 
-  // Ads and changing regions stay out of the score and out of the report.
+  // Ads and changing regions stay out of the score and out of the report;
+  // popup findings stay out of the score only and are listed with the rest.
   assert.equal(await report.getByRole("button", { name: /점수에서 제외된 문제/ }).count(), 0);
   assert.equal(await report.locator('.site-final-report__issue:is([data-issue-id="9106"], [data-issue-id="9107"])').count(), 0);
+  const popupGroup = report.getByRole("button", { name: /KWCAG 5\.1\.1/ });
+  if (await popupGroup.getAttribute("aria-expanded") !== "true") await popupGroup.click();
+  assert.equal(await report.locator('.site-final-report__issue[data-issue-id="9110"]').count(), 1);
+  await popupGroup.click();
   assert.equal(await page.locator("#site-dashboard-panel-results .site-page-evidence-preview").getAttribute("data-unavailable-locator-count"), "2");
-  console.log("PASS ads and dynamic regions are left out of the report");
+  console.log("PASS ads and dynamic regions are left out of the report, popups are kept");
 
   await report.getByRole("button", { name: "모두 펼치기" }).click();
   await report.locator('.site-final-report__issue[data-issue-id="9101"] .site-final-report__issue-toggle').click();
@@ -280,7 +293,7 @@ try {
   await report.getByLabel("검색").fill("footer-link");
   assert.equal(await report.locator(".site-final-report__issue").count(), 1);
   await report.getByRole("button", { name: "인쇄 · PDF 저장" }).click();
-  assert.deepEqual(await page.evaluate(() => window.__printSnapshots), [{ collapsed: 0, issues: 5 }],
+  assert.deepEqual(await page.evaluate(() => window.__printSnapshots), [{ collapsed: 0, issues: 6 }],
     "printing renders every group and issue, whatever the screen filter shows");
   await page.emulateMedia({ media: "print" });
   assert.equal(await page.locator(".dashboard-sidebar").first().isVisible(), false, "print hides the dashboard chrome");

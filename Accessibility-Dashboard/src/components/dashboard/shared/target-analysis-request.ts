@@ -160,12 +160,18 @@ export async function settleAbandonedTargetRescan(
   } catch {
     return;
   }
-  // Found, or never arrived after a bounded wait: nothing from this tab is in
-  // flight any more. A late server-side commit is still caught by the active
-  // request preflight of the next rescan.
-  clearTargetRescanRecovery(attempt.targetId, stored.rawValue);
   if (request) {
+    clearTargetRescanRecovery(attempt.targetId, stored.rawValue);
     onAccepted?.(request);
+    return;
+  }
+  // Not found yet. The POST may still commit after this bounded wait, so a
+  // keyed attempt keeps its checkpoint: the next rescan resends the same
+  // idempotent key and receives that request instead of creating a second one.
+  // Without a key nothing could correlate a late commit, so the slot is freed
+  // and the next rescan's active-request preflight is the only guard.
+  if (!attempt.analysisKey) {
+    clearTargetRescanRecovery(attempt.targetId, stored.rawValue);
   }
 }
 
