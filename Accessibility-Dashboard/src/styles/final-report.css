@@ -35,7 +35,9 @@
    red for problems. Severity data (bar, dots, badges) keeps the same colors
    as the analysis results and page markers. */
 .bridge-dashboard.dashboard-site-detail .site-final-report {
-  --site-report-accent-text: var(--dashboard-accent);
+  /* The base accent is 4.31:1 on the #f5f5f7 page; text uses the landing's
+     link blue (6.45:1) instead. */
+  --site-report-accent-text: #0055b8;
   /* Hover follows the dashboard's neutral grey (sidebar rows), not the
      warm card hover. */
   --site-report-hover-bg: var(--dashboard-sidebar-item-hover-bg);
@@ -71,7 +73,7 @@
 
 .bridge-dashboard.dashboard-site-detail .site-final-report__eyebrow,
 .bridge-dashboard.dashboard-site-detail .site-final-report__page-label {
-  color: var(--dashboard-accent);
+  color: var(--site-report-accent-text);
   font-size: 0.8125rem;
   font-weight: 800;
   letter-spacing: 0.02em;

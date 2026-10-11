@@ -82,6 +82,7 @@ export function SeverityDistributionPanel({ issues, children }: SeverityDistribu
             <span
               key={row.key}
               className="site-rail-severity__row"
+              role="img"
               tabIndex={0}
               aria-label={`${row.label} ${row.count.toLocaleString("ko-KR")}건`}
               style={style}

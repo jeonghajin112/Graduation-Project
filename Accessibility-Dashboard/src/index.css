@@ -231,6 +231,15 @@
     line-height: 1.35;
   }
 
+  /* WCAG 2.5.8: the address link gets a 24px target; the negative margin
+     cancels the padding so the card layout does not move. */
+  .bridge-dashboard.dashboard-project-detail a.dashboard-project-card-url {
+    box-sizing: border-box;
+    min-height: 24px;
+    padding-block: 4px;
+    margin-block: -4px;
+  }
+
   .bridge-dashboard.dashboard-project-detail .dashboard-project-card-score {
     font-size: clamp(0.9375rem, 0.625vw, 1.5rem);
     line-height: 1.25;
