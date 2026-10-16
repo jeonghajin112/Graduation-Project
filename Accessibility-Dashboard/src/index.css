@@ -1107,66 +1107,6 @@
   }
 }
 
-.bridge-dashboard.theme-light .dashboard-card .bg-white {
-  background-color: var(--dashboard-nested-surface);
-}
-
-.bridge-dashboard.theme-light .dashboard-card .bg-slate-50,
-.bridge-dashboard.theme-light .dashboard-card .bg-slate-100,
-.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/60,
-.bridge-dashboard.theme-light .dashboard-card .bg-slate-100\/70 {
-  background-color: var(--dashboard-muted-surface);
-}
-
-.bridge-dashboard.theme-light .dashboard-card .border-slate-200,
-.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/70,
-.bridge-dashboard.theme-light .dashboard-card .border-slate-200\/80 {
-  border-color: var(--dashboard-nested-border);
-}
-
-.bridge-dashboard.theme-light .dashboard-card .text-slate-900 {
-  color: var(--dashboard-text-strong);
-}
-
-.bridge-dashboard.theme-light .dashboard-card .text-slate-500,
-.bridge-dashboard.theme-light .dashboard-card .text-slate-600 {
-  color: var(--dashboard-text-muted);
-}
-
-.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-50:hover,
-.bridge-dashboard.theme-light .dashboard-card .hover\:bg-slate-100:hover {
-  background-color: var(--dashboard-hover-surface);
-}
-
-.bridge-dashboard.theme-dark .bg-slate-100,
-.bridge-dashboard.theme-dark .bg-slate-100\/60,
-.bridge-dashboard.theme-dark .bg-slate-100\/70 {
-  background-color: var(--dashboard-muted-surface);
-}
-
-.bridge-dashboard.theme-dark .border-slate-200,
-.bridge-dashboard.theme-dark .border-slate-200\/70,
-.bridge-dashboard.theme-dark .border-slate-200\/80 {
-  border-color: var(--dashboard-nested-border);
-}
-
-.bridge-dashboard.theme-dark .text-slate-950,
-.bridge-dashboard.theme-dark .text-slate-900 {
-  color: var(--dashboard-text-strong);
-}
-
-.bridge-dashboard.theme-dark .text-slate-700 {
-  color: #cccccc;
-}
-
-.bridge-dashboard.theme-dark .text-slate-600 {
-  color: var(--dashboard-text-secondary);
-}
-
-.bridge-dashboard.theme-dark .text-slate-500 {
-  color: var(--dashboard-text-muted);
-}
-
 .bridge-dashboard.theme-dark input:not(.dashboard-modal-input),
 .bridge-dashboard.theme-dark textarea {
   color: #e6e6e6;
@@ -1175,18 +1115,6 @@
 .bridge-dashboard.theme-dark input:not(.dashboard-modal-input)::placeholder,
 .bridge-dashboard.theme-dark textarea::placeholder {
   color: #8f8f8f;
-}
-
-.bridge-dashboard.theme-dark .hover\:bg-slate-50:hover,
-.bridge-dashboard.theme-dark .hover\:bg-slate-100:hover {
-  background-color: var(--dashboard-hover-surface);
-}
-
-/* Without this, hover:text-slate-900 turns labels near-black on dark surfaces.
-   :where() keeps it weaker than component-specific hover colors. */
-:where(.bridge-dashboard.theme-dark) .hover\:text-slate-900:hover,
-:where(.bridge-dashboard.theme-dark) .hover\:text-slate-950:hover {
-  color: var(--dashboard-text-strong);
 }
 
 .bridge-dashboard.theme-dark .sidebar-nav-link:hover {
@@ -1357,56 +1285,4 @@
 .bridge-dashboard.theme-light .dashboard-sidebar .dashboard-account-menu-item:hover,
 .bridge-dashboard.theme-light .dashboard-sidebar .sidebar-project-context-menu-item:hover {
   background-color: var(--dashboard-sidebar-item-hover-bg);
-}
-
-.bridge-dashboard.theme-light .fixed.inset-0.bg-white {
-  background-color: #f8f6f2;
-}
-
-.bridge-dashboard.theme-dark .shadow-\[0_18px_42px_rgba\(15\,23\,42\,0\.10\)\] {
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
-}
-
-.bridge-dashboard.theme-light .project-list-table th {
-  color: #64748b;
-}
-
-.bridge-dashboard.theme-light .project-list-row:hover {
-  background-color: var(--project-table-row-hover-bg);
-}
-
-.bridge-dashboard.theme-light .project-list-table .site-status-badge-finished {
-  background-color: rgba(16, 185, 129, 0.1);
-  color: #059669;
-}
-
-.bridge-dashboard.theme-light .project-list-table .site-status-badge-failed {
-  background-color: rgba(244, 63, 94, 0.1);
-  color: #e11d48;
-}
-
-.bridge-dashboard.theme-light .project-list-icon-action:hover {
-  background-color: rgba(15, 23, 42, 0.065);
-}
-
-.bridge-dashboard.theme-light .project-list-table .project-list-updated {
-  color: var(--dashboard-text-secondary);
-}
-
-.bridge-dashboard.theme-dark .project-list-table .site-status-badge {
-  border: none;
-}
-
-.bridge-dashboard.theme-dark .project-list-table .site-status-badge-running {
-  background-color: rgba(14, 165, 233, 0.1);
-  color: #38bdf8;
-}
-
-.bridge-dashboard.theme-dark .project-list-table .site-status-badge-idle {
-  background-color: rgba(148, 163, 184, 0.14);
-  color: #94a3b8;
-}
-
-.bridge-dashboard.theme-dark .project-list-table .project-list-updated {
-  color: var(--dashboard-text-muted);
 }

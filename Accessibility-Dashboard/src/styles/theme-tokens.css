@@ -62,7 +62,6 @@
     --dashboard-card-bg: var(--card, #ffffff);
     --dashboard-content-card-bg: var(--card, #ffffff);
     --dashboard-nested-surface: rgba(255, 255, 255, 0.7);
-    --dashboard-muted-surface: rgba(246, 241, 235, 0.76);
     --dashboard-hover-surface: rgba(239, 229, 218, 0.88);
     --dashboard-border-subtle: rgba(31, 27, 24, 0.055);
     --dashboard-card-border: rgba(24, 20, 18, 0.045);
@@ -82,7 +81,6 @@
     --dashboard-sidebar-item-hover-bg: #e5e5ea;
     --dashboard-sidebar-item-hover-border: transparent;
     --project-table-head-bg: #f5f5f7;
-    --project-table-row-hover-bg: #f5f5f7;
     --report-search-popover-bg: var(--popover, #ffffff);
     --site-score-line-color: var(--dashboard-accent);
     --site-score-grid-color: #d8dee8;
@@ -119,7 +117,6 @@
     --dashboard-card-bg: var(--card, #1c1c1e);
     --dashboard-content-card-bg: var(--card, #1c1c1e);
     --dashboard-nested-surface: #242426; /* raised */
-    --dashboard-muted-surface: #121212;
     --dashboard-hover-surface: #1a1a1a;
     --dashboard-border-subtle: #222222;
     --dashboard-card-border: transparent;
@@ -138,7 +135,6 @@
     --dashboard-sidebar-item-hover-bg: rgba(255, 255, 255, 0.04);
     --dashboard-sidebar-item-hover-border: transparent;
     --project-table-head-bg: #242426;
-    --project-table-row-hover-bg: #242426;
     --report-search-popover-bg: var(--popover, #1c1c1e);
     --site-score-line-color: var(--dashboard-accent);
     --site-score-grid-color: rgba(255, 255, 255, 0.14);

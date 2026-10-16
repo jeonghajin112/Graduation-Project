@@ -14,8 +14,8 @@
  * --resume-analysis reuses recorded input and its still-active request ID.
  * --report-only records the existing live page without starting another scan.
  * The report scene includes the current header, rendered page and summary rail.
- * --with-findings also captures a real issue popover; set LANDING_ISSUE_ID to
- * an issue on the selected page. Inspect the capture before publishing it.
+ * --with-findings also captures and verifies a real issue popover into the
+ * recording folder (not published); set LANDING_ISSUE_ID to an issue on the selected page.
  * LANDING_SIDEBAR_PROJECT_ONLY=1 keeps only the recorded page's project in the sidebar.
  */
 import assert from "node:assert/strict";
@@ -402,9 +402,6 @@ try {
     await page.screenshot({ path: posterPath, clip });
     findingsCapture = { issueId: findingsIssueId, posterPath, source: page.url(),
       text: await popover.innerText(), captureRegion: clip, verified: true };
-    if (!stillsOnly) await runFile("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-i", posterPath,
-      "-vf", "scale=2560:1440:flags=lanczos", "-frames:v", "1", "-c:v", "libwebp", "-quality", "90",
-      join(mediaOutput, "issue-detail.webp")], { windowsHide: true });
   }
 
   if (!reportOnly) {
@@ -425,7 +422,6 @@ try {
         await copyFile(join(mediaOutput, "vid", scene + suffix + ".mp4"), join(destination, "vid", scene + suffix + ".mp4"));
       }
     }
-    if (findingsCapture) await copyFile(join(mediaOutput, "issue-detail.webp"), join(root, "src/assets/landing/issue-detail.webp"));
     console.log("Updated " + scenes.length + " landing posters and " + scenes.length * variants.length + " videos.");
   }
   console.log("Verified capture: " + output);
