@@ -921,33 +921,57 @@
     position: static;
   }
 
-  /* On phones the action wraps below the (possibly long) title. */
+  /* On phones the action sits on the title's line, at the right: the eyebrow
+     spans the top row, and a long title wraps in its own column beside the
+     action instead of running under it. */
   .bridge-dashboard.dashboard-project-detail .dashboard-project-header-content {
     position: static;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.75rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 0.75rem;
     transform: none;
   }
 
-  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-actions {
-    align-self: flex-end;
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-heading {
+    display: contents;
+  }
+
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-eyebrow {
+    grid-column: 1 / -1;
   }
 
   .bridge-dashboard.dashboard-project-detail .dashboard-project-title {
+    grid-column: 1;
     overflow-wrap: anywhere;
   }
 
+  .bridge-dashboard.dashboard-project-detail .dashboard-project-header-actions {
+    grid-column: 2;
+    align-self: center;
+  }
+
   .bridge-dashboard.dashboard-project-detail .dashboard-project-add-action {
-    margin-bottom: 0.75rem;
+    margin-bottom: 0;
   }
 
   .bridge-dashboard .dashboard-analyze-view .dashboard-top-zone {
     height: 0;
   }
 
+  /* The address form sits at the optical centre of the screen, not at the top:
+     the zone fills the rest of the viewport under the menu-button strip, and
+     its bottom padding of the same height centres it on the whole screen. */
   .bridge-dashboard.dashboard-compact-top .dashboard-analyze-view .dashboard-content-zone {
-    min-height: 0;
+    box-sizing: border-box;
+    min-height: calc(100dvh - var(--dashboard-mobile-bar-height, 3.5rem));
+    padding-bottom: var(--dashboard-mobile-bar-height, 3.5rem);
+  }
+
+  .bridge-dashboard .dashboard-analyze-view .quick-analyze-layout:not(.quick-analyze-layout--progress) {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
   .bridge-dashboard .quick-analyze-layout:not(.quick-analyze-layout--progress) > article {

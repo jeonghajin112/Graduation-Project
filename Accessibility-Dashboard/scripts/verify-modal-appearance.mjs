@@ -67,6 +67,8 @@ async function verifyTheme(theme, viewport) {
   await capture("page-create", "페이지 추가", "취소");
   await page.getByRole("button", { name: `${fixture.target.name} 제거`, exact: true }).click();
   await capture("page-delete", "페이지 제거", "취소");
+  // Phones show the account button inside the menu drawer only.
+  if (isDrawer) await openMenu.click();
   await page.locator(".dashboard-account-menu-trigger").click();
   await page.getByRole("menuitem", { name: "설정", exact: true }).click();
   await capture("settings", "설정", "닫기");

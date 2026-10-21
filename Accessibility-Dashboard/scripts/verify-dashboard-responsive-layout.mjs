@@ -50,10 +50,11 @@ async function verifyLongProjectNames(page, fixture, theme) {
       const titleBounds = await heading.boundingBox();
       const actionBounds = await action.boundingBox();
       const cardBounds = await page.locator(".dashboard-project-card").first().boundingBox();
-      assert.ok(actionBounds.y >= titleBounds.y + titleBounds.height,
+      // The action keeps its place right of the title; a long name wraps in its own column.
+      assert.ok(titleBounds.x + titleBounds.width <= actionBounds.x + 0.5,
         `${theme} ${viewport.width}: long project name must not overlap the add action`);
-      assert.ok(cardBounds.y >= actionBounds.y + actionBounds.height,
-        "project cards must follow the add action");
+      assert.ok(cardBounds.y >= Math.max(actionBounds.y + actionBounds.height, titleBounds.y + titleBounds.height),
+        "project cards must follow the heading and the add action");
       assert.equal(await heading.evaluate(title => title.scrollWidth > title.clientWidth + 1), false,
         "unbroken project names must wrap within the heading, not clip inside the shell");
       await assertNoHorizontalOverflow(page, `${theme} ${viewport.width}: long project name`);
@@ -81,6 +82,10 @@ try {
       if (viewport.width < 640) {
         assert.ok(button.y >= input.y + input.height, "mobile controls must stack without overlap");
         assert.ok(button.y + button.height <= viewport.height, "the initial mobile form must fit below the fixture menu");
+        // Phones place the address form around the middle of the screen, not under the menu button.
+        const formMiddle = (input.y + button.y + button.height) / 2;
+        assert.ok(Math.abs(formMiddle - viewport.height / 2) < viewport.height * 0.15,
+          `${theme} ${viewport.width}: the mobile address form must sit near the middle (${Math.round(formMiddle)}px)`);
       }
       await assertNoHorizontalOverflow(page, `analysis ${viewport.width}`);
     }
@@ -91,7 +96,10 @@ try {
       const title = await page.getByRole("heading", { name: fixture.organization.name, level: 1 }).boundingBox();
       const action = await page.getByRole("button", { name: "페이지 추가", exact: true }).boundingBox();
       const card = await page.locator(".dashboard-project-card").first().boundingBox();
-      assert.ok(action.y >= title.y + title.height, "mobile page action must follow the project heading");
+      // Phones keep the add action on the title's line, at the right, centred on the title.
+      assert.ok(title.x + title.width <= action.x + 0.5, "mobile page action must sit right of the project heading");
+      assert.ok(Math.abs((action.y + action.height / 2) - (title.y + title.height / 2)) < 2,
+        `${theme} ${viewport.width}: mobile page action must line up with the project heading`);
       assert.ok(action.y + action.height <= card.y, "mobile page action must precede the page cards");
       await assertNoHorizontalOverflow(page, `project ${viewport.width}`);
     }
@@ -125,6 +133,9 @@ try {
     }
 
     await resize(page, { width: 568, height: 320 });
+    // Phones show the account button inside the menu drawer only.
+    const openMenu = page.getByRole("button", { name: "메뉴 열기", exact: true });
+    if (await openMenu.isVisible()) await openMenu.click();
     await page.locator(".dashboard-account-menu-trigger").click();
     await page.getByRole("menuitem", { name: "설정", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "설정", exact: true });

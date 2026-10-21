@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
 
 import type { MenuType } from "@/types/accessibility-domain";
 
-import { getFocusableElements } from "./shared/use-dialog-accessibility";
+import { getFocusableElements, lockBodyScroll, unlockBodyScroll } from "./shared/use-dialog-accessibility";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "dashboard-sidebar-collapsed";
 // Matches the --dashboard-sidebar-width transition in index.css.
@@ -121,20 +121,35 @@ function matchesMobileSidebar() {
   return typeof window !== "undefined" && window.matchMedia(MOBILE_SIDEBAR_QUERY).matches;
 }
 
+function subscribeMobileLayout(onChange: () => void) {
+  const query = window.matchMedia(MOBILE_SIDEBAR_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** Whether the dashboard uses its phone layout (the same 767px breakpoint). */
+export function useIsMobileDashboard() {
+  return useSyncExternalStore(subscribeMobileLayout, matchesMobileSidebar, () => false);
+}
+
 /**
  * The phone layout's navigation drawer. It belongs to the route it was opened
  * on, so following a link closes it in the same render, before route focus
- * moves to the new heading. While open, Tab stays within the menu button and
- * the drawer, Escape closes it, and the page behind is inert and does not scroll.
+ * moves to the new heading. While open, Tab stays within the button row (menu
+ * and account buttons) and the drawer, Escape closes it, and the page behind is
+ * inert and does not scroll.
  */
 export function useMobileSidebarDrawer({
   routeKey,
   toggleRef,
+  headerRef,
   drawerRef,
   mainRef
 }: {
   routeKey: string;
   toggleRef: RefObject<HTMLButtonElement | null>;
+  /** The row holding the menu button; its other visible buttons join the Tab loop. */
+  headerRef?: RefObject<HTMLElement | null>;
   drawerRef: RefObject<HTMLElement | null>;
   mainRef: RefObject<HTMLElement | null>;
 }) {
@@ -166,12 +181,14 @@ export function useMobileSidebarDrawer({
     if (!isOpen || !main) {
       return;
     }
-    const bodyOverflow = document.body.style.overflow;
+    // Lock <html>, the page's real scroller (page detail scrolls <html>, not
+    // <body>). Hiding body overflow instead let the page scroll on and made
+    // <body> a scroll container, so the sticky menu row scrolled away with it.
     main.inert = true;
-    document.body.style.overflow = "hidden";
+    lockBodyScroll();
     return () => {
       main.inert = false;
-      document.body.style.overflow = bodyOverflow;
+      unlockBodyScroll();
     };
   }, [isOpen, mainRef]);
 
@@ -201,11 +218,14 @@ export function useMobileSidebarDrawer({
       if (event.key !== "Tab" || !drawer || !toggleButton) {
         return;
       }
-      const stops = [toggleButton, ...getFocusableElements(drawer)];
+      const header = headerRef?.current ?? null;
+      const headerStops = header ? getFocusableElements(header) : [toggleButton];
+      const stops = [...headerStops, ...getFocusableElements(drawer)];
       const first = stops[0]!;
       const last = stops[stops.length - 1]!;
       const active = document.activeElement;
-      const inside = active instanceof Node && (drawer.contains(active) || active === toggleButton);
+      const inside = active instanceof Node &&
+        (drawer.contains(active) || active === toggleButton || Boolean(header?.contains(active)));
       if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus({ preventScroll: true });
@@ -237,7 +257,7 @@ export function useMobileSidebarDrawer({
       drawer?.removeEventListener("click", handleNavigationClick);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [close, drawerRef, isOpen, toggleRef]);
+  }, [close, drawerRef, headerRef, isOpen, toggleRef]);
 
   return { isMobile, isOpen, toggle, close };
 }

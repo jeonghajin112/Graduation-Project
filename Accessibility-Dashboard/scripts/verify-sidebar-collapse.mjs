@@ -84,13 +84,28 @@ try {
   assert.equal(await accountTrigger.isVisible(), true);
   assert.equal(Math.round(await sidebarWidth(sidebar)), Math.round(expandedWidth));
 
-  // Phones: the sidebar is a one-row bar and its content opens as a drawer.
+  // Phones: no top bar, only the menu button at the top left; the sidebar
+  // content (and the account button) opens as a drawer.
   await page.setViewportSize({ width: 390, height: 844 });
   const openMenu = sidebar.getByRole("button", { name: "메뉴 열기", exact: true });
   const closeMenu = sidebar.getByRole("button", { name: "메뉴 닫기", exact: true });
   await openMenu.waitFor();
   const mobileBarHeight = (await sidebar.boundingBox())?.height ?? 0;
   assert.ok(mobileBarHeight < 80, `mobile sidebar should be one row (${mobileBarHeight}px)`);
+  const mobileBar = await sidebar.evaluate((aside) => {
+    const style = getComputedStyle(aside);
+    return { background: style.backgroundColor, border: style.borderBottomWidth };
+  });
+  assert.deepEqual(mobileBar, { background: "rgba(0, 0, 0, 0)", border: "0px" }, "phones must not draw a top bar");
+  const menuBox = await openMenu.boundingBox();
+  assert.ok(menuBox && menuBox.x < 24 && menuBox.y < 24, "the menu button sits at the top left");
+  assert.ok(menuBox.width >= 44 && menuBox.height >= 44, "the menu button keeps a 44px touch target");
+  await openMenu.hover();
+  assert.deepEqual(await openMenu.evaluate((button) => {
+    const style = getComputedStyle(button);
+    return { background: style.backgroundColor, shadow: style.boxShadow };
+  }), { background: "rgba(0, 0, 0, 0)", shadow: "none" }, "the menu button is only the ☰ glyph, without a backing");
+  assert.equal(await accountTrigger.isVisible(), false, "phones keep the account button inside the drawer");
   assert.equal(await openMenu.getAttribute("aria-expanded"), "false");
   assert.equal(await analyzeLink.isVisible(), false, "the closed drawer hides navigation");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false,
@@ -103,8 +118,21 @@ try {
   assert.equal(await page.locator("main").evaluate((main) => main.inert), true,
     "the page behind an open drawer is inert");
   const drawerBox = await page.locator(".reference-sidebar-content").boundingBox();
-  assert.ok(drawerBox && drawerBox.y >= mobileBarHeight - 1 && drawerBox.width < 390,
-    "the drawer opens under the bar without covering the whole width");
+  assert.ok(drawerBox && drawerBox.y <= 1 && drawerBox.width < 390,
+    "the drawer opens from the top left without covering the whole width");
+  assert.equal(await accountTrigger.isVisible(), true, "the open drawer shows the account button");
+  // No visible close button: the dimmed page beside the drawer closes it. The
+  // button remains for screen readers and keyboard focus.
+  const closeBox = await closeMenu.boundingBox();
+  assert.ok(closeBox && closeBox.width <= 1 && closeBox.height <= 1, "the open drawer must not show a close button");
+  const accountBox = await accountTrigger.boundingBox();
+  assert.ok(accountBox && accountBox.x < 24 && accountBox.y < 24, "the account button takes the drawer's top left corner");
+  assert.equal(await page.locator(".sidebar-tree-projects").evaluate((list) => getComputedStyle(list).overflowY), "visible",
+    "the project list must not scroll on its own; the drawer scrolls as a whole");
+  const drawerRowHeights = await page.locator(".reference-sidebar-content :is(.reference-sidebar-row, .sidebar-tree-row)")
+    .evaluateAll((rows) => rows.filter((row) => row.getClientRects().length > 0).map((row) => row.getBoundingClientRect().height));
+  assert.ok(drawerRowHeights.length > 0 && drawerRowHeights.every((height) => height >= 43.5),
+    `drawer rows need a 44px touch height (${drawerRowHeights.map(Math.round).join(", ")})`);
   for (let step = 0; step < 30; step += 1) {
     await page.keyboard.press("Tab");
     assert.equal(await sidebar.evaluate((aside) => aside.contains(document.activeElement)), true,
@@ -115,6 +143,16 @@ try {
   assert.equal(await openMenu.evaluate((element) => element === document.activeElement), true,
     "Escape closes the drawer and returns focus to the menu button");
   assert.equal(await page.locator("main").evaluate((main) => main.inert), false);
+
+  // Tapping the dimmed page to the right of the drawer closes it.
+  await openMenu.click();
+  await closeMenu.waitFor({ state: "attached" });
+  const drawerRight = (await page.locator(".reference-sidebar-content").boundingBox())?.width ?? 0;
+  await page.mouse.click(drawerRight + (390 - drawerRight) / 2, 420);
+  await openMenu.waitFor();
+  assert.equal(await analyzeLink.isVisible(), false, "tapping beside the drawer closes it");
+  assert.equal(await openMenu.evaluate((element) => element === document.activeElement), true,
+    "closing from the page returns focus to the menu button");
 
   await openMenu.click();
   await analyzeLink.click();

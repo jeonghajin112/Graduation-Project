@@ -251,35 +251,80 @@
 }
 
 /*
- * Phone navigation: the sidebar is a sticky bar (account + menu button) and
- * its content opens as a drawer under it. useMobileSidebarDrawer in
+ * Phone navigation: no top bar. Only the menu button stays, at the top left,
+ * on its own translucent circle so it reads over the page as it scrolls.
+ * The sidebar keeps a transparent bar-height strip in the flow so pages do not
+ * start under the button; taps on the empty strip reach the page. The account
+ * button shows only inside the open drawer, beside the close button, and the
+ * drawer runs the full height. useMobileSidebarDrawer in
  * dashboard-surface-hooks.ts uses the same 767px breakpoint.
  */
 @media (max-width: 767px) {
   .bridge-dashboard {
     --dashboard-mobile-bar-height: 3.5rem;
+    --dashboard-mobile-drawer-width: min(20rem, 86vw);
   }
 
-  .bridge-dashboard .dashboard-sidebar {
+  /* With no bar, the strip around the menu button shows the dashboard's own
+     background; match the page surface so no band is left at the top. */
+  .bridge-dashboard:is(.theme-light, .theme-dark) {
+    background: var(--dashboard-content-bg);
+  }
+
+  /* :is(.theme-*) aside matches the themed sidebar background rules in index.css. */
+  .bridge-dashboard:is(.theme-light, .theme-dark) aside.dashboard-sidebar {
     position: sticky;
     top: 0;
     z-index: 30;
     flex-direction: row;
     align-items: center;
     height: var(--dashboard-mobile-bar-height);
-    padding-block: 0;
+    padding: 0 0.625rem;
     overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
   }
 
   .bridge-dashboard .dashboard-sidebar .dashboard-header-account {
-    flex: 1;
+    flex: none;
     min-width: 0;
-    margin-top: 0;
+    margin: 0;
+    gap: 0.5rem;
+    pointer-events: auto;
   }
 
-  .bridge-dashboard .dashboard-sidebar .dashboard-sidebar-toggle {
+  /* Only the ☰ glyph shows, with no backing; the 44px box stays as the touch
+     target. Touch keeps :hover after a tap, so hover adds no backing either. */
+  .bridge-dashboard .dashboard-sidebar .dashboard-sidebar-toggle,
+  .bridge-dashboard .dashboard-sidebar .dashboard-sidebar-toggle:hover {
     width: 2.75rem;
     height: 2.75rem;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  /* The open drawer has no visible close button: tapping the dimmed page beside
+     it (or Escape) closes it. The button stays for screen readers and shows
+     only while it has keyboard focus. */
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .dashboard-sidebar-toggle:not(:focus-visible) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .bridge-dashboard .dashboard-sidebar .dashboard-account-menu-trigger {
+    display: none;
+  }
+
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .dashboard-account-menu-trigger {
+    display: inline-flex;
   }
 
   .bridge-dashboard .dashboard-sidebar .reference-sidebar-content {
@@ -288,30 +333,73 @@
 
   .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
     position: fixed;
-    top: var(--dashboard-mobile-bar-height);
+    top: 0;
     bottom: 0;
     left: 0;
     z-index: 2;
     display: flex;
-    width: min(20rem, 86vw);
+    width: var(--dashboard-mobile-drawer-width);
     margin-top: 0;
-    padding: 0.75rem var(--dashboard-sidebar-padding-inline) 1.5rem;
+    /* The top strip holds the close and account buttons. */
+    padding: calc(var(--dashboard-mobile-bar-height) + 0.5rem) var(--dashboard-sidebar-padding-inline) 1.5rem;
     /* The rail colour is translucent; lay it over the opaque card surface. */
     background: linear-gradient(var(--dashboard-drawer-bg), var(--dashboard-drawer-bg)), var(--card);
     box-shadow: 12px 0 32px rgb(0 0 0 / 18%);
     overscroll-behavior: contain;
+    pointer-events: auto;
+  }
+
+  /* While open, the account row is pinned to the screen with the drawer, not
+     left in the page flow where scrolling could carry it away. */
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .dashboard-header-account {
+    position: fixed;
+    top: 0;
+    left: 0.625rem;
+    height: var(--dashboard-mobile-bar-height);
+  }
+
+  /* The drawer scrolls as a whole; its top strip (the account button) keeps the
+     drawer surface so the list slides under it instead of behind the button. */
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 3;
+    width: var(--dashboard-mobile-drawer-width);
+    height: calc(var(--dashboard-mobile-bar-height) + 0.25rem);
+    background: linear-gradient(var(--dashboard-drawer-bg), var(--dashboard-drawer-bg)), var(--card);
+    pointer-events: none;
+  }
+
+  /* Drawer rows get a full 44px touch height and slightly larger text. */
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
+    --dashboard-account-name-size: 0.9375rem;
+  }
+
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content :is(.reference-sidebar-row, .sidebar-tree-row) {
+    --dashboard-sidebar-nav-height: 2.75rem;
+    font-size: 0.9375rem;
+  }
+
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content .sidebar-tree-label {
+    font-size: 0.9375rem;
   }
 
   .dashboard-mobile-drawer-backdrop {
     position: fixed;
-    inset: var(--dashboard-mobile-bar-height) 0 0;
+    inset: 0;
     z-index: 1;
     background: rgb(0 0 0 / 40%);
+    pointer-events: auto;
   }
 }
 
+/* The list, its top strip and the account row are separate fixed layers; they
+   slide in by the same drawer width so they arrive as one panel. */
 @media (max-width: 767px) and (prefers-reduced-motion: no-preference) {
-  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar .reference-sidebar-content {
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar :is(.reference-sidebar-content, .dashboard-header-account),
+  .bridge-dashboard.dashboard-mobile-drawer-open .dashboard-sidebar::before {
     animation: dashboard-mobile-drawer-in 180ms ease-out;
   }
 
@@ -321,7 +409,7 @@
 }
 
 @keyframes dashboard-mobile-drawer-in {
-  from { transform: translateX(-100%); }
+  from { transform: translateX(calc(-1 * var(--dashboard-mobile-drawer-width))); }
   to { transform: translateX(0); }
 }
 

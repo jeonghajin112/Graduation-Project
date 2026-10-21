@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 
 let activeBodyScrollLocks = 0;
-let bodyOverflowBeforeLock = "";
+let rootOverflowBeforeLock = "";
 let bodyPaddingRightBeforeLock = "";
 
 // Open dialogs share one inert lock on the dashboard shell so screen-reader
@@ -36,14 +36,21 @@ export function getFocusableElements(container: HTMLElement): HTMLElement[] {
   });
 }
 
-function lockBodyScroll() {
+// The lock goes on <html>, the page's scroller. Page detail sets overflow on
+// <html> itself, so body overflow would no longer reach the viewport there:
+// the page kept scrolling and the scrollbar padding narrowed the live replay.
+// Counted, so the phone navigation drawer and a dialog opened from it share it.
+export function lockBodyScroll() {
   if (activeBodyScrollLocks === 0) {
-    bodyOverflowBeforeLock = document.body.style.overflow;
+    const root = document.documentElement;
+    rootOverflowBeforeLock = root.style.overflow;
     bodyPaddingRightBeforeLock = document.body.style.paddingRight;
 
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-    document.body.style.overflow = "hidden";
-    if (scrollbarWidth > 0) {
+    const scrollbarWidth = window.innerWidth - root.clientWidth;
+    // A stable gutter stays reserved while hidden, so padding would double it.
+    const keepsGutter = window.getComputedStyle(root).scrollbarGutter?.startsWith("stable") ?? false;
+    root.style.overflow = "hidden";
+    if (scrollbarWidth > 0 && !keepsGutter) {
       document.body.style.paddingRight = `${scrollbarWidth}px`;
     }
   }
@@ -51,10 +58,10 @@ function lockBodyScroll() {
   activeBodyScrollLocks += 1;
 }
 
-function unlockBodyScroll() {
+export function unlockBodyScroll() {
   activeBodyScrollLocks = Math.max(0, activeBodyScrollLocks - 1);
   if (activeBodyScrollLocks === 0) {
-    document.body.style.overflow = bodyOverflowBeforeLock;
+    document.documentElement.style.overflow = rootOverflowBeforeLock;
     document.body.style.paddingRight = bodyPaddingRightBeforeLock;
   }
 }

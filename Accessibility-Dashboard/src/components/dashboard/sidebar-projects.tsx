@@ -341,7 +341,8 @@ export function SidebarProjectsSection({
   };
 
   return (
-    <section className="sidebar-tree-section flex min-h-0 flex-col">
+    // No scroll box of its own: a long project list grows the sidebar, which scrolls as a whole.
+    <section className="sidebar-tree-section flex flex-col">
       <div className="sidebar-tree-section-header flex items-center gap-2">
         <p className={SIDEBAR_SECTION_HEADING}>프로젝트</p>
         <button
@@ -357,7 +358,7 @@ export function SidebarProjectsSection({
         </button>
       </div>
 
-      <div className="sidebar-tree-projects min-h-0 overflow-y-auto">
+      <div className="sidebar-tree-projects">
         {projects.length > 0 ? (
           <ul className="sidebar-tree-list flex flex-col">
             {projects.map((project) => {
