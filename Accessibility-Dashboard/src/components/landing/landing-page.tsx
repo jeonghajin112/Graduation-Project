@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type MouseEvent } from "react";
 import { useScroll } from "framer-motion";
 
 import {
@@ -7,6 +7,7 @@ import {
 } from "@/components/landing/scroll-world-engine.js";
 import { LandingNav } from "@/components/landing/landing-nav";
 import { LandingHero } from "@/components/landing/landing-hero";
+import { LandingStepsSection } from "@/components/landing/landing-steps-section";
 import { LandingMessageSection } from "@/components/landing/landing-message-section";
 import { LandingLookSection } from "@/components/landing/landing-look-section";
 import { LandingStatsSection } from "@/components/landing/landing-stats-section";
@@ -17,6 +18,7 @@ import { LandingCompareSection } from "@/components/landing/landing-compare-sect
 import { LandingFaqSection } from "@/components/landing/landing-faq-section";
 import { LandingEndSection } from "@/components/landing/landing-end-section";
 import { LandingFooter } from "@/components/landing/landing-footer";
+import { useLandingPhone } from "@/components/landing/use-landing-phone";
 
 // Latin 700 only: the landing wordmark is the sole DM Sans text.
 import "@fontsource/dm-sans/latin-700.css";
@@ -25,12 +27,6 @@ import "@/styles/landing-large-screen.css";
 
 const ASSET_ROOT = "/landing/scroll-world";
 const STATIC_HERO_QUERY = "(max-width: 760px), (prefers-reduced-motion: reduce)";
-// 휴대폰 세로 화면은 16:9 오프닝 사진을 크게 잘라 내므로, 필름을 제품 화면 카드부터 시작한다.
-const PHONE_FILM_QUERY = "(max-width: 760px)";
-
-function matchesPhoneFilm() {
-  return typeof window !== "undefined" && window.matchMedia(PHONE_FILM_QUERY).matches;
-}
 
 /**
  * 제품 소개 랜딩.
@@ -138,10 +134,8 @@ const LANDING_CONFIG = {
   connectors: []
 } satisfies ScrollWorldConfig;
 
-const PHONE_LANDING_CONFIG = {
-  ...LANDING_CONFIG,
-  sections: LANDING_CONFIG.sections.filter((section) => section.id !== "opening")
-} satisfies ScrollWorldConfig;
+// 휴대폰 세로 화면에서는 필름의 제품 화면이 너무 작아, 필름 대신 장면별 글만 목록으로 보여 준다.
+const PHONE_STEPS = LANDING_CONFIG.sections.filter((section) => section.id !== "opening");
 
 type LandingPageProps = {
   onEnterApp: () => void;
@@ -153,15 +147,7 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const onEnterAppRef = useRef(onEnterApp);
   const { scrollY } = useScroll();
-  const [isPhoneFilm, setIsPhoneFilm] = useState(matchesPhoneFilm);
-
-  useEffect(() => {
-    const query = window.matchMedia(PHONE_FILM_QUERY);
-    const update = () => setIsPhoneFilm(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
+  const isPhone = useLandingPhone();
 
   useEffect(() => {
     onEnterAppRef.current = onEnterApp;
@@ -179,21 +165,22 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
     enterApp();
   }, [enterApp]);
 
-  // 처음 열 때만 맨 위로 올린다. 화면 폭이 휴대폰 기준을 넘나들어 필름을 다시 만들 때는 위치를 지킨다.
-  const hasMountedFilmRef = useRef(false);
+  // 처음 열 때만 맨 위로 올린다. 화면 폭이 휴대폰 기준을 넘나들어 필름과 목록을 바꿔 그릴 때는 위치를 지킨다.
+  const hasMountedRef = useRef(false);
 
   useLayoutEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+    // 휴대폰은 필름 대신 단계 목록을 그리므로 필름을 만들지 않는다.
     const root = rootRef.current;
     if (!root) return;
 
-    if (!hasMountedFilmRef.current) {
-      hasMountedFilmRef.current = true;
-      window.scrollTo({ top: 0, behavior: "auto" });
-    }
     // landing.css 와 같은 조건: 이때는 히어로 카드가 없으므로 필름 첫 장면이 히어로 바로 아래에 놓인다.
     const staticHero = window.matchMedia(STATIC_HERO_QUERY);
 
-    return mountScrollWorld(root, isPhoneFilm ? PHONE_LANDING_CONFIG : LANDING_CONFIG, {
+    return mountScrollWorld(root, LANDING_CONFIG, {
       externalMain: true,
       // 필름은 히어로 아래에서 시작하므로, 필름 맨 위를 스크롤 0으로 삼는다.
       scrollOffset: () => root.getBoundingClientRect().top + window.scrollY,
@@ -202,7 +189,7 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
       subscribeScroll: (listener) => scrollY.on("change", listener),
       onEnterApp: enterApp
     });
-  }, [scrollY, enterApp, isPhoneFilm]);
+  }, [scrollY, enterApp, isPhone]);
 
   return (
     <>
@@ -211,7 +198,9 @@ export function LandingPage({ onEnterApp }: LandingPageProps) {
       <LandingNav onEnterApp={onEnterAppClick} />
       <main id={LANDING_CONFIG.mainId} tabIndex={-1} className="ua-landing outline-none">
         <LandingHero onEnterApp={onEnterAppClick} />
-        <div ref={rootRef} id="tour" className="uni-scroll-world" data-landing-root />
+        {isPhone
+          ? <LandingStepsSection steps={PHONE_STEPS} />
+          : <div ref={rootRef} id="tour" className="uni-scroll-world" data-landing-root />}
         {/* 스크롤 필름이 끝난 뒤 이어지는 일반 섹션 */}
         <LandingMessageSection />
         <LandingLookSection />

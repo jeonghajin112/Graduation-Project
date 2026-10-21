@@ -62,6 +62,8 @@
 
 /* ---- 히어로 ---- */
 .ua-hero { padding: calc(72 * var(--lp)) calc(22 * var(--lp)) 0; text-align: center; }
+/* 제목 위 작은 설명은 휴대폰에서만 보인다 */
+.ua-hero__eyebrow { display: none; margin: 0; color: var(--ua-sub); font-size: calc(15 * var(--lp)); font-weight: 600; }
 .ua-hero__title { margin: 0; font-size: clamp(calc(40 * var(--lp)), 7vw, calc(80 * var(--lp))); font-weight: 800; line-height: 1.06; letter-spacing: -.045em; text-wrap: balance; }
 .ua-hero__lede { max-width: 34em; margin: calc(18 * var(--lp)) auto 0; color: var(--ua-sub); font-size: clamp(calc(19 * var(--lp)), 2vw, calc(24 * var(--lp))); font-weight: 500; line-height: 1.4; }
 .ua-hero__lede b { color: var(--ua-ink); font-weight: 600; }
@@ -91,10 +93,23 @@
 .ua-dive__frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .uni-scroll-world { margin-top: -100vh; }
 .uni-scroll-world.sw-root { background: transparent; }
+/* 버튼과 필름 사이 여백은 히어로의 흰 배경으로 둔다. 바깥 여백이면 필름의 회색 고정 배경(.sw-sky)이 띠처럼 비친다. */
 @media (max-width: 760px), (prefers-reduced-motion: reduce) {
   .ua-dive { display: none; }
-  .uni-scroll-world { margin-top: calc(48 * var(--lp)); }
+  .ua-hero { padding-bottom: calc(48 * var(--lp)); }
+  .uni-scroll-world { margin-top: 0; }
 }
+
+/* ---- 휴대폰 단계 목록: 필름 대신 장면별 글을 흰 카드에 담아 회색 바탕 위에서 옆으로 넘긴다 (.ua-gallery) ---- */
+.ua-steps { padding: calc(64 * var(--lp)) calc(22 * var(--lp)) calc(56 * var(--lp)); background: var(--ua-tile); }
+.ua-steps__list { margin: calc(28 * var(--lp)) 0 0; list-style: none; counter-reset: ua-steps; }
+.ua-steps__item { min-height: calc(330 * var(--lp)); padding: calc(26 * var(--lp)) calc(24 * var(--lp)); background: #fff; }
+.ua-steps__label { display: flex; align-items: center; gap: calc(8 * var(--lp)); margin: 0; color: var(--ua-sub); font-size: calc(15 * var(--lp)); font-weight: 600; }
+.ua-steps__label::before { counter-increment: ua-steps; content: counter(ua-steps); display: grid; place-items: center; width: calc(24 * var(--lp)); height: calc(24 * var(--lp)); border-radius: 50%; background: var(--ua-accent); color: #fff; font-size: calc(12 * var(--lp)); font-weight: 700; }
+.ua-steps__title { margin: calc(16 * var(--lp)) 0 0; font-size: calc(23 * var(--lp)); font-weight: 800; line-height: 1.25; letter-spacing: -.03em; text-wrap: balance; }
+.ua-steps__body { margin: calc(10 * var(--lp)) 0 0; color: var(--ua-sub); font-size: calc(16 * var(--lp)); line-height: 1.5; }
+.ua-steps__tags { display: flex; flex-wrap: wrap; gap: calc(6 * var(--lp)); margin: calc(18 * var(--lp)) 0 0; padding: 0; list-style: none; }
+.ua-steps__tags li { padding: calc(6 * var(--lp)) calc(12 * var(--lp)); border-radius: 999px; background: var(--ua-ink); color: #fff; font-size: calc(13 * var(--lp)); font-weight: 600; }
 
 /* ---- 메시지 ---- */
 .ua-message__title { margin: 0; font-size: clamp(calc(32 * var(--lp)), 5.4vw, calc(64 * var(--lp))); font-weight: 800; line-height: 1.16; letter-spacing: -.045em; text-align: center; text-wrap: balance; }
@@ -169,6 +184,8 @@
 .ua-report__column, .ua-report__others { min-width: 0; padding: calc(24 * var(--lp)) calc(20 * var(--lp)) calc(8 * var(--lp)); border-radius: calc(22 * var(--lp)); background: #fff; }
 :is(.ua-report__column, .ua-report__others) h4 { margin: 0; font-size: calc(17 * var(--lp)); font-weight: 600; }
 :is(.ua-report__column, .ua-report__others) h4 span { display: block; margin-top: calc(4 * var(--lp)); color: var(--ua-report-sub); font-size: calc(13 * var(--lp)); font-weight: 500; }
+/* 문제 개수는 휴대폰에서만 빨간 굵은 글씨로 강조한다 */
+:is(.ua-report__column, .ua-report__others) h4 span b { font-weight: inherit; }
 :is(.ua-report__column, .ua-report__others) ul { display: flex; flex-direction: column; margin: calc(12 * var(--lp)) 0 0; padding: 0; list-style: none; }
 :is(.ua-report__column, .ua-report__others) li { display: flex; flex-direction: column; align-items: flex-start; gap: calc(4 * var(--lp)); padding: calc(11 * var(--lp)) 0; border-top: 1px solid var(--ua-report-rule); }
 .ua-report__criterion-name { font-size: calc(14 * var(--lp)); font-weight: 500; line-height: 1.4; }
@@ -177,6 +194,13 @@
 .ua-report__criterion-status svg { flex: none; }
 .ua-report__criterion-status[data-status="fail"] { color: var(--ua-problem); }
 .ua-report__criterion-status:is([data-status="manual"], [data-status="skipped"]) { color: var(--ua-report-sub); }
+/* 휴대폰: 원칙 카드는 이름과 문제 수만 보이고 눌러서 펼친다 (landing-report-section.tsx ReportGroup) */
+details:is(.ua-report__column, .ua-report__others) { padding-block: calc(8 * var(--lp)); }
+details:is(.ua-report__column, .ua-report__others)[open] { padding-bottom: calc(8 * var(--lp)); }
+:is(.ua-report__column, .ua-report__others) > summary { display: flex; align-items: center; justify-content: space-between; gap: calc(12 * var(--lp)); min-height: calc(56 * var(--lp)); list-style: none; cursor: pointer; }
+:is(.ua-report__column, .ua-report__others) > summary::-webkit-details-marker { display: none; }
+.ua-report__toggle { flex: none; color: var(--ua-report-sub); transition: transform .2s ease; }
+details[open] > summary .ua-report__toggle { transform: rotate(180deg); }
 .ua-report__note { margin-top: calc(24 * var(--lp)); color: var(--ua-sub); font-size: calc(12 * var(--lp)); }
 .ua-report__features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(32 * var(--lp)); margin: calc(48 * var(--lp)) 0 0; padding: 0; list-style: none; }
 .ua-report__features li { display: grid; gap: calc(6 * var(--lp)); align-content: start; }
@@ -306,20 +330,120 @@
   .ua-engine__steps li:nth-child(2n)::after { display: none; }
   .ua-faq__inner { grid-template-columns: minmax(0, 1fr); gap: 28px; }
 }
+/* ---- 휴대폰 (2026-10-21 시안 A) ----
+   섹션은 흰색·회색을 번갈아 쓰고(히어로 흰 → 단계 회 → 메시지·라이브 리포트 흰 → 숫자 회 → 리포트 흰
+   → 도구 회 → 엔진 흰 → 범위 회 → 질문 흰 → 마무리 회), 카드와 줄은 선 대신 배경색으로 나눈다. */
 @media (max-width: 760px) {
-  .ua-report__tiles, .ua-report__features, .ua-compare__grid { grid-template-columns: minmax(0, 1fr); }
-  .ua-report__tile { padding: calc(28 * var(--lp)) calc(24 * var(--lp)); }
-  .ua-report__title { margin-top: calc(64 * var(--lp)); }
-  .ua-report__features { gap: 20px; }
-  .ua-faq__item > p { padding-right: 0; }
-}
-@media (max-width: 560px) {
-  .ua-report__principles { grid-template-columns: minmax(0, 1fr); }
+  /* 상단바 아래 가는 선은 흰 섹션 위에서 따로 떠 보이므로 휴대폰에서는 지운다 (반투명 흰 바탕만 남긴다) */
+  .ua-lnav { border-bottom-color: transparent; }
+  .ua-eyebrow { margin-bottom: calc(6 * var(--lp)); font-size: calc(17 * var(--lp)); }
+  .ua-heading { font-size: calc(30 * var(--lp)); font-weight: 800; line-height: 1.2; letter-spacing: -.035em; }
+  .ua-lede { margin-top: calc(12 * var(--lp)); font-size: calc(17 * var(--lp)); line-height: 1.5; }
+
+  /* 히어로 */
+  .ua-hero { padding: calc(64 * var(--lp)) calc(22 * var(--lp)) calc(72 * var(--lp)); }
+  .ua-hero__eyebrow { display: block; }
+  .ua-hero__title { margin-top: calc(10 * var(--lp)); }
+  .ua-hero__lede { max-width: calc(310 * var(--lp)); font-size: calc(17 * var(--lp)); line-height: 1.5; }
+  .ua-hero__actions { margin-top: calc(28 * var(--lp)); }
+  .ua-hero .ua-button { min-height: calc(52 * var(--lp)); padding: 0 calc(30 * var(--lp)); font-size: calc(18 * var(--lp)); font-weight: 600; }
+
+  /* 섹션 여백과 배경 */
+  .ua-report, .ua-tools, .ua-engine, .ua-compare, .ua-faq { padding-block: calc(72 * var(--lp)); }
+  .ua-report, .ua-faq { background: #fff; }
+  .ua-stats, .ua-tools { background: var(--ua-tile); }
+
+  /* 메시지: 문장마다 한 줄, 화면보다 긴 문장만 단어 사이에서 줄을 바꾼다 */
+  .ua-message { padding-block: calc(80 * var(--lp)); }
+  .ua-message__title { font-size: calc(30 * var(--lp)); line-height: 1.3; }
+  .ua-message__sentence { display: block; white-space: normal; }
+
+  /* 숫자: 회색 바탕에 흰 타일 2×2 */
+  .ua-stats { padding-block: calc(64 * var(--lp)); }
+  .ua-stats__grid { gap: calc(10 * var(--lp)); margin-top: calc(28 * var(--lp)); }
+  .ua-stats__item { padding: calc(20 * var(--lp)) calc(18 * var(--lp)); border: 0; border-radius: calc(22 * var(--lp)); background: #fff; }
+  .ua-stats__item dt { font-size: calc(14 * var(--lp)); }
+  .ua-stats__value { margin-top: calc(8 * var(--lp)) !important; font-size: calc(44 * var(--lp)); line-height: 1; }
+  .ua-stats__item:last-child .ua-stats__value { font-size: min(calc(30 * var(--lp)), 23cqi); line-height: 1.45; }
+  .ua-stats__body { font-size: calc(14 * var(--lp)); line-height: 1.45; }
+
+  /* 최종 리포트: 용지 틀 없이 회색 카드만 둔다. 머리글·검사 범위·설명·특징 목록은 휴대폰에서 뺀다 */
+  .ua-report__paper { margin-top: calc(28 * var(--lp)); padding: 0; border-radius: 0; background: none; box-shadow: none; }
+  .ua-report__header, .ua-report__tile--scope, .ua-report__lead, .ua-report__features { display: none; }
+  .ua-report__tiles { grid-template-columns: minmax(0, 1fr); gap: calc(10 * var(--lp)); margin-top: 0; }
+  .ua-report__tile { padding: calc(22 * var(--lp)); border-radius: calc(26 * var(--lp)); background: var(--ua-tile); }
+  .ua-report__rows:not(.ua-report__rows--engines) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: calc(16 * var(--lp)); }
+  .ua-report__title { margin-top: calc(40 * var(--lp)); font-size: calc(21 * var(--lp)); font-weight: 800; letter-spacing: -.03em; }
+  /* 원칙 카드는 접혀 있으므로 한 줄에 하나씩, 펼친 항목 사이도 선 대신 간격으로 */
+  .ua-report__principles { grid-template-columns: minmax(0, 1fr); gap: calc(8 * var(--lp)); margin-top: calc(14 * var(--lp)); }
   .ua-report__column--tall { grid-row: auto; }
-  .ua-tools__swatches { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 460px) {
-  .ua-stats__grid { grid-template-columns: minmax(0, 1fr); }
+  :is(.ua-report__column, .ua-report__others) { padding-inline: calc(18 * var(--lp)); border-radius: calc(18 * var(--lp)); background: var(--ua-tile); }
+  :is(.ua-report__column, .ua-report__others) h4 { font-size: calc(16 * var(--lp)); font-weight: 700; }
+  :is(.ua-report__column, .ua-report__others) h4 span b { color: var(--ua-problem); font-weight: 700; }
+  :is(.ua-report__column, .ua-report__others) ul { gap: calc(12 * var(--lp)); margin-top: calc(4 * var(--lp)); }
+  :is(.ua-report__column, .ua-report__others) li { padding: 0; border-top: 0; }
+  .ua-report__note { margin-top: calc(14 * var(--lp)); font-size: calc(13 * var(--lp)); line-height: 1.5; }
+
+  /* 개선 도구: 회색 바탕에 흰 타일, 타일 안 예시는 회색. 마지막 타일 말고는 설명 문장 없이 예시만 */
+  .ua-tools__grid { gap: calc(10 * var(--lp)); margin-top: calc(28 * var(--lp)); }
+  .ua-tile { gap: calc(10 * var(--lp)); padding: calc(22 * var(--lp)); border-radius: calc(26 * var(--lp)); background: #fff; }
+  .ua-tile h3 { font-size: calc(21 * var(--lp)); }
+  .ua-tools__grid > .ua-tile:not(:last-child) > p, .ua-tools__themes, .ua-tools__swatches code { display: none; }
+  .ua-tools__rewrite { margin-top: calc(4 * var(--lp)); gap: calc(8 * var(--lp)); }
+  .ua-tools__rewrite div, .ua-tools__swatches > div, .ua-tools__projects li { background: var(--ua-tile); }
+  .ua-tools__swatches { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(8 * var(--lp)); margin-top: calc(4 * var(--lp)); }
+  .ua-tools__swatches > div { gap: calc(8 * var(--lp)); padding: calc(14 * var(--lp)); }
+  .ua-tools__chip { padding: calc(8 * var(--lp)) calc(12 * var(--lp)); font-size: calc(14 * var(--lp)); }
+  .ua-tools__ratio { font-size: calc(20 * var(--lp)); }
+  .ua-tools__ratio small { display: block; margin: calc(2 * var(--lp)) 0 0; font-size: calc(12 * var(--lp)); font-weight: 700; }
+  .ua-tile__note { padding: 0; border: 0; font-size: calc(12 * var(--lp)); }
+
+  /* 분석 엔진: 아이콘은 왼쪽, 글은 오른쪽인 회색 카드. 분석 과정은 선 없이 회색 칸 */
+  .ua-engine__cards { gap: calc(10 * var(--lp)); margin-top: calc(28 * var(--lp)); }
+  .ua-engine__card { display: grid; grid-template-columns: calc(44 * var(--lp)) minmax(0, 1fr); align-content: start; gap: calc(4 * var(--lp)) calc(14 * var(--lp)); padding: calc(20 * var(--lp)); border-radius: calc(22 * var(--lp)); }
+  .ua-engine__icon { grid-row: span 3; width: calc(44 * var(--lp)); height: calc(44 * var(--lp)); border-radius: calc(12 * var(--lp)); }
+  .ua-engine__icon svg { width: calc(22 * var(--lp)); height: calc(22 * var(--lp)); }
+  .ua-engine__card h3 { margin: 0; font-size: calc(18 * var(--lp)); font-weight: 700; }
+  .ua-engine__card p { font-size: calc(15 * var(--lp)); line-height: 1.5; }
+  .ua-engine__weight { margin-top: calc(4 * var(--lp)); padding-top: 0; border-top: 0; font-size: calc(13 * var(--lp)); }
+  .ua-engine__weight b { font-size: calc(20 * var(--lp)); }
+  .ua-engine__bar { margin-top: calc(20 * var(--lp)); }
+  .ua-engine__process-title { margin-top: calc(40 * var(--lp)); }
+  .ua-engine__steps { gap: calc(8 * var(--lp)); margin-top: calc(14 * var(--lp)); }
+  .ua-engine__steps li { padding: calc(14 * var(--lp)); border-radius: calc(16 * var(--lp)); background: var(--ua-tile); }
+  .ua-engine__steps li::before { content: counter(ua-step, decimal-leading-zero); position: static; display: block; width: auto; height: auto; border-radius: 0; background: none; color: var(--ua-link); font-size: calc(13 * var(--lp)); font-weight: 800; }
+  .ua-engine__steps li::after { display: none; }
+  .ua-engine__steps b { margin-top: calc(4 * var(--lp)); font-size: calc(15 * var(--lp)); }
+
+  /* 검사 범위: 회색 바탕에 흰 카드 두 장, 줄 사이 선 없이 */
+  .ua-compare__grid { grid-template-columns: minmax(0, 1fr); gap: calc(10 * var(--lp)); margin-top: calc(28 * var(--lp)); }
+  .ua-compare__column { padding: calc(22 * var(--lp)); border: 0; border-radius: calc(26 * var(--lp)); background: #fff; }
+  .ua-compare__column h3 { font-size: calc(19 * var(--lp)); }
+  .ua-compare__column > p { margin-top: calc(4 * var(--lp)); font-size: calc(14 * var(--lp)); }
+  .ua-compare__column ul { gap: calc(10 * var(--lp)); margin-top: calc(16 * var(--lp)); }
+  .ua-compare__column li { padding: 0; border-top: 0; }
+
+  /* 질문: 선 대신 회색 줄 */
+  .ua-faq__inner { gap: calc(24 * var(--lp)); }
+  .ua-faq__questions { display: grid; gap: calc(8 * var(--lp)); }
+  .ua-faq__item, .ua-faq__item:last-child { border: 0; border-radius: calc(18 * var(--lp)); background: var(--ua-tile); }
+  .ua-faq__item summary { min-height: calc(60 * var(--lp)); padding: calc(12 * var(--lp)) calc(18 * var(--lp)); font-size: calc(16 * var(--lp)); line-height: 1.4; }
+  .ua-faq__item summary i { width: calc(28 * var(--lp)); height: calc(28 * var(--lp)); }
+  .ua-faq__item > p { padding: 0 calc(18 * var(--lp)) calc(18 * var(--lp)); font-size: calc(15 * var(--lp)); line-height: 1.55; }
+
+  /* 마무리 */
+  .ua-end { padding-block: calc(80 * var(--lp)) calc(72 * var(--lp)); }
+  .ua-end__title { font-size: calc(36 * var(--lp)); line-height: 1.15; }
+  .ua-end .ua-button { margin-top: calc(28 * var(--lp)); }
+
+  /* 단계 카드 갤러리: 옆으로 밀어 넘기고, 다음 카드가 오른쪽에 보여 넘길 수 있음을 알린다.
+     카드는 한 장씩 왼쪽 여백(22px)에 맞춰 멈추고, 부모의 좌우 여백을 넘어 화면 끝까지 펼친다. */
+  .ua-landing .ua-gallery { display: flex; gap: calc(16 * var(--lp)); margin-inline: calc(-22 * var(--lp)); padding: calc(4 * var(--lp)) 0 calc(4 * var(--lp)) calc(22 * var(--lp)); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: calc(22 * var(--lp)); scrollbar-width: none; }
+  .ua-landing .ua-gallery::-webkit-scrollbar { display: none; }
+  /* 마지막 카드 뒤 여백: 끝 패딩을 스크롤 범위에 넣지 않는 브라우저도 있어 빈 칸으로 채운다 (간격 16 + 6 = 왼쪽 22) */
+  .ua-landing .ua-gallery::after { content: ""; flex: 0 0 calc(6 * var(--lp)); }
+  .ua-landing .ua-gallery > * { box-sizing: border-box; flex: 0 0 min(calc(272 * var(--lp)), 78%); border-radius: calc(28 * var(--lp)); scroll-snap-align: start; }
+  .ua-landing .ua-gallery:focus-visible { outline: 3px solid var(--ua-accent); outline-offset: -3px; border-radius: calc(28 * var(--lp)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

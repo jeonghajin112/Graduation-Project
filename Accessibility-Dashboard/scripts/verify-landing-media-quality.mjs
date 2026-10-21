@@ -13,7 +13,7 @@ const cases = [
   { width: 1920, height: 1080, dpr: 2, resolution: 3840 },
   { width: 1920, height: 1500, resolution: 3840 },
   { width: 3840, height: 2160, resolution: 3840 },
-  { width: 390, height: 844, static: true },
+  { width: 390, height: 844, phone: true },
   { width: 1440, height: 900, static: true, reduce: true },
   { width: 1440, height: 900, static: true, saveData: true }
 ];
@@ -21,7 +21,7 @@ const browser = await chromium.launch({ headless: true });
 const results = [];
 try {
   for (const scenario of cases) {
-    console.log(`Opening: ${scenario.width}x${scenario.height}@${scenario.dpr ?? 1} ${scenario.static ? "static" : scenario.resolution}`);
+    console.log(`Opening: ${scenario.width}x${scenario.height}@${scenario.dpr ?? 1} ${scenario.phone ? "phone" : scenario.static ? "static" : scenario.resolution}`);
     const context = await browser.newContext({
       viewport: { width: scenario.width, height: scenario.height },
       deviceScaleFactor: scenario.dpr ?? 1,
@@ -40,14 +40,25 @@ try {
       });
       await page.route("**/api/**", route => route.abort());
       await page.goto(baseUrl);
-      await page.locator('[data-scroll-world-ready="true"]').waitFor();
-      if (scenario.static) {
+      if (scenario.phone) {
+        // Phones list the film's steps as text, so none of its stills or clips load.
+        await page.locator(".ua-steps").waitFor();
+        await page.waitForLoadState("networkidle");
+        const filmMedia = await page.evaluate(() => performance.getEntriesByType("resource")
+          .map(entry => new URL(entry.name).pathname)
+          .filter(path => path.startsWith("/landing/scroll-world/")));
+        assert.deepEqual(filmMedia, [], "Phones must not download the film's media");
+        assert.equal(await page.locator("video").count(), 0);
+        results.push({ ...scenario, requests });
+      } else if (scenario.static) {
+        await page.locator('[data-scroll-world-ready="true"]').waitFor();
         await page.locator('.sw-scene__still').first().evaluate(image => image.decode());
         await page.waitForTimeout(200);
         assert.equal(await page.locator("video").count(), 0);
         assert.deepEqual(requests, [], "Static mode must not download a video");
         results.push({ ...scenario, requests });
       } else {
+        await page.locator('[data-scroll-world-ready="true"]').waitFor();
         await page.waitForFunction(() => document.querySelector("video")?.readyState >= 2);
         const expectedPath = "/landing/scroll-world/vid/opening.mp4";
         assert.deepEqual(requests.map(url => new URL(url).pathname), [expectedPath], "Initially load only the suitable opening variant");

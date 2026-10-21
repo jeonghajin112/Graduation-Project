@@ -19,6 +19,20 @@
 .ua-look__title { margin: 0; font-size: clamp(calc(34 * var(--lp)), 4.2vw, calc(56 * var(--lp))); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; word-break: keep-all; text-wrap: balance; }
 .ua-look__lede { margin: calc(14 * var(--lp)) 0 0; color: #6e6e73; font-size: calc(19 * var(--lp)); font-weight: 500; line-height: 1.45; word-break: keep-all; }
 .ua-look__stack { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: calc(22 * var(--lp)); margin-top: calc(34 * var(--lp)); }
+/* 휴대폰: 데모 대신 기능 네 가지를 회색 카드 2×2로 보여 주고(아이콘·제목·설명), 아래 섹션들처럼 왼쪽에 맞춘다 */
+.ua-look__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(10 * var(--lp)); margin: calc(28 * var(--lp)) 0 0; padding: 0; list-style: none; }
+.ua-look__list li { padding: calc(18 * var(--lp)); border-radius: calc(22 * var(--lp)); background: #f5f5f7; }
+.ua-look__icon { display: grid; place-items: center; width: calc(40 * var(--lp)); height: calc(40 * var(--lp)); margin-bottom: calc(12 * var(--lp)); border-radius: calc(12 * var(--lp)); background: #fff; color: var(--ua-demo-accent); }
+.ua-look__list h3 { margin: 0; font-size: calc(17 * var(--lp)); font-weight: 700; line-height: 1.35; letter-spacing: -.02em; }
+.ua-look__list p { margin: calc(6 * var(--lp)) 0 0; color: #515154; font-size: calc(14 * var(--lp)); line-height: 1.5; word-break: keep-all; }
+@media (max-width: 760px) {
+  /* 위 메시지 섹션의 아래 여백(80px)을 이어 받으므로 위쪽 여백은 작게 둔다 */
+  .ua-look { padding: calc(8 * var(--lp)) calc(22 * var(--lp)) calc(72 * var(--lp)); }
+  .ua-look__head { text-align: left; }
+  .ua-look__eyebrow { margin-bottom: calc(6 * var(--lp)); color: #515154; font-size: calc(17 * var(--lp)); }
+  .ua-look__title { font-size: calc(30 * var(--lp)); font-weight: 800; line-height: 1.2; letter-spacing: -.035em; }
+  .ua-look__lede { margin-top: calc(12 * var(--lp)); color: #515154; font-size: calc(17 * var(--lp)); line-height: 1.5; }
+}
 
 /* 기능 탭 */
 .ua-look__tabs { display: flex; gap: calc(2 * var(--lp)); max-width: 100%; min-width: 0; padding: calc(4 * var(--lp)); border-radius: 999px; background: #f2f2f4; overflow-x: auto; scrollbar-width: none; }

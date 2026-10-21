@@ -49,6 +49,8 @@ export function LandingHero({ onEnterApp }: { onEnterApp: EnterAppHandler }) {
   return (
     <>
       <section className="ua-hero" aria-labelledby="ua-hero-title">
+        {/* 휴대폰에서만 보인다 (landing.css) */}
+        <p className="ua-hero__eyebrow">공공 서비스 웹 접근성 평가</p>
         <h1 className="ua-hero__title" id="ua-hero-title">공공 서비스의 웹 접근성,<br />이제 한눈에.</h1>
         <p className="ua-hero__lede">주소만 넣으면 돼요. 문제를 찾아 <b>그 자리에 바로</b> 보여 주고, 고치는 방법도 알려 줘요.</p>
         <div className="ua-hero__actions">

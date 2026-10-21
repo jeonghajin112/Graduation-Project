@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import {
-  ArrowUpRight, CalendarClock, CircleCheck, CircleSlash, ListTree, Printer, RefreshCw, TrendingUp, TriangleAlert, UserRound
+  ArrowUpRight, CalendarClock, ChevronDown, CircleCheck, CircleSlash, ListTree, Printer, RefreshCw, TrendingUp, TriangleAlert, UserRound
 } from "lucide-react";
 import { KWCAG_LANDING_PRINCIPLES, type LandingCriterion } from "@/components/landing/landing-kwcag";
 import { LandingReportTrend } from "@/components/landing/landing-trend";
+import { useLandingPhone } from "@/components/landing/use-landing-phone";
 
 /**
  * 최종 리포트 소개. 실제 최종 리포트 화면(final-report-panel.tsx, report-criteria-overview.tsx)과 같은 모양으로
@@ -44,8 +46,28 @@ function CriterionStatus({ criterion }: { criterion: LandingCriterion }) {
   return <span className="ua-report__criterion-status" data-status="pass"><CircleCheck {...STATUS_ICON} />문제 없음</span>;
 }
 
+/** 원칙별 항목 카드. 휴대폰에서는 33줄이 너무 길어, 이름과 문제 수만 보이고 눌러서 펼친다. */
+function ReportGroup({ className, label, heading, collapsible, children }: {
+  className: string;
+  label: string;
+  heading: ReactNode;
+  collapsible: boolean;
+  children: ReactNode;
+}) {
+  if (!collapsible) {
+    return <section className={className} aria-label={label}><h4>{heading}</h4>{children}</section>;
+  }
+  return (
+    <details className={className}>
+      <summary><h4>{heading}</h4><ChevronDown size={20} aria-hidden="true" className="ua-report__toggle" /></summary>
+      {children}
+    </details>
+  );
+}
+
 export function LandingReportSection() {
   const total = SEVERITY.reduce((sum, item) => sum + item.count, 0);
+  const isPhone = useLandingPhone();
 
   return (
     <section className="ua-report" id="report" aria-labelledby="ua-report-title">
@@ -98,7 +120,7 @@ export function LandingReportSection() {
               </ul>
             </div>
 
-            <div className="ua-report__tile">
+            <div className="ua-report__tile ua-report__tile--scope">
               <dl className="ua-report__figure">
                 <dt>검사 범위</dt>
                 <dd>{ENGINES.length}<small>/{ENGINES.length} 완료</small></dd>
@@ -123,8 +145,8 @@ export function LandingReportSection() {
               // 운용의 용이성(15개)은 다른 원칙 두 개를 합친 만큼 길다.
               const tall = principle.criteria.length >= 12;
               return (
-                <section className={`ua-report__column${tall ? " ua-report__column--tall" : ""}`} key={principle.name} aria-label={principle.name}>
-                  <h4>{principle.name}<span>{principle.criteria.length}개 중 문제 {problems}개</span></h4>
+                <ReportGroup className={`ua-report__column${tall ? " ua-report__column--tall" : ""}`} key={principle.name} label={principle.name}
+                  collapsible={isPhone} heading={<>{principle.name}<span>{principle.criteria.length}개 중 <b>문제 {problems}개</b></span></>}>
                   <ul>
                     {principle.criteria.map(criterion => (
                       <li key={criterion.code}>
@@ -133,11 +155,11 @@ export function LandingReportSection() {
                       </li>
                     ))}
                   </ul>
-                </section>
+                </ReportGroup>
               );
             })}
-            <section className="ua-report__others" aria-label="33개 항목 밖">
-              <h4>33개 항목 밖<span>문제 {OTHERS.length}개</span></h4>
+            <ReportGroup className="ua-report__others" label="33개 항목 밖" collapsible={isPhone}
+              heading={<>33개 항목 밖<span><b>문제 {OTHERS.length}개</b></span></>}>
               <ul>
                 {OTHERS.map(other => (
                   <li key={other.code}>
@@ -146,7 +168,7 @@ export function LandingReportSection() {
                   </li>
                 ))}
               </ul>
-            </section>
+            </ReportGroup>
           </div>
           <figcaption className="ua-report__note">2026년 10월 8일 국세청 누리집 분석 결과예요. 문제 161건 가운데 21건은 KWCAG 항목 밖의 읽기 수준(WCAG 3.1.5) 문제예요.</figcaption>
         </figure>

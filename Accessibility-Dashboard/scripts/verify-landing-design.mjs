@@ -18,6 +18,9 @@ mkdirSync(outDir, { recursive: true });
 
 const CONTROL_MIN_HEIGHT_PX = 44;
 const SECTION_ORDER = ["ua-hero", "uni-scroll-world", "ua-message", "ua-look", "ua-stats", "ua-report", "ua-tools", "ua-engine", "ua-compare", "ua-faq", "ua-end"];
+// Phones (<=760px) show the film's card scenes as a plain list of steps instead of the film.
+const PHONE_SECTION_ORDER = SECTION_ORDER.map((name) => name === "uni-scroll-world" ? "ua-steps" : name);
+const PHONE_STEP_TITLES = ["확인할 페이지 주소를 입력하세요", "페이지 연결, 접근성 검사, 결과 준비", "페이지와 분석 결과를 한눈에.", "접근성을 한 화면에서"];
 const refreshedScenes = [
   { id: "input", index: 1, scrollVh: 2.25 },
   { id: "analyze", index: 2, scrollVh: 3.6 },
@@ -72,12 +75,15 @@ async function verifyReducedMotionViewport(browser, viewport) {
     await route.abort("blockedbyclient");
   });
 
+  const isPhone = viewport.width <= 760;
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-scroll-world-ready="true"]').waitFor();
+  await page.locator(isPhone ? ".ua-steps" : '[data-scroll-world-ready="true"]').waitFor();
   await page.locator("#ua-hero-title").waitFor();
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForFunction(() => [...document.querySelectorAll('.sw-scene__still')]
-    .every(image => image.complete && image.naturalWidth > 0));
+  if (!isPhone) {
+    await page.waitForFunction(() => [...document.querySelectorAll('.sw-scene__still')]
+      .every(image => image.complete && image.naturalWidth > 0));
+  }
   await settle(page);
 
   const facts = await page.evaluate((order) => {
@@ -93,7 +99,7 @@ async function verifyReducedMotionViewport(browser, viewport) {
     const stage = document.querySelector(".sw-stage");
     const film = document.getElementById("tour");
     const hero = document.querySelector(".ua-hero");
-    const controls = [...document.querySelectorAll(".ua-hero__actions a, .ua-look__tab, .ua-faq__item summary, .ua-footer__wordmark")]
+    const controls = [...document.querySelectorAll(".ua-hero__actions a, .ua-look__tab, .ua-report__principles summary, .ua-faq__item summary, .ua-footer__wordmark")]
       .filter(isVisible)
       .map((element) => ({ label: element.textContent?.trim(), height: element.getBoundingClientRect().height }));
     const sectionOrder = [...main.children]
@@ -101,6 +107,14 @@ async function verifyReducedMotionViewport(browser, viewport) {
       .filter(Boolean);
     return {
       ready: Boolean(document.querySelector("[data-scroll-world-ready=true]")),
+      filmLayerCount: document.querySelectorAll(".sw-root, .sw-sky, .sw-stage").length,
+      stepTitles: [...document.querySelectorAll(".ua-steps__title")].map((element) => element.textContent),
+      stepRow: (() => {
+        const list = document.querySelector(".ua-steps__list");
+        if (!list) return null;
+        const tops = [...list.querySelectorAll(".ua-steps__item")].map((item) => Math.round(item.getBoundingClientRect().top));
+        return { oneRow: new Set(tops).size === 1, swipes: list.scrollWidth > list.clientWidth, focusable: list.tabIndex === 0 };
+      })(),
       mainCount: document.querySelectorAll("main#uni-access-main").length,
       h1Count: document.querySelectorAll("h1").length,
       h1Text: title?.textContent,
@@ -126,13 +140,23 @@ async function verifyReducedMotionViewport(browser, viewport) {
       kwcagRows: document.querySelectorAll(".ua-report__column li").length,
       statValues: [...document.querySelectorAll(".ua-stats__value")].map((element) => element.dataset.value),
       lookTabs: document.querySelectorAll('.ua-look [role="tab"]').length,
+      lookItems: document.querySelectorAll(".ua-look__list li").length,
+      galleries: [...document.querySelectorAll(".ua-gallery")].map((gallery) => {
+        const tops = [...gallery.children].map((card) => Math.round(card.getBoundingClientRect().top));
+        return { oneRow: new Set(tops).size === 1, swipes: gallery.scrollWidth > gallery.clientWidth, focusable: gallery.tabIndex === 0, named: Boolean(gallery.getAttribute("aria-label")) };
+      }),
+      paddleCount: document.querySelectorAll(".ua-paddle").length,
+      heroEyebrowVisible: isVisible(document.querySelector(".ua-hero__eyebrow")),
+      lookIcons: document.querySelectorAll(".ua-look__icon svg").length,
+      lookDemoCount: document.querySelectorAll(".ua-demo-app").length,
+      reportGroups: document.querySelectorAll(".ua-report__principles details").length,
+      openReportGroups: document.querySelectorAll(".ua-report__principles details[open]").length,
       faqCount: document.querySelectorAll(".ua-faq__item").length,
       controls
     };
-  }, SECTION_ORDER);
+  }, [...SECTION_ORDER, "ua-steps"]);
 
   const label = `${viewport.width}x${viewport.height}${viewport.deviceScaleFactor ? `@${viewport.deviceScaleFactor}x` : ""}`;
-  assert.equal(facts.ready, true, `${label}: scroll world did not initialize`);
   assert.equal(facts.mainCount, 1, `${label}: landing must expose one main landmark`);
   assert.equal(facts.h1Count, 1, `${label}: landing must expose one h1`);
   assert.equal(facts.h1Text, "공공 서비스의 웹 접근성,이제 한눈에.", `${label}: hero heading changed`);
@@ -140,28 +164,48 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(facts.headerWithinViewport, true, `${label}: header exceeds the viewport`);
   assert.equal(facts.headerSticky, "sticky", `${label}: header must stay pinned while scrolling`);
   assert.equal(facts.engineChromeCount, 0, `${label}: the film must not add its own header, skip link or scroll cue`);
-  // Phones (<=760px) skip the opening photo, whose 16:9 frame crops badly in portrait.
-  const expectedScenes = viewport.width <= 760 ? 4 : 5;
-  assert.equal(facts.copyCount, expectedScenes, `${label}: expected ${expectedScenes} film scenes`);
-  // At the top of the page only the opening scene's (title-less) copy is live;
-  // a phone film starts on a card whose copy appears once it is scrolled to.
-  assert.equal(facts.activeCopyCount, expectedScenes === 5 ? 1 : 0,
-    `${label}: unexpected number of active scene copies before the film`);
-  assert.equal(facts.hiddenCopyCount, 0, `${label}: scene copy must stay readable by assistive technology`);
-  assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy controls escaped the Tab order`);
-  assert.equal(facts.routeVisible, false, `${label}: side progress bar must stay hidden`);
+  if (isPhone) {
+    assert.equal(facts.filmLayerCount, 0, `${label}: phones must not mount the scroll film`);
+    assert.deepEqual(facts.stepTitles, PHONE_STEP_TITLES, `${label}: phones must list the film's card scenes as steps`);
+    // The steps sit side by side and are swiped (or scrolled with the keyboard) one card at a time.
+    assert.deepEqual(facts.stepRow, { oneRow: true, swipes: true, focusable: true }, `${label}: phone steps must form one swipeable row`);
+  } else {
+    assert.equal(facts.ready, true, `${label}: scroll world did not initialize`);
+    assert.equal(facts.copyCount, 5, `${label}: expected 5 film scenes`);
+    // At the top of the page only the opening scene's (title-less) copy is live.
+    assert.equal(facts.activeCopyCount, 1, `${label}: unexpected number of active scene copies before the film`);
+    assert.equal(facts.hiddenCopyCount, 0, `${label}: scene copy must stay readable by assistive technology`);
+    assert.equal(facts.inactiveCopyLeakCount, 0, `${label}: inactive copy controls escaped the Tab order`);
+    assert.equal(facts.routeVisible, false, `${label}: side progress bar must stay hidden`);
+    assert.equal(facts.posterReady, true, `${label}: one or more scene posters failed to load`);
+    assert.equal(facts.stageInFlow, true, `${label}: the film's first frame must wait in the page flow`);
+    assert.ok(facts.stageTopGap !== null && facts.stageTopGap < 1, `${label}: the waiting first frame is not at the film's top`);
+  }
   assert.equal(facts.videoCount, 0, `${label}: reduced motion must not create videos`);
   assert.deepEqual(videoRequests, [], `${label}: reduced motion unexpectedly requested video media`);
-  assert.equal(facts.posterReady, true, `${label}: one or more scene posters failed to load`);
   assert.equal(facts.overflow, 0, `${label}: page-level horizontal overflow detected`);
   assert.equal(facts.diveVisible, false, `${label}: the growing hero card must stay off under reduced motion`);
-  assert.equal(facts.stageInFlow, true, `${label}: the film's first frame must wait in the page flow`);
-  assert.ok(facts.stageTopGap !== null && facts.stageTopGap < 1, `${label}: the waiting first frame is not at the film's top`);
   assert.equal(facts.filmAfterHero, true, `${label}: the film overlaps the hero`);
-  assert.deepEqual(facts.sectionOrder, SECTION_ORDER, `${label}: landing sections are out of order`);
+  assert.deepEqual(facts.sectionOrder, isPhone ? PHONE_SECTION_ORDER : SECTION_ORDER, `${label}: landing sections are out of order`);
   assert.equal(facts.kwcagRows, 33, `${label}: the report grid must list all 33 KWCAG items`);
   assert.deepEqual(facts.statValues.slice(0, 3), ["3", "33", "21"], `${label}: scope numbers changed`);
-  assert.equal(facts.lookTabs, 4, `${label}: expected four live-report features`);
+  if (isPhone) {
+    // Phones list the live-report features as text and fold each KWCAG principle until tapped.
+    assert.deepEqual([facts.lookTabs, facts.lookDemoCount, facts.lookItems], [0, 0, 4], `${label}: phones must list the four live-report features without the demo`);
+    assert.deepEqual([facts.reportGroups, facts.openReportGroups], [5, 0], `${label}: phone report groups must start folded`);
+    // Only the steps become a swipe gallery (swiped by hand or scrolled with the keyboard, no previous/next buttons);
+    // the sections after the message stay stacked.
+    const swipeGallery = { oneRow: true, swipes: true, focusable: true, named: true };
+    assert.deepEqual(facts.galleries, [swipeGallery], `${label}: phones must show the steps as one swipe gallery`);
+    assert.equal(facts.paddleCount, 0, `${label}: the steps gallery must not show previous/next buttons`);
+    assert.equal(facts.heroEyebrowVisible, true, `${label}: phones must show the line above the hero title`);
+    assert.equal(facts.lookIcons, 4, `${label}: each live-report feature card needs its icon`);
+  } else {
+    assert.deepEqual([facts.galleries.length, facts.paddleCount], [0, 0], `${label}: wider screens must keep their grids`);
+    assert.equal(facts.heroEyebrowVisible, false, `${label}: the line above the hero title is for phones only`);
+    assert.equal(facts.lookTabs, 4, `${label}: expected four live-report features`);
+    assert.equal(facts.reportGroups, 0, `${label}: wider screens must show every KWCAG row`);
+  }
   assert.equal(facts.faqCount, 6, `${label}: expected six questions`);
   if (viewport.width >= 3840 && viewport.height >= 2000) {
     assert.ok(facts.titleFontSize >= 155 && facts.titleFontSize <= 161, `${label}: 4K hero title did not scale (${facts.titleFontSize}px)`);
@@ -197,53 +241,54 @@ async function verifyReducedMotionViewport(browser, viewport) {
   assert.equal(focus.offset, "3px", `${label}: CTA focus separation must be 3px`);
   assert.notEqual(focus.style, "none", `${label}: CTA focus outline is missing`);
 
-  // Film distances are capped at the FHD unit even when media fills a taller viewport.
-  // Without the opening scene (scroll 1.6) every later scene starts that much earlier.
-  const filmShift = expectedScenes === 5 ? 0 : 1.6;
-  const reportSceneIndex = expectedScenes === 5 ? 3 : 2;
-  await scrollFilm(page, 5.15 - filmShift);
-  await page.waitForFunction(
-    () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
-  );
-  await settle(page);
-  const report = await page.evaluate((sceneIndex) => {
-    const scene = document.querySelectorAll(".sw-scene")[sceneIndex];
-    const media = scene?.querySelector(".sw-scene__video, .sw-scene__still");
-    const copy = document.querySelector('.sw-copy[data-sw-active="true"]');
-    const rect = media?.getBoundingClientRect();
-    const copyRect = copy?.getBoundingClientRect();
-    return {
-      inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[data-sw-active="false"] :is(a[href], button):not([tabindex="-1"])').length,
-      cardWidth: rect?.width ?? 0,
-      cardRadius: media ? Number.parseFloat(getComputedStyle(media).borderTopLeftRadius) : 0,
-      overlapsCopy: Boolean(rect && copyRect && rect.left < copyRect.right - 1 && rect.right > copyRect.left + 1 &&
-        rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1),
-      stageFixed: getComputedStyle(document.querySelector(".sw-stage")).position === "fixed",
-      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
-    };
-  }, reportSceneIndex);
-  assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
-  assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
-  assert.equal(report.stageFixed, true, `${label}: the film stage must be pinned while it plays`);
-  assert.ok(report.cardRadius >= 20, `${label}: report media must retain rounded card framing (${report.cardRadius}px)`);
-  const configuredCardRatio = viewport.width <= 860 ? 0.92 : viewport.width < 1280 ? 0.48 : 0.54;
-  const cardMaxHeightRatio = viewport.width <= 860 ? 0.46 : 0.82;
-  const expectedCardWidth = Math.min(viewport.width * configuredCardRatio, viewport.height * cardMaxHeightRatio * (16 / 9));
-  assert.ok(
-    Math.abs(report.cardWidth - expectedCardWidth) < 1,
-    `${label}: report card width is ${Math.round(report.cardWidth)}px; expected ${Math.round(expectedCardWidth)}px`
-  );
-  assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
+  // Phones have no film; the step list was checked above.
+  let report = null;
+  if (!isPhone) {
+    // Film distances are capped at the FHD unit even when media fills a taller viewport.
+    await scrollFilm(page, 5.15);
+    await page.waitForFunction(
+      () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "페이지와 분석 결과를 한눈에."
+    );
+    await settle(page);
+    report = await page.evaluate((sceneIndex) => {
+      const scene = document.querySelectorAll(".sw-scene")[sceneIndex];
+      const media = scene?.querySelector(".sw-scene__video, .sw-scene__still");
+      const copy = document.querySelector('.sw-copy[data-sw-active="true"]');
+      const rect = media?.getBoundingClientRect();
+      const copyRect = copy?.getBoundingClientRect();
+      return {
+        inactiveCopyLeakCount: document.querySelectorAll('.sw-copy[data-sw-active="false"] :is(a[href], button):not([tabindex="-1"])').length,
+        cardWidth: rect?.width ?? 0,
+        cardRadius: media ? Number.parseFloat(getComputedStyle(media).borderTopLeftRadius) : 0,
+        overlapsCopy: Boolean(rect && copyRect && rect.left < copyRect.right - 1 && rect.right > copyRect.left + 1 &&
+          rect.top < copyRect.bottom - 1 && rect.bottom > copyRect.top + 1),
+        stageFixed: getComputedStyle(document.querySelector(".sw-stage")).position === "fixed",
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+      };
+    }, 3);
+    assert.equal(report.inactiveCopyLeakCount, 0, `${label}: report transition exposed hidden CTA content`);
+    assert.equal(report.overlapsCopy, false, `${label}: report media overlaps its copy`);
+    assert.equal(report.stageFixed, true, `${label}: the film stage must be pinned while it plays`);
+    assert.ok(report.cardRadius >= 20, `${label}: report media must retain rounded card framing (${report.cardRadius}px)`);
+    const configuredCardRatio = viewport.width <= 860 ? 0.92 : viewport.width < 1280 ? 0.48 : 0.54;
+    const cardMaxHeightRatio = viewport.width <= 860 ? 0.46 : 0.82;
+    const expectedCardWidth = Math.min(viewport.width * configuredCardRatio, viewport.height * cardMaxHeightRatio * (16 / 9));
+    assert.ok(
+      Math.abs(report.cardWidth - expectedCardWidth) < 1,
+      `${label}: report card width is ${Math.round(report.cardWidth)}px; expected ${Math.round(expectedCardWidth)}px`
+    );
+    assert.equal(report.overflow, 0, `${label}: report scene introduced horizontal overflow`);
 
-  await scrollFilm(page, 6.75 - filmShift);
-  await page.waitForFunction(
-    () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
-  );
-  assert.deepEqual(
-    await page.locator('.sw-copy[data-sw-active="true"] .sw-copy__cta a').allTextContents(),
-    ["새 페이지 분석"],
-    `${label}: the final scene must offer only the primary action`
-  );
+    await scrollFilm(page, 6.75);
+    await page.waitForFunction(
+      () => document.querySelector(".sw-copy[data-sw-active=true] .sw-copy__title")?.textContent === "접근성을 한 화면에서"
+    );
+    assert.deepEqual(
+      await page.locator('.sw-copy[data-sw-active="true"] .sw-copy__cta a').allTextContents(),
+      ["새 페이지 분석"],
+      `${label}: the final scene must offer only the primary action`
+    );
+  }
 
   // After the film: the following sections cover the pinned film layers.
   await page.locator(".ua-report").scrollIntoViewIfNeeded();
@@ -532,33 +577,24 @@ async function verifyRefreshedMediaVariants(browser) {
   return results;
 }
 
-async function verifyMobileHeightOnlyResize(browser) {
+async function verifyPhoneStepsBreakpoint(browser) {
+  // Widening a phone past 760px swaps the step list for the film; narrowing it again removes every film layer.
   const context = await browser.newContext({
-    viewport: { width: 390, height: 700 },
+    viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
     reducedMotion: "reduce"
   });
   const page = await context.newPage();
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+  await page.locator(".ua-steps").waitFor();
+  assert.equal(await page.locator(".sw-root, .sw-sky").count(), 0, "phones must not mount the scroll film");
+  await page.setViewportSize({ width: 1024, height: 844 });
   await page.locator('[data-scroll-world-ready="true"]').waitFor();
-  // Finish initial assets/font layout before isolating a height-only resize.
-  await page.waitForLoadState("networkidle");
-  await page.evaluate(() => document.fonts.ready);
+  assert.equal(await page.locator(".ua-steps").count(), 0, "wider screens must show the film instead of the step list");
   await page.setViewportSize({ width: 390, height: 844 });
-  await settle(page);
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await page.waitForFunction(() => {
-    const maxScroll = document.documentElement.scrollHeight - innerHeight;
-    const activeTitle = document.querySelector('.sw-copy[data-sw-active="true"] .sw-copy__title');
-    return Math.abs(scrollY - maxScroll) <= 1 && activeTitle?.textContent === "접근성을 한 화면에서";
-  });
-  assert.equal(await page.locator(".sw-route").isVisible(), false, "mobile resize must not restore the side bar");
-  assert.equal(
-    await page.locator('.sw-copy[data-sw-active="true"] .sw-copy__title').textContent(),
-    "접근성을 한 화면에서",
-    "mobile height-only resize lost the final scene state"
-  );
+  await page.locator(".ua-steps").waitFor();
+  assert.equal(await page.locator(".sw-root, .sw-sky").count(), 0, "returning to a phone width must remove the film layers");
   await context.close();
 }
 
@@ -599,7 +635,7 @@ try {
   for (const viewport of viewports) {
     results.push(await verifyReducedMotionViewport(browser, viewport));
   }
-  await verifyMobileHeightOnlyResize(browser);
+  await verifyPhoneStepsBreakpoint(browser);
   await verifyLookTabs(browser);
   const scenes = await verifyDesktopMotionPath(browser);
   const variants = await verifyRefreshedMediaVariants(browser);
