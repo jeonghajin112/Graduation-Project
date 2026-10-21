@@ -2,6 +2,7 @@ package com.accessibility.platform.livereport;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -11,7 +12,8 @@ import java.nio.charset.StandardCharsets;
 final class LiveReportBridgeAssets {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String STYLES = read("bridge.css");
-    private static final String MODULES = read("locator-resolver.js") + "\n"
+    private static final String MODULES = read("desktop-environment.js") + "\n"
+            + read("locator-resolver.js") + "\n"
             + read("marker-clusters.js") + "\n" + read("popover-view.js") + "\n"
             + read("bridge-runtime.js");
 
@@ -22,7 +24,9 @@ final class LiveReportBridgeAssets {
     static String script(Configuration configuration) {
         try {
             // HTML parsers recognize closing script tags even inside JS strings.
-            String config = JSON.writeValueAsString(configuration)
+            ObjectNode configNode = JSON.valueToTree(configuration);
+            configNode.put("desktopUserAgent", LiveReportRequestHeaders.DESKTOP_USER_AGENT);
+            String config = JSON.writeValueAsString(configNode)
                     .replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
             return "(() => { 'use strict'; const bridgeConfig = " + config + ";\n" + MODULES + "\n})();";
         } catch (JsonProcessingException e) {

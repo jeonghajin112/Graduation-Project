@@ -23,9 +23,15 @@ export const REPLAY_VIEW_SCALE_MIN = 0.01;
 export const REPLAY_VIEW_SCALE_MAX = 1;
 export const REPLAY_VISUAL_WIDTH_MAX = 16_384;
 
+export type ReplayMarkerDensity = "regular" | "compact";
+
 export type ReplayViewportMetrics = {
   scale: number;
   visualWidth: number;
+  /** "compact" draws markers as small dots (a phone's preview). */
+  markerDensity?: ReplayMarkerDensity;
+  /** Below 1 the issue popover is drawn smaller than on desktop (phones). */
+  popoverScale?: number;
 };
 
 // Bounds the live viewer enforces on INIT_ISSUES (bridge-runtime.js). One
@@ -171,6 +177,8 @@ export type DashboardToPageReplayMessage =
       scale: number;
       visualWidth: number;
       topInset?: number;
+      markerDensity?: ReplayMarkerDensity;
+      popoverScale?: number;
     };
 
 export type LocatorConnectionStatus =

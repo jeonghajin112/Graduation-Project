@@ -85,6 +85,16 @@ white-space:nowrap;pointer-events:none}
 border:0;border-radius:999px;background:#ff3b30;color:#fff;display:grid;place-items:center;
 font:700 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;box-shadow:0 1px 3px rgba(16,24,40,.25);
 pointer-events:none}
+/* A phone's small preview: each chip is a dot showing its finding count. The
+   dashboard opens a larger view to read and choose them, so the dots are not
+   interactive here. */
+#ap-live-marker-layer[data-density="compact"] .ap-live-marker{min-width:13px;height:13px;padding:0 3px;gap:0;border-radius:999px;
+background:#d70015;box-shadow:0 0 0 1.5px #fff,0 1px 3px rgba(16,24,40,.35);font:800 8px/1 system-ui,-apple-system,"Segoe UI",sans-serif;
+pointer-events:none}
+#ap-live-marker-layer[data-density="compact"] .ap-live-marker::before{content:attr(data-count);width:auto;height:auto;border-radius:0;
+background:none;box-shadow:none;color:#fff;font:inherit}
+#ap-live-marker-layer[data-density="compact"] :is(.ap-live-marker__icon,.ap-live-marker__count){display:none}
+#ap-live-marker-layer[data-density="compact"] .ap-live-marker--approximate{background:#48484a;border:0}
 .ap-live-popover{all:initial;box-sizing:border-box;position:absolute;z-index:3;width:min(480px,calc(100vw - 24px));
 min-height:0;max-height:min(520px,calc(100vh - 24px));overflow:hidden;border:1px solid rgba(16,24,40,.1);
 border-radius:14px;background:#fff;color:#101828;box-shadow:0 12px 28px rgba(16,24,40,.16);

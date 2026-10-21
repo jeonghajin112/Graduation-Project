@@ -339,6 +339,80 @@ try {
     height: 18,
     label: "시각"
   });
+
+  const sendViewport = (viewport) => page.evaluate((viewport) => window.__sendLiveCommand({
+    source: "accessibility-dashboard",
+    type: "SET_VIEW_SCALE",
+    documentToken: window.__liveEvents.find(event => event?.type === "ACK").documentToken,
+    scale: 1,
+    visualWidth: 900,
+    ...viewport
+  }), viewport);
+  // The bridge pauses the page's own animation frames, so wait on the clock.
+  const nextFrames = () => page.waitForTimeout(150);
+  // A phone's small preview draws every chip as a small dot showing its count.
+  await sendViewport({ markerDensity: "compact" });
+  await frame.locator('#ap-live-marker-layer[data-density="compact"]').waitFor({ state: "attached" });
+  await nextFrames();
+  const readDot = (marker) => {
+    const style = getComputedStyle(marker);
+    const rect = marker.getBoundingClientRect();
+    return {
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      background: style.backgroundColor,
+      pointerEvents: style.pointerEvents,
+      count: getComputedStyle(marker, "::before").content,
+      label: getComputedStyle(marker.querySelector(".ap-live-marker__icon")).display
+    };
+  };
+  assert.deepEqual(await groupedMarker.evaluate(readDot), {
+    width: 13, height: 13, background: "rgb(215, 0, 21)", pointerEvents: "none", count: '"3"', label: "none"
+  }, "compact markers are 13px dots with their finding count");
+  assert.equal((await visualMarker.evaluate(readDot)).count, '"1"', "a single finding's dot shows 1");
+  await sendViewport({});
+  await frame.locator('#ap-live-marker-layer:not([data-density])').waitFor({ state: "attached" });
+  await nextFrames();
+  assert.equal((await visualMarker.evaluate(readDot)).height, 18, "regular density restores the labelled chip");
+
+  // A narrow or panned frame keeps the popover inside the part on screen.
+  await sendViewport({ visualWidth: 320, visibleLeft: 100 });
+  await nextFrames();
+  await groupedMarker.hover();
+  const narrowPopover = frame.locator(".ap-live-popover");
+  await narrowPopover.waitFor({ state: "visible" });
+  await nextFrames();
+  const narrowRect = await narrowPopover.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, width: rect.width };
+  });
+  assert.ok(narrowRect.width <= 296.5, `popover must fit a 320px frame (${narrowRect.width}px)`);
+  assert.ok(narrowRect.left >= 111.5 && narrowRect.right <= 408.5,
+    `popover must stay in the visible 100-420px part (${narrowRect.left}-${narrowRect.right})`);
+  await page.mouse.move(890, 750);
+  await narrowPopover.waitFor({ state: "hidden" });
+
+  // Phones draw the popover smaller than its desktop size.
+  const popoverWidthAt = async (viewport) => {
+    await sendViewport(viewport);
+    await nextFrames();
+    await groupedMarker.hover();
+    await narrowPopover.waitFor({ state: "visible" });
+    await nextFrames();
+    const width = await narrowPopover.evaluate((element) => element.getBoundingClientRect().width);
+    await page.mouse.move(890, 750);
+    await narrowPopover.waitFor({ state: "hidden" });
+    return width;
+  };
+  const desktopWidth = await popoverWidthAt({});
+  const phoneWidth = await popoverWidthAt({ popoverScale: 0.85 });
+  assert.ok(Math.abs(phoneWidth - desktopWidth * 0.85) <= 2,
+    `popoverScale shrinks the popover (${desktopWidth}px -> ${phoneWidth}px)`);
+  // On a narrow phone frame the width cap shrinks with it, keeping proportions.
+  const narrowPhoneWidth = await popoverWidthAt({ visualWidth: 320, popoverScale: 0.85 });
+  assert.ok(Math.abs(narrowPhoneWidth - (320 - 24) * 0.85) <= 2,
+    `a phone popover is 85% of the frame-width popover (${narrowPhoneWidth}px)`);
+  await sendViewport({});
   assert.equal(await frame.locator(".ap-live-marker:visible").filter({ hasText: "텍스트" }).count(), 1, "text-difficulty issues must be labelled 텍스트");
   // 같은 자리를 나눠 쓰는 중첩 문단(108)과 링크(109)는 클러스터 칩 하나로 묶인다
   const clusterMarker = frame.locator(".ap-live-marker--cluster:visible");

@@ -37,6 +37,7 @@ import {
   toPageReplayIssue,
   type DashboardToPageReplayMessage,
   type PageReplayToDashboardMessage,
+  type ReplayMarkerDensity,
   type ReplayViewportMetrics
 } from "./page-replay-protocol";
 import type { LocatorReport, RecentIssueRow } from "./types";
@@ -154,6 +155,8 @@ export function usePageEvidenceConnection({
     scale: number;
     visualWidth: number;
     topInset: number;
+    markerDensity: ReplayMarkerDensity;
+    popoverScale: number;
   } | null>(null);
   const replayOriginSelectionRef = useRef<{ issueId: number | null } | null>(null);
   const selectedIssueStateRef = useRef(selectedIssueId);
@@ -581,12 +584,16 @@ export function usePageEvidenceConnection({
     }
 
     const topInset = isDocumentScrolled ? Math.min(128, chromeHeight) : 0;
+    const markerDensity = replayViewportMetrics.markerDensity ?? "regular";
+    const popoverScale = replayViewportMetrics.popoverScale ?? 1;
     const previous = sentReplayViewportRef.current;
     if (
       previous?.documentToken === documentToken
       && Math.abs(previous.scale - replayViewportMetrics.scale) < 0.001
       && Math.abs(previous.visualWidth - replayViewportMetrics.visualWidth) < 0.5
       && Math.abs(previous.topInset - topInset) < 0.5
+      && previous.markerDensity === markerDensity
+      && previous.popoverScale === popoverScale
     ) {
       return;
     }
@@ -597,13 +604,17 @@ export function usePageEvidenceConnection({
       documentToken,
       scale: replayViewportMetrics.scale,
       visualWidth: replayViewportMetrics.visualWidth,
-      topInset
+      topInset,
+      ...(markerDensity === "compact" ? { markerDensity } : {}),
+      ...(popoverScale < 1 ? { popoverScale } : {})
     });
     sentReplayViewportRef.current = {
       documentToken,
       scale: replayViewportMetrics.scale,
       visualWidth: replayViewportMetrics.visualWidth,
-      topInset
+      topInset,
+      markerDensity,
+      popoverScale
     };
   }
 
@@ -952,6 +963,8 @@ export function usePageEvidenceConnection({
     replayReadyEpoch,
     replayViewportMetrics.scale,
     replayViewportMetrics.visualWidth,
+    replayViewportMetrics.markerDensity,
+    replayViewportMetrics.popoverScale,
     chromeHeight,
     isDocumentScrolled
   ]);

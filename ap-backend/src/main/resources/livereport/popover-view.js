@@ -71,22 +71,32 @@ function createLivePopoverView({document, popover, popoverTags, popoverDetail, c
     documentLeft = globalThis.scrollX,
     documentTop = globalThis.scrollY
   ) => {
-    const {openEntry, openTargetEntry, viewScale, viewTopInset = 0} = getState();
+    const {openEntry, openTargetEntry, viewScale, viewTopInset = 0, viewVisibleLeft = 0, viewVisualWidth = 0,
+      viewPopoverScale = 1} = getState();
     if (popover.hidden || !openEntry) return;
+    // A narrow dashboard frame (a phone) must not get a popover wider than it.
+    // Popover pixels are screen pixels times viewPopoverScale, so a smaller
+    // popover keeps its proportions: narrower as well as smaller text.
+    const maxWidth = viewVisualWidth > 0 ? `${Math.max(240, viewVisualWidth - 24)}px` : '';
+    if (popover.style.maxWidth !== maxWidth) popover.style.maxWidth = maxWidth;
     // 팝오버는 사용자가 가리킨 칩에 붙인다. 요소 전체를 기준으로 하면 큰 요소일수록
     // 칩에서 멀어지고, 묶인 이슈를 넘길 때마다 기준 요소가 바뀌어 팝오버가 움직인다.
     // 칩이 숨겨진 경우(마커 끄기 등)에만 대상 요소를 기준으로 한다.
     const markerVisible = openEntry.marker?.isConnected && !openEntry.marker.hidden;
     const targetEntry = openTargetEntry?.element?.isConnected ? openTargetEntry : openEntry;
     const anchor = (markerVisible ? openEntry.marker : targetEntry.element).getBoundingClientRect();
-    const scale = 1 / viewScale;
+    const scale = viewPopoverScale / viewScale;
     applyPopoverScale(scale);
     const width = popover.offsetWidth * scale;
     const height = popover.offsetHeight * scale;
     const gap = 8 * scale;
-    const viewportLeft = 12;
+    // Zoomed past the frame width, only [viewVisibleLeft, visibleRight] shows.
+    const visibleRight = viewVisualWidth > 0
+      ? Math.min(innerWidth, viewVisibleLeft + viewVisualWidth / viewScale)
+      : innerWidth;
+    const viewportLeft = Math.min(viewVisibleLeft, innerWidth) + 12;
     const viewportTop = 12 + viewTopInset / viewScale;
-    const viewportRight = innerWidth - 12;
+    const viewportRight = visibleRight - 12;
     const viewportBottom = innerHeight - 12;
     const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
     const spaceBelow = viewportBottom - anchor.bottom - gap;

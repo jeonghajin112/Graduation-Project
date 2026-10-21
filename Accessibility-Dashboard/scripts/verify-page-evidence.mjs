@@ -2463,6 +2463,26 @@ async function verifyScaledReplayOverlays(page, evidence, frame) {
   assert.ok(Math.abs(scaleMessage.scale - frameMetrics.scale) <= 0.001);
   assert.ok(Math.abs(scaleMessage.visualWidth - frameMetrics.visualWidth) <= 0.5);
 
+  // Phones show the page small with dot markers and no interaction of its
+  // own: the whole preview is one button that opens the larger view.
+  const lastViewScale = async () => (await getReplayMessages(frame)).filter((message) => message.type === "SET_VIEW_SCALE").at(-1);
+  assert.equal((await lastViewScale()).markerDensity, "compact", "the phone preview asks for compact markers");
+  assert.equal(await frameElement.evaluate((element) => element.inert), true, "the small phone preview is inert");
+  const expand = evidence.getByRole("button", { name: "크게 보기", exact: true });
+  await expand.click();
+  const viewer = page.getByRole("dialog", { name: /./ });
+  await viewer.waitFor({ state: "visible" });
+  // The page keeps a stable scrollbar gutter; the view covers the rest.
+  const screen = await page.evaluate(() => ({ width: document.documentElement.clientWidth, height: innerHeight }));
+  const viewerBox = await viewer.boundingBox();
+  assert.ok(viewerBox && Math.abs(viewerBox.x) <= 1 && Math.abs(viewerBox.y) <= 1
+    && Math.abs(viewerBox.width - screen.width) <= 1 && Math.abs(viewerBox.height - screen.height) <= 1,
+    `the larger view covers the screen: ${JSON.stringify({ viewerBox, screen })}`);
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "크게 보기 닫기");
+  await page.waitForFunction(() => document.querySelector("iframe.site-page-evidence-replay-frame")?.inert === false);
+  await page.waitForTimeout(150);
+  assert.equal((await lastViewScale()).markerDensity, undefined, "the larger view uses regular markers");
+
   const marker = frame.locator('.replay-marker[data-issue-id="9001"]');
   const markerBox = await marker.boundingBox();
   assert.ok(markerBox, "the scaled replay marker must remain visible");
@@ -2483,6 +2503,17 @@ async function verifyScaledReplayOverlays(page, evidence, frame) {
   );
   assert.ok(tooltipBox.width <= previewBox.width - 20, "the scaled tooltip must fit the visual viewport");
   await page.mouse.move(0, 0);
+
+  // The view fits the page to the screen; the phone's pinch zoom enlarges it,
+  // so there are no zoom buttons of its own.
+  assert.equal(await viewer.getByRole("button", { name: /^(확대|축소|화면에 맞춤)$/ }).count(), 0,
+    "the larger view has no zoom buttons");
+
+  await page.keyboard.press("Escape");
+  await viewer.waitFor({ state: "detached" });
+  await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "크게 보기");
+  await page.waitForTimeout(150);
+  assert.equal((await lastViewScale()).markerDensity, "compact", "closing returns to the compact preview");
 }
 
 /** Waits until every group has finished sliding open or folding away. */

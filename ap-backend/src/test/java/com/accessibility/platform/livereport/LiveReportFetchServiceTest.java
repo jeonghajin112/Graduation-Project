@@ -292,7 +292,7 @@ class LiveReportFetchServiceTest {
                 new LiveReportRequestHeaders(
                         "text/plain, */*;q=0.1",
                         "fr-FR,fr;q=0.9",
-                        "Mozilla/5.0 Browser Under Test"
+                        "Mozilla/5.0 (Linux; Android 15) Chrome/146.0.0.0 Mobile Safari/537.36"
                 )
         );
 
@@ -305,7 +305,8 @@ class LiveReportFetchServiceTest {
         assertThat(request.getValue().headers().firstValue("Accept-Language"))
                 .contains("fr-FR,fr;q=0.9");
         assertThat(request.getValue().headers().firstValue("User-Agent"))
-                .contains("Mozilla/5.0 Browser Under Test");
+                .contains(LiveReportRequestHeaders.DESKTOP_USER_AGENT);
+        assertThat(request.getValue().headers().firstValue("Sec-CH-UA-Mobile")).isEmpty();
         assertThat(addresses.getValue()).singleElement().satisfies(address ->
                 assertThat(address.getHostAddress()).isEqualTo("93.184.216.34")
         );

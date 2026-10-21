@@ -49,6 +49,8 @@ export function shouldAwaitLiveDocumentHealthAfterFrameLoad({
 // Keep this in sync with the viewer document's root scrollbar width. It is
 // part of the logical iframe width before the dashboard applies its fit scale.
 export const REPLAY_SCROLLBAR_GUTTER_PX = 10;
+// Same desktop viewport as the analyzer; keep it even before metadata arrives.
+export const DESKTOP_REPLAY_VIEWPORT_WIDTH = 1280;
 
 export function getReplaySourceWidth(
   captureMetadata: Pick<
@@ -57,13 +59,17 @@ export function getReplaySourceWidth(
   > | null,
   frameKind: EvidenceFrameKind
 ): number {
-  if (captureMetadata === null || frameKind === null) {
+  if (frameKind === null) {
     return 0;
+  }
+  if (captureMetadata === null) {
+    return frameKind === "live" ? DESKTOP_REPLAY_VIEWPORT_WIDTH + REPLAY_SCROLLBAR_GUTTER_PX : 0;
   }
 
   const pageWidth = Math.max(
     captureMetadata.viewportWidthCssPx,
-    captureMetadata.pageWidthCssPx
+    captureMetadata.pageWidthCssPx,
+    frameKind === "live" ? DESKTOP_REPLAY_VIEWPORT_WIDTH : 0
   );
   return pageWidth + REPLAY_SCROLLBAR_GUTTER_PX;
 }

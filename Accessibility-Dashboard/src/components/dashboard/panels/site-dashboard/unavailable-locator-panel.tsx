@@ -1,3 +1,4 @@
+import { Minus, Plus } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import type { SeverityLevel } from "@/types/accessibility-domain";
@@ -254,7 +255,9 @@ function LocatorGroup({ group, expanded, visibleCount, entryById, mode, onToggle
           {group.codeLabel && <span className="site-unavailable-locator-panel__code">{group.codeLabel}</span>}
           <span className="site-unavailable-locator-panel__group-name">{group.title}</span>
           <span className="site-unavailable-locator-panel__group-count">{group.rows.length.toLocaleString("ko-KR")}건</span>
-          <span className="site-unavailable-locator-panel__plus" aria-hidden="true">{expanded ? "−" : "+"}</span>
+          <span className="site-unavailable-locator-panel__plus" aria-hidden="true">
+            {expanded ? <Minus size={14} /> : <Plus size={14} />}
+          </span>
         </button>
       </h4>
       <div ref={bodyRef} id={listId} hidden={!mounted} data-state={expanded ? "open" : "closing"}

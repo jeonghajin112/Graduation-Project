@@ -1,8 +1,10 @@
-import { MonitorOff, RefreshCw } from "lucide-react";
-import { useLayoutEffect, useRef, useState } from "react";
+import { Maximize2, MonitorOff, RefreshCw, X } from "lucide-react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { EvaluationCaptureMetadata, LiveReportSession } from "@/types/accessibility-domain";
 
+import { useIsMobileDashboard } from "../../dashboard-surface-hooks";
+import { useDialogAccessibility } from "../../shared/use-dialog-accessibility";
 import { formatIssueCodeLabel } from "./constants";
 import { PageFavicon } from "./page-favicon";
 import { getReplaySourceWidth, resolveReplayCaptureMetadataStatus, type EvidenceFrameKind } from "./evidence-source";
@@ -46,6 +48,8 @@ type RenderedPageEvidenceCardProps = {
 const frameZoomSupported = typeof navigator !== "undefined" && !navigator.webdriver
   && ((navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } })
     .userAgentData?.brands?.some(({ brand }) => brand === "Chromium") ?? false);
+
+const PHONE_POPOVER_SCALE = 0.85;
 
 type PageEvidenceLoadingBarStyle = CSSProperties & {
   "--site-page-evidence-loading-progress": number;
@@ -151,6 +155,19 @@ export function RenderedPageEvidenceCard({
     visualWidth: 0
   });
   const previewRef = useRef<HTMLDivElement>(null);
+  // Phones show the desktop page small, with dots for markers; "크게 보기"
+  // opens it over the whole screen, where the phone's own pinch zoom works.
+  const isMobileDashboard = useIsMobileDashboard();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const expandButtonRef = useRef<HTMLButtonElement>(null);
+  const closeViewerButtonRef = useRef<HTMLButtonElement>(null);
+  const sentViewportMetrics = useMemo<ReplayViewportMetrics>(() => ({
+    ...replayViewportMetrics,
+    markerDensity: isMobileDashboard && !isExpanded ? "compact" : "regular",
+    // A desktop-sized issue popover covers most of a phone screen. The larger
+    // view stays open on a phone turned sideways, past the phone breakpoint.
+    popoverScale: isMobileDashboard || isExpanded ? PHONE_POPOVER_SCALE : 1
+  }), [isExpanded, isMobileDashboard, replayViewportMetrics]);
   const {
     iframeRef, frameIdentity, frameRevision, frameRuntimeUrl,
     activeFrameKind, effectiveLoadState, replayConnectionState, replayLoadingPhase,
@@ -161,7 +178,9 @@ export function RenderedPageEvidenceCard({
     evaluationRequestId, liveSession, liveSessionLoadState, onRetryLiveSession,
     onLocatorReportChange, onSelectIssue, previewRuntimeUrl, rows,
     deviceScaleFactor: captureMetadata?.deviceScaleFactor ?? null, selectedIssueId,
-    selectedIssueFocusRequestId, replayViewportMetrics, chromeHeight,
+    selectedIssueFocusRequestId, replayViewportMetrics: sentViewportMetrics,
+    // The larger view has no page header over the page's top edge.
+    chromeHeight: isExpanded ? 0 : chromeHeight,
     captureMetadataStatus: resolveReplayCaptureMetadataStatus(captureMetadataLoadState, captureMetadata !== null)
   });
   const headerTitle = documentTitle === null ? "" : documentTitle || "제목 없음";
@@ -176,15 +195,43 @@ export function RenderedPageEvidenceCard({
     || (effectiveLoadState === "ready" && showsReplayLoadingOverlay);
   const replaySourceWidth = getReplaySourceWidth(captureMetadata, activeFrameKind);
   const replayScale = replayViewportMetrics.scale;
-  const replayFrameStyle: CSSProperties | undefined = activeFrameKind !== null && captureMetadata && replayScale < 0.999
+  const hasReplayFrame = effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null;
+  const viewerOpen = isExpanded && hasReplayFrame;
+  const showsExpandButton = isMobileDashboard && hasReplayFrame && replayConnectionState === "ready";
+  const isCompactPreview = isMobileDashboard && !viewerOpen;
+
+  const closeViewer = useCallback(() => setIsExpanded(false), []);
+  const viewerRef = useDialogAccessibility<HTMLDivElement>({
+    isOpen: viewerOpen,
+    onClose: closeViewer,
+    initialFocusRef: closeViewerButtonRef,
+    returnFocusRef: expandButtonRef
+  });
+  // The frame can go away (a new analysis, an error) while the view is open.
+  useLayoutEffect(() => {
+    if (isExpanded && !hasReplayFrame) closeViewer();
+  }, [closeViewer, hasReplayFrame, isExpanded]);
+
+  // The small phone preview only shows where the findings are; reading and
+  // choosing them happens in the larger view, so the page itself is inert.
+  useLayoutEffect(() => {
+    const frame = iframeRef.current;
+    if (frame) frame.inert = isCompactPreview;
+  }, [iframeRef, isCompactPreview, frameIdentity, frameRevision, hasReplayFrame]);
+
+  // Set the desktop width on the very first frame load, before page scripts
+  // can choose a mobile layout. Scale only its presentation in the dashboard.
+  // A preview wider than that width is filled at full size instead.
+  const replayFrameWidth = `max(${replaySourceWidth}px, 100%)`;
+  const replayFrameStyle: CSSProperties | undefined = activeFrameKind !== null && replaySourceWidth > 0
     ? frameZoomSupported
       ? {
-          width: `${replaySourceWidth}px`,
+          width: replayFrameWidth,
           height: "100%",
           zoom: String(replayScale)
         }
       : {
-          width: `${replaySourceWidth}px`,
+          width: replayFrameWidth,
           height: `${100 / replayScale}%`,
           transform: `scale(${replayScale})`,
           transformOrigin: "top left"
@@ -298,9 +345,27 @@ export function RenderedPageEvidenceCard({
           </div>
         )}
 
-        {effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null && (
+        {hasReplayFrame && (
           <div className="site-page-evidence-grid">
-            <div className="site-page-evidence-replay-column">
+            <div
+              ref={viewerRef}
+              className="site-page-evidence-replay-column"
+              data-expanded={viewerOpen || undefined}
+              role={viewerOpen ? "dialog" : undefined}
+              aria-modal={viewerOpen || undefined}
+              aria-labelledby={viewerOpen ? "site-page-evidence-viewer-title" : undefined}
+            >
+              {viewerOpen && (
+                <div className="site-page-evidence-viewer-bar">
+                  <button ref={closeViewerButtonRef} type="button" className="site-page-evidence-viewer-button"
+                    aria-label="크게 보기 닫기" onClick={closeViewer}>
+                    <X aria-hidden="true" size={22} strokeWidth={2} />
+                  </button>
+                  <div className="site-page-evidence-viewer-heading">
+                    <h2 id="site-page-evidence-viewer-title">{headerTitle || targetName}</h2>
+                  </div>
+                </div>
+              )}
               <div
                 ref={previewRef}
                 className="site-page-evidence-preview"
@@ -312,11 +377,12 @@ export function RenderedPageEvidenceCard({
                 data-unavailable-locator-count={unavailableLocatorCount}
                 data-hidden-state-locator-count={recoverableHiddenLocatorCount}
                 data-focus-request-id={selectedIssueFocusRequestId}
+                data-marker-density={sentViewportMetrics.markerDensity}
               >
                 {activeFrameKind === "live" && (
                   <button type="button" className="site-report-focus-guard"
                     data-live-report-focus-guard="forward"
-                    tabIndex={replayConnectionState === "ready" ? 0 : -1}
+                    tabIndex={replayConnectionState === "ready" && !isCompactPreview ? 0 : -1}
                     onFocus={event => enterReportFocus("forward", event.currentTarget)}
                     onClick={() => enterReportFocus("forward")}>이슈 마커로 이동</button>
                 )}
@@ -343,9 +409,19 @@ export function RenderedPageEvidenceCard({
                 {activeFrameKind === "live" && (
                   <button type="button" className="site-report-focus-guard"
                     data-live-report-focus-guard="backward"
-                    tabIndex={replayConnectionState === "ready" ? 0 : -1}
+                    tabIndex={replayConnectionState === "ready" && !isCompactPreview ? 0 : -1}
                     onFocus={event => enterReportFocus("backward", event.currentTarget)}
                     onClick={() => enterReportFocus("backward")}>이슈 마커로 이동</button>
+                )}
+
+                {showsExpandButton && (
+                  <button ref={expandButtonRef} type="button" className="site-page-evidence-expand"
+                    hidden={viewerOpen} onClick={() => setIsExpanded(true)}>
+                    <span className="site-page-evidence-expand__label">
+                      <Maximize2 aria-hidden="true" size={18} strokeWidth={2} />
+                      크게 보기
+                    </span>
+                  </button>
                 )}
 
                 {showsReplayLoadingOverlay && (

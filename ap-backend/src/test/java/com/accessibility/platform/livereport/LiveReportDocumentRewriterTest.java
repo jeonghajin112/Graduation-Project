@@ -43,6 +43,20 @@ class LiveReportDocumentRewriterTest {
     );
 
     @Test
+    void installsDesktopIdentityBeforeUpstreamDeviceDetectionScripts() throws Exception {
+        String html = "<html><head><script id='device-detection'>window.device = navigator.userAgent</script>"
+                + "</head><body>Page</body></html>";
+        var resource = new LiveReportFetchService.FetchedResource(
+                URI.create("https://example.com/"), "text/html", html.getBytes(StandardCharsets.UTF_8));
+        Document document = Jsoup.parse(new String(rewriter.rewriteHtml(resource, session), StandardCharsets.UTF_8));
+        Element firstScript = document.selectFirst("script");
+        assertThat(firstScript).isNotNull();
+        assertThat(firstScript.attr("data-ap-live-bridge")).isEqualTo("true");
+        assertThat(firstScript.data()).contains("\"desktopUserAgent\":\"" + LiveReportRequestHeaders.DESKTOP_USER_AGENT + "\"");
+        assertThat(document.select("script").get(1).id()).isEqualTo("device-detection");
+    }
+
+    @Test
     void rewritesRelativeAndRootResourcesAndInjectsAuthenticatedMarkerBridge() {
         String html = """
                 <!doctype html><html><head>

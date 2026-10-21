@@ -4,7 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import java.nio.charset.StandardCharsets;
 
-/** Browser request semantics that are safe to reproduce upstream. */
+/** Safe request semantics, with a desktop identity matching the analyzed page. */
 public record LiveReportRequestHeaders(
         String accept,
         String acceptLanguage,
@@ -13,16 +13,18 @@ public record LiveReportRequestHeaders(
 ) {
     private static final int MAX_ACCEPT_BYTES = 1024;
     private static final int MAX_ACCEPT_LANGUAGE_BYTES = 512;
-    private static final int MAX_USER_AGENT_BYTES = 512;
     private static final String DEFAULT_ACCEPT = "*/*";
     private static final String DEFAULT_ACCEPT_LANGUAGE = "ko-KR,ko;q=0.9,en;q=0.8";
-    private static final String DEFAULT_USER_AGENT =
-            "Mozilla/5.0 (compatible; AccessibilityDashboardLiveReport/1.0)";
+    static final String DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 
     public LiveReportRequestHeaders {
         accept = sanitize(accept, MAX_ACCEPT_BYTES, DEFAULT_ACCEPT);
         acceptLanguage = sanitize(acceptLanguage, MAX_ACCEPT_LANGUAGE_BYTES, DEFAULT_ACCEPT_LANGUAGE);
-        userAgent = sanitize(userAgent, MAX_USER_AGENT_BYTES, DEFAULT_USER_AGENT);
+        // Results were collected on desktop. A phone UA can redirect the viewer
+        // to another document with different elements and invalidate its markers.
+        userAgent = DESKTOP_USER_AGENT;
         upstreamOrigin = sanitizeOptional(upstreamOrigin, 2048);
     }
 
@@ -34,7 +36,7 @@ public record LiveReportRequestHeaders(
         return new LiveReportRequestHeaders(
                 request.getHeader("Accept"),
                 request.getHeader("Accept-Language"),
-                request.getHeader("User-Agent"),
+                DESKTOP_USER_AGENT,
                 null
         );
     }

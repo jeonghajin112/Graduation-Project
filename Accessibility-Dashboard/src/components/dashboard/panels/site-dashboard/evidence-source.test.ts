@@ -65,8 +65,15 @@ describe("page evidence source selection", () => {
     expect(getReplaySourceWidth(captureMetadata, "live")).toBe(
       1920 + REPLAY_SCROLLBAR_GUTTER_PX
     );
-    expect(getReplaySourceWidth(null, "live")).toBe(0);
+    expect(getReplaySourceWidth(null, "live")).toBe(1280 + REPLAY_SCROLLBAR_GUTTER_PX);
     expect(getReplaySourceWidth(captureMetadata, null)).toBe(0);
+  });
+
+  it("keeps a desktop viewport while metadata is missing or narrower, without changing previews", () => {
+    const phoneCapture = { viewportWidthCssPx: 390, pageWidthCssPx: 390 };
+    expect(getReplaySourceWidth(phoneCapture, "live")).toBe(1280 + REPLAY_SCROLLBAR_GUTTER_PX);
+    expect(getReplaySourceWidth(phoneCapture, "preview")).toBe(390 + REPLAY_SCROLLBAR_GUTTER_PX);
+    expect(getReplaySourceWidth(null, "preview")).toBe(0);
   });
 
   it("keeps the viewport width when the recorded page is not wider", () => {

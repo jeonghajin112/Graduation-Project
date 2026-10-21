@@ -852,7 +852,7 @@ class LiveReportControllerTest {
                         .param("nonce", "test-nonce")
                         .header("Accept", "text/html,application/xhtml+xml")
                         .header("Accept-Language", "fr-FR,fr;q=0.9")
-                        .header("User-Agent", "Mozilla/5.0 Browser Under Test"))
+                        .header("User-Agent", "Mozilla/5.0 (iPhone) Mobile Safari/604.1"))
                 .andExpect(status().isNotFound())
                 .andExpect(content().bytes(body))
                 .andExpect(header().string("Referrer-Policy", "same-origin"));
@@ -863,7 +863,7 @@ class LiveReportControllerTest {
                 isNull(),
                 argThat(headers -> headers.accept().equals("text/html,application/xhtml+xml")
                         && headers.acceptLanguage().equals("fr-FR,fr;q=0.9")
-                        && headers.userAgent().equals("Mozilla/5.0 Browser Under Test"))
+                        && headers.userAgent().equals(LiveReportRequestHeaders.DESKTOP_USER_AGENT))
         );
         verify(sessionService).recordDocumentUri(session, fetched.finalUri());
     }

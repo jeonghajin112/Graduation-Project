@@ -190,6 +190,16 @@
   let viewScale = 1;
   const markerZoomSupported = globalThis.CSS?.supports?.('zoom', '2') === true;
   let viewTopInset = 0;
+  // The dashboard can zoom the page wider than its frame and pan it sideways:
+  // the visible part starts at viewVisibleLeft (page px), viewVisualWidth wide
+  // (screen px). 0 = the whole frame width is visible.
+  let viewVisibleLeft = 0;
+  let viewVisualWidth = 0;
+  // 'compact' (a phone's small preview) draws each chip as a small numbered
+  // dot; the dashboard opens a larger view for reading and choosing them.
+  let markerDensity = 'regular';
+  // Below 1 the popover is drawn that much smaller than its desktop size (phones).
+  let viewPopoverScale = 1;
   const insetAnchors = new Map();
   const insetCandidates = new Set();
   const insetCandidateRoots = new Set();
@@ -384,7 +394,13 @@
         && numberIsFinite(payload.scale) && payload.scale > 0 && payload.scale <= 1
         && numberIsFinite(payload.visualWidth) && payload.visualWidth > 0 && payload.visualWidth <= 16384
         && (payload.topInset === undefined || (numberIsFinite(payload.topInset)
-          && payload.topInset >= 0 && payload.topInset <= 128));
+          && payload.topInset >= 0 && payload.topInset <= 128))
+        && (payload.visibleLeft === undefined || (numberIsFinite(payload.visibleLeft)
+          && payload.visibleLeft >= 0 && payload.visibleLeft <= 100000))
+        && (payload.markerDensity === undefined
+          || payload.markerDensity === 'regular' || payload.markerDensity === 'compact')
+        && (payload.popoverScale === undefined || (numberIsFinite(payload.popoverScale)
+          && payload.popoverScale >= 0.5 && payload.popoverScale <= 1));
     }
     if (payload.type !== 'INIT_ISSUES'
         || !arrayIsArray(payload.issues) || payload.issues.length > 10000
@@ -2095,7 +2111,7 @@ const scheduleClosePopover = () => {
 };
 let openSelected = false;
 let openTargetEntry = null;
-  const {renderDetailContent, sizePopoverForCluster, positionPopover:placePopoverBesideChip, movePopoverTo} = createLivePopoverView({document, popover, popoverTags, popoverDetail, createSeverityBadge, createCodeBadge, textValue, clusterIssuesFor, presentationNoteFor, getState: () => ({openEntry, openTargetEntry, viewScale, viewTopInset})});
+  const {renderDetailContent, sizePopoverForCluster, positionPopover:placePopoverBesideChip, movePopoverTo} = createLivePopoverView({document, popover, popoverTags, popoverDetail, createSeverityBadge, createCodeBadge, textValue, clusterIssuesFor, presentationNoteFor, getState: () => ({openEntry, openTargetEntry, viewScale, viewTopInset, viewVisibleLeft, viewVisualWidth, viewPopoverScale})});
 // 팝오버가 문제 위치를 덮으면 어디가 문제인지 안 보인다. 칩 옆 자리가 칩이나 칩에
 // 묶인 요소(넘겨 볼 이슈의 하이라이트 자리)를 가리면, 가리지 않는 자리로 옮긴다.
 // 묶인 요소 전체를 피해야 < > 로 넘길 때도 팝오버가 제자리에 있다.
@@ -2123,9 +2139,13 @@ const positionPopover = (documentLeft = globalThis.scrollX, documentTop = global
     * Math.max(0, Math.min(top + height, rect.bottom) - Math.max(top, rect.top)), 0);
   const currentOverlap = overlapAt(current.left, current.top);
   if (currentOverlap === 0) return;
-  const viewportLeft = 12;
+  // The same visible part as popover-view.js: a zoomed, panned frame shows less.
+  const visibleRight = viewVisualWidth > 0
+    ? Math.min(innerWidth, viewVisibleLeft + viewVisualWidth / viewScale)
+    : innerWidth;
+  const viewportLeft = Math.min(viewVisibleLeft, innerWidth) + 12;
   const viewportTop = 12 + viewTopInset / viewScale;
-  const viewportRight = innerWidth - 12;
+  const viewportRight = visibleRight - 12;
   const viewportBottom = innerHeight - 12;
   const clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
   const anchor = avoided[0];
@@ -3164,6 +3184,9 @@ const targetVisibleInViewport = (element, rect) => (
     } else if (count) {
       count.remove();
     }
+    // The compact dot shows this count (bridge.css), single findings included.
+    const issueCount = String(issues.length);
+    if (marker.dataset.count !== issueCount) marker.dataset.count = issueCount;
     const elementCount = 1 + (entry.clusterMembers?.size || 0);
     marker.setAttribute('aria-label', issues.length > 1
       ? (clustered
@@ -3625,7 +3648,19 @@ const resolveIssueSnapshot = (issueIds = null) => {
     }
     if (data.type === 'SET_VIEW_SCALE' && data.documentToken === documentToken
         && numberIsFinite(data.scale) && data.scale > 0 && data.scale <= 1) {
-      if (viewScale !== data.scale) {
+      const nextDensity = data.markerDensity === 'compact' ? 'compact' : 'regular';
+      const densityChanged = nextDensity !== markerDensity;
+      if (densityChanged) {
+        markerDensity = nextDensity;
+        if (markerDensity === 'compact') {
+          layer.dataset.density = 'compact';
+          closePopover();
+        } else delete layer.dataset.density;
+      }
+      viewVisualWidth = data.visualWidth;
+      viewPopoverScale = data.popoverScale ?? 1;
+      viewVisibleLeft = data.visibleLeft ?? 0;
+      if (viewScale !== data.scale || densityChanged) {
         viewScale = data.scale;
         insetStylesDirty = true;
         marked.forEach(entry => {

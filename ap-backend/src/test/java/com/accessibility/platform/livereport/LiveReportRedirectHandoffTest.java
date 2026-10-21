@@ -105,10 +105,11 @@ class LiveReportRedirectHandoffTest {
 
     @Test
     void contextChangesAndExplicitReloadsDoNotConsumeTheStoredResponse() throws Exception {
+        // Client User-Agent no longer varies the upstream response: all viewer
+        // requests use the same desktop identity, including redirect follow-ups.
         for (String[] change : List.of(
                 new String[]{"Accept", "text/plain"},
                 new String[]{"Accept-Language", "fr-FR"},
-                new String[]{"User-Agent", "different agent"},
                 new String[]{"Sec-Fetch-Dest", "image"},
                 new String[]{"Referer", "https://different.example/"},
                 new String[]{"Cache-Control", "no-cache"},
