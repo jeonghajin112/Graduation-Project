@@ -16,6 +16,20 @@ const SiteDashboardPanel = lazy(() =>
   import("./panels/site-dashboard-panel").then((module) => ({ default: module.SiteDashboardPanel }))
 );
 
+function getRouteSelection(dashboard: DashboardView) {
+  const project = dashboard.menu === "projects" ? dashboard.selectedOrganizationModel : null;
+  const page = project ? dashboard.selectedEvaluationTargetModel : null;
+  return { project, page };
+}
+
+function getRouteData(data: DashboardView["dashboardData"]) {
+  return {
+    evaluationRequests: data?.evaluationRequests ?? [],
+    scoreResults: data?.scoreResults ?? [],
+    resultSummaries: data?.resultSummaries ?? []
+  };
+}
+
 /** The panel of the current route: quick analysis, a project, or one of its pages. */
 export function DashboardRoutePanels({
   dashboard,
@@ -29,10 +43,8 @@ export function DashboardRoutePanels({
   routeKey: string;
   previewEvidenceByTargetId?: ReadonlyMap<number, SiteDashboardPreviewEvidence>;
 }) {
-  const project = dashboard.menu === "projects" ? dashboard.selectedOrganizationModel : null;
-  const page = project ? dashboard.selectedEvaluationTargetModel : null;
-  const evaluationRequests = dashboard.dashboardData?.evaluationRequests ?? [];
-  const scoreResults = dashboard.dashboardData?.scoreResults ?? [];
+  const { project, page } = getRouteSelection(dashboard);
+  const { evaluationRequests, scoreResults, resultSummaries } = getRouteData(dashboard.dashboardData);
 
   return (
     <ErrorBoundary resetKey={routeKey} fallback={RoutePanelErrorFallback}>
@@ -51,7 +63,7 @@ export function DashboardRoutePanels({
             onAnalysisAccepted={actions?.handleAnalysisAccepted}
             evaluationTarget={page}
             evaluationRequests={evaluationRequests}
-            resultSummaries={dashboard.dashboardData?.resultSummaries ?? []}
+            resultSummaries={resultSummaries}
             scoreResults={scoreResults}
             previewEvidence={previewEvidenceByTargetId?.get(page.id)}
           />

@@ -30,23 +30,27 @@ export async function runMutationRequestWithDeadline<T>({
 
   try {
     const result = await operation(deadline.signal);
-    if (signal?.aborted) {
-      throw createAbortError();
-    }
-    if (deadline.didTimeout()) {
-      throw new UserFacingError(timeoutMessage);
-    }
+    throwIfCancelledOrTimedOut(signal, deadline, timeoutMessage);
     return result;
   } catch (error) {
-    if (signal?.aborted) {
-      throw createAbortError();
-    }
-    if (deadline.didTimeout()) {
-      throw new UserFacingError(timeoutMessage);
-    }
+    throwIfCancelledOrTimedOut(signal, deadline, timeoutMessage);
     throw error;
   } finally {
     deadline.dispose();
+  }
+}
+
+/** Caller cancellation takes precedence over the request's own deadline. */
+function throwIfCancelledOrTimedOut(
+  signal: AbortSignal | undefined,
+  deadline: ReturnType<typeof createRequestDeadline>,
+  timeoutMessage: string
+): void {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+  if (deadline.didTimeout()) {
+    throw new UserFacingError(timeoutMessage);
   }
 }
 

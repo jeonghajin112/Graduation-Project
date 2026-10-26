@@ -129,8 +129,9 @@ const routeBudgets = {
   projectDetail: 115 * 1024,
   // Raised from 230 KiB for per-target rescan recovery, load coordination and
   // dialog focus fallback (about 3.4 KiB gzip over the previous build), then
-  // from 234 KiB for the phone navigation drawer (about 0.5 KiB gzip).
-  pageDetail: 235 * 1024
+  // from 234 KiB for the phone navigation drawer (about 0.5 KiB gzip), then
+  // from 235 KiB for splitting functions to complexity 10 (about 2 KiB gzip).
+  pageDetail: 236 * 1024
 };
 const routeResults = {};
 

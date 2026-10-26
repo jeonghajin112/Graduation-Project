@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type RefObject
+} from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -31,10 +40,177 @@ import {
   type SiteCreateRecoveryForm
 } from "./site-create-recovery-form";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
-import { useMutationOperation } from "../shared/use-mutation-operation";
+import { useMutationOperation, type MutationOperation } from "../shared/use-mutation-operation";
+import { isDialogFocusLost } from "./dialog-submit-focus";
 
 
 type SiteCreateField = "name" | "url";
+
+function siteInputRejection(
+  name: string,
+  accessUrl: string
+): { field: SiteCreateField; message: string } | null {
+  if (name.length === 0 || accessUrl.length === 0) {
+    return { field: name.length === 0 ? "name" : "url", message: "페이지 이름과 주소를 입력해주세요." };
+  }
+  if (name.length > SITE_NAME_MAX_LENGTH) {
+    return { field: "name", message: `페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.` };
+  }
+  if (!isValidEvaluationTargetAccessUrl(accessUrl)) {
+    return { field: "url", message: "올바른 페이지 주소를 입력해주세요. 예: https://example.com" };
+  }
+  return null;
+}
+
+function readProjectSiteCreateRecovery(projectId: number) {
+  const recovery = readSiteCreateRecovery();
+  return recovery.kind === "valid" && recovery.attempt.projectId === projectId ? recovery : null;
+}
+
+/** False when the stored checkpoint is not this accepted request or cannot be removed. */
+function clearAcceptedSiteCreateRecovery(targetId: number, requestId: number): boolean {
+  const completedRecovery = readSiteCreateRecovery();
+  if (completedRecovery.kind === "blocked") return false;
+  if (completedRecovery.kind !== "valid") return true;
+  const { attempt } = completedRecovery;
+  return (
+    attempt.phase === "poll" &&
+    attempt.targetId === targetId &&
+    attempt.requestId === requestId &&
+    clearSiteCreateRecovery(completedRecovery.rawValue)
+  );
+}
+
+function siteCreateNoticeTitle(resumePoint: AnalysisResumePoint, recoveryPhase: AnalysisRecoveryPhase) {
+  if (resumePoint.kind === "create") return "페이지 추가 실패";
+  if (recoveryPhase === "ready") return "페이지 등록 완료 · 분석 시작 전";
+  return recoveryPhase === "paused"
+    ? "페이지 등록 완료 · 상태 확인 필요"
+    : "페이지 등록 완료 · 분석 실패";
+}
+
+function siteCreateSubmitLabel(
+  isSubmitting: boolean,
+  recoveryPhase: AnalysisRecoveryPhase,
+  resumePoint: AnalysisResumePoint
+) {
+  if (isSubmitting) return "요청 중…";
+  if (recoveryPhase === null || recoveryPhase === "ready") return "분석 시작";
+  if (recoveryPhase === "paused" && resumePoint.kind === "request") return "분석 시작 여부 확인";
+  if (resumePoint.kind === "create") return "다시 시도";
+  return resumePoint.kind === "request" ? "분석 요청 다시 시도" : "상태 확인 다시 시도";
+}
+
+function SiteCreateInput({
+  label,
+  inputRef,
+  value,
+  onChange,
+  isInvalid,
+  error,
+  errorId,
+  inputMode,
+  autoComplete,
+  disabled,
+  maxLength,
+  placeholder
+}: {
+  label: string;
+  inputRef: RefObject<HTMLInputElement>;
+  value: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  isInvalid: boolean;
+  error: string;
+  errorId: string;
+  inputMode?: "url";
+  autoComplete: string;
+  disabled: boolean;
+  maxLength: number;
+  placeholder: string;
+}) {
+  return (
+    <label className="block">
+      <span className="dashboard-modal-label">{label}</span>
+      <Input
+        ref={inputRef}
+        value={value}
+        onChange={onChange}
+        aria-invalid={isInvalid || undefined}
+        aria-describedby={isInvalid && error ? errorId : undefined}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
+        disabled={disabled}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        className="dashboard-modal-input"
+      />
+    </label>
+  );
+}
+
+function SiteCreateFooter({
+  isSubmitting,
+  isRecoveryBlocked,
+  canDiscardRecovery,
+  recoveryPhase,
+  resumePoint,
+  submitButtonRef,
+  onDiscardRecovery,
+  onClose
+}: {
+  isSubmitting: boolean;
+  isRecoveryBlocked: boolean;
+  canDiscardRecovery: boolean;
+  recoveryPhase: AnalysisRecoveryPhase;
+  resumePoint: AnalysisResumePoint;
+  submitButtonRef: RefObject<HTMLButtonElement>;
+  onDiscardRecovery: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      data-site-create-footer
+      className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-3.5 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <span />
+      <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+        {(isRecoveryBlocked || canDiscardRecovery) && (
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={isSubmitting || !canDiscardRecovery}
+            onClick={onDiscardRecovery}
+            className="dashboard-modal-button dashboard-modal-button--danger"
+          >
+            이전 작업 정보 삭제
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={isSubmitting}
+          onClick={onClose}
+          className="dashboard-modal-button"
+        >
+          {resumePoint.kind !== "create" ? "닫기" : "취소"}
+        </Button>
+
+        <Button
+          ref={submitButtonRef}
+          type="submit"
+          size="sm"
+          disabled={isSubmitting || isRecoveryBlocked}
+          aria-busy={isSubmitting}
+          className="dashboard-modal-button dashboard-modal-button--primary"
+        >
+          {siteCreateSubmitLabel(isSubmitting, recoveryPhase, resumePoint)}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export function SiteCreateModal({
   isOpen,
@@ -89,6 +265,7 @@ export function SiteCreateModal({
   });
   const isAnalysisNotice =
     recoveryPhase === "ready" || recoveryPhase === "paused";
+  const isFieldLocked = isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create";
 
   const applyRecoveryForm = useCallback((form: SiteCreateRecoveryForm) => {
     recoveryRawValueRef.current = form.rawValue;
@@ -123,10 +300,7 @@ export function SiteCreateModal({
       return;
     }
     const active = document.activeElement;
-    const focusLost =
-      !(active instanceof HTMLElement) ||
-      !dialog.contains(active) ||
-      (active as HTMLButtonElement | HTMLInputElement).disabled === true;
+    const focusLost = isDialogFocusLost(dialog, active);
     if (isSubmittingSite) {
       if (focusLost) dialog.focus({ preventScroll: true });
       return;
@@ -210,38 +384,38 @@ export function SiteCreateModal({
     discardLockRef.current = false;
   };
 
-  const handleAddSite = async () => {
-    if (isMutationOperationLocked()) {
-      return;
-    }
-    if (isRecoveryBlocked) {
-      setSiteCreateError(SITE_RECOVERY_BLOCKED_MESSAGE);
+  const recoverFromSubmitFailure = (
+    error: unknown,
+    operation: MutationOperation,
+    failedAt: AnalysisResumePoint
+  ) => {
+    if (isAbortError(error) || !isMutationOperationCurrent(operation)) {
       return;
     }
 
-    const name = siteName.trim();
-    const accessUrl = baseUrl.trim();
+    setResumePoint(failedAt);
+    const message = getApiErrorMessage(
+      error,
+      failedAt.kind === "create"
+        ? "페이지를 추가하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요."
+        : "페이지는 등록되었지만 분석을 시작하지 못했습니다. 분석만 다시 시도해 주세요."
+    );
+    setSiteCreateError(message);
+    if (failedAt.kind === "create") {
+      const unresolvedRecovery = readProjectSiteCreateRecovery(project.id);
+      if (unresolvedRecovery !== null) {
+        recoveryRawValueRef.current = unresolvedRecovery.rawValue;
+        setCanDiscardRecovery(true);
+      }
+      setRecoveryPhase(null);
+    } else {
+      const persistedRecovery = readProjectSiteCreateRecovery(project.id);
+      setRecoveryPhase(phaseAfterFailedRequest(persistedRecovery?.attempt ?? null, failedAt));
+    }
+  };
 
-    if (resumePoint.kind === "create" && (name.length === 0 || accessUrl.length === 0)) {
-      rejectField(name.length === 0 ? "name" : "url", "페이지 이름과 주소를 입력해주세요.");
-      return;
-    }
-    if (resumePoint.kind === "create" && name.length > SITE_NAME_MAX_LENGTH) {
-      rejectField("name", `페이지 이름은 ${SITE_NAME_MAX_LENGTH}자 이하로 입력해주세요.`);
-      return;
-    }
-    if (resumePoint.kind === "create" && !isValidEvaluationTargetAccessUrl(accessUrl)) {
-      rejectField("url", "올바른 페이지 주소를 입력해주세요. 예: https://example.com");
-      return;
-    }
-    setInvalidField(null);
-
-    const operation = beginMutationOperation("site-create-operation");
-    if (operation === null) {
-      return;
-    }
+  const submitSite = async (operation: MutationOperation, name: string, accessUrl: string) => {
     const isActiveOperation = () => isMutationOperationCurrent(operation);
-
 
     // Aborts when the modal closes or unmounts.
     const { signal } = operation;
@@ -253,11 +427,9 @@ export function SiteCreateModal({
 
     let nextResumePoint = resumePoint;
 
-
     try {
-      let targetId: number;
       if (nextResumePoint.kind === "create") {
-        targetId = await onCreateEvaluationTargetModel(
+        const targetId = await onCreateEvaluationTargetModel(
           {
             projectId: project.id,
             name,
@@ -270,20 +442,14 @@ export function SiteCreateModal({
         }
         nextResumePoint = { kind: "request", targetId };
         setResumePoint(nextResumePoint);
-      } else {
-        targetId = nextResumePoint.targetId;
       }
 
-      let requestId: number;
-      if (nextResumePoint.kind === "poll") {
-        requestId = nextResumePoint.requestId;
-      } else {
-        requestId = await onRequestEvaluationTargetAnalysis(
+      if (nextResumePoint.kind === "request") {
+        const { targetId } = nextResumePoint;
+        const requestId = await onRequestEvaluationTargetAnalysis(
           targetId,
           signal,
-          nextResumePoint.kind === "request"
-            ? nextResumePoint.previousFailedRequestId
-            : undefined
+          nextResumePoint.previousFailedRequestId
         );
         if (!isActiveOperation()) {
           return;
@@ -292,6 +458,7 @@ export function SiteCreateModal({
         setResumePoint(nextResumePoint);
       }
 
+      const { targetId, requestId } = nextResumePoint;
       onAnalysisAccepted({
         id: requestId,
         evaluationTargetId: targetId,
@@ -302,52 +469,14 @@ export function SiteCreateModal({
         updatedAt: ""
       }, accessUrl);
 
-      const completedRecovery = readSiteCreateRecovery();
-      if (
-        completedRecovery.kind === "blocked" ||
-        (completedRecovery.kind === "valid" &&
-          (completedRecovery.attempt.phase !== "poll" ||
-            completedRecovery.attempt.targetId !== targetId ||
-            completedRecovery.attempt.requestId !== requestId ||
-            !clearSiteCreateRecovery(completedRecovery.rawValue)))
-      ) {
+      if (!clearAcceptedSiteCreateRecovery(targetId, requestId)) {
         throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
       }
 
       applyRecoveryForm(EMPTY_RECOVERY_FORM);
       onClose();
     } catch (error) {
-      if (isAbortError(error) || !isActiveOperation()) {
-        return;
-      }
-
-      setResumePoint(nextResumePoint);
-      const message = getApiErrorMessage(
-        error,
-        nextResumePoint.kind === "create"
-          ? "페이지를 추가하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요."
-          : "페이지는 등록되었지만 분석을 시작하지 못했습니다. 분석만 다시 시도해 주세요."
-      );
-      setSiteCreateError(message);
-      if (nextResumePoint.kind === "create") {
-        const unresolvedRecovery = readSiteCreateRecovery();
-        if (
-          unresolvedRecovery.kind === "valid" &&
-          unresolvedRecovery.attempt.projectId === project.id
-        ) {
-          recoveryRawValueRef.current = unresolvedRecovery.rawValue;
-          setCanDiscardRecovery(true);
-        }
-        setRecoveryPhase(null);
-      } else {
-        const persistedRecovery = readSiteCreateRecovery();
-        const persistedAttempt =
-          persistedRecovery.kind === "valid" &&
-          persistedRecovery.attempt.projectId === project.id
-            ? persistedRecovery.attempt
-            : null;
-        setRecoveryPhase(phaseAfterFailedRequest(persistedAttempt, nextResumePoint));
-      }
+      recoverFromSubmitFailure(error, operation, nextResumePoint);
     } finally {
       // The request-recovery hook binds its in-memory directory lease to this
       // operation scope. Ending the scope releases that lease while the
@@ -356,6 +485,32 @@ export function SiteCreateModal({
         setIsSubmittingSite(false);
       }
     }
+  };
+
+  const handleAddSite = async () => {
+    if (isMutationOperationLocked()) {
+      return;
+    }
+    if (isRecoveryBlocked) {
+      setSiteCreateError(SITE_RECOVERY_BLOCKED_MESSAGE);
+      return;
+    }
+
+    const name = siteName.trim();
+    const accessUrl = baseUrl.trim();
+
+    const rejection = resumePoint.kind === "create" ? siteInputRejection(name, accessUrl) : null;
+    if (rejection !== null) {
+      rejectField(rejection.field, rejection.message);
+      return;
+    }
+    setInvalidField(null);
+
+    const operation = beginMutationOperation("site-create-operation");
+    if (operation === null) {
+      return;
+    }
+    await submitSite(operation, name, accessUrl);
   };
 
   if (!isOpen) {
@@ -412,109 +567,58 @@ export function SiteCreateModal({
               data-tone={isAnalysisNotice ? "warning" : "danger"}
               className="dashboard-inline-notice mb-4 rounded-lg border px-3 py-2 text-xs"
             >
-              {resumePoint.kind === "create"
-                ? "페이지 추가 실패"
-                : recoveryPhase === "ready"
-                  ? "페이지 등록 완료 · 분석 시작 전"
-                  : recoveryPhase === "paused"
-                  ? "페이지 등록 완료 · 상태 확인 필요"
-                  : "페이지 등록 완료 · 분석 실패"}: {siteCreateError}
+              {siteCreateNoticeTitle(resumePoint, recoveryPhase)}: {siteCreateError}
             </div>
           )}
 
           <div className="grid gap-3.5">
-            <label className="block">
-              <span className="dashboard-modal-label">페이지 이름</span>
-              <Input
-                ref={nameInputRef}
-                value={siteName}
-                onChange={(event) => {
-                  setSiteName(event.target.value);
-                  if (invalidField === "name") setInvalidField(null);
-                }}
-                aria-invalid={invalidField === "name" || undefined}
-                aria-describedby={invalidField === "name" && siteCreateError ? errorId : undefined}
-                autoComplete="off"
-                disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
-                maxLength={SITE_NAME_MAX_LENGTH}
-                placeholder="페이지 이름 입력"
-                className="dashboard-modal-input"
-              />
-            </label>
+            <SiteCreateInput
+              label="페이지 이름"
+              inputRef={nameInputRef}
+              value={siteName}
+              onChange={(event) => {
+                setSiteName(event.target.value);
+                if (invalidField === "name") setInvalidField(null);
+              }}
+              isInvalid={invalidField === "name"}
+              error={siteCreateError}
+              errorId={errorId}
+              autoComplete="off"
+              disabled={isFieldLocked}
+              maxLength={SITE_NAME_MAX_LENGTH}
+              placeholder="페이지 이름 입력"
+            />
 
-            <label className="block">
-              <span className="dashboard-modal-label">페이지 주소</span>
-              <Input
-                ref={urlInputRef}
-                value={baseUrl}
-                onChange={(event) => {
-                  setBaseUrl(event.target.value);
-                  if (invalidField === "url") setInvalidField(null);
-                }}
-                aria-invalid={invalidField === "url" || undefined}
-                aria-describedby={invalidField === "url" && siteCreateError ? errorId : undefined}
-                inputMode="url"
-                autoComplete="url"
-                disabled={isSubmittingSite || isRecoveryBlocked || resumePoint.kind !== "create"}
-                maxLength={SITE_URL_MAX_LENGTH}
-                placeholder="https://example.com"
-                className="dashboard-modal-input"
-              />
-            </label>
+            <SiteCreateInput
+              label="페이지 주소"
+              inputRef={urlInputRef}
+              value={baseUrl}
+              onChange={(event) => {
+                setBaseUrl(event.target.value);
+                if (invalidField === "url") setInvalidField(null);
+              }}
+              isInvalid={invalidField === "url"}
+              error={siteCreateError}
+              errorId={errorId}
+              inputMode="url"
+              autoComplete="url"
+              disabled={isFieldLocked}
+              maxLength={SITE_URL_MAX_LENGTH}
+              placeholder="https://example.com"
+            />
           </div>
         </div>
 
-        <div
-          data-site-create-footer
-          className="flex shrink-0 flex-col items-stretch gap-3 px-6 pb-6 pt-3.5 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <span />
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:shrink-0">
-            {(isRecoveryBlocked || canDiscardRecovery) && (
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={isSubmittingSite || !canDiscardRecovery}
-                onClick={handleDiscardRecovery}
-                className="dashboard-modal-button dashboard-modal-button--danger"
-              >
-                이전 작업 정보 삭제
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={isSubmittingSite}
-              onClick={onClose}
-              className="dashboard-modal-button"
-            >
-              {resumePoint.kind !== "create" ? "닫기" : "취소"}
-            </Button>
-
-            <Button
-              ref={submitButtonRef}
-              type="submit"
-              size="sm"
-              disabled={isSubmittingSite || isRecoveryBlocked}
-              aria-busy={isSubmittingSite}
-              className="dashboard-modal-button dashboard-modal-button--primary"
-            >
-              {isSubmittingSite
-                ? "요청 중…"
-                : recoveryPhase === null || recoveryPhase === "ready"
-                  ? "분석 시작"
-                  : recoveryPhase === "paused" && resumePoint.kind === "request"
-                    ? "분석 시작 여부 확인"
-                    : resumePoint.kind === "create"
-                      ? "다시 시도"
-                      : resumePoint.kind === "request"
-                        ? "분석 요청 다시 시도"
-                        : "상태 확인 다시 시도"}
-            </Button>
-          </div>
-        </div>
+        <SiteCreateFooter
+          isSubmitting={isSubmittingSite}
+          isRecoveryBlocked={isRecoveryBlocked}
+          canDiscardRecovery={canDiscardRecovery}
+          recoveryPhase={recoveryPhase}
+          resumePoint={resumePoint}
+          submitButtonRef={submitButtonRef}
+          onDiscardRecovery={handleDiscardRecovery}
+          onClose={onClose}
+        />
       </form>
     </div>,
     document.body

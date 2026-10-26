@@ -17,10 +17,11 @@ import type { DashboardViewModel } from "@/types/accessibility-domain";
 
 import { isDefinitiveMutationRejection, runMutationRequestWithDeadline } from "./mutation-recovery";
 import type { DirectoryRecoveryToken, LoadDashboard } from "./use-dashboard-data";
-import { useMutationOperation } from "./use-mutation-operation";
+import { useMutationOperation, type MutationOperation } from "./use-mutation-operation";
 
 type OrganizationRecovery = RecoveryRead<PersistedOrganizationCreateAttempt> | { kind: "conflict" };
 type PendingRecovery = Extract<OrganizationRecovery, { kind: "valid" }>;
+type SubmittableRecovery = Extract<OrganizationRecovery, { kind: "none" | "valid" }>;
 
 const REFRESH_FAILURE_MESSAGE =
   "프로젝트는 생성되었지만 목록을 불러오지 못했습니다. 생성 요청을 다시 보내지 않고 프로젝트 목록만 다시 불러와 주세요.";
@@ -43,6 +44,14 @@ function recoveryMessage(recovery: OrganizationRecovery): string {
   return recovery.value.organizationId !== null
     ? REFRESH_FAILURE_MESSAGE
     : INDETERMINATE_REFRESH_FAILURE_MESSAGE;
+}
+
+function organizationNameError(name: string): string | null {
+  if (name.length === 0) return "프로젝트 이름은 필수입니다.";
+  if (name.length > ORGANIZATION_NAME_MAX_LENGTH) {
+    return `프로젝트 이름은 ${ORGANIZATION_NAME_MAX_LENGTH}자 이하여야 합니다.`;
+  }
+  return null;
 }
 
 function canDiscardRecovery(recovery: OrganizationRecovery): boolean {
@@ -184,22 +193,104 @@ export function useOrganizationModelCreateForm({
     resetRecovery();
   }, [isMutationOperationLocked, resetRecovery]);
 
+  // Returns the attempt once its POST is known to have committed, or null when it must stop.
+  const submitOrganizationAttempt = useCallback(async (
+    initial: SubmittableRecovery,
+    name: string,
+    operation: MutationOperation
+  ): Promise<PendingRecovery | null> => {
+    let pending = initial;
+    if (pending.kind === "none") {
+      const posting = persistRecovery({
+        version: 2,
+        attemptId: createRandomUuid(),
+        apiScope: API_BASE_URL,
+        name,
+        organizationId: null,
+        startedAt: Date.now()
+      }, null);
+      if (posting === null) throw new UserFacingError(PERSISTENCE_FAILURE_MESSAGE);
+      pending = posting;
+    }
+    if (pending.value.organizationId !== null) return pending;
+
+    const stored = readOrganizationCreateRecovery();
+    if (stored.kind !== "valid" || stored.rawValue !== pending.rawValue) {
+      blockForRecoveryConflict();
+      return null;
+    }
+    const attempt = pending.value;
+    const created = await runMutationRequestWithDeadline({
+      signal: operation.signal,
+      timeoutMessage: "프로젝트 생성 응답을 기다리는 시간이 초과되었습니다.",
+      operation: (signal) => createOrganizationModel({
+        name: attempt.name,
+        description: "",
+        attemptId: attempt.attemptId
+      }, signal)
+    });
+    if (!isMutationOperationCurrent(operation)) return null;
+    const reconciling = persistRecovery({
+      ...pending.value,
+      organizationId: created.id
+    }, pending.rawValue);
+    if (reconciling === null) blockForRecoveryConflict();
+    return reconciling;
+  }, [blockForRecoveryConflict, isMutationOperationCurrent, persistRecovery]);
+
+  const confirmCreatedOrganization = useCallback(async (
+    pending: PendingRecovery,
+    operation: MutationOperation
+  ) => {
+    const refreshedDashboard = await refreshDirectory(operation.signal);
+    if (!isMutationOperationCurrent(operation)) return;
+    const organizationId = pending.value.organizationId;
+    if (organizationId !== null && refreshedDashboard?.organizations.some(
+      (organization) => organization.id === organizationId
+    )) {
+      finishCreatedOrganization(pending, organizationId, true);
+    } else if (recoveryRef.current === pending) {
+      setProjectCreateError(recoveryMessage(pending));
+    }
+  }, [finishCreatedOrganization, isMutationOperationCurrent, refreshDirectory]);
+
+  const recoverFromCreateFailure = useCallback((
+    error: unknown,
+    operation: MutationOperation,
+    isNewAttempt: boolean
+  ) => {
+    if (!isMutationOperationCurrent(operation)) return;
+    const current = recoveryRef.current;
+    if (current.kind === "conflict") return;
+    if (current.kind === "valid") {
+      // A rejected GET says nothing about whether the earlier POST committed.
+      if (!isNewAttempt || current.value.organizationId !== null || !isDefinitiveMutationRejection(error)) {
+        setProjectCreateError(recoveryMessage(current));
+        return;
+      }
+      if (!clearPersistedOrganizationCreateAttempt(current.rawValue)) {
+        blockForRecoveryConflict();
+        return;
+      }
+      updateRecovery({ kind: "none" });
+    }
+    releaseDirectoryRecovery();
+    setProjectCreateError(getApiErrorMessage(error, "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."));
+  }, [blockForRecoveryConflict, isMutationOperationCurrent, releaseDirectoryRecovery, updateRecovery]);
+
   const handleCreateOrganizationModel = useCallback(async () => {
     if (isMutationOperationLocked()) return;
-    let pending = recoveryRef.current;
+    const pending = recoveryRef.current;
     const isNewAttempt = pending.kind === "none";
     if (pending.kind === "blocked" || pending.kind === "conflict") {
       setProjectCreateError(recoveryMessage(pending));
       return;
     }
     const name = newOrganizationModelName.trim();
-    if (pending.kind === "none") {
-      if (name.length === 0 || name.length > ORGANIZATION_NAME_MAX_LENGTH) {
-        setProjectCreateError(name.length === 0
-          ? "프로젝트 이름은 필수입니다."
-          : `프로젝트 이름은 ${ORGANIZATION_NAME_MAX_LENGTH}자 이하여야 합니다.`);
-        return;
-      }
+    const nameError = isNewAttempt ? organizationNameError(name) : null;
+    if (nameError !== null) {
+      setProjectCreateError(nameError);
+      return;
     }
     const operation = beginMutationOperation("organization-create-operation");
     if (operation === null) return;
@@ -208,83 +299,17 @@ export function useOrganizationModelCreateForm({
     acquireDirectoryRecovery();
 
     try {
-      if (pending.kind === "none") {
-        const posting = persistRecovery({
-          version: 2,
-          attemptId: createRandomUuid(),
-          apiScope: API_BASE_URL,
-          name,
-          organizationId: null,
-          startedAt: Date.now()
-        }, null);
-        if (posting === null) throw new UserFacingError(PERSISTENCE_FAILURE_MESSAGE);
-        pending = posting;
-      }
-
-      if (pending.value.organizationId === null) {
-        const stored = readOrganizationCreateRecovery();
-        if (stored.kind !== "valid" || stored.rawValue !== pending.rawValue) {
-          blockForRecoveryConflict();
-          return;
-        }
-        const attempt = pending.value;
-        const created = await runMutationRequestWithDeadline({
-          signal: operation.signal,
-          timeoutMessage: "프로젝트 생성 응답을 기다리는 시간이 초과되었습니다.",
-          operation: (signal) => createOrganizationModel({
-            name: attempt.name,
-            description: "",
-            attemptId: attempt.attemptId
-          }, signal)
-        });
-        if (!isMutationOperationCurrent(operation)) return;
-        const reconciling = persistRecovery({
-          ...pending.value,
-          organizationId: created.id
-        }, pending.rawValue);
-        if (reconciling === null) {
-          blockForRecoveryConflict();
-          return;
-        }
-        pending = reconciling;
-      }
-
-      const refreshedDashboard = await refreshDirectory(operation.signal);
-      if (!isMutationOperationCurrent(operation)) return;
-      const organizationId = pending.value.organizationId;
-      if (organizationId !== null && refreshedDashboard?.organizations.some(
-        (organization) => organization.id === organizationId
-      )) {
-        finishCreatedOrganization(pending, organizationId, true);
-      } else if (recoveryRef.current === pending) {
-        setProjectCreateError(recoveryMessage(pending));
-      }
+      const created = await submitOrganizationAttempt(pending, name, operation);
+      if (created !== null) await confirmCreatedOrganization(created, operation);
     } catch (error) {
-      if (!isMutationOperationCurrent(operation)) return;
-      const current = recoveryRef.current;
-      if (current.kind === "conflict") return;
-      if (current.kind === "valid") {
-        // A rejected GET says nothing about whether the earlier POST committed.
-        if (!isNewAttempt || current.value.organizationId !== null || !isDefinitiveMutationRejection(error)) {
-          setProjectCreateError(recoveryMessage(current));
-          return;
-        }
-        if (!clearPersistedOrganizationCreateAttempt(current.rawValue)) {
-          blockForRecoveryConflict();
-          return;
-        }
-        updateRecovery({ kind: "none" });
-      }
-      releaseDirectoryRecovery();
-      setProjectCreateError(getApiErrorMessage(error, "프로젝트를 만들지 못했습니다. 잠시 후 다시 시도해 주세요."));
+      recoverFromCreateFailure(error, operation, isNewAttempt);
     } finally {
       if (finishMutationOperation(operation)) setIsCreatingOrganizationModel(false);
     }
   }, [
-    acquireDirectoryRecovery, beginMutationOperation, blockForRecoveryConflict,
-    finishCreatedOrganization, finishMutationOperation, isMutationOperationCurrent,
-    isMutationOperationLocked, newOrganizationModelName, persistRecovery, refreshDirectory,
-    releaseDirectoryRecovery, updateRecovery
+    acquireDirectoryRecovery, beginMutationOperation, confirmCreatedOrganization,
+    finishMutationOperation, isMutationOperationLocked, newOrganizationModelName,
+    recoverFromCreateFailure, submitOrganizationAttempt
   ]);
 
   return {

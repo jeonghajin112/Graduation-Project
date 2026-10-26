@@ -114,6 +114,13 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
     render();
   }
   function step(d) { if (!open) return; open.i = Math.max(0, Math.min(open.m.pages.length - 1, open.i + d)); open.m.sel = open.i; render(); }
+  // 같은 요소에 문제가 여러 개일 때만 이전·다음 버튼을 붙인다
+  const pagerHtml = (i, n) => n > 1 ? `<div class="ua-demo-pop__pager" role="group" aria-label="같은 요소의 접근성 문제 이동"><button type="button" data-d="-1" aria-label="이전 문제" ${i === 0 ? "disabled" : ""}>${GLYPH("M15 6l-6 6 6 6")}</button><button type="button" data-d="1" aria-label="다음 문제" ${i === n - 1 ? "disabled" : ""}>${GLYPH("M9 6l6 6-6 6")}</button></div>` : "";
+  // 첫·마지막 문제에서 누른 쪽이 비활성이 되면 반대쪽 버튼, 버튼이 없으면 마커로 보낸다
+  function refocusPop(pager, focusedStep, m) {
+    const target = pager.find(b => b.dataset.d === focusedStep && !b.disabled) ?? pager.find(b => !b.disabled) ?? markerEls.get(m.id);
+    target.focus({ preventScroll: true });
+  }
   function render() {
     const { m, i, el } = open; const p = m.pages[i]; const n = m.pages.length;
     // 다시 그리면 이전·다음 버튼이 바뀌므로, 초점이 창 안에 있었으면 같은 방향의 버튼으로 되돌린다
@@ -121,7 +128,7 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
     const focusedStep = hadFocus ? document.activeElement.dataset?.d : undefined;
     // 심각도·항목 코드는 글자로, 설명 본문은 실제 런타임이 만든 마크업(스냅샷)을 그대로 넣는다
     el.innerHTML = `<div class="ua-demo-pop__bar"><div class="ua-demo-pop__tags"><span class="ua-demo-pop__sev"></span><span class="ua-demo-pop__code"></span></div>` +
-      (n > 1 ? `<div class="ua-demo-pop__pager" role="group" aria-label="같은 요소의 접근성 문제 이동"><button type="button" data-d="-1" aria-label="이전 문제" ${i === 0 ? "disabled" : ""}>${GLYPH("M15 6l-6 6 6 6")}</button><button type="button" data-d="1" aria-label="다음 문제" ${i === n - 1 ? "disabled" : ""}>${GLYPH("M9 6l6 6-6 6")}</button></div>` : "") +
+      pagerHtml(i, n) +
       `</div><div class="ua-demo-pop__detail">${p.html}</div>`;
     const sev = el.querySelector(".ua-demo-pop__sev"); sev.textContent = p.sev; sev.style.background = p.sevColor;
     el.querySelector(".ua-demo-pop__code").textContent = p.code;
@@ -133,11 +140,7 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
     const [x, y, w] = p.box;
     Object.assign(el.style, { left: pct(x, L.PW), top: pct(y, L.PH), width: pct(w, L.PW) });
     drawHl(p);
-    if (hadFocus) {
-      // 첫·마지막 문제에서 누른 쪽이 비활성이 되면 반대쪽 버튼, 버튼이 없으면 마커로 보낸다
-      const target = pager.find(b => b.dataset.d === focusedStep && !b.disabled) ?? pager.find(b => !b.disabled) ?? markerEls.get(m.id);
-      target.focus({ preventScroll: true });
-    }
+    if (hadFocus) refocusPop(pager, focusedStep, m);
   }
   on(pageEl, "pointerdown", e => { if (open && !open.el.contains(e.target) && !e.target.closest(".ua-demo-mk")) close(); }, true);
   on(document, "keydown", e => { if (e.key === "Escape" && open && root.contains(document.activeElement)) { const b = markerEls.get(open.m.id); close(); b.focus({ preventScroll: true }); } });
@@ -249,16 +252,18 @@ export function mountLookDemo(root, { snapshot, assetRoot }) {
       fired = ITEMS[idx].events.length;
     } else cursor.classList.toggle("is-on", inView);
   }
+  // 장면 시간을 dt 만큼 진행하며 때가 된 연출을 실행하고, 끝나면 다음 장면으로 넘어간다
+  function advance(dt) {
+    elapsed += dt;
+    const ev = ITEMS[idx].events;
+    while (fired < ev.length && ev[fired][0] <= elapsed) ev[fired++][1]();
+    if (elapsed >= DUR) go(idx + 1);
+  }
   function tick(ts) {
     const dt = last == null ? 0 : Math.min(100, ts - last); last = ts;
     if (inView) {
       if (paused && !reduced && !verify && performance.now() - lastActive > IDLE) { paused = false; tryHint.classList.remove("is-gone"); go(idx); }
-      if (!paused) {
-        elapsed += dt;
-        const ev = ITEMS[idx].events;
-        while (fired < ev.length && ev[fired][0] <= elapsed) ev[fired++][1]();
-        if (elapsed >= DUR) go(idx + 1);
-      }
+      if (!paused) advance(dt);
     }
     raf = requestAnimationFrame(tick);
   }

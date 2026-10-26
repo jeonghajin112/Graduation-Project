@@ -81,6 +81,19 @@ function getTargetTypeInfo(type: OrganizationModel["evaluationTargets"][number][
   return "PC 웹";
 }
 
+function getStatusDotClass(status: string) {
+  if (status === mapScanStatus("finished")) {
+    return "bg-emerald-400";
+  }
+  if (status === mapScanStatus("queued")) {
+    return "bg-sky-400";
+  }
+  if (status === mapScanStatus("failed")) {
+    return "bg-rose-400";
+  }
+  return "bg-[var(--dashboard-text-muted)]";
+}
+
 export function OrganizationModelDetailPanel({
   organization,
   evaluationRequests,
@@ -227,10 +240,6 @@ export function OrganizationModelDetailPanel({
     }
   };
 
-  const finishedStatusLabel = mapScanStatus("finished");
-  const failedStatusLabel = mapScanStatus("failed");
-  const runningStatusLabel = mapScanStatus("queued");
-
   const addPageButton = (
     <button
       ref={addPageButtonRef}
@@ -351,16 +360,7 @@ export function OrganizationModelDetailPanel({
               <div className="dashboard-project-card-footer pointer-events-none relative z-[1] mt-auto flex items-center justify-between border-t border-[var(--dashboard-card-divider)]">
                 <span className="dashboard-project-card-status inline-flex min-w-0 items-center gap-1.5 text-[var(--dashboard-card-status-text)]">
                   <span
-                    className={cn(
-                      "dashboard-project-status-dot shrink-0 rounded-full",
-                      row.status === finishedStatusLabel && "bg-emerald-400",
-                      row.status === runningStatusLabel && "bg-sky-400",
-                      row.status === failedStatusLabel && "bg-rose-400",
-                      row.status !== finishedStatusLabel &&
-                        row.status !== runningStatusLabel &&
-                        row.status !== failedStatusLabel &&
-                        "bg-[var(--dashboard-text-muted)]"
-                    )}
+                    className={cn("dashboard-project-status-dot shrink-0 rounded-full", getStatusDotClass(row.status))}
                     aria-hidden="true"
                   />
                   <span className="truncate">{row.status}</span>

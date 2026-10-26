@@ -58,9 +58,11 @@ export function useSidebarCollapse(isPreview: boolean, beforeToggle: () => void)
 export function useDashboardDocumentTitle(
   isPreview: boolean,
   menu: MenuType,
-  organizationName: string,
-  evaluationTargetName: string
+  organization: { name: string } | null,
+  evaluationTarget: { name: string } | null
 ) {
+  const organizationName = organization?.name ?? "";
+  const evaluationTargetName = evaluationTarget?.name ?? "";
   useEffect(() => {
     if (isPreview) {
       return;
@@ -130,6 +132,25 @@ function subscribeMobileLayout(onChange: () => void) {
 /** Whether the dashboard uses its phone layout (the same 767px breakpoint). */
 export function useIsMobileDashboard() {
   return useSyncExternalStore(subscribeMobileLayout, matchesMobileSidebar, () => false);
+}
+
+function isFocusInDrawer(active: Element | null, drawer: HTMLElement, toggleButton: HTMLElement, header: HTMLElement | null) {
+  return active instanceof Node &&
+    (drawer.contains(active) || active === toggleButton || Boolean(header?.contains(active)));
+}
+
+/** Loops Tab through the button row and the open drawer. */
+function keepTabInDrawer(event: KeyboardEvent, drawer: HTMLElement, toggleButton: HTMLElement, header: HTMLElement | null) {
+  const headerStops = header ? getFocusableElements(header) : [toggleButton];
+  const stops = [...headerStops, ...getFocusableElements(drawer)];
+  const first = stops[0]!;
+  const last = stops[stops.length - 1]!;
+  const active = document.activeElement;
+  const inside = isFocusInDrawer(active, drawer, toggleButton, header);
+  if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({ preventScroll: true });
+  }
 }
 
 /**
@@ -218,18 +239,7 @@ export function useMobileSidebarDrawer({
       if (event.key !== "Tab" || !drawer || !toggleButton) {
         return;
       }
-      const header = headerRef?.current ?? null;
-      const headerStops = header ? getFocusableElements(header) : [toggleButton];
-      const stops = [...headerStops, ...getFocusableElements(drawer)];
-      const first = stops[0]!;
-      const last = stops[stops.length - 1]!;
-      const active = document.activeElement;
-      const inside = active instanceof Node &&
-        (drawer.contains(active) || active === toggleButton || Boolean(header?.contains(active)));
-      if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus({ preventScroll: true });
-      }
+      keepTabInDrawer(event, drawer, toggleButton, headerRef?.current ?? null);
     };
 
     // Any navigation row closes the drawer, including the current page's own

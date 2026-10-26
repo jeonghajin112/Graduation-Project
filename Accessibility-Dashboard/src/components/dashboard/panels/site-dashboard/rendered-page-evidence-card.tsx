@@ -128,12 +128,244 @@ function EmptyEvidenceState() {
   );
 }
 
+type PageEvidenceConnection = ReturnType<typeof usePageEvidenceConnection>;
+
+function LoadingStatus({ className, frameKind, phase }: {
+  className: string;
+  frameKind: EvidenceFrameKind;
+  phase: PageEvidenceLoadingPhase;
+}) {
+  const loadingFrameKind = frameKind ?? "live";
+  const message = getPageEvidenceLoadingMessage({ frameKind: loadingFrameKind, phase });
+  return (
+    <div className={className} role="status" aria-live="polite">
+      <PageEvidenceLoadingBar
+        frameKind={loadingFrameKind}
+        label={message}
+        phase={phase}
+      />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function PageEvidenceStatus({ connection, errorMessage, onRetry }: {
+  connection: PageEvidenceConnection;
+  errorMessage: string | null;
+  onRetry: () => void;
+}) {
+  const loadState = connection.effectiveLoadState;
+  if (loadState === "loading") {
+    return <LoadingStatus className="site-page-evidence-loading" frameKind={connection.activeFrameKind} phase={connection.replayLoadingPhase} />;
+  }
+  if (loadState === "idle") return <EmptyEvidenceState />;
+  if (loadState !== "error") return null;
+  return (
+    <div className="site-page-evidence-empty" role="alert">
+      <MonitorOff aria-hidden="true" size={26} strokeWidth={1.8} />
+      <div>
+        <p className="site-page-evidence-empty-title">현재 동적 페이지를 열지 못했어요</p>
+        <p className="site-page-evidence-empty-description">
+          {errorMessage ??
+            "원본 사이트에 연결할 수 없습니다. 잠시 후 동적 화면을 다시 시도해 주세요."}
+        </p>
+        <button type="button" className="site-page-evidence-retry" onClick={onRetry}>
+          <RefreshCw aria-hidden="true" size={15} />
+          다시 시도
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function getCaptureInputs(
+  captureMetadata: EvaluationCaptureMetadata | null,
+  captureMetadataLoadState: EvaluationCaptureMetadataLoadState = "ready"
+) {
+  return {
+    deviceScaleFactor: captureMetadata?.deviceScaleFactor ?? null,
+    captureMetadataStatus: resolveReplayCaptureMetadataStatus(captureMetadataLoadState, captureMetadata !== null)
+  };
+}
+
+// The page's address once its frame can be shown.
+function getReplayFrameUrl({ effectiveLoadState, activeFrameKind, frameRuntimeUrl }: PageEvidenceConnection): string | null {
+  return effectiveLoadState === "ready" && activeFrameKind !== null ? frameRuntimeUrl : null;
+}
+
+function getHeaderTitle(documentTitle: string | null): string {
+  return documentTitle === null ? "" : documentTitle || "제목 없음";
+}
+
+function getEvidenceCardState({
+  effectiveLoadState, replayConnectionState, replayLoadingPhase, isDocumentScrolled
+}: PageEvidenceConnection) {
+  const showsReplayLoadingOverlay = replayConnectionState === "loading"
+    || (replayConnectionState === "ready" && replayLoadingPhase !== "complete");
+  return {
+    showsReplayLoadingOverlay,
+    isPageLoading: effectiveLoadState === "loading"
+      || (effectiveLoadState === "ready" && showsReplayLoadingOverlay),
+    connectionError: effectiveLoadState === "error" || (effectiveLoadState === "ready" && replayConnectionState === "error"),
+    documentScrolled: isDocumentScrolled && replayConnectionState === "ready"
+  };
+}
+
+function getPhoneViewState(
+  isMobileDashboard: boolean,
+  isExpanded: boolean,
+  hasReplayFrame: boolean,
+  replayConnectionState: PageEvidenceConnection["replayConnectionState"]
+) {
+  const viewerOpen = isExpanded && hasReplayFrame;
+  const isCompactPreview = isMobileDashboard && !viewerOpen;
+  return {
+    viewerOpen,
+    showsExpandButton: isMobileDashboard && hasReplayFrame && replayConnectionState === "ready",
+    isCompactPreview,
+    focusGuardTabIndex: replayConnectionState === "ready" && !isCompactPreview ? 0 : -1
+  };
+}
+
+// Set the desktop width on the very first frame load, before page scripts
+// can choose a mobile layout. Scale only its presentation in the dashboard.
+// A preview wider than that width is filled at full size instead.
+function getReplayFrameStyle(
+  activeFrameKind: EvidenceFrameKind,
+  replaySourceWidth: number,
+  replayScale: number
+): CSSProperties | undefined {
+  const replayFrameWidth = `max(${replaySourceWidth}px, 100%)`;
+  return activeFrameKind !== null && replaySourceWidth > 0
+    ? frameZoomSupported
+      ? {
+          width: replayFrameWidth,
+          height: "100%",
+          zoom: String(replayScale)
+        }
+      : {
+          width: replayFrameWidth,
+          height: `${100 / replayScale}%`,
+          transform: `scale(${replayScale})`,
+          transformOrigin: "top left"
+        }
+    : undefined;
+}
+
+const viewerDialogAttributes = {
+  "data-expanded": true,
+  role: "dialog",
+  "aria-modal": true,
+  "aria-labelledby": "site-page-evidence-viewer-title"
+};
+
+function ReportFocusGuard({ direction, frameKind, tabIndex, onEnter }: {
+  direction: "forward" | "backward";
+  frameKind: EvidenceFrameKind;
+  tabIndex: number;
+  onEnter: PageEvidenceConnection["enterReportFocus"];
+}) {
+  if (frameKind !== "live") return null;
+  return (
+    <button type="button" className="site-report-focus-guard"
+      data-live-report-focus-guard={direction}
+      tabIndex={tabIndex}
+      onFocus={event => onEnter(direction, event.currentTarget)}
+      onClick={() => onEnter(direction)}>이슈 마커로 이동</button>
+  );
+}
+
+function ReplayStatusOverlay({ connection, frameKind, showsLoading }: {
+  connection: PageEvidenceConnection;
+  frameKind: EvidenceFrameKind;
+  showsLoading: boolean;
+}) {
+  if (showsLoading) {
+    return <LoadingStatus className="site-page-evidence-replay-overlay" frameKind={frameKind} phase={connection.replayLoadingPhase} />;
+  }
+  if (connection.replayConnectionState !== "error") return null;
+  return (
+    <div className="site-page-evidence-replay-overlay" role="alert">
+      <MonitorOff aria-hidden="true" size={24} />
+      <span>{frameKind === "live" ? "동적 페이지와 연결하지 못했어요" : "제품 미리보기를 불러오지 못했어요"}</span>
+      <button
+        type="button"
+        onClick={connection.retryFrame}
+      >
+        화면 다시 불러오기
+      </button>
+    </div>
+  );
+}
+
+function ReplayFrame({ connection, frameKind, src, style, viewportMetrics, targetName }: {
+  connection: PageEvidenceConnection;
+  frameKind: EvidenceFrameKind;
+  src: string;
+  style: CSSProperties | undefined;
+  viewportMetrics: ReplayViewportMetrics;
+  targetName: string;
+}) {
+  return (
+    <iframe
+      key={`${connection.frameIdentity ?? "none"}:${connection.frameRevision}`}
+      ref={connection.iframeRef}
+      className="site-page-evidence-replay-frame"
+      data-replay-scale={viewportMetrics.scale.toFixed(4)}
+      data-replay-visual-width={viewportMetrics.visualWidth.toFixed(2)}
+      data-report-mode={frameKind}
+      tabIndex={frameKind === "live" ? -1 : undefined}
+      src={src}
+      style={style}
+      title={`${targetName} 접근성 검사 페이지 ${frameKind === "live" ? "동적 보기" : "제품 미리보기"}`}
+      sandbox={frameKind === "live"
+        ? "allow-scripts allow-same-origin allow-forms"
+        : "allow-scripts"}
+      referrerPolicy="no-referrer"
+      loading={frameKind === "live" ? "eager" : "lazy"}
+      onLoad={connection.handleFrameLoad}
+      onError={connection.handleFrameError}
+    />
+  );
+}
+
+function FallbackIssueDetail({ connection }: { connection: PageEvidenceConnection }) {
+  const issue = connection.fallbackIssue;
+  if (connection.replayConnectionState !== "ready" || !issue) return null;
+  return (
+    <div
+      className="site-page-evidence-fallback-detail"
+      data-issue-id={issue.id}
+      aria-hidden="true"
+    >
+      <div className="site-page-evidence-fallback-detail__tags">
+        <span
+          className="site-page-evidence-fallback-detail__tag site-page-evidence-fallback-detail__severity"
+          data-severity={issue.severity}
+        >
+          {issue.severityLabel}
+        </span>
+        <span className="site-page-evidence-fallback-detail__tag">
+          {formatIssueCodeLabel(issue.code) || "KWCAG"}
+        </span>
+      </div>
+      <p data-copyable className="site-page-evidence-fallback-detail__title">{issue.title}</p>
+      {issue.message && (
+        <p data-copyable className="site-page-evidence-fallback-detail__message">{issue.message}</p>
+      )}
+      {issue.path && (
+        <code className="site-page-evidence-fallback-detail__path">{issue.path}</code>
+      )}
+    </div>
+  );
+}
+
 export function RenderedPageEvidenceCard({
   accessUrl,
   headerActions,
   faviconUrl,
   captureMetadata,
-  captureMetadataLoadState = "ready",
+  captureMetadataLoadState,
   errorMessage,
   evaluationRequestId,
   liveSession,
@@ -168,37 +400,26 @@ export function RenderedPageEvidenceCard({
     // view stays open on a phone turned sideways, past the phone breakpoint.
     popoverScale: isMobileDashboard || isExpanded ? PHONE_POPOVER_SCALE : 1
   }), [isExpanded, isMobileDashboard, replayViewportMetrics]);
-  const {
-    iframeRef, frameIdentity, frameRevision, frameRuntimeUrl,
-    activeFrameKind, effectiveLoadState, replayConnectionState, replayLoadingPhase,
-    documentTitle, isDocumentScrolled, fallbackIssue,
-    unavailableLocatorCount, recoverableHiddenLocatorCount,
-    handleFrameLoad, handleFrameError, retryFrame, enterReportFocus, resetAutomaticLiveRecovery
-  } = usePageEvidenceConnection({
+  const connection = usePageEvidenceConnection({
     evaluationRequestId, liveSession, liveSessionLoadState, onRetryLiveSession,
     onLocatorReportChange, onSelectIssue, previewRuntimeUrl, rows,
-    deviceScaleFactor: captureMetadata?.deviceScaleFactor ?? null, selectedIssueId,
-    selectedIssueFocusRequestId, replayViewportMetrics: sentViewportMetrics,
+    selectedIssueId, selectedIssueFocusRequestId, replayViewportMetrics: sentViewportMetrics,
     // The larger view has no page header over the page's top edge.
     chromeHeight: isExpanded ? 0 : chromeHeight,
-    captureMetadataStatus: resolveReplayCaptureMetadataStatus(captureMetadataLoadState, captureMetadata !== null)
+    ...getCaptureInputs(captureMetadata, captureMetadataLoadState)
   });
-  const headerTitle = documentTitle === null ? "" : documentTitle || "제목 없음";
-  const loadingFrameKind = activeFrameKind ?? "live";
-  const replayLoadingMessage = getPageEvidenceLoadingMessage({
-    frameKind: loadingFrameKind,
-    phase: replayLoadingPhase
-  });
-  const showsReplayLoadingOverlay = replayConnectionState === "loading"
-    || (replayConnectionState === "ready" && replayLoadingPhase !== "complete");
-  const isPageLoading = effectiveLoadState === "loading"
-    || (effectiveLoadState === "ready" && showsReplayLoadingOverlay);
+  const {
+    iframeRef, frameIdentity, frameRevision, activeFrameKind, effectiveLoadState,
+    replayConnectionState, replayLoadingPhase, enterReportFocus, resetAutomaticLiveRecovery
+  } = connection;
+  const headerTitle = getHeaderTitle(connection.documentTitle);
+  const { showsReplayLoadingOverlay, isPageLoading, connectionError, documentScrolled } = getEvidenceCardState(connection);
   const replaySourceWidth = getReplaySourceWidth(captureMetadata, activeFrameKind);
-  const replayScale = replayViewportMetrics.scale;
-  const hasReplayFrame = effectiveLoadState === "ready" && activeFrameKind !== null && frameRuntimeUrl !== null;
-  const viewerOpen = isExpanded && hasReplayFrame;
-  const showsExpandButton = isMobileDashboard && hasReplayFrame && replayConnectionState === "ready";
-  const isCompactPreview = isMobileDashboard && !viewerOpen;
+  const replayFrameUrl = getReplayFrameUrl(connection);
+  const hasReplayFrame = replayFrameUrl !== null;
+  const { viewerOpen, showsExpandButton, isCompactPreview, focusGuardTabIndex } = getPhoneViewState(
+    isMobileDashboard, isExpanded, hasReplayFrame, replayConnectionState
+  );
 
   const closeViewer = useCallback(() => setIsExpanded(false), []);
   const viewerRef = useDialogAccessibility<HTMLDivElement>({
@@ -219,24 +440,7 @@ export function RenderedPageEvidenceCard({
     if (frame) frame.inert = isCompactPreview;
   }, [iframeRef, isCompactPreview, frameIdentity, frameRevision, hasReplayFrame]);
 
-  // Set the desktop width on the very first frame load, before page scripts
-  // can choose a mobile layout. Scale only its presentation in the dashboard.
-  // A preview wider than that width is filled at full size instead.
-  const replayFrameWidth = `max(${replaySourceWidth}px, 100%)`;
-  const replayFrameStyle: CSSProperties | undefined = activeFrameKind !== null && replaySourceWidth > 0
-    ? frameZoomSupported
-      ? {
-          width: replayFrameWidth,
-          height: "100%",
-          zoom: String(replayScale)
-        }
-      : {
-          width: replayFrameWidth,
-          height: `${100 / replayScale}%`,
-          transform: `scale(${replayScale})`,
-          transformOrigin: "top left"
-        }
-    : undefined;
+  const replayFrameStyle = getReplayFrameStyle(activeFrameKind, replaySourceWidth, replayViewportMetrics.scale);
 
   useLayoutEffect(() => {
     const chrome = chromeRef.current;
@@ -294,10 +498,10 @@ export function RenderedPageEvidenceCard({
   return (
     <article aria-label="페이지 검사 화면" className="dashboard-card site-page-evidence-card"
       data-loading={isPageLoading}
-      data-connection-error={effectiveLoadState === "error" || (effectiveLoadState === "ready" && replayConnectionState === "error")}
-      data-document-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
+      data-connection-error={connectionError}
+      data-document-scrolled={documentScrolled}>
       <header ref={chromeRef} className="site-page-evidence-chrome"
-        data-scrolled={isDocumentScrolled && replayConnectionState === "ready"}>
+        data-scrolled={documentScrolled}>
         <div className="site-page-evidence-chrome__identity" style={{ visibility: isPageLoading ? "hidden" : undefined }}>
           <PageFavicon key={faviconUrl ?? "fallback"} faviconUrl={faviconUrl} className="site-page-evidence-chrome__icon" />
           <h2 id="site-page-evidence-heading" title={headerTitle}>{headerTitle}</h2>
@@ -310,50 +514,21 @@ export function RenderedPageEvidenceCard({
       </header>
 
       <div className="site-page-evidence-body">
-        {effectiveLoadState === "loading" && (
-          <div className="site-page-evidence-loading" role="status" aria-live="polite">
-            <PageEvidenceLoadingBar
-              frameKind={loadingFrameKind}
-              label={replayLoadingMessage}
-              phase={replayLoadingPhase}
-            />
-            <span>{replayLoadingMessage}</span>
-          </div>
-        )}
-
-        {effectiveLoadState === "idle" && (
-          <EmptyEvidenceState />
-        )}
-
-        {effectiveLoadState === "error" && (
-          <div className="site-page-evidence-empty" role="alert">
-            <MonitorOff aria-hidden="true" size={26} strokeWidth={1.8} />
-            <div>
-              <p className="site-page-evidence-empty-title">현재 동적 페이지를 열지 못했어요</p>
-              <p className="site-page-evidence-empty-description">
-                {errorMessage ??
-                  "원본 사이트에 연결할 수 없습니다. 잠시 후 동적 화면을 다시 시도해 주세요."}
-              </p>
-              <button type="button" className="site-page-evidence-retry" onClick={() => {
-                resetAutomaticLiveRecovery();
-                onRetry();
-              }}>
-                <RefreshCw aria-hidden="true" size={15} />
-                다시 시도
-              </button>
-            </div>
-          </div>
-        )}
+        <PageEvidenceStatus
+          connection={connection}
+          errorMessage={errorMessage}
+          onRetry={() => {
+            resetAutomaticLiveRecovery();
+            onRetry();
+          }}
+        />
 
         {hasReplayFrame && (
           <div className="site-page-evidence-grid">
             <div
               ref={viewerRef}
               className="site-page-evidence-replay-column"
-              data-expanded={viewerOpen || undefined}
-              role={viewerOpen ? "dialog" : undefined}
-              aria-modal={viewerOpen || undefined}
-              aria-labelledby={viewerOpen ? "site-page-evidence-viewer-title" : undefined}
+              {...(viewerOpen ? viewerDialogAttributes : undefined)}
             >
               {viewerOpen && (
                 <div className="site-page-evidence-viewer-bar">
@@ -374,45 +549,24 @@ export function RenderedPageEvidenceCard({
                 aria-busy={showsReplayLoadingOverlay}
                 data-connection-state={replayConnectionState}
                 data-loading-phase={replayLoadingPhase}
-                data-unavailable-locator-count={unavailableLocatorCount}
-                data-hidden-state-locator-count={recoverableHiddenLocatorCount}
+                data-unavailable-locator-count={connection.unavailableLocatorCount}
+                data-hidden-state-locator-count={connection.recoverableHiddenLocatorCount}
                 data-focus-request-id={selectedIssueFocusRequestId}
                 data-marker-density={sentViewportMetrics.markerDensity}
               >
-                {activeFrameKind === "live" && (
-                  <button type="button" className="site-report-focus-guard"
-                    data-live-report-focus-guard="forward"
-                    tabIndex={replayConnectionState === "ready" && !isCompactPreview ? 0 : -1}
-                    onFocus={event => enterReportFocus("forward", event.currentTarget)}
-                    onClick={() => enterReportFocus("forward")}>이슈 마커로 이동</button>
-                )}
-                <iframe
-                  key={`${frameIdentity ?? "none"}:${frameRevision}`}
-                  ref={iframeRef}
-                  className="site-page-evidence-replay-frame"
-                  data-replay-scale={replayScale.toFixed(4)}
-                  data-replay-visual-width={replayViewportMetrics.visualWidth.toFixed(2)}
-                  data-report-mode={activeFrameKind}
-                  tabIndex={activeFrameKind === "live" ? -1 : undefined}
-                  src={frameRuntimeUrl}
+                <ReportFocusGuard direction="forward" frameKind={activeFrameKind}
+                  tabIndex={focusGuardTabIndex} onEnter={enterReportFocus} />
+                <ReplayFrame
+                  connection={connection}
+                  frameKind={activeFrameKind}
+                  src={replayFrameUrl}
                   style={replayFrameStyle}
-                  title={`${targetName} 접근성 검사 페이지 ${activeFrameKind === "live" ? "동적 보기" : "제품 미리보기"}`}
-                  sandbox={activeFrameKind === "live"
-                    ? "allow-scripts allow-same-origin allow-forms"
-                    : "allow-scripts"}
-                  referrerPolicy="no-referrer"
-                  loading={activeFrameKind === "live" ? "eager" : "lazy"}
-                  onLoad={handleFrameLoad}
-                  onError={handleFrameError}
+                  viewportMetrics={sentViewportMetrics}
+                  targetName={targetName}
                 />
 
-                {activeFrameKind === "live" && (
-                  <button type="button" className="site-report-focus-guard"
-                    data-live-report-focus-guard="backward"
-                    tabIndex={replayConnectionState === "ready" && !isCompactPreview ? 0 : -1}
-                    onFocus={event => enterReportFocus("backward", event.currentTarget)}
-                    onClick={() => enterReportFocus("backward")}>이슈 마커로 이동</button>
-                )}
+                <ReportFocusGuard direction="backward" frameKind={activeFrameKind}
+                  tabIndex={focusGuardTabIndex} onEnter={enterReportFocus} />
 
                 {showsExpandButton && (
                   <button ref={expandButtonRef} type="button" className="site-page-evidence-expand"
@@ -424,57 +578,11 @@ export function RenderedPageEvidenceCard({
                   </button>
                 )}
 
-                {showsReplayLoadingOverlay && (
-                  <div className="site-page-evidence-replay-overlay" role="status" aria-live="polite">
-                    <PageEvidenceLoadingBar
-                      frameKind={loadingFrameKind}
-                      label={replayLoadingMessage}
-                      phase={replayLoadingPhase}
-                    />
-                    <span>{replayLoadingMessage}</span>
-                  </div>
-                )}
-
-                {replayConnectionState === "error" && (
-                  <div className="site-page-evidence-replay-overlay" role="alert">
-                    <MonitorOff aria-hidden="true" size={24} />
-                    <span>{activeFrameKind === "live" ? "동적 페이지와 연결하지 못했어요" : "제품 미리보기를 불러오지 못했어요"}</span>
-                    <button
-                      type="button"
-                      onClick={retryFrame}
-                    >
-                      화면 다시 불러오기
-                    </button>
-                  </div>
-                )}
+                <ReplayStatusOverlay connection={connection} frameKind={activeFrameKind}
+                  showsLoading={showsReplayLoadingOverlay} />
               </div>
 
-              {replayConnectionState === "ready" && fallbackIssue && (
-                <div
-                  className="site-page-evidence-fallback-detail"
-                  data-issue-id={fallbackIssue.id}
-                  aria-hidden="true"
-                >
-                  <div className="site-page-evidence-fallback-detail__tags">
-                    <span
-                      className="site-page-evidence-fallback-detail__tag site-page-evidence-fallback-detail__severity"
-                      data-severity={fallbackIssue.severity}
-                    >
-                      {fallbackIssue.severityLabel}
-                    </span>
-                    <span className="site-page-evidence-fallback-detail__tag">
-                      {formatIssueCodeLabel(fallbackIssue.code) || "KWCAG"}
-                    </span>
-                  </div>
-                  <p data-copyable className="site-page-evidence-fallback-detail__title">{fallbackIssue.title}</p>
-                  {fallbackIssue.message && (
-                    <p data-copyable className="site-page-evidence-fallback-detail__message">{fallbackIssue.message}</p>
-                  )}
-                  {fallbackIssue.path && (
-                    <code className="site-page-evidence-fallback-detail__path">{fallbackIssue.path}</code>
-                  )}
-                </div>
-              )}
+              <FallbackIssueDetail connection={connection} />
             </div>
 
           </div>

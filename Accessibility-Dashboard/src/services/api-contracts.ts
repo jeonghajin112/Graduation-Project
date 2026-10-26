@@ -701,6 +701,33 @@ export function createEvaluationCaptureMetadataParser(
   };
 }
 
+function assertViewerOriginMatchesRuntimeUrl(
+  viewerOrigin: string,
+  runtimeUrl: string,
+  path: string
+): void {
+  const parsedRuntimeUrl = new URL(runtimeUrl);
+  if (viewerOrigin === "null") {
+    return;
+  }
+  const parsedViewerOrigin = new URL(parseAbsoluteHttpUrl(viewerOrigin, `${path}.viewerOrigin`, 512));
+  if (
+    parsedViewerOrigin.origin !== viewerOrigin ||
+    parsedViewerOrigin.pathname !== "/" ||
+    parsedViewerOrigin.search.length > 0 ||
+    parsedViewerOrigin.hash.length > 0
+  ) {
+    failContract(viewerOrigin, `${path}.viewerOrigin`, "path가 없는 HTTP(S) origin");
+  }
+  if (parsedRuntimeUrl.origin !== parsedViewerOrigin.origin) {
+    failContract(
+      runtimeUrl,
+      `${path}.runtimeUrl`,
+      `viewerOrigin ${viewerOrigin}과 같은 origin의 URL`
+    );
+  }
+}
+
 export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession> = (
   value,
   path
@@ -715,25 +742,7 @@ export const parseLiveReportSessionResponse: ApiResponseParser<LiveReportSession
   const runtimeUrl = fields.required("runtimeUrl", parseAbsoluteHttpUrl);
   const viewerOrigin = fields.required("viewerOrigin", (field, fieldPath) =>
     parseNonBlankString(field, fieldPath, 512));
-  const parsedRuntimeUrl = new URL(runtimeUrl);
-  if (viewerOrigin !== "null") {
-    const parsedViewerOrigin = new URL(parseAbsoluteHttpUrl(viewerOrigin, `${path}.viewerOrigin`, 512));
-    if (
-      parsedViewerOrigin.origin !== viewerOrigin ||
-      parsedViewerOrigin.pathname !== "/" ||
-      parsedViewerOrigin.search.length > 0 ||
-      parsedViewerOrigin.hash.length > 0
-    ) {
-      return failContract(viewerOrigin, `${path}.viewerOrigin`, "path가 없는 HTTP(S) origin");
-    }
-    if (parsedRuntimeUrl.origin !== parsedViewerOrigin.origin) {
-      return failContract(
-        runtimeUrl,
-        `${path}.runtimeUrl`,
-        `viewerOrigin ${viewerOrigin}과 같은 origin의 URL`
-      );
-    }
-  }
+  assertViewerOriginMatchesRuntimeUrl(viewerOrigin, runtimeUrl, path);
 
   const nonce = fields.required("nonce", (field, fieldPath) =>
     parseNonBlankString(field, fieldPath, 256));

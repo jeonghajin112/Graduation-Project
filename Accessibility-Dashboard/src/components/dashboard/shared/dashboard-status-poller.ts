@@ -7,6 +7,8 @@ import type { LoadDashboard } from "./use-dashboard-data";
 
 const STATUS_BATCH_SIZE = 100;
 
+type StatusEntry = Awaited<ReturnType<typeof fetchEvaluationStatuses>>[number];
+
 type StatusPollerOptions = {
   activeEvaluationRequestIds: number[];
   observations: Map<number, RequestPollObservation>;
@@ -42,6 +44,24 @@ export function createDashboardStatusPoller({
     observations.set(id, failedPoll(observations.get(id), Date.now()));
     updatePausedCount();
   };
+  // Returns whether the entry calls for an overview refresh.
+  const applyStatusEntry = (entry: StatusEntry): boolean => {
+    const request = entry.request;
+    if (entry.outcome === "REMOVED") {
+      observations.set(entry.id, { failures: 0, firstFailureAt: 0, lastAttemptAt: Date.now(), nextAttemptAt: Infinity, paused: true, removed: true });
+      forgetRequest(entry.id);
+      return true;
+    }
+    if (!request) {
+      recordFailure(entry.id);
+      return true;
+    }
+    // Apply each completed response immediately, independent of slow peers.
+    trackEvaluationRequest(request);
+    const targetVisible = getDashboard()?.organizations.some(organization => organization.evaluationTargets.some(target => target.id === request.evaluationTargetId));
+    observations.set(entry.id, { failures: 0, firstFailureAt: 0, lastAttemptAt: Date.now(), nextAttemptAt: 0, paused: false });
+    return !targetVisible || request.status === "COMPLETED" || request.status === "FAILED";
+  };
   const pollBatch = async (ids: number[]) => {
     activeBatches++;
     ids.forEach(id => inFlight.add(id));
@@ -51,21 +71,7 @@ export function createDashboardStatusPoller({
       if (signal.aborted) return;
       let needsOverview = false;
       for (const entry of entries) {
-        const request = entry.request;
-        if (entry.outcome === "REMOVED") {
-          observations.set(entry.id, { failures: 0, firstFailureAt: 0, lastAttemptAt: Date.now(), nextAttemptAt: Infinity, paused: true, removed: true });
-          forgetRequest(entry.id);
-          needsOverview = true;
-        } else if (!request) {
-          recordFailure(entry.id);
-          needsOverview = true;
-        } else {
-          // Apply each completed response immediately, independent of slow peers.
-          trackEvaluationRequest(request);
-          const targetVisible = getDashboard()?.organizations.some(organization => organization.evaluationTargets.some(target => target.id === request.evaluationTargetId));
-          observations.set(entry.id, { failures: 0, firstFailureAt: 0, lastAttemptAt: Date.now(), nextAttemptAt: 0, paused: false });
-          needsOverview ||= !targetVisible || request.status === "COMPLETED" || request.status === "FAILED";
-        }
+        if (applyStatusEntry(entry)) needsOverview = true;
       }
       updatePausedCount();
       if (needsOverview) void refreshOverview();

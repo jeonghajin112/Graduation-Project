@@ -6,6 +6,7 @@
 //   live-report/page-evidence hooks intentionally omit some dependencies and
 //   are tracked for review. Do not add new warnings — `npm run lint:strict`
 //   (--max-warnings 0) is the target once they are resolved.
+// - complexity is an error at 10 for every function, components included.
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
@@ -18,6 +19,12 @@ export default tseslint.config(
   {
     linterOptions: {
       reportUnusedDisableDirectives: "warn"
+    }
+  },
+  {
+    files: ["src/**/*.{ts,tsx,js}"],
+    rules: {
+      complexity: ["error", 10]
     }
   },
   {

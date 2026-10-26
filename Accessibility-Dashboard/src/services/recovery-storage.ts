@@ -12,6 +12,17 @@ export type StoredRecovery<T> = {
 };
 export type RecoveryWriteFailure = "invalid" | "changed" | "quota" | "unavailable";
 
+const ATTEMPT_ID_MAX_LENGTH = 100;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isRecoveryAttemptId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= ATTEMPT_ID_MAX_LENGTH;
+}
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
 export function isRecoveryTimestampStale(
   startedAt: number,
   now = Date.now()
@@ -120,7 +131,11 @@ export function writeSessionRecoveryIfUnchanged<T>(
     }
     return { rawValue, value: normalizedValue };
   } catch (error) {
-    onFailure?.(error instanceof Error && error.name === "QuotaExceededError" ? "quota" : "unavailable");
+    onFailure?.(getStorageWriteFailure(error));
     return null;
   }
+}
+
+function getStorageWriteFailure(error: unknown): RecoveryWriteFailure {
+  return error instanceof Error && error.name === "QuotaExceededError" ? "quota" : "unavailable";
 }

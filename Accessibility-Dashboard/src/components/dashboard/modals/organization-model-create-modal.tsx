@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,78 @@ import { Input } from "@/components/ui/input";
 import { PanelMessage } from "../shared/display";
 import { preventAccidentalSubmit } from "../shared/form-keyboard";
 import { useDialogAccessibility } from "../shared/use-dialog-accessibility";
+import { isDialogFocusLost } from "./dialog-submit-focus";
+
+function OrganizationCreateActions({
+  hasPendingOrganizationCreate,
+  hasRecovery,
+  canDiscardRecovery,
+  isRecoveryBlocked,
+  isSubmitting,
+  submitButtonRef,
+  onClose,
+  onDiscardRecovery
+}: {
+  hasPendingOrganizationCreate: boolean;
+  hasRecovery: boolean;
+  canDiscardRecovery: boolean;
+  isRecoveryBlocked: boolean;
+  isSubmitting: boolean;
+  submitButtonRef: RefObject<HTMLButtonElement>;
+  onClose: () => void;
+  onDiscardRecovery: () => void;
+}) {
+  return (
+    <div className="dashboard-modal-actions">
+      {canDiscardRecovery && (
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          disabled={isSubmitting}
+          onClick={() => {
+            const shouldDiscard = window.confirm(
+              "프로젝트가 이미 생성되지 않았는지 목록에서 확인하셨나요? 이전 작업 정보를 삭제하면 같은 프로젝트가 다시 생성될 수 있습니다. 그래도 삭제할까요?"
+            );
+            if (shouldDiscard) {
+              onDiscardRecovery();
+            }
+          }}
+          className="dashboard-modal-button dashboard-modal-button--danger"
+        >
+          이전 작업 정보 삭제
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={isSubmitting}
+        onClick={onClose}
+        className="dashboard-modal-button"
+      >
+        {hasRecovery ? "닫기" : "취소"}
+      </Button>
+      {!isRecoveryBlocked && (
+        <Button
+          ref={submitButtonRef}
+          type="submit"
+          size="sm"
+          disabled={isSubmitting}
+          className="dashboard-modal-button dashboard-modal-button--primary"
+        >
+          {hasPendingOrganizationCreate
+            ? isSubmitting
+              ? "처리 중..."
+              : "프로젝트 다시 시도"
+            : isSubmitting
+              ? "생성 중..."
+              : "생성"}
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function OrganizationModelCreateModal({
   isOpen,
@@ -69,10 +141,7 @@ export function OrganizationModelCreateModal({
       return;
     }
     const active = document.activeElement;
-    const focusLost =
-      !(active instanceof HTMLElement) ||
-      !dialog.contains(active) ||
-      (active as HTMLButtonElement | HTMLInputElement).disabled === true;
+    const focusLost = isDialogFocusLost(dialog, active);
     if (isSubmitting) {
       if (focusLost) dialog.focus({ preventScroll: true });
       return;
@@ -148,54 +217,16 @@ export function OrganizationModelCreateModal({
           />
         </div>
 
-        <div className="dashboard-modal-actions">
-          {canDiscardRecovery && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={isSubmitting}
-              onClick={() => {
-                const shouldDiscard = window.confirm(
-                  "프로젝트가 이미 생성되지 않았는지 목록에서 확인하셨나요? 이전 작업 정보를 삭제하면 같은 프로젝트가 다시 생성될 수 있습니다. 그래도 삭제할까요?"
-                );
-                if (shouldDiscard) {
-                  onDiscardRecovery();
-                }
-              }}
-              className="dashboard-modal-button dashboard-modal-button--danger"
-            >
-              이전 작업 정보 삭제
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isSubmitting}
-            onClick={onClose}
-            className="dashboard-modal-button"
-          >
-            {hasRecovery ? "닫기" : "취소"}
-          </Button>
-          {!isRecoveryBlocked && (
-            <Button
-              ref={submitButtonRef}
-              type="submit"
-              size="sm"
-              disabled={isSubmitting}
-              className="dashboard-modal-button dashboard-modal-button--primary"
-            >
-              {hasPendingOrganizationCreate
-                ? isSubmitting
-                  ? "처리 중..."
-                  : "프로젝트 다시 시도"
-                : isSubmitting
-                  ? "생성 중..."
-                  : "생성"}
-            </Button>
-          )}
-        </div>
+        <OrganizationCreateActions
+          hasPendingOrganizationCreate={hasPendingOrganizationCreate}
+          hasRecovery={hasRecovery}
+          canDiscardRecovery={canDiscardRecovery}
+          isRecoveryBlocked={isRecoveryBlocked}
+          isSubmitting={isSubmitting}
+          submitButtonRef={submitButtonRef}
+          onClose={onClose}
+          onDiscardRecovery={onDiscardRecovery}
+        />
       </form>
     </div>,
     document.body

@@ -75,6 +75,25 @@ function waitForLoadOrAbort(
   });
 }
 
+type LoadRequest = Required<Omit<LoadDashboardOptions, "signal">> & Pick<LoadDashboardOptions, "signal">;
+
+/** Whether a new load must wait for the active one before replacing, joining or starting. */
+function queuesBehind(
+  active: ActiveDashboardLoad,
+  { background, refreshAfterInFlight, showLoading }: LoadRequest
+): boolean {
+  if (background && refreshAfterInFlight) {
+    // The status poller observed a change newer than any running load, but
+    // cancelling a user's refresh or a mutation's reconciliation would make
+    // that caller report a false failure. Queue behind it instead.
+    return !active.isBackground;
+  }
+  // Strict Mode remounts the bootstrap effect after aborting its first
+  // request. Wait for that owned request to settle before starting the
+  // live replacement so development mode does not duplicate GETs.
+  return !refreshAfterInFlight && showLoading;
+}
+
 /**
  * Owns the single in-flight overview request. It is independent of React so
  * the ordering rules below are unit-testable:
@@ -90,58 +109,10 @@ export function createDashboardLoadCoordinator(getHandlers: () => DashboardLoadH
   let activeLoad: ActiveDashboardLoad | null = null;
   let isBootstrapped = false;
 
-  const load: LoadDashboard = async ({
-    background = false,
-    awaitInFlight = false,
-    refreshAfterInFlight = false,
-    showLoading = false,
-    clearOnError = false,
-    signal
-  } = {}) => {
-    if (signal?.aborted) {
-      return null;
-    }
-
-    if (background && refreshAfterInFlight) {
-      // The status poller observed a change newer than any running load, but
-      // cancelling a user's refresh or a mutation's reconciliation would make
-      // that caller report a false failure. Queue behind it instead.
-      while (activeLoad && !activeLoad.isBackground) {
-        const waited = await waitForLoadOrAbort(activeLoad.promise, signal);
-        if (waited.aborted) {
-          return null;
-        }
-      }
-    }
-
-    let inheritedLoading = false;
-    let supersededLoad: ActiveDashboardLoad | null = null;
-    // A manual or mutation refresh must not queue forever behind a stalled
-    // bootstrap/poll. Detach it immediately; the load id below prevents a
-    // late continuation from painting stale data or clearing newer state.
-    if (refreshAfterInFlight && activeLoad) {
-      supersededLoad = activeLoad;
-      inheritedLoading = supersededLoad.managesLoading;
-      activeLoad = null;
-    } else if (showLoading) {
-      // Strict Mode remounts the bootstrap effect after aborting its first
-      // request. Wait for that owned request to settle before starting the
-      // live replacement so development mode does not duplicate GETs.
-      while (activeLoad) {
-        const waited = await waitForLoadOrAbort(activeLoad.promise, signal);
-        if (waited.aborted) {
-          return null;
-        }
-      }
-    } else if (activeLoad) {
-      if (!awaitInFlight) {
-        return null;
-      }
-
-      const waited = await waitForLoadOrAbort(activeLoad.promise, signal);
-      return waited.aborted ? null : waited.value;
-    }
-
+  const startLoad = (
+    { background, refreshAfterInFlight, showLoading, clearOnError, signal }: LoadRequest,
+    supersededLoad: ActiveDashboardLoad | null
+  ): Promise<DashboardViewModel | null> => {
     const loadDeadline = createRequestDeadline({
       signal,
       timeoutMs: DASHBOARD_OVERVIEW_TIMEOUT_MS,
@@ -149,11 +120,64 @@ export function createDashboardLoadCoordinator(getHandlers: () => DashboardLoadH
     });
     const loadAbortController = loadDeadline.controller;
     const loadId = Symbol("dashboard-overview-load");
-    const managesLoading = showLoading || inheritedLoading;
+    const managesLoading = showLoading || (supersededLoad !== null && supersededLoad.managesLoading);
     let successor: Promise<DashboardViewModel | null> | null = null;
     let didCancel = false;
     const cleanupLoadResources = loadDeadline.dispose;
     const isCurrentLoad = () => activeLoad?.id === loadId;
+
+    const recoverFromError = (error: unknown): Promise<DashboardViewModel | null> | null => {
+      if (loadDeadline.didTimeout()) {
+        if (isCurrentLoad()) {
+          getHandlers().reportError(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE, clearOnError);
+        }
+        return null;
+      }
+
+      if (isAbortError(error) || loadAbortController.signal.aborted) {
+        if (successor !== null && !signal?.aborted) {
+          // Replaced, not cancelled: hand the caller the newer snapshot.
+          return successor;
+        }
+        didCancel = true;
+        return null;
+      }
+
+      if (isCurrentLoad()) {
+        getHandlers().reportError(getApiErrorMessage(error, DASHBOARD_LOAD_ERROR_MESSAGE), clearOnError);
+      }
+      return null;
+    };
+
+    const finishLoad = () => {
+      cleanupLoadResources();
+      if (!isCurrentLoad()) {
+        return;
+      }
+      activeLoad = null;
+
+      // A successful/error/timeout replacement refresh can finish a
+      // bootstrap it superseded. Unmount aborts remain silent because
+      // cancelActiveLoad detaches the active load before aborting it.
+      const completesBootstrap = !didCancel && !isBootstrapped;
+      if (completesBootstrap) {
+        isBootstrapped = true;
+        getHandlers().onBootstrapComplete();
+      }
+
+      if (didCancel && !isBootstrapped) {
+        // The replacement's own caller gave up (modal closed, deadline)
+        // while the app was still booting. Keep the loading state and
+        // start a fresh bootstrap instead of leaving the shell inert.
+        queueMicrotask(() => {
+          if (!isBootstrapped && activeLoad === null) {
+            void load({ showLoading: true, clearOnError: true });
+          }
+        });
+      } else if (managesLoading || completesBootstrap) {
+        getHandlers().setLoading(false);
+      }
+    };
 
     const loadPromise = (async (): Promise<DashboardViewModel | null> => {
       const handlers = getHandlers();
@@ -168,53 +192,9 @@ export function createDashboardLoadCoordinator(getHandlers: () => DashboardLoadH
         }
         return getHandlers().applySnapshot(nextData);
       } catch (error) {
-        if (loadDeadline.didTimeout()) {
-          if (isCurrentLoad()) {
-            getHandlers().reportError(DASHBOARD_OVERVIEW_TIMEOUT_MESSAGE, clearOnError);
-          }
-          return null;
-        }
-
-        if (isAbortError(error) || loadAbortController.signal.aborted) {
-          if (successor !== null && !signal?.aborted) {
-            // Replaced, not cancelled: hand the caller the newer snapshot.
-            return successor;
-          }
-          didCancel = true;
-          return null;
-        }
-
-        if (isCurrentLoad()) {
-          getHandlers().reportError(getApiErrorMessage(error, DASHBOARD_LOAD_ERROR_MESSAGE), clearOnError);
-        }
-        return null;
+        return recoverFromError(error);
       } finally {
-        cleanupLoadResources();
-        if (isCurrentLoad()) {
-          activeLoad = null;
-
-          // A successful/error/timeout replacement refresh can finish a
-          // bootstrap it superseded. Unmount aborts remain silent because
-          // cancelActiveLoad detaches the active load before aborting it.
-          const completesBootstrap = !didCancel && !isBootstrapped;
-          if (completesBootstrap) {
-            isBootstrapped = true;
-            getHandlers().onBootstrapComplete();
-          }
-
-          if (didCancel && !isBootstrapped) {
-            // The replacement's own caller gave up (modal closed, deadline)
-            // while the app was still booting. Keep the loading state and
-            // start a fresh bootstrap instead of leaving the shell inert.
-            queueMicrotask(() => {
-              if (!isBootstrapped && activeLoad === null) {
-                void load({ showLoading: true, clearOnError: true });
-              }
-            });
-          } else if (managesLoading || completesBootstrap) {
-            getHandlers().setLoading(false);
-          }
-        }
+        finishLoad();
       }
     })();
 
@@ -236,6 +216,44 @@ export function createDashboardLoadCoordinator(getHandlers: () => DashboardLoadH
     }
     return loadPromise;
   };
+
+  const admitLoad = async (request: LoadRequest): Promise<DashboardViewModel | null> => {
+    while (activeLoad && queuesBehind(activeLoad, request)) {
+      const waited = await waitForLoadOrAbort(activeLoad.promise, request.signal);
+      if (waited.aborted) {
+        return null;
+      }
+    }
+
+    // A manual or mutation refresh must not queue forever behind a stalled
+    // bootstrap/poll. Detach it immediately; the load id below prevents a
+    // late continuation from painting stale data or clearing newer state.
+    if (request.refreshAfterInFlight && activeLoad) {
+      const supersededLoad = activeLoad;
+      activeLoad = null;
+      return startLoad(request, supersededLoad);
+    }
+    if (activeLoad) {
+      if (!request.awaitInFlight) {
+        return null;
+      }
+
+      const waited = await waitForLoadOrAbort(activeLoad.promise, request.signal);
+      return waited.aborted ? null : waited.value;
+    }
+    return startLoad(request, null);
+  };
+
+  const load: LoadDashboard = ({
+    background = false,
+    awaitInFlight = false,
+    refreshAfterInFlight = false,
+    showLoading = false,
+    clearOnError = false,
+    signal
+  } = {}) => signal?.aborted
+    ? Promise.resolve(null)
+    : admitLoad({ background, awaitInFlight, refreshAfterInFlight, showLoading, clearOnError, signal });
 
   return {
     load,

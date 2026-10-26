@@ -89,6 +89,36 @@ function unlockAppShell() {
   }
 }
 
+function trapDialogTabFocus(dialog: HTMLElement, event: KeyboardEvent) {
+  const focusableElements = getFocusableElements(dialog);
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    dialog.focus({ preventScroll: true });
+    return;
+  }
+
+  const firstFocusableElement = focusableElements[0]!;
+  const lastFocusableElement = focusableElements[focusableElements.length - 1]!;
+  const activeElement = document.activeElement;
+
+  if (!(activeElement instanceof Node) || !dialog.contains(activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? lastFocusableElement : firstFocusableElement).focus({ preventScroll: true });
+    return;
+  }
+
+  if (event.shiftKey && (activeElement === firstFocusableElement || activeElement === dialog)) {
+    event.preventDefault();
+    lastFocusableElement.focus({ preventScroll: true });
+    return;
+  }
+
+  if (!event.shiftKey && activeElement === lastFocusableElement) {
+    event.preventDefault();
+    firstFocusableElement.focus({ preventScroll: true });
+  }
+}
+
 export function useDialogAccessibility<TElement extends HTMLElement = HTMLElement>({
   isOpen,
   onClose,
@@ -160,36 +190,8 @@ export function useDialogAccessibility<TElement extends HTMLElement = HTMLElemen
         return;
       }
 
-      if (event.key !== "Tab") {
-        return;
-      }
-
-      const focusableElements = getFocusableElements(dialog);
-      if (focusableElements.length === 0) {
-        event.preventDefault();
-        dialog.focus({ preventScroll: true });
-        return;
-      }
-
-      const firstFocusableElement = focusableElements[0]!;
-      const lastFocusableElement = focusableElements[focusableElements.length - 1]!;
-      const activeElement = document.activeElement;
-
-      if (!(activeElement instanceof Node) || !dialog.contains(activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? lastFocusableElement : firstFocusableElement).focus({ preventScroll: true });
-        return;
-      }
-
-      if (event.shiftKey && (activeElement === firstFocusableElement || activeElement === dialog)) {
-        event.preventDefault();
-        lastFocusableElement.focus({ preventScroll: true });
-        return;
-      }
-
-      if (!event.shiftKey && activeElement === lastFocusableElement) {
-        event.preventDefault();
-        firstFocusableElement.focus({ preventScroll: true });
+      if (event.key === "Tab") {
+        trapDialogTabFocus(dialog, event);
       }
     };
 

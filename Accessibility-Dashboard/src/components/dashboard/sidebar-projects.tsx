@@ -1,6 +1,7 @@
 import type { SidebarProjectActions } from "./dashboard-surface.types";
 import { ChevronRight, FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { Ref } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 
@@ -31,7 +32,6 @@ const PROJECT_MENU_HEIGHT = 74;
 const PROJECT_MENU_GAP = 4;
 const PROJECT_MENU_VIEWPORT_PADDING = 8;
 const PROJECT_NAME_MAX_LENGTH = 100;
-const EMPTY_QUICK_ANALYSIS_RESULTS: readonly QuickAnalysisResultRecord[] = [];
 const subscribeStaticQuickAnalysisResults = () => () => undefined;
 const ANALYSIS_ACKNOWLEDGED_KEY = `uni-access.analysis-acknowledged.v1:${API_BASE_URL}`;
 
@@ -63,6 +63,235 @@ function getEmptyListCopy(listState: SidebarListState, emptyCopy: string): strin
   if (listState === "loading") return "불러오는 중...";
   if (listState === "error") return "목록을 불러오지 못했습니다.";
   return emptyCopy;
+}
+
+function isSelectedRow(selection: DashboardSidebarSelection | null, kind: "project" | "recentPage", id: number) {
+  return selection?.kind === kind && selection.id === id;
+}
+
+function isSelectedProjectPage(selection: DashboardSidebarSelection | null, projectId: number, pageId: number) {
+  return selection?.kind === "projectPage" && selection.projectId === projectId && selection.pageId === pageId;
+}
+
+function getSelectedPageProjectId(selection: DashboardSidebarSelection | null) {
+  return selection?.kind === "projectPage" ? selection.projectId : null;
+}
+
+// The landing preview passes fixed results instead of reading the live registry.
+function getQuickAnalysisResultsStore(override: readonly QuickAnalysisResultRecord[] | undefined) {
+  if (override === undefined) {
+    return {
+      subscribe: subscribeQuickAnalysisRegistry,
+      getSnapshot: getQuickAnalysisRegistrySnapshot,
+      getServerSnapshot: getQuickAnalysisRegistryServerSnapshot
+    };
+  }
+  const getStaticSnapshot = () => override;
+  return {
+    subscribe: subscribeStaticQuickAnalysisResults,
+    getSnapshot: getStaticSnapshot,
+    getServerSnapshot: getStaticSnapshot
+  };
+}
+
+function ProjectRowLabel({ name, isExpanded }: { name: string; isExpanded: boolean }) {
+  return (
+    <>
+      <span className="sidebar-tree-chevron inline-flex shrink-0 items-center justify-center" aria-hidden="true">
+        <ChevronRight
+          size={13}
+          aria-hidden="true"
+          className={cn(
+            "transition-transform duration-150 ease-out motion-reduce:transition-none",
+            isExpanded && "rotate-90"
+          )}
+        />
+      </span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="sidebar-tree-folder-icon inline-flex shrink-0 items-center justify-center">
+          {isExpanded ? (
+            <FolderOpen size={15} aria-hidden="true" />
+          ) : (
+            <Folder size={15} aria-hidden="true" />
+          )}
+        </span>
+        <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{name}</span>
+      </span>
+    </>
+  );
+}
+
+function PageRowLabel({ name }: { name: string }) {
+  return (
+    <>
+      <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
+        <FileText size={16} aria-hidden="true" />
+      </span>
+      <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{name}</span>
+    </>
+  );
+}
+
+function ProjectEditDialog({
+  dialogRef,
+  inputRef,
+  name,
+  onNameChange,
+  error,
+  errorId,
+  isSaving,
+  onClose,
+  onSave
+}: {
+  dialogRef: Ref<HTMLFormElement>;
+  inputRef: Ref<HTMLInputElement>;
+  name: string;
+  onNameChange: (name: string) => void;
+  error: string;
+  errorId: string;
+  isSaving: boolean;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+}) {
+  return createPortal(
+    <div className="dashboard-modal-layer">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
+      <form
+        ref={dialogRef}
+        noValidate
+        onKeyDown={preventAccidentalSubmit}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!isSaving) void onSave();
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sidebar-project-edit-title"
+        tabIndex={-1}
+        className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
+      >
+        <h3
+          id="sidebar-project-edit-title"
+          className="dashboard-modal-title"
+        >
+          프로젝트 수정
+        </h3>
+
+        {error.length > 0 && (
+          <div id={errorId}>
+            <PanelMessage className="dashboard-modal-message" label={`프로젝트 수정 실패: ${error}`} isError />
+          </div>
+        )}
+
+        <div className="mt-4 space-y-4">
+          <label className="block">
+            <span className="dashboard-modal-label">
+              프로젝트 이름
+            </span>
+            <input
+              ref={inputRef}
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              maxLength={PROJECT_NAME_MAX_LENGTH}
+              autoComplete="off"
+              aria-invalid={error.length > 0 || undefined}
+              aria-describedby={error.length > 0 ? errorId : undefined}
+              className="dashboard-modal-input"
+              placeholder="예: 고령자 접근성 점검"
+            />
+          </label>
+        </div>
+
+        <div className="dashboard-modal-actions">
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={onClose}
+            className="dashboard-modal-button"
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="dashboard-modal-button dashboard-modal-button--primary"
+          >
+            {isSaving ? "저장 중..." : "저장"}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body
+  );
+}
+
+function ProjectDeleteDialog({
+  dialogRef,
+  projectName,
+  error,
+  isDeleting,
+  onClose,
+  onDelete
+}: {
+  dialogRef: Ref<HTMLElement>;
+  projectName: string;
+  error: string;
+  isDeleting: boolean;
+  onClose: () => void;
+  onDelete: () => Promise<void>;
+}) {
+  return createPortal(
+    <div className="dashboard-modal-layer">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
+      <article
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sidebar-project-delete-title"
+        tabIndex={-1}
+        className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
+      >
+        <h3
+          id="sidebar-project-delete-title"
+          className="dashboard-modal-title"
+        >
+          프로젝트 제거
+        </h3>
+        <p className="dashboard-modal-description mt-2">
+          <span className="font-medium text-foreground">
+            {projectName}
+          </span>{" "}
+          프로젝트를 제거하시겠습니까?
+        </p>
+
+        {error.length > 0 && <PanelMessage className="dashboard-modal-message" label={`프로젝트 제거 실패: ${error}`} isError />}
+
+        <div className="dashboard-modal-actions">
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={onClose}
+            className="dashboard-modal-button"
+          >
+            아니요
+          </button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={isDeleting}
+            onClick={() => {
+              void onDelete();
+            }}
+            className="dashboard-modal-button dashboard-modal-button--danger"
+          >
+            {isDeleting ? "제거 중..." : "네"}
+          </Button>
+        </div>
+      </article>
+    </div>,
+    document.body
+  );
 }
 
 export function SidebarProjectsSection({
@@ -122,18 +351,11 @@ export function SidebarProjectsSection({
   };
   const pageAnalysisRequests = useMemo(() => selectRepresentativeRequestByTarget(evaluationRequests), [evaluationRequests]);
   const autoExpandedPageProjectId = useRef<number | null>(null);
-  const hasQuickAnalysisResultsOverride = quickAnalysisResultsOverride !== undefined;
-  const staticQuickAnalysisResults = quickAnalysisResultsOverride ?? EMPTY_QUICK_ANALYSIS_RESULTS;
+  const quickAnalysisStore = getQuickAnalysisResultsStore(quickAnalysisResultsOverride);
   const quickAnalysisResults = useSyncExternalStore(
-    hasQuickAnalysisResultsOverride
-      ? subscribeStaticQuickAnalysisResults
-      : subscribeQuickAnalysisRegistry,
-    hasQuickAnalysisResultsOverride
-      ? () => staticQuickAnalysisResults
-      : getQuickAnalysisRegistrySnapshot,
-    hasQuickAnalysisResultsOverride
-      ? () => staticQuickAnalysisResults
-      : getQuickAnalysisRegistryServerSnapshot
+    quickAnalysisStore.subscribe,
+    quickAnalysisStore.getSnapshot,
+    quickAnalysisStore.getServerSnapshot
   );
   const recentAnalyzedPages = useMemo(
     () =>
@@ -144,7 +366,7 @@ export function SidebarProjectsSection({
       }),
     [organizations, quickAnalysisResults, evaluationRequests]
   );
-  const selectedPageProjectId = selection?.kind === "projectPage" ? selection.projectId : null;
+  const selectedPageProjectId = getSelectedPageProjectId(selection);
 
   useEffect(
     () => () => {
@@ -362,7 +584,7 @@ export function SidebarProjectsSection({
         {projects.length > 0 ? (
           <ul className="sidebar-tree-list flex flex-col">
             {projects.map((project) => {
-              const isActive = selection?.kind === "project" && selection.id === project.id;
+              const isActive = isSelectedRow(selection, "project", project.id);
               const isExpanded = expandedProjectIds.has(project.id);
               const childListId = `sidebar-project-pages-${project.id}`;
               const menuId = `sidebar-project-menu-${project.id}`;
@@ -446,26 +668,7 @@ export function SidebarProjectsSection({
                       )}
                       title={project.name}
                     >
-                      <span className="sidebar-tree-chevron inline-flex shrink-0 items-center justify-center" aria-hidden="true">
-                        <ChevronRight
-                          size={13}
-                          aria-hidden="true"
-                          className={cn(
-                            "transition-transform duration-150 ease-out motion-reduce:transition-none",
-                            isExpanded && "rotate-90"
-                          )}
-                        />
-                      </span>
-                      <span className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="sidebar-tree-folder-icon inline-flex shrink-0 items-center justify-center">
-                          {isExpanded ? (
-                            <FolderOpen size={15} aria-hidden="true" />
-                          ) : (
-                            <Folder size={15} aria-hidden="true" />
-                          )}
-                        </span>
-                        <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{project.name}</span>
-                      </span>
+                      <ProjectRowLabel name={project.name} isExpanded={isExpanded} />
                     </button>
 
                     {!readOnly ? (
@@ -548,30 +751,28 @@ export function SidebarProjectsSection({
                     <ul id={childListId} className="sidebar-tree-children flex flex-col">
                       {project.evaluationTargets.map((page) => {
                         const analysis = pageAnalysisRequests.get(page.id);
-                        const isPageActive =
-                          selection?.kind === "projectPage" &&
-                          selection.projectId === project.id &&
-                          selection.pageId === page.id;
+                        const isPageActive = isSelectedProjectPage(selection, project.id, page.id);
+                        const ariaCurrent = isPageActive ? "page" : undefined;
+                        const rowLabel = `${page.name} 페이지 열기 (${project.name} 프로젝트)`;
+                        const rowTitle = `${page.name} · ${project.name}`;
+                        const rowClassName = cn(
+                          SIDEBAR_NAV_ITEM_BASE,
+                          "sidebar-tree-child-row pr-8",
+                          isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
+                        );
 
                         return (
                           <li key={page.id} className="relative">
                             {readOnly ? (
                               <button
                                 type="button"
-                                aria-current={isPageActive ? "page" : undefined}
-                                aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
-                                title={`${page.name} · ${project.name}`}
+                                aria-current={ariaCurrent}
+                                aria-label={rowLabel}
+                                title={rowTitle}
                                 onClick={() => onSelectPage?.({ projectId: project.id, pageId: page.id })}
-                                className={cn(
-                                  SIDEBAR_NAV_ITEM_BASE,
-                                  "sidebar-tree-child-row pr-8",
-                                  isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
-                                )}
+                                className={rowClassName}
                               >
-                                <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
-                                  <FileText size={16} aria-hidden="true" />
-                                </span>
-                                <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
+                                <PageRowLabel name={page.name} />
                               </button>
                             ) : (
                               <Link
@@ -579,19 +780,12 @@ export function SidebarProjectsSection({
                                 onClick={() => {
                                   if (analysis?.status === "COMPLETED") acknowledgeAnalysis(analysis);
                                 }}
-                                aria-current={isPageActive ? "page" : undefined}
-                                aria-label={`${page.name} 페이지 열기 (${project.name} 프로젝트)`}
-                                title={`${page.name} · ${project.name}`}
-                                className={cn(
-                                  SIDEBAR_NAV_ITEM_BASE,
-                                  "sidebar-tree-child-row pr-8",
-                                  isPageActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
-                                )}
+                                aria-current={ariaCurrent}
+                                aria-label={rowLabel}
+                                title={rowTitle}
+                                className={rowClassName}
                               >
-                                <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
-                                  <FileText size={16} aria-hidden="true" />
-                                </span>
-                                <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.name}</span>
+                                <PageRowLabel name={page.name} />
                               </Link>
                             )}
                             {!readOnly && <PageAnalysisStatus request={analysis} pageName={page.name}
@@ -619,7 +813,7 @@ export function SidebarProjectsSection({
             <p className="sidebar-tree-empty-copy">{getEmptyListCopy(listState, "분석한 페이지가 없습니다.")}</p>
           ) : (
             recentAnalyzedPages.map((page) => {
-              const isActive = selection?.kind === "recentPage" && selection.id === page.pageId;
+              const isActive = isSelectedRow(selection, "recentPage", page.pageId);
               const contextLabel = page.systemManaged
                 ? `${page.pageName} 페이지 열기 (최근 분석)`
                 : `${page.pageName} 페이지 열기 (${page.projectName} 프로젝트)`;
@@ -643,10 +837,7 @@ export function SidebarProjectsSection({
                       isActive ? SIDEBAR_NAV_ITEM_ACTIVE : SIDEBAR_NAV_ITEM_INACTIVE
                     )}
                   >
-                    <span className="sidebar-tree-page-icon inline-flex shrink-0 items-center justify-center">
-                      <FileText size={16} aria-hidden="true" />
-                    </span>
-                    <span className="sidebar-tree-label min-w-0 flex-1 truncate font-medium">{page.pageName}</span>
+                    <PageRowLabel name={page.pageName} />
                   </button>
                   {!readOnly && <PageAnalysisStatus request={analysis} pageName={page.pageName}
                     acknowledged={analysis !== undefined && acknowledgedAnalyses[page.pageId] === analysis.id} />}
@@ -657,133 +848,30 @@ export function SidebarProjectsSection({
         </div>
       </div>
 
-      {editingProject
-        ? createPortal(
-            <div className="dashboard-modal-layer">
-              <div className="absolute inset-0" onClick={closeEdit} aria-hidden="true" />
-              <form
-                ref={editDialogRef}
-                noValidate
-                onKeyDown={preventAccidentalSubmit}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!isSaving) void handleSave();
-                }}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="sidebar-project-edit-title"
-                tabIndex={-1}
-                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
-              >
-                <h3
-                  id="sidebar-project-edit-title"
-                  className="dashboard-modal-title"
-                >
-                  프로젝트 수정
-                </h3>
+      {editingProject ? (
+        <ProjectEditDialog
+          dialogRef={editDialogRef}
+          inputRef={editNameInputRef}
+          name={editName}
+          onNameChange={setEditName}
+          error={editError}
+          errorId={editErrorId}
+          isSaving={isSaving}
+          onClose={closeEdit}
+          onSave={handleSave}
+        />
+      ) : null}
 
-                {editError.length > 0 && (
-                  <div id={editErrorId}>
-                    <PanelMessage className="dashboard-modal-message" label={`프로젝트 수정 실패: ${editError}`} isError />
-                  </div>
-                )}
-
-                <div className="mt-4 space-y-4">
-                  <label className="block">
-                    <span className="dashboard-modal-label">
-                      프로젝트 이름
-                    </span>
-                    <input
-                      ref={editNameInputRef}
-                      value={editName}
-                      onChange={(event) => setEditName(event.target.value)}
-                      maxLength={PROJECT_NAME_MAX_LENGTH}
-                      autoComplete="off"
-                      aria-invalid={editError.length > 0 || undefined}
-                      aria-describedby={editError.length > 0 ? editErrorId : undefined}
-                      className="dashboard-modal-input"
-                      placeholder="예: 고령자 접근성 점검"
-                    />
-                  </label>
-                </div>
-
-                <div className="dashboard-modal-actions">
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={closeEdit}
-                    className="dashboard-modal-button"
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSaving}
-                    className="dashboard-modal-button dashboard-modal-button--primary"
-                  >
-                    {isSaving ? "저장 중..." : "저장"}
-                  </button>
-                </div>
-              </form>
-            </div>,
-            document.body
-          )
-        : null}
-
-      {deletingProject
-        ? createPortal(
-            <div className="dashboard-modal-layer">
-              <div className="absolute inset-0" onClick={closeDelete} aria-hidden="true" />
-              <article
-                ref={deleteDialogRef}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="sidebar-project-delete-title"
-                tabIndex={-1}
-                className="dashboard-modal-surface dashboard-modal-content w-full max-w-md"
-              >
-                <h3
-                  id="sidebar-project-delete-title"
-                  className="dashboard-modal-title"
-                >
-                  프로젝트 제거
-                </h3>
-                <p className="dashboard-modal-description mt-2">
-                  <span className="font-medium text-foreground">
-                    {deletingProject.name}
-                  </span>{" "}
-                  프로젝트를 제거하시겠습니까?
-                </p>
-
-                {deleteError.length > 0 && <PanelMessage className="dashboard-modal-message" label={`프로젝트 제거 실패: ${deleteError}`} isError />}
-
-                <div className="dashboard-modal-actions">
-                  <button
-                    type="button"
-                    disabled={isDeleting}
-                    onClick={closeDelete}
-                    className="dashboard-modal-button"
-                  >
-                    아니요
-                  </button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    disabled={isDeleting}
-                    onClick={() => {
-                      void handleDelete();
-                    }}
-                    className="dashboard-modal-button dashboard-modal-button--danger"
-                  >
-                    {isDeleting ? "제거 중..." : "네"}
-                  </Button>
-                </div>
-              </article>
-            </div>,
-            document.body
-          )
-        : null}
+      {deletingProject ? (
+        <ProjectDeleteDialog
+          dialogRef={deleteDialogRef}
+          projectName={deletingProject.name}
+          error={deleteError}
+          isDeleting={isDeleting}
+          onClose={closeDelete}
+          onDelete={handleDelete}
+        />
+      ) : null}
     </section>
   );
 }

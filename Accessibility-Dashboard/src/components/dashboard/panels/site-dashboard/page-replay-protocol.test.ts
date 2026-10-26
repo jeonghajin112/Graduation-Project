@@ -369,29 +369,20 @@ describe("live document health messages", () => {
   it.each(["EMPTY", "MEANINGFUL"] as const)(
     "accepts an exact %s visible-content report",
     (status) => {
-      expect(parsePageReplayMessage({
+      const meaningful = status === "MEANINGFUL";
+      const report = {
         source: PAGE_REPLAY_SOURCE,
         type: "DOCUMENT_HEALTH",
         documentToken: "live_doc_501",
         status,
-        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
+        consecutiveMeaningfulSamples: meaningful ? 4 : 0,
         visibleControlCount: 0,
-        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
-        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
-        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
-        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
-      })).toEqual({
-        source: PAGE_REPLAY_SOURCE,
-        type: "DOCUMENT_HEALTH",
-        documentToken: "live_doc_501",
-        status,
-        consecutiveMeaningfulSamples: status === "MEANINGFUL" ? 4 : 0,
-        visibleControlCount: 0,
-        visibleElementCount: status === "MEANINGFUL" ? 12 : 0,
-        visibleImageCount: status === "MEANINGFUL" ? 1 : 0,
-        largestVisibleVisualArea: status === "MEANINGFUL" ? 24_000 : 0,
-        visibleTextLength: status === "MEANINGFUL" ? 48 : 0
-      });
+        visibleElementCount: meaningful ? 12 : 0,
+        visibleImageCount: meaningful ? 1 : 0,
+        largestVisibleVisualArea: meaningful ? 24_000 : 0,
+        visibleTextLength: meaningful ? 48 : 0
+      };
+      expect(parsePageReplayMessage({ ...report })).toEqual(report);
     }
   );
 

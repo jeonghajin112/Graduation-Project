@@ -89,35 +89,31 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const INVALID_INPUT_MESSAGE = "입력한 내용을 확인한 뒤 다시 시도해 주세요.";
+const TIMEOUT_MESSAGE = "요청 처리에 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
+
+const API_ERROR_MESSAGE_BY_STATUS: Partial<Record<number, string>> = {
+  400: INVALID_INPUT_MESSAGE,
+  401: "로그인 정보가 만료되었거나 확인되지 않았습니다. 다시 로그인해 주세요.",
+  403: "이 작업을 수행할 권한이 없습니다. 권한이 필요하면 관리자에게 문의해 주세요.",
+  404: "요청한 정보를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.",
+  408: TIMEOUT_MESSAGE,
+  409: "다른 변경과 겹쳐 요청을 완료하지 못했습니다. 최신 상태를 불러온 뒤 다시 시도해 주세요.",
+  413: "전송할 내용이 너무 큽니다. 크기를 줄인 뒤 다시 시도해 주세요.",
+  422: INVALID_INPUT_MESSAGE,
+  429: "요청이 많아 잠시 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  504: TIMEOUT_MESSAGE
+};
+
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiRequestError) {
     if (error.status === null) {
       return "서비스에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 잠시 후 다시 시도해 주세요.";
     }
 
-    if (error.status === 400 || error.status === 422) {
-      return "입력한 내용을 확인한 뒤 다시 시도해 주세요.";
-    }
-    if (error.status === 401) {
-      return "로그인 정보가 만료되었거나 확인되지 않았습니다. 다시 로그인해 주세요.";
-    }
-    if (error.status === 403) {
-      return "이 작업을 수행할 권한이 없습니다. 권한이 필요하면 관리자에게 문의해 주세요.";
-    }
-    if (error.status === 404) {
-      return "요청한 정보를 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.";
-    }
-    if (error.status === 408 || error.status === 504) {
-      return "요청 처리에 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.";
-    }
-    if (error.status === 409) {
-      return "다른 변경과 겹쳐 요청을 완료하지 못했습니다. 최신 상태를 불러온 뒤 다시 시도해 주세요.";
-    }
-    if (error.status === 413) {
-      return "전송할 내용이 너무 큽니다. 크기를 줄인 뒤 다시 시도해 주세요.";
-    }
-    if (error.status === 429) {
-      return "요청이 많아 잠시 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.";
+    const statusMessage = API_ERROR_MESSAGE_BY_STATUS[error.status];
+    if (statusMessage !== undefined) {
+      return statusMessage;
     }
     if (error.status >= 500) {
       return "서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
@@ -204,6 +200,53 @@ async function readJsonResponse(
   }
 }
 
+function throwEnvelopeViolation(payload: unknown): never {
+  if (!isPlainRecord(payload)) {
+    throw new ApiContractValidationError({
+      fieldPath: "$",
+      expected: "{ success, data, message } API 응답 envelope",
+      actualType: payload === null ? "null" : Array.isArray(payload) ? "배열" : typeof payload
+    });
+  }
+  if (
+    !Object.prototype.hasOwnProperty.call(payload, "success") ||
+    typeof payload.success !== "boolean"
+  ) {
+    throw new ApiContractValidationError({
+      fieldPath: "success",
+      expected: "불리언",
+      actualType: payload.success === undefined ? "누락된" : typeof payload.success
+    });
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, "data")) {
+    throw new ApiContractValidationError({
+      fieldPath: "data",
+      expected: "필수 필드",
+      actualType: "누락된"
+    });
+  }
+  throwEnvelopeMetadataViolation(payload);
+}
+
+function throwEnvelopeMetadataViolation(payload: Record<string, unknown>): never {
+  const invalidMetadataKey = ["message", "error"].find(
+    (key) =>
+      (key === "message" && !Object.prototype.hasOwnProperty.call(payload, key)) ||
+      (key in payload && payload[key] !== null && typeof payload[key] !== "string")
+  );
+  throw new ApiContractValidationError({
+    fieldPath: invalidMetadataKey ?? "message",
+    expected:
+      invalidMetadataKey === "error"
+        ? "문자열 또는 null"
+        : "문자열 또는 null인 필수 필드",
+    actualType:
+      invalidMetadataKey === undefined || payload[invalidMetadataKey] === undefined
+        ? "누락된"
+        : typeof payload[invalidMetadataKey]
+  });
+}
+
 function unwrapSuccessfulPayload(
   payload: unknown,
   context: {
@@ -214,46 +257,7 @@ function unwrapSuccessfulPayload(
   }
 ): { value: unknown; fieldPath: string } {
   if (!isApiEnvelope(payload)) {
-    if (!isPlainRecord(payload)) {
-      throw new ApiContractValidationError({
-        fieldPath: "$",
-        expected: "{ success, data, message } API 응답 envelope",
-        actualType: payload === null ? "null" : Array.isArray(payload) ? "배열" : typeof payload
-      });
-    }
-    if (
-      !Object.prototype.hasOwnProperty.call(payload, "success") ||
-      typeof payload.success !== "boolean"
-    ) {
-      throw new ApiContractValidationError({
-        fieldPath: "success",
-        expected: "불리언",
-        actualType: payload.success === undefined ? "누락된" : typeof payload.success
-      });
-    }
-    if (!Object.prototype.hasOwnProperty.call(payload, "data")) {
-      throw new ApiContractValidationError({
-        fieldPath: "data",
-        expected: "필수 필드",
-        actualType: "누락된"
-      });
-    }
-    const invalidMetadataKey = ["message", "error"].find(
-      (key) =>
-        (key === "message" && !Object.prototype.hasOwnProperty.call(payload, key)) ||
-        (key in payload && payload[key] !== null && typeof payload[key] !== "string")
-    );
-    throw new ApiContractValidationError({
-      fieldPath: invalidMetadataKey ?? "message",
-      expected:
-        invalidMetadataKey === "error"
-          ? "문자열 또는 null"
-          : "문자열 또는 null인 필수 필드",
-      actualType:
-        invalidMetadataKey === undefined || payload[invalidMetadataKey] === undefined
-          ? "누락된"
-          : typeof payload[invalidMetadataKey]
-    });
+    throwEnvelopeViolation(payload);
   }
 
   if (!payload.success) {
@@ -268,6 +272,20 @@ function unwrapSuccessfulPayload(
   }
 
   return { value: payload.data, fieldPath: "data" };
+}
+
+function throwContractFailure(
+  error: unknown,
+  failure: Omit<ApiRequestErrorInput, "message">
+): never {
+  if (!(error instanceof ApiContractValidationError)) {
+    throw error;
+  }
+
+  throw new ApiRequestError({
+    ...failure,
+    message: `서버 응답 계약이 올바르지 않습니다. ${error.message}`
+  });
 }
 
 function parseSuccessfulResponse<T>({
@@ -289,19 +307,62 @@ function parseSuccessfulResponse<T>({
     const unwrapped = unwrapSuccessfulPayload(payload, { method, path, status, url });
     return parser(unwrapped.value, unwrapped.fieldPath);
   } catch (error) {
-    if (!(error instanceof ApiContractValidationError)) {
-      throw error;
-    }
-
-    throw new ApiRequestError({
-      method,
-      path,
-      payload,
-      status,
-      url,
-      message: `서버 응답 계약이 올바르지 않습니다. ${error.message}`
-    });
+    throwContractFailure(error, { method, path, payload, status, url });
   }
+}
+
+function getFetchFailure(
+  error: unknown,
+  signal: AbortSignal | undefined,
+  context: { method: ApiRequestMethod; path: string; url: string }
+): unknown {
+  if (isAbortError(error) || signal?.aborted) {
+    // fetch rejects with the signal's reason, which may be a caller's
+    // timeout message. A cancelled or timed-out caller is never a network
+    // failure; callers own their deadline messages via their own checks.
+    return isAbortError(error) ? error : createAbortError();
+  }
+
+  return new ApiRequestError({
+    ...context,
+    payload: error,
+    status: null,
+    message: humanizeHttpError(null, "Network request failed.")
+  });
+}
+
+function getBodyReadFailure(error: unknown, signal: AbortSignal | undefined): unknown {
+  // Aborting while the body streams must stay a cancellation as well.
+  if (signal?.aborted && !(error instanceof ApiRequestError)) {
+    return isAbortError(error) ? error : createAbortError();
+  }
+  // readJsonResponse already wraps parse failures with ApiRequestError.
+  return error;
+}
+
+function parseFailedResponse<T>(
+  response: Response,
+  payload: unknown,
+  parser: ApiResponseParser<T>,
+  optionalStatuses: number[],
+  context: { method: ApiRequestMethod; path: string; url: string }
+): T {
+  const failure = { ...context, payload, status: response.status };
+  if (optionalStatuses.includes(response.status)) {
+    try {
+      return parser(null, "data");
+    } catch (error) {
+      throwContractFailure(error, failure);
+    }
+  }
+
+  throw new ApiRequestError({
+    ...failure,
+    message: getErrorMessage(
+      payload,
+      humanizeHttpError(response.status, response.statusText || "API request failed.")
+    )
+  });
 }
 
 export async function apiRequest<T>(
@@ -333,65 +394,18 @@ export async function apiRequest<T>(
       ...requestInit
     });
   } catch (error) {
-    if (isAbortError(error) || signal?.aborted) {
-      // fetch rejects with the signal's reason, which may be a caller's
-      // timeout message. A cancelled or timed-out caller is never a network
-      // failure; callers own their deadline messages via their own checks.
-      throw isAbortError(error) ? error : createAbortError();
-    }
-
-    throw new ApiRequestError({
-      method,
-      path,
-      payload: error,
-      status: null,
-      url,
-      message: humanizeHttpError(null, "Network request failed.")
-    });
+    throw getFetchFailure(error, signal, { method, path, url });
   }
 
   let payload: unknown;
   try {
     payload = await readJsonResponse(response, { method, path, url });
   } catch (error) {
-    // Aborting while the body streams must stay a cancellation as well.
-    if (signal?.aborted && !(error instanceof ApiRequestError)) {
-      throw isAbortError(error) ? error : createAbortError();
-    }
-    // readJsonResponse already wraps parse failures with ApiRequestError.
-    throw error;
+    throw getBodyReadFailure(error, signal);
   }
 
   if (!response.ok) {
-    if (optionalStatuses.includes(response.status)) {
-      try {
-        return parser(null, "data");
-      } catch (error) {
-        if (!(error instanceof ApiContractValidationError)) {
-          throw error;
-        }
-        throw new ApiRequestError({
-          method,
-          path,
-          payload,
-          status: response.status,
-          url,
-          message: `서버 응답 계약이 올바르지 않습니다. ${error.message}`
-        });
-      }
-    }
-
-    throw new ApiRequestError({
-      method,
-      path,
-      payload,
-      status: response.status,
-      url,
-      message: getErrorMessage(
-        payload,
-        humanizeHttpError(response.status, response.statusText || "API request failed.")
-      )
-    });
+    return parseFailedResponse(response, payload, parser, optionalStatuses, { method, path, url });
   }
 
   return parseSuccessfulResponse({
@@ -564,6 +578,36 @@ function issueIdToNumber(issue: EvaluationIssue, index: number): number {
   return Number.isFinite(parsed) ? parsed : issue.requestId * 10000 + index + 1;
 }
 
+function registerSyntheticAnalysisResult(
+  analysisResultById: Map<number, AnalysisResult>,
+  issue: EvaluationIssue,
+  timestamp: string
+): number {
+  const analysisResultId = getSyntheticAnalysisId(issue.requestId, issue.module);
+  if (!analysisResultById.has(analysisResultId)) {
+    analysisResultById.set(analysisResultId, {
+      id: analysisResultId,
+      evaluationRequestId: issue.requestId,
+      analyzerType: moduleToAnalyzerType(issue.module),
+      status: "SUCCESS",
+      summary: "",
+      startedAt: null,
+      completedAt: timestamp || null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    });
+  }
+  return analysisResultId;
+}
+
+function formatIssueMessage(issue: EvaluationIssue): string {
+  const description = issue.description?.trim() ?? "";
+  const recommendation = issue.recommendation?.trim() ?? "";
+  return recommendation.length > 0 && !description.includes(recommendation)
+    ? `${description}\n\n권장사항: ${recommendation}`
+    : description;
+}
+
 function buildIssueViewModels(
   evaluationIssues: EvaluationIssue[],
   requestById: Map<number, EvaluationRequestModel>
@@ -572,28 +616,8 @@ function buildIssueViewModels(
   const issueResults = evaluationIssues.map((issue, index): IssueResultModel => {
     const request = requestById.get(issue.requestId);
     const timestamp = issue.createdAt ?? request?.updatedAt ?? "";
-    const analysisResultId = getSyntheticAnalysisId(issue.requestId, issue.module);
-
-    if (!analysisResultById.has(analysisResultId)) {
-      analysisResultById.set(analysisResultId, {
-        id: analysisResultId,
-        evaluationRequestId: issue.requestId,
-        analyzerType: moduleToAnalyzerType(issue.module),
-        status: "SUCCESS",
-        summary: "",
-        startedAt: null,
-        completedAt: timestamp || null,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      });
-    }
-
-    const description = issue.description?.trim() ?? "";
-    const recommendation = issue.recommendation?.trim() ?? "";
-    const message =
-      recommendation.length > 0 && !description.includes(recommendation)
-        ? `${description}\n\n권장사항: ${recommendation}`
-        : description;
+    const analysisResultId = registerSyntheticAnalysisResult(analysisResultById, issue, timestamp);
+    const message = formatIssueMessage(issue);
 
     return {
       id: issueIdToNumber(issue, index),

@@ -103,134 +103,131 @@ type CreationContext = Omit<UseEvaluationTargetCreationOptions, "dashboardData">
   bindTargetCheckpointToSignal: (checkpoint: TargetCreateCheckpoint, signal?: AbortSignal) => void;
 };
 
-export async function createTargetWithRecovery(
-  { beginDirectoryRecovery, endDirectoryRecovery, loadDashboard,
-    targetCreateCheckpointRef, releaseTargetCheckpoint, bindTargetCheckpointToSignal }: CreationContext,
-  input: CreateEvaluationTargetModelInput, signal?: AbortSignal
-): Promise<number> {
-  signal?.throwIfAborted();
-  const normalizedInput = {
-    projectId: input.projectId,
-    name: input.name.trim(),
-    accessUrl: normalizeSiteCreateAccessUrl(input.accessUrl)
-  };
-  const key = buildTargetCreateKey(normalizedInput);
+function finishTargetRecovery(
+  releaseTargetCheckpoint: CreationContext["releaseTargetCheckpoint"],
+  checkpoint: TargetCreateCheckpoint,
+  targetId: number
+): number {
+  const nextStored = writeSiteCreateRecovery(
+    {
+      ...checkpoint.stored.attempt,
+      phase: "request-ready",
+      targetId,
+      previousFailedRequestId: null
+    },
+    checkpoint.stored.rawValue
+  );
+  if (nextStored === null) {
+    throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+  }
+  checkpoint.stored = nextStored;
+  checkpoint.resolvedTargetId = targetId;
+  releaseTargetCheckpoint(checkpoint);
+  return targetId;
+}
 
-  const finishTargetRecovery = (
-    checkpoint: TargetCreateCheckpoint,
-    targetId: number
-  ): number => {
-    const nextStored = writeSiteCreateRecovery(
-      {
-        ...checkpoint.stored.attempt,
-        phase: "request-ready",
-        targetId,
-        previousFailedRequestId: null
-      },
-      checkpoint.stored.rawValue
-    );
-    if (nextStored === null) {
-      throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-    }
-    checkpoint.stored = nextStored;
-    checkpoint.resolvedTargetId = targetId;
-    releaseTargetCheckpoint(checkpoint);
-    return targetId;
-  };
+async function reconcileTargetCheckpoint(
+  loadDashboard: LoadDashboard,
+  checkpoint: TargetCreateCheckpoint,
+  signal: AbortSignal | undefined
+): Promise<number | null> {
+  const deadline = createRequestDeadline({ signal, timeoutMs: TARGET_CREATE_TIMEOUT_MS });
 
-  const reconcileCheckpoint = async (
-    checkpoint: TargetCreateCheckpoint
-  ): Promise<number | null> => {
-    const deadline = createRequestDeadline({ signal, timeoutMs: TARGET_CREATE_TIMEOUT_MS });
-
-    try {
-      return await reconcileWithRetries({
-        attempts: TARGET_CREATE_RECONCILE_ATTEMPTS,
-        intervalMs: TARGET_CREATE_RECONCILE_INTERVAL_MS,
-        signal: deadline.signal,
-        probe: async (reconcileSignal) => {
-          const refreshedTargets = await fetchEvaluationTargetsForOrganization(
-            checkpoint.projectId,
-            reconcileSignal
-          );
-          const recoveredTargetId = findCheckpointTargetId(checkpoint, refreshedTargets);
-          if (recoveredTargetId === null) {
-            return null;
-          }
-          // Best-effort UI refresh. Recovery correctness depends only on
-          // the targeted list above, so an unrelated overview error
-          // cannot cause another POST.
-          await loadDashboard({
-            refreshAfterInFlight: true,
-            clearOnError: false,
-            signal: reconcileSignal
-          });
-          return recoveredTargetId;
+  try {
+    return await reconcileWithRetries({
+      attempts: TARGET_CREATE_RECONCILE_ATTEMPTS,
+      intervalMs: TARGET_CREATE_RECONCILE_INTERVAL_MS,
+      signal: deadline.signal,
+      probe: async (reconcileSignal) => {
+        const refreshedTargets = await fetchEvaluationTargetsForOrganization(
+          checkpoint.projectId,
+          reconcileSignal
+        );
+        const recoveredTargetId = findCheckpointTargetId(checkpoint, refreshedTargets);
+        if (recoveredTargetId === null) {
+          return null;
         }
-      });
-    } catch (error) {
-      if (deadline.signal.aborted && !signal?.aborted) {
-        return null;
+        // Best-effort UI refresh. Recovery correctness depends only on
+        // the targeted list above, so an unrelated overview error
+        // cannot cause another POST.
+        await loadDashboard({
+          refreshAfterInFlight: true,
+          clearOnError: false,
+          signal: reconcileSignal
+        });
+        return recoveredTargetId;
       }
-      throw error;
-    } finally {
-      deadline.dispose();
+    });
+  } catch (error) {
+    if (deadline.signal.aborted && !signal?.aborted) {
+      return null;
     }
+    throw error;
+  } finally {
+    deadline.dispose();
+  }
+}
+
+function adoptPersistedCheckpoint(
+  { beginDirectoryRecovery, targetCreateCheckpointRef, releaseTargetCheckpoint }: CreationContext,
+  key: string,
+  stored: StoredSiteCreateAttempt
+): TargetCreateCheckpoint {
+  const existingCheckpoint = targetCreateCheckpointRef.current;
+  if (
+    existingCheckpoint !== null &&
+    existingCheckpoint.stored.attempt.attemptId === stored.attempt.attemptId
+  ) {
+    existingCheckpoint.stored = stored;
+    return existingCheckpoint;
+  }
+  releaseTargetCheckpoint(existingCheckpoint);
+  const checkpoint: TargetCreateCheckpoint = {
+    key,
+    projectId: stored.attempt.projectId,
+    name: stored.attempt.name,
+    accessUrl: stored.attempt.accessUrl,
+    previousTargetIds: stored.attempt.previousTargetIds,
+    releaseAbortListener: null,
+    recoveryToken: beginDirectoryRecovery(),
+    resolvedTargetId: null,
+    stored
   };
+  targetCreateCheckpointRef.current = checkpoint;
+  return checkpoint;
+}
 
-  const persistedRecovery = readSiteCreateRecovery();
-  if (persistedRecovery.kind === "blocked") {
-    throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
+/** Continues the persisted creation of this same page with GETs only. */
+async function resumeTargetCreation(
+  context: CreationContext,
+  key: string,
+  stored: StoredSiteCreateAttempt,
+  signal: AbortSignal | undefined
+): Promise<number> {
+  const { loadDashboard, releaseTargetCheckpoint, bindTargetCheckpointToSignal } = context;
+  const persistedTargetId = getPersistedTargetId(stored.attempt);
+  if (persistedTargetId !== null) {
+    return persistedTargetId;
   }
 
-  if (persistedRecovery.kind === "valid") {
-    const persistedKey = buildPersistedTargetCreateKey(persistedRecovery.attempt);
-    if (persistedKey === key) {
-      const persistedTargetId = getPersistedTargetId(persistedRecovery.attempt);
-      if (persistedTargetId !== null) {
-        return persistedTargetId;
-      }
+  const checkpoint = adoptPersistedCheckpoint(context, key, stored);
+  bindTargetCheckpointToSignal(checkpoint, signal);
 
-      let existingCheckpoint = targetCreateCheckpointRef.current;
-      if (
-        existingCheckpoint === null ||
-        existingCheckpoint.stored.attempt.attemptId !==
-          persistedRecovery.attempt.attemptId
-      ) {
-        releaseTargetCheckpoint(existingCheckpoint);
-        existingCheckpoint = {
-          key,
-          projectId: persistedRecovery.attempt.projectId,
-          name: persistedRecovery.attempt.name,
-          accessUrl: persistedRecovery.attempt.accessUrl,
-          previousTargetIds: persistedRecovery.attempt.previousTargetIds,
-          releaseAbortListener: null,
-          recoveryToken: beginDirectoryRecovery(),
-          resolvedTargetId: null,
-          stored: {
-            attempt: persistedRecovery.attempt,
-            rawValue: persistedRecovery.rawValue
-          }
-        };
-        targetCreateCheckpointRef.current = existingCheckpoint;
-      } else {
-        existingCheckpoint.stored = {
-          attempt: persistedRecovery.attempt,
-          rawValue: persistedRecovery.rawValue
-        };
-      }
-      bindTargetCheckpointToSignal(existingCheckpoint, signal);
-
-      const recoveredTargetId = await reconcileCheckpoint(existingCheckpoint);
-      if (recoveredTargetId !== null) {
-        return finishTargetRecovery(existingCheckpoint, recoveredTargetId);
-      }
-      throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
-    }
-
-    throw new UserFacingError(SITE_RECOVERY_CONFLICT_MESSAGE);
+  const recoveredTargetId = await reconcileTargetCheckpoint(loadDashboard, checkpoint, signal);
+  if (recoveredTargetId !== null) {
+    return finishTargetRecovery(releaseTargetCheckpoint, checkpoint, recoveredTargetId);
   }
+  throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
+}
 
+/** Records a new creation attempt against the project's current page list. */
+async function openTargetCheckpoint(
+  { beginDirectoryRecovery, endDirectoryRecovery,
+    targetCreateCheckpointRef, releaseTargetCheckpoint, bindTargetCheckpointToSignal }: CreationContext,
+  key: string,
+  normalizedInput: CreateEvaluationTargetModelInput,
+  signal: AbortSignal | undefined
+): Promise<TargetCreateCheckpoint> {
   const existingCheckpoint = targetCreateCheckpointRef.current;
   if (existingCheckpoint !== null) {
     releaseTargetCheckpoint(existingCheckpoint);
@@ -283,6 +280,52 @@ export async function createTargetWithRecovery(
   };
   targetCreateCheckpointRef.current = checkpoint;
   bindTargetCheckpointToSignal(checkpoint, signal);
+  return checkpoint;
+}
+
+/** A definitive rejection clears the checkpoint so a retry starts clean. */
+function releaseRejectedCreation(
+  releaseTargetCheckpoint: CreationContext["releaseTargetCheckpoint"],
+  checkpoint: TargetCreateCheckpoint
+): void {
+  const didClear = clearSiteCreateRecovery(checkpoint.stored.rawValue);
+  releaseTargetCheckpoint(checkpoint);
+  if (!didClear) {
+    throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
+  }
+}
+
+export async function createTargetWithRecovery(
+  context: CreationContext,
+  input: CreateEvaluationTargetModelInput, signal?: AbortSignal
+): Promise<number> {
+  signal?.throwIfAborted();
+  const { loadDashboard, releaseTargetCheckpoint } = context;
+  const normalizedInput = {
+    projectId: input.projectId,
+    name: input.name.trim(),
+    accessUrl: normalizeSiteCreateAccessUrl(input.accessUrl)
+  };
+  const key = buildTargetCreateKey(normalizedInput);
+
+  const persistedRecovery = readSiteCreateRecovery();
+  if (persistedRecovery.kind === "blocked") {
+    throw new UserFacingError(SITE_RECOVERY_BLOCKED_MESSAGE);
+  }
+
+  if (persistedRecovery.kind === "valid") {
+    const persistedKey = buildPersistedTargetCreateKey(persistedRecovery.attempt);
+    if (persistedKey === key) {
+      return resumeTargetCreation(context, key, {
+        attempt: persistedRecovery.attempt,
+        rawValue: persistedRecovery.rawValue
+      }, signal);
+    }
+
+    throw new UserFacingError(SITE_RECOVERY_CONFLICT_MESSAGE);
+  }
+
+  const checkpoint = await openTargetCheckpoint(context, key, normalizedInput, signal);
 
   try {
     const commitOutcome = await commitMutationOnce({
@@ -293,19 +336,14 @@ export async function createTargetWithRecovery(
       // The response parser already matched the project, name, URL and status
       // to this input; only a pre-existing ID can still mean "not ours".
       accept: (createdTarget) =>
-        previousTargetIds.includes(createdTarget.id) ? null : createdTarget.id
+        checkpoint.previousTargetIds.includes(createdTarget.id) ? null : createdTarget.id
     });
     if (commitOutcome.kind === "accepted") {
-      return finishTargetRecovery(checkpoint, commitOutcome.value);
+      return finishTargetRecovery(releaseTargetCheckpoint, checkpoint, commitOutcome.value);
     }
   } catch (error) {
     if (isDefinitiveMutationRejection(error)) {
-      const didClear = clearSiteCreateRecovery(checkpoint.stored.rawValue);
-      releaseTargetCheckpoint(checkpoint);
-      if (!didClear) {
-        throw new UserFacingError(SITE_RECOVERY_PERSISTENCE_MESSAGE);
-      }
-      throw error;
+      releaseRejectedCreation(releaseTargetCheckpoint, checkpoint);
     }
 
     throw error;
@@ -313,9 +351,9 @@ export async function createTargetWithRecovery(
 
   // Timeout, connection reset, 5xx, and unusable success bodies are all
   // ambiguous. The durable checkpoint keeps every later retry GET-only.
-  const recoveredTargetId = await reconcileCheckpoint(checkpoint);
+  const recoveredTargetId = await reconcileTargetCheckpoint(loadDashboard, checkpoint, signal);
   if (recoveredTargetId !== null) {
-    return finishTargetRecovery(checkpoint, recoveredTargetId);
+    return finishTargetRecovery(releaseTargetCheckpoint, checkpoint, recoveredTargetId);
   }
   throw new UserFacingError(TARGET_CREATE_RECOVERY_MESSAGE);
 }

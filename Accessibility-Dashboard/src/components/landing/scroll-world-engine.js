@@ -83,17 +83,9 @@ export function mountScrollWorld(container, config, options = {}) {
       .sort((p, q) => p.maxDevicePx - q.maxDevicePx).find(v => devicePx <= v.maxDevicePx);
     return (url && variant?.suffix) ? url.replace(/(\.[a-z0-9]+)(\?.*)?$/i, variant.suffix + '$1$2') : url;
   };
-  // Network Information API is non-standard; type it locally for @ts-check.
-  const navigatorWithConnection = /** @type {Navigator & { connection?: { saveData?: boolean }, mozConnection?: { saveData?: boolean }, webkitConnection?: { saveData?: boolean } }} */ (navigator);
-  const connection = navigatorWithConnection.connection || navigatorWithConnection.mozConnection || navigatorWithConnection.webkitConnection;
-  const saveData = Boolean(connection && connection.saveData);
+  const saveData = prefersSaveData();
   const useStaticMedia = () => reduce || saveData || (isMobile() && config.mobileVideo === false);
-  const SECTIONS = config.sections || [];
-  const CONNECTORS = config.connectors || [];
-  const CONNECTORS_M = config.connectorsMobile || [];
-  const DIVE_W = config.diveScroll || 1.3;
-  const CONN_W = config.connScroll || 0.9;
-  const CROSSFADE = (config.crossfade != null) ? config.crossfade : 0.12;  // seam dissolve width (vh)
+  const { SECTIONS, CONNECTORS, CONNECTORS_M, DIVE_W, CONN_W, CROSSFADE, CARD } = filmSettings(config);
   const N = SECTIONS.length;
   if (!N) return () => {};
 
@@ -107,14 +99,7 @@ export function mountScrollWorld(container, config, options = {}) {
   injectCSS();
   container.replaceChildren();
   container.classList.add('sw-root');
-  // Optional landmark split: the skip link and topbar (banner) can live in a
-  // separate element before the page's own <main>, which then wraps this
-  // container together with the content that follows the film.
-  const chrome = options.chromeContainer || null;
-  if (chrome) {
-    chrome.replaceChildren();
-    chrome.classList.add('sw-chrome');
-  }
+  const chrome = claimChrome(options.chromeContainer);
   const externalMain = Boolean(options.externalMain);
   const accentHosts = chrome ? [container, chrome] : [container];
 
@@ -137,85 +122,45 @@ export function mountScrollWorld(container, config, options = {}) {
   const NSEG = SEGMENTS.length;
 
   // ---- DOM ----
-  const sky = el('div', 'sw-sky');
-  if (config.atmosphere !== false) {
-    sky.appendChild(el('div', 'sw-sky__grad'));
-    sky.appendChild(el('div', 'sw-sky__glow'));
-  }
+  const sky = buildSky(config.atmosphere !== false);
   const particles = el('div', 'sw-particles'); sky.appendChild(particles);
 
-  const skip = el('a', 'sw-skip-link');
-  skip.href = `#${config.mainId || 'uni-access-main'}`;
-  skip.textContent = config.skipLabel || '본문으로 바로가기';
-
-  const topbar = el('header', 'sw-topbar');
-  if (config.brand) {
-    const brand = el('a', 'sw-brand'); brand.href = (config.brand.href || '#');
-    if (config.brand.wordmark) {
-      // Typographic wordmark: one lowercase word set in the brand face (e.g. uniaccess).
-      const wm = el('span', 'sw-wordmark'); wm.textContent = config.brand.wordmark.text || '';
-      brand.setAttribute('aria-label', config.brand.name || '');
-      brand.appendChild(wm);
-    } else {
-      brand.appendChild(el('span', 'sw-brand__mark'));
-      const nm = el('span', 'sw-brand__name'); nm.textContent = config.brand.name || ''; brand.appendChild(nm);
-    }
-    topbar.appendChild(brand);
-  }
+  const skip = buildSkipLink(config);
   const nav = el('nav', 'sw-nav');
   nav.setAttribute('aria-label', '제품 둘러보기');
-  if (config.nav !== false) topbar.appendChild(nav);
-  if (config.cta && config.cta.label) {
-    const c = el('a', 'sw-topcta'); c.href = config.cta.href || '#'; c.textContent = config.cta.label;
-    if (config.cta.action) c.dataset.swAction = config.cta.action;
-    topbar.appendChild(c);
-  }
+  const topbar = buildTopbar(config, nav);
 
   const stage = el('div', 'sw-stage');
   stage.setAttribute('aria-hidden', 'true');
-  const copylayer = el(externalMain ? 'div' : 'main', 'sw-copylayer');
-  if (!externalMain) {
-    copylayer.id = config.mainId || 'uni-access-main';
-    copylayer.tabIndex = -1;
-  }
-  const route = el('nav', 'sw-route');
-  route.setAttribute('aria-label', '현재 장면');
-  if (config.route === false) route.style.display = 'none';   // route:false → 오른쪽 세로 진행 레일 숨김
-  const hint = config.hint ? el('button', 'sw-hint') : null;
+  const copylayer = buildCopyLayer(config, externalMain);
+  const route = buildRoute(config);
   const hintText = el('span');
   let hintAtBottom = false;
-  if (hint) {
-    hint.type = 'button';
-    hint.setAttribute('aria-label', config.hintLabel || '아래로 스크롤');
+  const hint = config.hint ? buildHint() : null;
+  function buildHint() {
+    const button = el('button', 'sw-hint');
+    button.type = 'button';
+    button.setAttribute('aria-label', config.hintLabel || '아래로 스크롤');
     // The visible cue stays in English; mark it so screen readers pronounce it correctly.
     hintText.lang = config.hintLang || 'en';
     const arrow = el('i');
     arrow.setAttribute('aria-hidden', 'true');
     arrow.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16m-6-6 6 6 6-6"/></svg>';
     hintText.textContent = config.hint;
-    hint.append(arrow, hintText);
-    hint.addEventListener('click', () => {
+    button.append(arrow, hintText);
+    button.addEventListener('click', () => {
       window.scrollTo({
         top: hintAtBottom ? 0 : window.scrollY + window.innerHeight * 0.8,
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'
       });
     });
+    return button;
   }
   const track = el('div', 'sw-track');
   track.setAttribute('aria-hidden', 'true');
 
   // chrome:false — the page renders its own skip link and header.
-  const ownChrome = config.chrome !== false;
-  if (chrome && ownChrome) {
-    [skip, topbar].forEach(n => chrome.appendChild(n));
-    [sky, stage, copylayer, route, hint, track]
-      .filter(Boolean)
-      .forEach(n => container.appendChild(n));
-  } else {
-    [ownChrome && skip, sky, ownChrome && topbar, stage, copylayer, route, hint, track]
-      .filter(Boolean)
-      .forEach(n => container.appendChild(n));
-  }
+  appendLayers(container, chrome, config.chrome !== false, { skip, sky, topbar, stage, copylayer, route, hint, track });
 
   // segment scenes
   SEGMENTS.forEach((s, segmentIndex) => {
@@ -232,8 +177,8 @@ export function mountScrollWorld(container, config, options = {}) {
 
   // ---- card layout: a section with layout:'card' shows its clip inside a rounded box on the
   // right (copy on the left). The first card after a full-bleed section shrinks from full-bleed
-  // over the first `in` fraction of its scroll band; driven by scroll, so it rewinds too.
-  const CARD = Object.assign({ width: 54, right: 4, radius: 24, in: 0.22, maxH: 82 }, config.card || {});
+  // over the first `in` fraction of its scroll band (CARD, see filmSettings); driven by scroll,
+  // so it rewinds too.
   function applyCard(s) {
     const t = s.cardT, vw = window.innerWidth, vhh = window.innerHeight;
     // Geometry follows the viewport, not the pointer type. A wide touch display
@@ -263,19 +208,7 @@ export function mountScrollWorld(container, config, options = {}) {
     // Every scene's copy stays in the accessibility tree (reading order =
     // story order). Only its pointer and Tab reachability follow the scroll.
     c.dataset.swActive = 'false';
-    // The first scene titles the page only when the engine owns <main>; a host
-    // page with its own hero (externalMain) keeps its h1 and gets h2s here.
-    const isPageTitle = i === 0 && !externalMain;
-    const headingTag = isPageTitle ? 'h1' : 'h2';
-    const headingId = isPageTitle ? 'ua-hero-title' : `sw-title-${s.id || i + 1}`;
-    const headingClass = 'sw-copy__title';
-    c.innerHTML =
-      (config.showSectionNumbers === false ? '' : `<span class="sw-copy__num">${pad(i + 1)} / ${pad(N)}</span>`) +
-      (s.eyebrow ? `<span class="sw-copy__eyebrow">${esc(s.eyebrow)}</span>` : '') +
-      (s.title ? `<${headingTag} id="${headingId}" class="${headingClass}">${esc(s.title)}</${headingTag}>` : '') +
-      (s.body ? `<p class="sw-copy__body">${esc(s.body)}</p>` : '') +
-      (s.tags && s.tags.length ? `<ul class="sw-copy__tags">${s.tags.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '') +
-      (s.cta ? `<div class="sw-copy__cta">${ctaBtns(s.cta)}</div>` : '');
+    c.innerHTML = copyMarkup(s, i, N, config.showSectionNumbers !== false, externalMain);
     copylayer.appendChild(c); copies.push(c);
     setCopyInteractive(c, false);
     // A screen reader (or a click on an off-screen copy) moving focus into a
@@ -295,16 +228,7 @@ export function mountScrollWorld(container, config, options = {}) {
       b.addEventListener('click', () => jumpTo(i)); nav.appendChild(b);
     }
   });
-  // Extra nav links to content below the film (e.g. a normal section with id="engine"):
-  //   navLinks: [{ label: '분석 엔진', href: '#engine' }]
-  if (Array.isArray(config.navLinks) && config.navLinks.length) {
-    // Links work even with nav:false (section pills off): the nav then holds only these links.
-    if (!nav.isConnected) topbar.insertBefore(nav, topbar.querySelector('.sw-topcta'));
-    config.navLinks.forEach(link => {
-      const a = el('a', 'sw-nav__item sw-nav__item--link'); a.href = link.href || '#'; a.textContent = link.label || '';
-      nav.appendChild(a);
-    });
-  }
+  appendNavLinks(nav, topbar, config.navLinks);
 
   // ---- math ----
   const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
@@ -430,108 +354,167 @@ export function mountScrollWorld(container, config, options = {}) {
   function read() {
     if (destroyed) return;
     const y = (window.scrollY || window.pageYOffset) - filmOffset();
-    const fade = CROSSFADE * scrollUnit;
+    const ci = segmentIndexAt(y);
+    updateScenes(y, ci);
+    updateCopies(y);
+    placeFilm(y);
+    const near = nearestSection(y, ci);
+    if (near !== activeIndex) setActiveSection(near);
+    updateProgress(y);
+    if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
+    ticking = false;
+    scheduleScrub();
+  }
+
+  // Index of the last segment whose band has started at scroll position y.
+  function segmentIndexAt(y) {
     let ci = 0;
     for (let i = 0; i < NSEG; i++) if (y >= SEGMENTS[i].start) ci = i;
+    return ci;
+  }
 
+  // Per segment: clip loading, scrub target, card growth, crossfade and still zoom.
+  function updateScenes(y, ci) {
+    const fade = CROSSFADE * scrollUnit;
     for (let i = 0; i < NSEG; i++) {
       const s = SEGMENTS[i];
-      // The opening clip loads up front even when the film starts further down the page.
-      if (i === 0 ? y < s.end + 0.9 * scrollUnit : y > s.start - 0.9 * scrollUnit && y < s.end + 0.9 * scrollUnit) loadClip(s);
+      if (inLoadRange(s, i, y)) loadClip(s);
       const local = clamp((y - s.start) / (s.end - s.start), 0, 1);
       s.target = s.linger ? lingerEase(local, s.linger) : local;
-      if (s.kind === 'dive' && s.layout === 'card') {
-        // A card grows out of the full-screen scene before it; a film that opens
-        // on a card (phones skip the opening) shows it as a card from the start.
-        const prevFull = s.si > 0 && (SECTIONS[s.si - 1].layout || 'full') !== 'card';
-        s.cardT = prevFull ? smooth(clamp(local / CARD.in)) : 1;
-        applyCard(s);
-      }
-      let outside = 0;
-      // The first scene stays fully visible before the film and the final scene past its end:
-      // they arrive and leave with the page (see the placement block below).
-      if (y < s.start && i !== 0) outside = s.start - y; else if (y > s.end && i !== NSEG - 1) outside = y - s.end;
-      const op = smooth(1 - outside / fade);
+      if (s.kind === 'dive' && s.layout === 'card') growCard(s, local);
+      const op = smooth(1 - outsideDistance(s, i, y) / fade);
       s.el.style.opacity = op; s.visible = op > 0.001;
       s.el.style.zIndex = (i === ci) ? '120' : String(100 + Math.round(op * 10));
-      if ((!s.hasClip || !s.ready) && s.layout !== 'card') {
-        const sc = reduce ? 1 : 1.03 + local * 0.14;
-        s.img.style.transform = `scale(${sc.toFixed(3)})`;
-      }
+      zoomStill(s, local);
     }
+  }
 
+  // The opening clip loads up front even when the film starts further down the page.
+  function inLoadRange(s, i, y) {
+    return i === 0 ? y < s.end + 0.9 * scrollUnit : y > s.start - 0.9 * scrollUnit && y < s.end + 0.9 * scrollUnit;
+  }
+
+  // A card grows out of the full-screen scene before it; a film that opens
+  // on a card (phones skip the opening) shows it as a card from the start.
+  function growCard(s, local) {
+    const prevFull = s.si > 0 && (SECTIONS[s.si - 1].layout || 'full') !== 'card';
+    s.cardT = prevFull ? smooth(clamp(local / CARD.in)) : 1;
+    applyCard(s);
+  }
+
+  // The first scene stays fully visible before the film and the final scene past its end:
+  // they arrive and leave with the page (see the placement block below).
+  function outsideDistance(s, i, y) {
+    if (y < s.start && i !== 0) return s.start - y;
+    if (y > s.end && i !== NSEG - 1) return y - s.end;
+    return 0;
+  }
+
+  // Until its clip can paint, a full-bleed still slowly zooms with the scroll.
+  function zoomStill(s, local) {
+    if ((!s.hasClip || !s.ready) && s.layout !== 'card') {
+      const sc = reduce ? 1 : 1.03 + local * 0.14;
+      s.img.style.transform = `scale(${sc.toFixed(3)})`;
+    }
+  }
+
+  function updateCopies(y) {
     for (let i = 0; i < N; i++) {
       const seg = SECTIONS[i]._seg;
       const pr = clamp((y - seg.start) / (seg.end - seg.start), 0, 1);
-      const before = y < seg.start, after = y > seg.end;
-      let cop;
-      if (i === 0 && (SECTIONS[i].layout || 'full') !== 'card') cop = after ? 0 : smooth(1 - pr / 0.62);  // greets on landing
-      else if (i === N - 1) cop = before ? 0 : smooth(pr / 0.4);       // holds CTA at the end
-      else if ((SECTIONS[i].layout || 'full') === 'card')                 // card copy: enter after the box settles, hold, leave late
-        cop = (before || after) ? 0 : smooth(clamp(Math.min(pr / Math.max(CARD.in, 0.2), (1 - pr) / 0.15)));
-      else cop = (before || after) ? 0 : smooth(1 - Math.abs(pr - 0.5) / 0.5);
+      const isCard = (SECTIONS[i].layout || 'full') === 'card';
+      const cop = copyOpacity(i, pr, y < seg.start, y > seg.end, isCard);
       const c = copies[i];
       c.style.opacity = cop;
-      const slideX = (SECTIONS[i].layout || 'full') === 'card' ? (1 - cop) * -3 : 0;   // card copy enters from the left
+      const slideX = isCard ? (1 - cop) * -3 : 0;   // card copy enters from the left
       const driftY = (0.5 - pr) * 4;
-      // Desktop copy is positioned from top:50%, so preserve its centering
-      // translate when the scroll animation writes an inline transform. Narrow
-      // layouts are bottom-anchored and therefore need no percentage offset.
-      c.style.transform = reduce
-        ? (isNarrow() ? 'none' : 'translateY(-50%)')
-        : isNarrow()
-          ? `translate(${slideX.toFixed(2)}vw, ${driftY}vh)`
-          : `translate(${slideX.toFixed(2)}vw, calc(-50% + ${driftY}vh))`;
+      c.style.transform = copyTransform(slideX, driftY);
       const isInteractive = cop > 0.5;
       c.style.pointerEvents = isInteractive ? 'auto' : 'none';
       if (c.dataset.swActive !== String(isInteractive)) setCopyInteractive(c, isInteractive);
     }
+  }
 
-    // ---- before and after the film: hand the first/last frame over to the document flow ----
-    // While the film plays the stage/copy are position:fixed. Past the last band (filmEnd)
-    // they become position:absolute at exactly that document offset, so the final scene
-    // scrolls away with the page and the following section continues beneath it. When the
-    // film starts below other content, the first frame likewise sits in the flow at the
-    // container top until it reaches the viewport top — unless options.hideBeforeStart()
-    // asks to keep the layers hidden (the page covers that stretch itself). Reversible.
+  function copyOpacity(i, pr, before, after, isCard) {
+    if (i === 0 && !isCard) return after ? 0 : smooth(1 - pr / 0.62);  // greets on landing
+    if (i === N - 1) return before ? 0 : smooth(pr / 0.4);           // holds CTA at the end
+    if (before || after) return 0;
+    return isCard
+      ? smooth(clamp(Math.min(pr / Math.max(CARD.in, 0.2), (1 - pr) / 0.15)))  // card copy: enter after the box settles, hold, leave late
+      : smooth(1 - Math.abs(pr - 0.5) / 0.5);
+  }
+
+  // Desktop copy is positioned from top:50%, so preserve its centering
+  // translate when the scroll animation writes an inline transform. Narrow
+  // layouts are bottom-anchored and therefore need no percentage offset.
+  function copyTransform(slideX, driftY) {
+    return reduce
+      ? (isNarrow() ? 'none' : 'translateY(-50%)')
+      : isNarrow()
+        ? `translate(${slideX.toFixed(2)}vw, ${driftY}vh)`
+        : `translate(${slideX.toFixed(2)}vw, calc(-50% + ${driftY}vh))`;
+  }
+
+  // ---- before and after the film: hand the first/last frame over to the document flow ----
+  // While the film plays the stage/copy are position:fixed. Past the last band (filmEnd)
+  // they become position:absolute at exactly that document offset, so the final scene
+  // scrolls away with the page and the following section continues beneath it. When the
+  // film starts below other content, the first frame likewise sits in the flow at the
+  // container top until it reaches the viewport top — unless options.hideBeforeStart()
+  // asks to keep the layers hidden (the page covers that stretch itself). Reversible.
+  function placeFilm(y) {
     const filmEnd = totalW * scrollUnit;
     const ended = y >= filmEnd;
-    const placement = y < 0
-      ? (typeof options.hideBeforeStart === 'function' && options.hideBeforeStart() ? 'hidden' : 'before')
-      : ended ? 'after' : 'fixed';
-    if (placement !== placementState) {
-      placementState = placement;
-      container.classList.toggle('sw-ended', ended);
-      const inFlow = placement === 'before' || placement === 'after';
-      [stage, copylayer].forEach(n => {
-        n.style.position = inFlow ? 'absolute' : '';
-        n.style.top = placement === 'after' ? filmEnd + 'px' : placement === 'before' ? '0px' : '';
-        n.style.bottom = inFlow ? 'auto' : '';
-        n.style.height = inFlow ? vh + 'px' : '';
-      });
-      [sky, stage, copylayer].forEach(n => { n.style.visibility = placement === 'hidden' ? 'hidden' : ''; });
-    }
+    const placement = filmPlacement(y, ended);
+    if (placement !== placementState) applyPlacement(placement, ended, filmEnd);
     // Fade the last scene's copy as it scrolls away so it never collides with the fixed topbar.
     if (ended) copylayer.style.opacity = String(clamp(1 - (y - filmEnd) / (vh * 0.45))); else copylayer.style.opacity = '';
+  }
+
+  function filmPlacement(y, ended) {
+    return y < 0
+      ? (typeof options.hideBeforeStart === 'function' && options.hideBeforeStart() ? 'hidden' : 'before')
+      : ended ? 'after' : 'fixed';
+  }
+
+  function applyPlacement(placement, ended, filmEnd) {
+    placementState = placement;
+    container.classList.toggle('sw-ended', ended);
+    const inFlow = placement === 'before' || placement === 'after';
+    [stage, copylayer].forEach(n => {
+      n.style.position = inFlow ? 'absolute' : '';
+      n.style.top = placement === 'after' ? filmEnd + 'px' : placement === 'before' ? '0px' : '';
+      n.style.bottom = inFlow ? 'auto' : '';
+      n.style.height = inFlow ? vh + 'px' : '';
+    });
+    [sky, stage, copylayer].forEach(n => { n.style.visibility = placement === 'hidden' ? 'hidden' : ''; });
+  }
+
+  // A connector counts toward the scene it is closer to.
+  function nearestSection(y, ci) {
     const cur = SEGMENTS[ci];
-    const near = clamp(cur.kind === 'dive' ? cur.si
+    return clamp(cur.kind === 'dive' ? cur.si
       : (((y - cur.start) / (cur.end - cur.start)) > 0.5 ? cur.si + 1 : cur.si), 0, N - 1);
-    if (near !== activeIndex) {
-      activeIndex = near;
-      dots.forEach((d, k) => {
-        const isActive = k === near;
-        d.classList.toggle('is-active', isActive);
-        d.classList.toggle('is-past', k < near);
-        if (isActive) d.setAttribute('aria-current', 'step'); else d.removeAttribute('aria-current');
-      });
-      nav.querySelectorAll('.sw-nav__item').forEach((n, k) => {
-        const isActive = k === near;
-        n.classList.toggle('is-active', isActive);
-        if (isActive) n.setAttribute('aria-current', 'step'); else n.removeAttribute('aria-current');
-      });
-      accentHosts.forEach(host => host.style.setProperty('--sw-accent', SECTIONS[near].accent || ''));
-      container.classList.toggle('sw-card-active', (SECTIONS[near].layout || 'full') === 'card');
-    }
+  }
+
+  function setActiveSection(near) {
+    activeIndex = near;
+    dots.forEach((d, k) => {
+      const isActive = k === near;
+      d.classList.toggle('is-active', isActive);
+      d.classList.toggle('is-past', k < near);
+      if (isActive) d.setAttribute('aria-current', 'step'); else d.removeAttribute('aria-current');
+    });
+    nav.querySelectorAll('.sw-nav__item').forEach((n, k) => {
+      const isActive = k === near;
+      n.classList.toggle('is-active', isActive);
+      if (isActive) n.setAttribute('aria-current', 'step'); else n.removeAttribute('aria-current');
+    });
+    accentHosts.forEach(host => host.style.setProperty('--sw-accent', SECTIONS[near].accent || ''));
+    container.classList.toggle('sw-card-active', (SECTIONS[near].layout || 'full') === 'card');
+  }
+
+  function updateProgress(y) {
     // This replaces the removed horizontal page gauge, so it follows the
     // complete scroll range rather than jumping to fixed scene bands.
     const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
@@ -545,9 +528,6 @@ export function mountScrollWorld(container, config, options = {}) {
       hintText.textContent = atBottom ? 'TOP' : config.hint;
       hint.setAttribute('aria-label', atBottom ? '맨 위로 이동' : (config.hintLabel || '아래로 스크롤'));
     }
-    if (particles) particles.style.transform = `translate3d(0, ${-y * 0.05}px, 0)`;
-    ticking = false;
-    scheduleScrub();
   }
 
   function scheduleScrub() {
@@ -561,21 +541,31 @@ export function mountScrollWorld(container, config, options = {}) {
     const eps = isMobile() ? 0.02 : 0.008;   // coarser seek step on phones = fewer decodes
     for (let i = 0; i < NSEG; i++) {
       const s = SEGMENTS[i];
-      if (!s.hasClip || !s.ready || !s.video) continue;
-      // Never queue a seek while the decoder is still resolving the last one.
-      // On phones a fast flick would otherwise pile up seeks and freeze the clip;
-      // cur keeps lerping, so we snap to the latest target the moment it's free.
-      if (s.video.seeking) continue;
-      if (!s.visible && Math.abs(s.cur - s.target) < 0.002) continue;
-      s.cur += (s.target - s.cur) * (reduce ? 1 : 0.18);
-      if (Math.abs(s.target - s.cur) < 0.0005) s.cur = s.target;
-      else moving = true;
-      const dur = s.video.duration || 1;
-      const t = clamp(s.cur, 0, 0.999) * dur;
-      if (Math.abs(s.video.currentTime - t) > eps) { try { s.video.currentTime = t; } catch (e) {} }
+      if (canScrub(s) && scrubClip(s, eps)) moving = true;
     }
     // A decoder in flight wakes us through seeked. Stable clips need no polling.
     if (moving) scheduleScrub();
+  }
+
+  function canScrub(s) {
+    if (!s.hasClip || !s.ready || !s.video) return false;
+    // Never queue a seek while the decoder is still resolving the last one.
+    // On phones a fast flick would otherwise pile up seeks and freeze the clip;
+    // cur keeps lerping, so we snap to the latest target the moment it's free.
+    if (s.video.seeking) return false;
+    if (!s.visible && Math.abs(s.cur - s.target) < 0.002) return false;
+    return true;
+  }
+
+  // Eases the clip time toward its scroll target and seeks; true while still moving.
+  function scrubClip(s, eps) {
+    s.cur += (s.target - s.cur) * (reduce ? 1 : 0.18);
+    const settled = Math.abs(s.target - s.cur) < 0.0005;
+    if (settled) s.cur = s.target;
+    const dur = s.video.duration || 1;
+    const t = clamp(s.cur, 0, 0.999) * dur;
+    if (Math.abs(s.video.currentTime - t) > eps) { try { s.video.currentTime = t; } catch (e) {} }
+    return !settled;
   }
 
   // iOS needs a user gesture before a muted video will decode/paint reliably. On the
@@ -593,21 +583,12 @@ export function mountScrollWorld(container, config, options = {}) {
     userReady = true;
     SEGMENTS.forEach(s => primeVideo(s.video));
   }
-  if (!useStaticMedia()) {
-    window.addEventListener('pointerdown', onFirstGesture, { once: true, passive: true });
-    window.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
-  }
 
-  // Particles are a per-frame cost we can't afford alongside video scrubbing on a phone.
-  seedParticles(particles, reduce || coarse || config.atmosphere === false);
   function onScroll() {
     if (!ticking) {
       ticking = true;
       requestAnimationFrame(read);
     }
-  }
-  if (typeof options.subscribeScroll === 'function') {
-    unsubscribeScroll = options.subscribeScroll(onScroll) || (() => {});
   }
   // Mobile browsers fire `resize` every time the URL bar slides in/out. Re-running
   // layout() there rebuilds the track height and yanks the scroll position, so on
@@ -618,14 +599,27 @@ export function mountScrollWorld(container, config, options = {}) {
     if (coarse && window.innerWidth === laidOutW) { read(); return; }
     layout();
   }
-  window.addEventListener('resize', onResize);
-  window.addEventListener('orientationchange', layout);
-  window.addEventListener('load', layout);
   function onVisibilityChange() {
     if (document.hidden) { cancelAnimationFrame(rafId); rafId = 0; }
     else read();
   }
-  document.addEventListener('visibilitychange', onVisibilityChange);
+  function attachListeners() {
+    if (!useStaticMedia()) {
+      window.addEventListener('pointerdown', onFirstGesture, { once: true, passive: true });
+      window.addEventListener('touchstart', onFirstGesture, { once: true, passive: true });
+    }
+    if (typeof options.subscribeScroll === 'function') {
+      unsubscribeScroll = options.subscribeScroll(onScroll) || (() => {});
+    }
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', layout);
+    window.addEventListener('load', layout);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  // Particles are a per-frame cost we can't afford alongside video scrubbing on a phone.
+  seedParticles(particles, reduce || coarse || config.atmosphere === false);
+  attachListeners();
   layout();
   container.dataset.scrollWorldReady = 'true';
   scheduleScrub();
@@ -662,17 +656,156 @@ export function mountScrollWorld(container, config, options = {}) {
       chrome.style.removeProperty('--sw-accent');
     }
   };
+}
 
-  // ---- helpers ----
-  function el(tag, cls) { const n = document.createElement(tag); if (cls) n.className = cls; return n; }
-  function pad(n) { return String(n).padStart(2, '0'); }
-  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
-  function ctaBtns(cta) {
-    let h = '';
-    if (cta.primary) h += `<a class="sw-btn sw-btn--primary" href="${esc(cta.primary.href || '#')}"${cta.primary.action ? ` data-sw-action="${esc(cta.primary.action)}"` : ''}>${esc(cta.primary.label)}</a>`;
-    if (cta.secondary) h += `<a class="sw-btn sw-btn--ghost" href="${esc(cta.secondary.href || '#')}"${cta.secondary.section ? ` data-sw-section="${esc(cta.secondary.section)}"` : ''}>${esc(cta.secondary.label)}</a>`;
-    return h;
+// ---- config ----
+function filmSettings(config) {
+  return {
+    SECTIONS: config.sections || [],
+    CONNECTORS: config.connectors || [],
+    CONNECTORS_M: config.connectorsMobile || [],
+    DIVE_W: config.diveScroll || 1.3,
+    CONN_W: config.connScroll || 0.9,
+    CROSSFADE: (config.crossfade != null) ? config.crossfade : 0.12,  // seam dissolve width (vh)
+    // card layout geometry (see applyCard)
+    CARD: Object.assign({ width: 54, right: 4, radius: 24, in: 0.22, maxH: 82 }, config.card || {})
+  };
+}
+
+function prefersSaveData() {
+  // Network Information API is non-standard; type it locally for @ts-check.
+  const navigatorWithConnection = /** @type {Navigator & { connection?: { saveData?: boolean }, mozConnection?: { saveData?: boolean }, webkitConnection?: { saveData?: boolean } }} */ (navigator);
+  const connection = navigatorWithConnection.connection || navigatorWithConnection.mozConnection || navigatorWithConnection.webkitConnection;
+  return Boolean(connection && connection.saveData);
+}
+
+// ---- DOM building ----
+// Optional landmark split: the skip link and topbar (banner) can live in a
+// separate element before the page's own <main>, which then wraps this
+// container together with the content that follows the film.
+function claimChrome(chromeContainer) {
+  const chrome = chromeContainer || null;
+  if (chrome) {
+    chrome.replaceChildren();
+    chrome.classList.add('sw-chrome');
   }
+  return chrome;
+}
+
+function buildSky(atmosphere) {
+  const sky = el('div', 'sw-sky');
+  if (atmosphere) {
+    sky.appendChild(el('div', 'sw-sky__grad'));
+    sky.appendChild(el('div', 'sw-sky__glow'));
+  }
+  return sky;
+}
+
+function buildSkipLink(config) {
+  const skip = el('a', 'sw-skip-link');
+  skip.href = `#${config.mainId || 'uni-access-main'}`;
+  skip.textContent = config.skipLabel || '본문으로 바로가기';
+  return skip;
+}
+
+function buildTopbar(config, nav) {
+  const topbar = el('header', 'sw-topbar');
+  if (config.brand) topbar.appendChild(buildBrand(config.brand));
+  if (config.nav !== false) topbar.appendChild(nav);
+  if (config.cta && config.cta.label) {
+    const c = el('a', 'sw-topcta'); c.href = config.cta.href || '#'; c.textContent = config.cta.label;
+    if (config.cta.action) c.dataset.swAction = config.cta.action;
+    topbar.appendChild(c);
+  }
+  return topbar;
+}
+
+function buildBrand(brandConfig) {
+  const brand = el('a', 'sw-brand'); brand.href = (brandConfig.href || '#');
+  if (brandConfig.wordmark) {
+    // Typographic wordmark: one lowercase word set in the brand face (e.g. uniaccess).
+    const wm = el('span', 'sw-wordmark'); wm.textContent = brandConfig.wordmark.text || '';
+    brand.setAttribute('aria-label', brandConfig.name || '');
+    brand.appendChild(wm);
+  } else {
+    brand.appendChild(el('span', 'sw-brand__mark'));
+    const nm = el('span', 'sw-brand__name'); nm.textContent = brandConfig.name || ''; brand.appendChild(nm);
+  }
+  return brand;
+}
+
+function buildCopyLayer(config, externalMain) {
+  const copylayer = el(externalMain ? 'div' : 'main', 'sw-copylayer');
+  if (!externalMain) {
+    copylayer.id = config.mainId || 'uni-access-main';
+    copylayer.tabIndex = -1;
+  }
+  return copylayer;
+}
+
+function buildRoute(config) {
+  const route = el('nav', 'sw-route');
+  route.setAttribute('aria-label', '현재 장면');
+  if (config.route === false) route.style.display = 'none';   // route:false → 오른쪽 세로 진행 레일 숨김
+  return route;
+}
+
+function appendLayers(container, chrome, ownChrome, layers) {
+  const { skip, sky, topbar, stage, copylayer, route, hint, track } = layers;
+  if (chrome && ownChrome) {
+    [skip, topbar].forEach(n => chrome.appendChild(n));
+    [sky, stage, copylayer, route, hint, track]
+      .filter(Boolean)
+      .forEach(n => container.appendChild(n));
+  } else {
+    [ownChrome && skip, sky, ownChrome && topbar, stage, copylayer, route, hint, track]
+      .filter(Boolean)
+      .forEach(n => container.appendChild(n));
+  }
+}
+
+function copyMarkup(s, i, n, showNumbers, externalMain) {
+  return (showNumbers ? `<span class="sw-copy__num">${pad(i + 1)} / ${pad(n)}</span>` : '') +
+    (s.eyebrow ? `<span class="sw-copy__eyebrow">${esc(s.eyebrow)}</span>` : '') +
+    copyHeading(s, i, externalMain) +
+    (s.body ? `<p class="sw-copy__body">${esc(s.body)}</p>` : '') +
+    (s.tags && s.tags.length ? `<ul class="sw-copy__tags">${s.tags.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '') +
+    (s.cta ? `<div class="sw-copy__cta">${ctaBtns(s.cta)}</div>` : '');
+}
+
+function copyHeading(s, i, externalMain) {
+  if (!s.title) return '';
+  // The first scene titles the page only when the engine owns <main>; a host
+  // page with its own hero (externalMain) keeps its h1 and gets h2s here.
+  const isPageTitle = i === 0 && !externalMain;
+  const headingTag = isPageTitle ? 'h1' : 'h2';
+  const headingId = isPageTitle ? 'ua-hero-title' : `sw-title-${s.id || i + 1}`;
+  const headingClass = 'sw-copy__title';
+  return `<${headingTag} id="${headingId}" class="${headingClass}">${esc(s.title)}</${headingTag}>`;
+}
+
+// Extra nav links to content below the film (e.g. a normal section with id="engine"):
+//   navLinks: [{ label: '분석 엔진', href: '#engine' }]
+function appendNavLinks(nav, topbar, navLinks) {
+  if (Array.isArray(navLinks) && navLinks.length) {
+    // Links work even with nav:false (section pills off): the nav then holds only these links.
+    if (!nav.isConnected) topbar.insertBefore(nav, topbar.querySelector('.sw-topcta'));
+    navLinks.forEach(link => {
+      const a = el('a', 'sw-nav__item sw-nav__item--link'); a.href = link.href || '#'; a.textContent = link.label || '';
+      nav.appendChild(a);
+    });
+  }
+}
+
+// ---- helpers ----
+function el(tag, cls) { const n = document.createElement(tag); if (cls) n.className = cls; return n; }
+function pad(n) { return String(n).padStart(2, '0'); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function ctaBtns(cta) {
+  let h = '';
+  if (cta.primary) h += `<a class="sw-btn sw-btn--primary" href="${esc(cta.primary.href || '#')}"${cta.primary.action ? ` data-sw-action="${esc(cta.primary.action)}"` : ''}>${esc(cta.primary.label)}</a>`;
+  if (cta.secondary) h += `<a class="sw-btn sw-btn--ghost" href="${esc(cta.secondary.href || '#')}"${cta.secondary.section ? ` data-sw-section="${esc(cta.secondary.section)}"` : ''}>${esc(cta.secondary.label)}</a>`;
+  return h;
 }
 
 function seedParticles(host, reduce) {

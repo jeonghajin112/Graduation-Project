@@ -21,7 +21,7 @@ import type {
 import { selectLatestAnalysisAttempt, selectLatestEvaluationRequest } from "@/services/evaluation-request-selection";
 import { formatDateTime } from "../shared/utils";
 import { useMutationOperation } from "../shared/use-mutation-operation";
-import { QuickAnalysisProgress } from "./quick-analysis-progress";
+import { QuickAnalysisProgress, type AnalysisPhase } from "./quick-analysis-progress";
 import { AnalysisTrendPanel } from "./site-dashboard/analysis-trend-panel";
 import { severityChartItems } from "./site-dashboard/constants";
 import {
@@ -32,10 +32,10 @@ import {
 import { PageAnalysisActions } from "./site-dashboard/page-analysis-actions";
 import { RenderedPageEvidenceCard } from "./site-dashboard/rendered-page-evidence-card";
 import { SeverityDistributionPanel } from "./site-dashboard/severity-distribution-panel";
-import type { LocatorReport, RecentIssueRow } from "./site-dashboard/types";
-import { useEvaluationCaptureMetadata } from "./site-dashboard/use-evaluation-capture-metadata";
-import { useEvaluationResultDetails } from "./site-dashboard/use-evaluation-result-details";
-import { useLiveReportSession } from "./site-dashboard/use-live-report-session";
+import type { LocatorCheckState, LocatorReport, RecentIssueRow } from "./site-dashboard/types";
+import { useEvaluationCaptureMetadata, type EvaluationCaptureMetadataLoadState } from "./site-dashboard/use-evaluation-capture-metadata";
+import { useEvaluationResultDetails, type EvaluationResultDetailsLoadState } from "./site-dashboard/use-evaluation-result-details";
+import { useLiveReportSession, type LiveReportSessionLoadState } from "./site-dashboard/use-live-report-session";
 import { sameLocatorReport } from "./site-dashboard/locator-report";
 
 import "@/styles/page-evidence-layout.css";
@@ -65,25 +65,32 @@ export type SiteDashboardPreviewEvidence = {
   previewRuntimeUrl: string;
 };
 
-export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
-  const requests = props.evaluationRequests.filter(
-    (request) => request.evaluationTargetId === props.evaluationTarget.id
-  );
+function selectProgressPhase(requests: EvaluationRequestModel[]): AnalysisPhase | null {
   const running = requests.find((request) => request.status === "IN_PROGRESS");
   const queued = requests.find((request) => request.status === "PENDING");
   const latest = selectLatestAnalysisAttempt(requests);
   const failedWithoutResult = latest?.status === "FAILED" &&
     !requests.some((request) => request.status === "COMPLETED");
+  if (running) return "running";
+  if (queued) return "queued";
+  return failedWithoutResult ? "failed" : null;
+}
 
-  if (!props.previewEvidence && (running || queued || failedWithoutResult)) {
+export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
+  const requests = props.evaluationRequests.filter(
+    (request) => request.evaluationTargetId === props.evaluationTarget.id
+  );
+  const phase = selectProgressPhase(requests);
+
+  if (!props.previewEvidence && phase) {
     return (
       <div className="site-analysis-progress">
         <QuickAnalysisProgress
-          phase={running ? "running" : queued ? "queued" : "failed"}
+          phase={phase}
           url={props.evaluationTarget.accessUrl}
-          isBusy={Boolean(running || queued)}
+          isBusy={phase !== "failed"}
         >
-          {failedWithoutResult && !running && !queued ? (
+          {phase === "failed" ? (
             <p className="text-sm text-[var(--dashboard-text-muted)]">
               새 페이지 분석에서 주소를 입력해 다시 시도해 주세요.
             </p>
@@ -96,18 +103,14 @@ export function SiteDashboardPanel(props: SiteDashboardPanelProps) {
   return <SiteDashboardResults key={props.evaluationTarget.id} {...props} />;
 }
 
-// Mount result hooks only after active jobs finish, including when rescanning
-// a page with an older result. This also releases its live viewer while busy.
-function SiteDashboardResults(props: SiteDashboardPanelProps) {
-  const {
-    evaluationTarget,
-    evaluationRequests,
-    previewEvidence,
-    resultSummaries,
-    scoreResults,
-    onRequestEvaluationTargetAnalysis,
-    onAnalysisAccepted
-  } = props;
+// The page view and the report share one re-analysis request. The preview and
+// a parent that cannot accept the request offer none.
+function usePageRescanRequest({
+  evaluationTarget,
+  previewEvidence,
+  onRequestEvaluationTargetAnalysis,
+  onAnalysisAccepted
+}: SiteDashboardPanelProps) {
   const [isRequestingAnalysis, setIsRequestingAnalysis] = useState(false);
   const [analysisRequestError, setAnalysisRequestError] = useState<string | null>(null);
   const {
@@ -115,9 +118,10 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     finishMutationOperation,
     isMutationOperationCurrent
   } = useMutationOperation();
+  const canRequestAnalysis = !previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted;
 
   async function handleRequestAnalysis() {
-    if (previewEvidence || !onRequestEvaluationTargetAnalysis || !onAnalysisAccepted) return;
+    if (!canRequestAnalysis) return;
     const operation = beginMutationOperation("page-rescan");
     if (!operation) return;
     setIsRequestingAnalysis(true);
@@ -151,20 +155,127 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
       if (finishMutationOperation(operation)) setIsRequestingAnalysis(false);
     }
   }
+
+  return {
+    isRequestingAnalysis,
+    analysisRequestError,
+    onRequestAnalysis: canRequestAnalysis ? handleRequestAnalysis : undefined
+  };
+}
+
+function selectResultRequests(requests: EvaluationRequestModel[], previewEvidence?: SiteDashboardPreviewEvidence) {
+  const latestResultRequest = selectLatestEvaluationRequest(
+    // A status receipt can arrive before the refreshed overview's score rows.
+    // Fetch the newly completed request instead of briefly replaying an old one.
+    requests.filter((request) => request.status === "COMPLETED")
+  );
+  const latestAttempt = selectLatestAnalysisAttempt(requests);
+  return {
+    latestResultRequest,
+    latestResultRequestId: latestResultRequest?.id ?? null,
+    showsPreviousResult: !previewEvidence && latestAttempt?.status === "FAILED" && latestResultRequest !== null
+  };
+}
+
+function readLocatorReport(report: LocatorReport | null, requestId: number | null, issueIdsSignature: string) {
+  const currentLocatorReport = report?.requestId === requestId &&
+    report.issueIdsSignature === issueIdsSignature ? report : null;
+  const locatorCheckState: LocatorCheckState = currentLocatorReport?.state ?? "loading";
+  return { currentLocatorReport, locatorCheckState, issueStates: currentLocatorReport?.issueStates };
+}
+
+function evidenceLiveSessionLoadStateOf(
+  hasPreview: boolean,
+  resultDetailsLoadState: EvaluationResultDetailsLoadState,
+  liveSessionLoadState: LiveReportSessionLoadState,
+  latestResultRequestId: number | null
+): LiveReportSessionLoadState {
+  return hasPreview
+    ? "idle"
+    : resultDetailsLoadState === "ready"
+      ? liveSessionLoadState
+      : resultDetailsLoadState === "error"
+        ? "error"
+        : latestResultRequestId === null
+          ? "idle"
+          : "loading";
+}
+
+function readCapture(captureMetadata: EvaluationCaptureMetadata | null, latestResultRequest: EvaluationRequestModel | null) {
+  return {
+    deviceScaleFactor: captureMetadata?.deviceScaleFactor ?? null,
+    analyzedAt: captureMetadata?.capturedAt ??
+      latestResultRequest?.requestedAt ??
+      latestResultRequest?.updatedAt ??
+      null
+  };
+}
+
+function ResultNotices({
+  showsPreviousResult,
+  analyzedAt,
+  analysisRequestError,
+  captureMetadataLoadState,
+  captureMetadataErrorMessage,
+  onRetryCaptureMetadata
+}: {
+  showsPreviousResult: boolean;
+  analyzedAt: string | null;
+  analysisRequestError: string | null;
+  captureMetadataLoadState: EvaluationCaptureMetadataLoadState;
+  captureMetadataErrorMessage: string | null;
+  onRetryCaptureMetadata: () => void;
+}) {
+  if (!(showsPreviousResult || analysisRequestError || captureMetadataLoadState === "loading" || captureMetadataLoadState === "error")) {
+    return null;
+  }
+  return (
+    <div className="site-result-notices">
+      {showsPreviousResult && <p className="site-result-notice" role="status">
+        최신 재분석에 실패했습니다. {formatDateTime(analyzedAt)} 분석의 이전 성공 결과를 표시하고 있습니다.
+      </p>}
+      {analysisRequestError && (
+        <p id="site-analysis-request-error" className="site-result-notice" role="alert">
+          {analysisRequestError}
+        </p>
+      )}
+      {captureMetadataLoadState === "loading" && (
+        <p className="site-capture-metadata-status site-result-notice" role="status">
+          분석 당시 화면 정보를 불러오는 중입니다.
+        </p>
+      )}
+      {captureMetadataLoadState === "error" && (
+        <div className="site-capture-metadata-status site-result-notice" role="alert">
+          <p>분석 당시 화면 정보를 불러오지 못했습니다.</p>
+          {captureMetadataErrorMessage && <p>{captureMetadataErrorMessage}</p>}
+          <button type="button" onClick={onRetryCaptureMetadata}>
+            화면 정보 다시 불러오기
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Mount result hooks only after active jobs finish, including when rescanning
+// a page with an older result. This also releases its live viewer while busy.
+function SiteDashboardResults(props: SiteDashboardPanelProps) {
+  const {
+    evaluationTarget,
+    evaluationRequests,
+    previewEvidence,
+    resultSummaries,
+    scoreResults
+  } = props;
+  const { isRequestingAnalysis, analysisRequestError, onRequestAnalysis } = usePageRescanRequest(props);
   // Stable while the overview is unchanged, so the report's trend is not rebuilt
   // on every marker selection.
   const targetEvaluationRequests = useMemo(
     () => evaluationRequests.filter((request) => request.evaluationTargetId === evaluationTarget.id),
     [evaluationRequests, evaluationTarget.id]
   );
-  const latestResultRequest = selectLatestEvaluationRequest(
-    // A status receipt can arrive before the refreshed overview's score rows.
-    // Fetch the newly completed request instead of briefly replaying an old one.
-    targetEvaluationRequests.filter((request) => request.status === "COMPLETED")
-  );
-  const latestResultRequestId = latestResultRequest?.id ?? null;
-  const latestAttempt = selectLatestAnalysisAttempt(targetEvaluationRequests);
-  const showsPreviousResult = !previewEvidence && latestAttempt?.status === "FAILED" && latestResultRequest !== null;
+  const { latestResultRequest, latestResultRequestId, showsPreviousResult } =
+    selectResultRequests(targetEvaluationRequests, previewEvidence);
   const {
     analysisResults,
     errorMessage: resultDetailsErrorMessage,
@@ -233,9 +344,8 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     setLocatorReport((current) => sameLocatorReport(current, next) ? current : next);
   }, []);
   const latestIssueSignature = latestIssues.map((issue) => issue.id).join(",");
-  const currentLocatorReport = locatorReport?.requestId === latestResultRequestId &&
-    locatorReport.issueIdsSignature === latestIssueSignature ? locatorReport : null;
-  const locatorCheckState = currentLocatorReport?.state ?? "loading";
+  const { currentLocatorReport, locatorCheckState, issueStates } =
+    readLocatorReport(locatorReport, latestResultRequestId, latestIssueSignature);
 
   function revealHiddenIssue(issueId: number) {
     setSelectedIssueId(issueId);
@@ -316,16 +426,12 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     return replayIssueRows.filter(({ issue }) => pageSettingIds.has(issue.id));
   }, [currentLocatorReport, replayIssueRows]);
   const locationRow = replayIssueRows.find(({ issue }) => issue.id === locationIssueId);
-  const evidenceLiveSessionLoadState =
-    previewEvidence !== undefined
-      ? "idle"
-      : resultDetailsLoadState === "ready"
-        ? liveSessionLoadState
-        : resultDetailsLoadState === "error"
-          ? "error"
-          : latestResultRequestId === null
-            ? "idle"
-            : "loading";
+  const evidenceLiveSessionLoadState = evidenceLiveSessionLoadStateOf(
+    previewEvidence !== undefined,
+    resultDetailsLoadState,
+    liveSessionLoadState,
+    latestResultRequestId
+  );
   const retryEvidence = () => {
     if (resultDetailsLoadState === "error") {
       retryResultDetails();
@@ -334,15 +440,11 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
     retryLiveSession();
     retryCaptureMetadata();
   };
-  const captureDeviceScaleFactor = captureMetadata?.deviceScaleFactor ?? null;
+  const { deviceScaleFactor: captureDeviceScaleFactor, analyzedAt: latestAnalyzedAt } =
+    readCapture(captureMetadata, latestResultRequest);
   // Severity comes from the result-details request and remains independent of
   // whether the current live page can still resolve every historical locator.
   const showsRailDetailCards = resultDetailsLoadState === "ready";
-  const latestAnalyzedAt =
-    captureMetadata?.capturedAt ??
-    latestResultRequest?.requestedAt ??
-    latestResultRequest?.updatedAt ??
-    null;
 
   return (
     <div className="site-dashboard-view" data-active-view={view}>
@@ -360,9 +462,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
               analyzedAt={latestAnalyzedAt}
               isRequestingAnalysis={isRequestingAnalysis}
               analysisRequestError={analysisRequestError}
-              onRequestAnalysis={!previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted
-                ? handleRequestAnalysis
-                : undefined}
+              onRequestAnalysis={onRequestAnalysis}
             />}
             faviconUrl={evaluationTarget.faviconUrl}
             captureMetadata={captureMetadata}
@@ -383,32 +483,14 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
           />
         </div>
         <div className="site-dashboard-rail">
-          {(showsPreviousResult || analysisRequestError || captureMetadataLoadState === "loading" || captureMetadataLoadState === "error") && (
-            <div className="site-result-notices">
-              {showsPreviousResult && <p className="site-result-notice" role="status">
-                최신 재분석에 실패했습니다. {formatDateTime(latestAnalyzedAt)} 분석의 이전 성공 결과를 표시하고 있습니다.
-              </p>}
-              {analysisRequestError && (
-                <p id="site-analysis-request-error" className="site-result-notice" role="alert">
-                  {analysisRequestError}
-                </p>
-              )}
-              {captureMetadataLoadState === "loading" && (
-                <p className="site-capture-metadata-status site-result-notice" role="status">
-                  분석 당시 화면 정보를 불러오는 중입니다.
-                </p>
-              )}
-              {captureMetadataLoadState === "error" && (
-                <div className="site-capture-metadata-status site-result-notice" role="alert">
-                  <p>분석 당시 화면 정보를 불러오지 못했습니다.</p>
-                  {captureMetadataErrorMessage && <p>{captureMetadataErrorMessage}</p>}
-                  <button type="button" onClick={retryCaptureMetadata}>
-                    화면 정보 다시 불러오기
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          <ResultNotices
+            showsPreviousResult={showsPreviousResult}
+            analyzedAt={latestAnalyzedAt}
+            analysisRequestError={analysisRequestError}
+            captureMetadataLoadState={captureMetadataLoadState}
+            captureMetadataErrorMessage={captureMetadataErrorMessage}
+            onRetryCaptureMetadata={retryCaptureMetadata}
+          />
 
           <AnalysisTrendPanel
             evaluationRequests={evaluationRequests}
@@ -431,7 +513,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                     checkState={locatorCheckState}
                     rows={pageSettingIssueRows}
                     onShowLocation={setLocationIssueId}
-                    issueStates={currentLocatorReport?.issueStates}
+                    issueStates={issueStates}
                   />
                   {/* Findings in another screen state join the hidden list as
                       one of its filters. */}
@@ -442,7 +524,7 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                     recoverableRows={recoverableHiddenLocatorIssueRows}
                     onSelectIssue={revealHiddenIssue}
                     onShowLocation={setLocationIssueId}
-                    issueStates={currentLocatorReport?.issueStates}
+                    issueStates={issueStates}
                   />
                 </Suspense>
               </ErrorBoundary>
@@ -473,12 +555,10 @@ function SiteDashboardResults(props: SiteDashboardPanelProps) {
                 errorMessage={resultDetailsErrorMessage}
                 onRetry={retryResultDetails}
                 locatorCheckState={locatorCheckState}
-                issueStates={currentLocatorReport?.issueStates}
+                issueStates={issueStates}
                 onShowOnPage={showIssueOnPage}
                 deviceScaleFactor={captureDeviceScaleFactor}
-                onRequestAnalysis={!previewEvidence && onRequestEvaluationTargetAnalysis && onAnalysisAccepted
-                  ? handleRequestAnalysis
-                  : undefined}
+                onRequestAnalysis={onRequestAnalysis}
                 isRequestingAnalysis={isRequestingAnalysis}
                 analysisRequestError={analysisRequestError}
               />

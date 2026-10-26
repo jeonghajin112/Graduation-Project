@@ -9,7 +9,12 @@ import {
   updateOrganizationModel
 } from "@/services/backend-api";
 import { parseDashboardRoute } from "@/services/dashboard-route";
-import type { EvaluationRequestModel } from "@/types/accessibility-domain";
+import type {
+  EvaluationRequestModel,
+  EvaluationTargetModel,
+  MenuType,
+  OrganizationModel
+} from "@/types/accessibility-domain";
 
 import {
   readEvaluationTargetRemoved,
@@ -25,6 +30,30 @@ import { formatDateTime } from "./utils";
 
 const APP_HOME_PATH = "/analyze";
 
+/** Which detail view the route shows, and the header title for it. */
+function describeDetailView(
+  menu: MenuType,
+  selectedOrganizationModel: OrganizationModel | null,
+  selectedEvaluationTargetModel: EvaluationTargetModel | null
+) {
+  const isProjectDetailView =
+    menu === "projects" &&
+    selectedOrganizationModel !== null &&
+    selectedEvaluationTargetModel === null;
+  const isSiteDetailView =
+    menu === "projects" &&
+    selectedOrganizationModel !== null &&
+    selectedEvaluationTargetModel !== null;
+  const headerTitle =
+    menu === "analyze"
+      ? "새 페이지 분석"
+      : isSiteDetailView
+        ? selectedEvaluationTargetModel!.name
+        : isProjectDetailView
+          ? selectedOrganizationModel!.name
+          : "프로젝트";
+  return { headerTitle, isSiteDetailView };
+}
 
 export function useDashboardController({
   onBootstrapComplete
@@ -121,10 +150,11 @@ export function useDashboardController({
     );
   }, [routeState.selectedEvaluationTargetModelId, selectedOrganizationModel]);
 
-  const isProjectDetailView =
-    routeState.menu === "projects" &&
-    selectedOrganizationModel !== null &&
-    selectedEvaluationTargetModel === null;
+  const { headerTitle, isSiteDetailView } = describeDetailView(
+    routeState.menu,
+    selectedOrganizationModel,
+    selectedEvaluationTargetModel
+  );
 
   useEffect(() => {
     if (!selectedOrganizationModel?.systemManaged) return;
@@ -134,10 +164,6 @@ export function useDashboardController({
       navigate(APP_HOME_PATH, { replace: true });
     }
   }, [navigate, routeState.kind, selectedOrganizationModel, selectedEvaluationTargetModel]);
-  const isSiteDetailView =
-    routeState.menu === "projects" &&
-    selectedOrganizationModel !== null &&
-    selectedEvaluationTargetModel !== null;
 
   useEffect(() => {
     setIsSiteCreateOpen(false);
@@ -287,14 +313,6 @@ export function useDashboardController({
     [navigate, routeState.menu]
   );
 
-  const headerTitle =
-    routeState.menu === "analyze"
-      ? "새 페이지 분석"
-      : isSiteDetailView
-        ? selectedEvaluationTargetModel!.name
-        : isProjectDetailView
-          ? selectedOrganizationModel!.name
-          : "프로젝트";
   const siteLatestScanLabel = useMemo(() => {
     if (!isSiteDetailView || !selectedEvaluationTargetModel) {
       return "";

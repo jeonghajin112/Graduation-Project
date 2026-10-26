@@ -227,6 +227,14 @@ export function useLiveReportSession(
       scheduleRefreshRevision(currentState.requestId, delay);
       return true;
     };
+    const applyCachedState = (cached: CachedLiveReportSessionState) => {
+      const currentState = getSafelyUsableCurrentSession();
+      if (cached.loadState === "unavailable" && currentState !== null && scheduleRefreshRetry(currentState)) {
+        return;
+      }
+      commitState(cached);
+      scheduleExpiryRefresh(cached);
+    };
 
     if (!enabled || requestId === null) {
       forceFreshSessionRef.current = false;
@@ -238,14 +246,7 @@ export function useLiveReportSession(
     forceFreshSessionRef.current = false;
     const cached = forceFreshSession ? null : readSessionCache(requestId);
     if (cached !== null) {
-      const currentState = getSafelyUsableCurrentSession();
-      if (cached.loadState === "unavailable" && currentState !== null) {
-        if (scheduleRefreshRetry(currentState)) {
-          return clearRefreshTimer;
-        }
-      }
-      commitState(cached);
-      scheduleExpiryRefresh(cached);
+      applyCachedState(cached);
       return clearRefreshTimer;
     }
 

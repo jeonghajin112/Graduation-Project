@@ -3,7 +3,9 @@ import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
   clearSessionRecoveryStorageByPrefix,
+  isRecoveryAttemptId,
   isRecoveryTimestampStale,
+  isUuid,
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
@@ -26,7 +28,6 @@ export function clearAnalysisRecoveryStorage(): void {
   clearSessionRecoveryStorageByPrefix(TARGET_RESCAN_STORAGE_KEY);
 }
 
-const ATTEMPT_ID_MAX_LENGTH = 100;
 const URL_MAX_LENGTH = 4096;
 const STATUS_MAX_LENGTH = 100;
 export const REQUEST_IDS_MAX_LENGTH = 10_000;
@@ -61,6 +62,11 @@ export type PersistedQuickAnalysisAttempt = PersistedAttemptBase & {
       }
   );
 
+type QuickAnalysisAttemptCommon = PersistedAttemptBase & {
+  version: 1;
+  url: string;
+};
+
 export type StoredQuickAnalysisAttempt = {
   attempt: PersistedQuickAnalysisAttempt;
   rawValue: string;
@@ -70,12 +76,9 @@ function normalizeAttemptBase(
   value: Record<string, unknown>
 ): PersistedAttemptBase | null {
   if (
-    typeof value.attemptId !== "string" ||
-    value.attemptId.length === 0 ||
-    value.attemptId.length > ATTEMPT_ID_MAX_LENGTH ||
+    !isRecoveryAttemptId(value.attemptId) ||
     value.apiScope !== API_BASE_URL ||
-    !Number.isSafeInteger(value.startedAt) ||
-    (value.startedAt as number) <= 0
+    !isPositiveSafeInteger(value.startedAt)
   ) {
     return null;
   }
@@ -109,6 +112,75 @@ function normalizeNullableShortString(value: unknown): string | null | undefined
   return value;
 }
 
+function isHttpAttemptUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > URL_MAX_LENGTH) {
+    return false;
+  }
+  try {
+    const parsedUrl = new URL(value);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeRequestIdsPhase(
+  value: Record<string, unknown>,
+  common: QuickAnalysisAttemptCommon,
+  phase: "posting" | "reconciling"
+): PersistedQuickAnalysisAttempt | null {
+  if (value.serverKey !== undefined && (value.serverKey !== true || !isUuid(common.attemptId))) return null;
+  const knownRequestIds = normalizeRequestIds(value.knownRequestIds);
+  return knownRequestIds === null
+    ? null
+    : { ...common, phase, knownRequestIds, ...(value.serverKey === true ? { serverKey: true as const } : {}) };
+}
+
+function normalizeRequestPhase(
+  value: Record<string, unknown>,
+  common: QuickAnalysisAttemptCommon
+): PersistedQuickAnalysisAttempt | null {
+  if (!isPositiveSafeInteger(value.requestId)) {
+    return null;
+  }
+  const targetId = value.targetId === null
+    ? null
+    : isPositiveSafeInteger(value.targetId)
+      ? value.targetId
+      : undefined;
+  const status = normalizeNullableShortString(value.status);
+  const updatedAt = normalizeNullableShortString(value.updatedAt);
+  return targetId === undefined || status === undefined || updatedAt === undefined
+    ? null
+    : {
+        ...common,
+        phase: "request",
+        requestId: value.requestId,
+        targetId,
+        status,
+        updatedAt
+      };
+}
+
+function normalizeTargetPhase(
+  value: Record<string, unknown>,
+  common: QuickAnalysisAttemptCommon
+): PersistedQuickAnalysisAttempt | null {
+  if (!isPositiveSafeInteger(value.requestId) || !isPositiveSafeInteger(value.targetId)) {
+    return null;
+  }
+  const updatedAt = normalizeNullableShortString(value.updatedAt);
+  return updatedAt === undefined
+    ? null
+    : {
+        ...common,
+        phase: "target",
+        requestId: value.requestId,
+        targetId: value.targetId,
+        updatedAt
+      };
+}
+
 function normalizeQuickAnalysisAttempt(
   value: unknown
 ): PersistedQuickAnalysisAttempt | null {
@@ -116,71 +188,26 @@ function normalizeQuickAnalysisAttempt(
     return null;
   }
   const base = normalizeAttemptBase(value);
-  if (
-    base === null ||
-    typeof value.url !== "string" ||
-    value.url.length === 0 ||
-    value.url.length > URL_MAX_LENGTH
-  ) {
-    return null;
-  }
-  try {
-    const parsedUrl = new URL(value.url);
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      return null;
-    }
-  } catch {
+  if (base === null || !isHttpAttemptUrl(value.url)) {
     return null;
   }
 
-  const common = {
-    version: 1 as const,
+  const common: QuickAnalysisAttemptCommon = {
+    version: 1,
     ...base,
     url: value.url
   };
-  if (value.phase === "posting" || value.phase === "reconciling") {
-    if (value.serverKey !== undefined && (value.serverKey !== true || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base.attemptId))) return null;
-    const knownRequestIds = normalizeRequestIds(value.knownRequestIds);
-    return knownRequestIds === null
-      ? null
-      : { ...common, phase: value.phase, knownRequestIds, ...(value.serverKey === true ? { serverKey: true as const } : {}) };
+  switch (value.phase) {
+    case "posting":
+    case "reconciling":
+      return normalizeRequestIdsPhase(value, common, value.phase);
+    case "request":
+      return normalizeRequestPhase(value, common);
+    case "target":
+      return normalizeTargetPhase(value, common);
+    default:
+      return null;
   }
-  if (value.phase === "request" && isPositiveSafeInteger(value.requestId)) {
-    const targetId = value.targetId === null
-      ? null
-      : isPositiveSafeInteger(value.targetId)
-        ? value.targetId
-        : undefined;
-    const status = normalizeNullableShortString(value.status);
-    const updatedAt = normalizeNullableShortString(value.updatedAt);
-    return targetId === undefined || status === undefined || updatedAt === undefined
-      ? null
-      : {
-          ...common,
-          phase: "request",
-          requestId: value.requestId,
-          targetId,
-          status,
-          updatedAt
-        };
-  }
-  if (
-    value.phase === "target" &&
-    isPositiveSafeInteger(value.requestId) &&
-    isPositiveSafeInteger(value.targetId)
-  ) {
-    const updatedAt = normalizeNullableShortString(value.updatedAt);
-    return updatedAt === undefined
-      ? null
-      : {
-          ...common,
-          phase: "target",
-          requestId: value.requestId,
-          targetId: value.targetId,
-          updatedAt
-        };
-  }
-  return null;
 }
 
 export function readQuickAnalysisRecovery(

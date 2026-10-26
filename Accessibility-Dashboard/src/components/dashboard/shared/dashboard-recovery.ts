@@ -20,12 +20,19 @@ export type DirectoryRecovery = {
 const MAX_INCOMPLETE_RECOVERY_SNAPSHOTS = 4;
 
 export function createDirectoryRecoveryLease(baseline: DashboardViewModel | null): DirectoryRecoveryLease {
+  const source: DashboardViewModel = baseline ?? {
+    organizations: [],
+    evaluationRequests: [],
+    resultSummaries: [],
+    latestIssueCounts: [],
+    scoreResults: []
+  };
   return {
-    baselineOrganizations: baseline?.organizations ?? [],
-    baselineEvaluationRequests: baseline?.evaluationRequests ?? [],
-    baselineResultSummaries: baseline?.resultSummaries ?? [],
-    baselineLatestIssueCounts: baseline?.latestIssueCounts ?? [],
-    baselineScoreResults: baseline?.scoreResults ?? [],
+    baselineOrganizations: source.organizations,
+    baselineEvaluationRequests: source.evaluationRequests,
+    baselineResultSummaries: source.resultSummaries,
+    baselineLatestIssueCounts: source.latestIssueCounts,
+    baselineScoreResults: source.scoreResults,
     incompleteSnapshotCount: 0,
     protectionActive: true
   };
@@ -66,6 +73,68 @@ export function requestHasNotRolledBack(
   return requestStatusHasNotRolledBack(baseline.status, next.status);
 }
 
+function indexSnapshot(nextData: DashboardViewModel) {
+  return {
+    organizationsById: new Map(
+      nextData.organizations.map((organization) => [organization.id, organization])
+    ),
+    requestsById: new Map(
+      nextData.evaluationRequests.map((request) => [request.id, request])
+    ),
+    resultSummaryRequestIds: new Set(
+      nextData.resultSummaries.map((summary) => summary.requestId)
+    ),
+    latestIssueCountRequestIds: new Set(
+      nextData.latestIssueCounts.map((statistics) => statistics.requestId)
+    ),
+    scoreResultKeys: new Set(
+      nextData.scoreResults.map(
+        (scoreResult) => `${scoreResult.id}:${scoreResult.evaluationRequestId}`
+      )
+    )
+  };
+}
+
+/** Whether the snapshot still contains everything this lease protects. */
+function snapshotCoversLease(
+  lease: DirectoryRecoveryLease,
+  next: ReturnType<typeof indexSnapshot>
+): boolean {
+  const isDirectoryComplete = lease.baselineOrganizations.every(
+    (protectedOrganization) => {
+      const nextOrganization = next.organizationsById.get(protectedOrganization.id);
+      if (!nextOrganization) {
+        return false;
+      }
+
+      const nextTargetIds = new Set(
+        nextOrganization.evaluationTargets.map((target) => target.id)
+      );
+      return protectedOrganization.evaluationTargets.every((target) =>
+        nextTargetIds.has(target.id)
+      );
+    }
+  );
+  const areBaselineRequestsComplete = lease.baselineEvaluationRequests.every(
+    (baselineRequest) => {
+      const nextRequest = next.requestsById.get(baselineRequest.id);
+      return nextRequest ? requestHasNotRolledBack(baselineRequest, nextRequest) : false;
+    }
+  );
+  const areBaselineResultsComplete =
+    lease.baselineResultSummaries.every((summary) =>
+      next.resultSummaryRequestIds.has(summary.requestId)
+    ) &&
+    lease.baselineLatestIssueCounts.every((statistics) =>
+      next.latestIssueCountRequestIds.has(statistics.requestId)
+    ) &&
+    lease.baselineScoreResults.every((scoreResult) =>
+      next.scoreResultKeys.has(`${scoreResult.id}:${scoreResult.evaluationRequestId}`)
+    );
+
+  return isDirectoryComplete && areBaselineRequestsComplete && areBaselineResultsComplete;
+}
+
 export function protectRecoverySnapshot(
   nextData: DashboardViewModel,
   recovery: DirectoryRecovery | null
@@ -74,63 +143,14 @@ export function protectRecoverySnapshot(
     return nextData;
   }
 
-  const nextOrganizationsById = new Map(
-    nextData.organizations.map((organization) => [organization.id, organization])
-  );
-  const nextRequestsById = new Map(
-    nextData.evaluationRequests.map((request) => [request.id, request])
-  );
-  const nextResultSummaryRequestIds = new Set(
-    nextData.resultSummaries.map((summary) => summary.requestId)
-  );
-  const nextLatestIssueCountRequestIds = new Set(
-    nextData.latestIssueCounts.map((statistics) => statistics.requestId)
-  );
-  const nextScoreResultKeys = new Set(
-    nextData.scoreResults.map(
-      (scoreResult) => `${scoreResult.id}:${scoreResult.evaluationRequestId}`
-    )
-  );
-
+  const next = indexSnapshot(nextData);
   let hasIncompleteActiveLease = false;
   for (const lease of recovery.leases.values()) {
     if (!lease.protectionActive) {
       continue;
     }
 
-    const isDirectoryComplete = lease.baselineOrganizations.every(
-      (protectedOrganization) => {
-        const nextOrganization = nextOrganizationsById.get(protectedOrganization.id);
-        if (!nextOrganization) {
-          return false;
-        }
-
-        const nextTargetIds = new Set(
-          nextOrganization.evaluationTargets.map((target) => target.id)
-        );
-        return protectedOrganization.evaluationTargets.every((target) =>
-          nextTargetIds.has(target.id)
-        );
-      }
-    );
-    const areBaselineRequestsComplete = lease.baselineEvaluationRequests.every(
-      (baselineRequest) => {
-        const nextRequest = nextRequestsById.get(baselineRequest.id);
-        return nextRequest ? requestHasNotRolledBack(baselineRequest, nextRequest) : false;
-      }
-    );
-    const areBaselineResultsComplete =
-      lease.baselineResultSummaries.every((summary) =>
-        nextResultSummaryRequestIds.has(summary.requestId)
-      ) &&
-      lease.baselineLatestIssueCounts.every((statistics) =>
-        nextLatestIssueCountRequestIds.has(statistics.requestId)
-      ) &&
-      lease.baselineScoreResults.every((scoreResult) =>
-        nextScoreResultKeys.has(`${scoreResult.id}:${scoreResult.evaluationRequestId}`)
-      );
-
-    if (isDirectoryComplete && areBaselineRequestsComplete && areBaselineResultsComplete) {
+    if (snapshotCoversLease(lease, next)) {
       lease.incompleteSnapshotCount = 0;
       continue;
     }

@@ -3,11 +3,12 @@ import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
   isRecoveryTimestampStale,
+  isUuid,
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
 import type { RecoveryRead } from "@/services/recovery-storage";
-import { isObjectRecord } from "@/lib/guards";
+import { isObjectRecord, isPositiveSafeInteger } from "@/lib/guards";
 
 export const ORGANIZATION_CREATE_STORAGE_KEY =
   "accessibility-dashboard.organization-create-attempt.v1";
@@ -27,6 +28,14 @@ export type StoredOrganizationCreateAttempt = {
   rawValue: string;
 };
 
+function isOrganizationName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.trim().length <= ORGANIZATION_NAME_MAX_LENGTH
+  );
+}
+
 function normalizePersistedOrganizationCreateAttempt(
   value: unknown
 ): PersistedOrganizationCreateAttempt | null {
@@ -34,16 +43,11 @@ function normalizePersistedOrganizationCreateAttempt(
     !isObjectRecord(value) ||
     // Keep the storage key so pre-idempotency attempts are blocked, never replayed.
     value.version !== 2 ||
-    typeof value.attemptId !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.attemptId) ||
+    !isUuid(value.attemptId) ||
     value.apiScope !== API_BASE_URL ||
-    typeof value.name !== "string" ||
-    value.name.trim().length === 0 ||
-    value.name.trim().length > ORGANIZATION_NAME_MAX_LENGTH ||
-    !(value.organizationId === null ||
-      (Number.isSafeInteger(value.organizationId) && (value.organizationId as number) > 0)) ||
-    !Number.isSafeInteger(value.startedAt) ||
-    (value.startedAt as number) <= 0
+    !isOrganizationName(value.name) ||
+    !(value.organizationId === null || isPositiveSafeInteger(value.organizationId)) ||
+    !isPositiveSafeInteger(value.startedAt)
   ) {
     return null;
   }

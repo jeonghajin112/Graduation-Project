@@ -17,6 +17,17 @@ export type LiveReportViewerBase = Readonly<{
   protocol: "http:" | "https:";
 }>;
 
+/** True when the URL is a bare origin: no credentials, path, query or fragment. */
+function hasOnlyOrigin(url: URL): boolean {
+  return (
+    url.username.length === 0 &&
+    url.password.length === 0 &&
+    url.pathname === "/" &&
+    url.search.length === 0 &&
+    url.hash.length === 0
+  );
+}
+
 export function parseLiveReportViewerBase(
   value = LIVE_REPORT_VIEWER_BASE_URL
 ): LiveReportViewerBase | null {
@@ -25,11 +36,7 @@ export function parseLiveReportViewerBase(
     const isLocalDevelopmentOrigin = url.hostname === "localhost";
     if (
       (url.protocol !== "https:" && !(isLocalDevelopmentOrigin && url.protocol === "http:")) ||
-      url.username.length > 0 ||
-      url.password.length > 0 ||
-      url.pathname !== "/" ||
-      url.search.length > 0 ||
-      url.hash.length > 0 ||
+      !hasOnlyOrigin(url) ||
       url.hostname.endsWith(".")
     ) {
       return null;
@@ -66,11 +73,7 @@ export function isLiveReportViewerOriginAllowed(
       /^[0-9a-f]{40}$/.test(routeLabel) &&
       viewerUrl.protocol === viewerBase.protocol &&
       viewerUrl.port === viewerBase.port &&
-      viewerUrl.username.length === 0 &&
-      viewerUrl.password.length === 0 &&
-      viewerUrl.pathname === "/" &&
-      viewerUrl.search.length === 0 &&
-      viewerUrl.hash.length === 0 &&
+      hasOnlyOrigin(viewerUrl) &&
       viewerUrl.origin === viewerOrigin
     );
   } catch {

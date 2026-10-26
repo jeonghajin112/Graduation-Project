@@ -61,10 +61,7 @@ export type SharedGuidance = {
  * the closed rows tell findings apart; with several engines in a group, each
  * engine's shared text is labelled with it.
  */
-export function buildSharedGuidance(
-  rows: readonly RecentIssueRow[],
-  readingOf: (row: RecentIssueRow) => IssueReading
-): SharedGuidance {
+function partitionByAnalyzer(rows: readonly RecentIssueRow[]): Map<string, RecentIssueRow[]> {
   const partitions = new Map<string, RecentIssueRow[]>();
   for (const row of rows) {
     const key = row.analyzerType ?? "OTHER";
@@ -72,6 +69,14 @@ export function buildSharedGuidance(
     if (members) members.push(row);
     else partitions.set(key, [row]);
   }
+  return partitions;
+}
+
+export function buildSharedGuidance(
+  rows: readonly RecentIssueRow[],
+  readingOf: (row: RecentIssueRow) => IssueReading
+): SharedGuidance {
+  const partitions = partitionByAnalyzer(rows);
   const sharedKeys = new Map<string, Map<string, string>>();
   const entries: SharedGuidance["entries"] = [];
   const labelled = partitions.size > 1;
@@ -156,29 +161,51 @@ function clip(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 }
 
+type ElementContent = { text?: string | null; image?: string | null } | null;
+
+function trimmedContent(content?: ElementContent): { text: string; image: string } {
+  return { text: content?.text?.trim() ?? "", image: content?.image?.trim() ?? "" };
+}
+
+function elementTag(open: RegExpExecArray | null, contentText: string, contentImage: string): string {
+  return open?.[1]?.toLowerCase() ?? (contentImage && !contentText ? "img" : "");
+}
+
+function describeImage(openTag: string): string {
+  const alt = attribute(openTag, "alt");
+  return alt ? `img-alt “${clip(alt, 60)}”` : "img-alt";
+}
+
+function inputType(openTag: string, tag: string): string {
+  return tag === "input" ? attribute(openTag, "type")?.toLowerCase() ?? "text" : "";
+}
+
+function elementKind(openTag: string, tag: string, type: string): string {
+  const role = attribute(openTag, "role")?.toLowerCase() ?? "";
+  return roleNames[role] ?? (type ? inputNames[type] : undefined) ?? tagNames[tag] ?? "요소";
+}
+
+function elementWords(openTag: string, text: string, type: string): string | null {
+  return attribute(openTag, "aria-label") ?? (text || null)
+    ?? attribute(openTag, "title") ?? attribute(openTag, "placeholder")
+    ?? (type && type !== "text" ? attribute(openTag, "value") : null);
+}
+
 /**
  * A short name for the element a finding points at, instead of its markup:
  * an image is named by its alt text, anything else by its kind and the
  * words that tell it apart.
  */
-export function describeElement(html: string, content?: { text?: string | null; image?: string | null } | null): string | null {
+export function describeElement(html: string, content?: ElementContent): string | null {
   const open = /^\s*<([a-zA-Z][\w-]*)([^>]*)>?/.exec(html);
-  const contentText = content?.text?.trim() ?? "";
-  const contentImage = content?.image?.trim() ?? "";
+  const { text: contentText, image: contentImage } = trimmedContent(content);
   if (!open && !contentText && !contentImage) return null;
-  const tag = open?.[1]?.toLowerCase() ?? (contentImage && !contentText ? "img" : "");
+  const tag = elementTag(open, contentText, contentImage);
   const openTag = open?.[0] ?? "";
-  if (tag === "img") {
-    const alt = attribute(openTag, "alt");
-    return alt ? `img-alt “${clip(alt, 60)}”` : "img-alt";
-  }
-  const role = attribute(openTag, "role")?.toLowerCase() ?? "";
-  const type = tag === "input" ? attribute(openTag, "type")?.toLowerCase() ?? "text" : "";
-  const kind = roleNames[role] ?? (type ? inputNames[type] : undefined) ?? tagNames[tag] ?? "요소";
-  const text = contentText || visibleText(html);
-  const words = attribute(openTag, "aria-label") ?? (text || null)
-    ?? attribute(openTag, "title") ?? attribute(openTag, "placeholder")
-    ?? (type && type !== "text" ? attribute(openTag, "value") : null);
+  if (tag === "img") return describeImage(openTag);
+  const type = inputType(openTag, tag);
+  const kind = elementKind(openTag, tag, type);
+  const words = elementWords(openTag, contentText || visibleText(html), type);
   return words ? `${kind} “${clip(words.replace(/\s+/g, " "), 60)}”` : kind;
 }
 
@@ -191,21 +218,33 @@ export function describeIssueLine(row: RecentIssueRow, reading: IssueReading, sh
   const { issue } = row;
   const content = issue.locator?.content;
   const html = issue.locator?.htmlSnippet?.trim() ?? "";
+  return reading.contrast
+    ? describeContrastLine(reading.contrast, reading.parts, html, content)
+    : describeTextLine(row, reading, shared, html, content);
+}
+
+function describeContrastLine(contrast: ContrastFinding, parts: IssuePart[], html: string, content: ElementContent | undefined): IssueLine {
+  // The measured glyphs are often one character; the element's own words
+  // say where they are. An image only says that it is one.
+  const context = visibleText(html) || (content?.image ? "이미지 속 글자" : content?.text?.trim() || null);
+  return {
+    title: contrast.text ? `“${contrast.text}”` : "글자 정보 없음",
+    context,
+    metrics: [],
+    compare: null,
+    details: parts
+  };
+}
+
+function describeTextLine(
+  row: RecentIssueRow,
+  reading: IssueReading,
+  shared: SharedGuidance | undefined,
+  html: string,
+  content: ElementContent | undefined
+): IssueLine {
+  const { issue } = row;
   const own = reading.parts.filter((part) => !shared?.isShared(row, part));
-
-  if (reading.contrast) {
-    // The measured glyphs are often one character; the element's own words
-    // say where they are. An image only says that it is one.
-    const context = visibleText(html) || (content?.image ? "이미지 속 글자" : content?.text?.trim() || null);
-    return {
-      title: reading.contrast.text ? `“${reading.contrast.text}”` : "글자 정보 없음",
-      context,
-      metrics: [],
-      compare: null,
-      details: reading.parts
-    };
-  }
-
   const sentence = bodyOf(reading.parts, "분석 문장");
   const rewrite = bodyOf(reading.parts, "수정 예시");
   // Only the first unlabelled paragraph names the problem; when the group

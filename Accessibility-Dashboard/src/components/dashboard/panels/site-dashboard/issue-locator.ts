@@ -45,6 +45,18 @@ function isCoordinate(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= COORDINATE_LIMIT;
 }
 
+function isMeasuredBox(box: Partial<Record<keyof IssueCoordinateBox, unknown>>): box is IssueCoordinateBox {
+  return isCoordinate(box.x) && isCoordinate(box.y) && isCoordinate(box.width) && isCoordinate(box.height)
+    && box.width > 0 && box.height > 0;
+}
+
+function getCaptureScale(coordinateSpace: string, deviceScaleFactor: number | null | undefined): number {
+  return coordinateSpace === "SCREENSHOT_PX" &&
+    typeof deviceScaleFactor === "number" && Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0
+    ? deviceScaleFactor
+    : 1;
+}
+
 // Findings from the visual engine have no DOM path, only the box measured on
 // the analysis screenshot. Their `locationPath` is a coordinate label, not a
 // selector. Screenshot pixels become document CSS pixels by the capture scale.
@@ -54,16 +66,11 @@ export function getIssueCoordinateBox(
 ): IssueCoordinateBox | null {
   const locator = issue.locator;
   if (!locator || getStoredPathSteps(issue).length > 0) return null;
-  const { x, y, width, height, coordinateSpace } = locator;
+  const { coordinateSpace } = locator;
   if (coordinateSpace !== "SCREENSHOT_PX" && coordinateSpace !== "DOCUMENT_CSS_PX") return null;
-  if (!isCoordinate(x) || !isCoordinate(y) || !isCoordinate(width) || !isCoordinate(height) || width <= 0 || height <= 0) {
-    return null;
-  }
-  const scale = coordinateSpace === "SCREENSHOT_PX" &&
-    typeof deviceScaleFactor === "number" && Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0
-    ? deviceScaleFactor
-    : 1;
-  const box = { x: x / scale, y: y / scale, width: width / scale, height: height / scale };
+  if (!isMeasuredBox(locator)) return null;
+  const scale = getCaptureScale(coordinateSpace, deviceScaleFactor);
+  const box = { x: locator.x / scale, y: locator.y / scale, width: locator.width / scale, height: locator.height / scale };
   // A capture scale below 1 enlarges the box; the viewer rejects the whole
   // issue list when any coordinate exceeds its bound.
   return [box.x, box.y, box.width, box.height].every(isCoordinate) ? box : null;
@@ -101,22 +108,24 @@ export function getReplayIssueContent(issue: IssueResultModel): IssueLocatorCont
   return { text, image };
 }
 
+function isUsableCarouselContext(context: IssueLocatorCarouselContext): boolean {
+  return (
+    Number.isSafeInteger(context.carouselId) &&
+    context.carouselId > 0 &&
+    Number.isSafeInteger(context.slideIndex) &&
+    context.slideIndex >= 0 &&
+    Number.isSafeInteger(context.slideCount) &&
+    context.slideCount >= 2 &&
+    context.slideCount <= 10_000 &&
+    context.slideIndex < context.slideCount
+  );
+}
+
 export function getReplayIssueCarouselContext(
   issue: IssueResultModel
 ): IssueLocatorCarouselContext | null {
   const context = issue.locator?.carouselContext;
-  if (
-    context === null ||
-    context === undefined ||
-    !Number.isSafeInteger(context.carouselId) ||
-    context.carouselId <= 0 ||
-    !Number.isSafeInteger(context.slideIndex) ||
-    context.slideIndex < 0 ||
-    !Number.isSafeInteger(context.slideCount) ||
-    context.slideCount < 2 ||
-    context.slideCount > 10_000 ||
-    context.slideIndex >= context.slideCount
-  ) {
+  if (context === null || context === undefined || !isUsableCarouselContext(context)) {
     return null;
   }
 

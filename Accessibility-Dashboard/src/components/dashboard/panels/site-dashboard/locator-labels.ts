@@ -67,6 +67,10 @@ export function getLocatorExplanationKey(
   if (coordinateOnly && (onPage || state.status === "OFFSCREEN")) return "coordinate";
   if (onPage) return "visible";
   if (state.status === "OFFSCREEN") return "offscreen";
+  return getOffPageKey(state);
+}
+
+function getOffPageKey(state: LocatorIssueState): LocatorExplanationKey {
   if (state.status === "HIDDEN_STATE" && state.recoverable) {
     return state.reason === "FOCUS_TO_REVEAL" ? "focusReveal" : "otherSlide";
   }

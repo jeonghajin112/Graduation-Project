@@ -20,6 +20,8 @@ import type {
   EvaluationRequestModel,
   EvaluationResultSummary,
   EvaluationTargetModel,
+  IssueLocatorContent,
+  IssueResultModel,
   ScoreResult
 } from "@/types/accessibility-domain";
 
@@ -34,16 +36,28 @@ import {
   getReportLocationStatus,
   groupByCriterion,
   summarizeReport,
+  type ContrastFinding,
   type ReportCriterionGroup,
   type ReportFilters,
-  type ReportLocationStatus
+  type ReportIssueLocation,
+  type ReportLocationStatus,
+  type ReportSummary
 } from "./final-report";
-import { buildSharedGuidance, describeIssueLine, partLabel, readIssue, type IssueReading, type SharedGuidance } from "./issue-guidance";
+import {
+  buildSharedGuidance,
+  describeIssueLine,
+  partLabel,
+  readIssue,
+  type IssueLine,
+  type IssuePart,
+  type IssueReading,
+  type SharedGuidance
+} from "./issue-guidance";
 import { buildCriteriaOverview, describeCriterion } from "./kwcag-criteria";
 import { ReportCriteriaOverview } from "./report-criteria-overview";
 import { ReportScoreTrend } from "./report-score-trend";
-import { buildScoreTrend, compareWithPrevious } from "./score-trend";
-import type { LocatorCheckState, LocatorIssueState, RecentIssueRow, SeverityChartItem } from "./types";
+import { buildScoreTrend, compareWithPrevious, type ScoreChange } from "./score-trend";
+import type { LocatorCheckState, LocatorIssueState, RecentIssueRow, ScoreChartItem, SeverityChartItem } from "./types";
 import type { EvaluationResultDetailsLoadState } from "./use-evaluation-result-details";
 
 import "@/styles/final-report.css";
@@ -117,6 +131,35 @@ function contextLabel(context: string): string {
   return context === "FRAME" ? "프레임 내부" : context === "SHADOW_ROOT" ? "Shadow DOM 내부" : "문서";
 }
 
+function readScoreResult(scoreResult: ScoreResult | undefined) {
+  const cvStatus = scoreResult?.cvStatus ?? null;
+  // Only a recorded SUCCESS counts as done. Older analyses stored no outcome
+  // (null), which is neither a pass nor a failure: it is shown as unknown.
+  const textState = engineState(scoreResult?.textStatus);
+  const cvState = engineState(cvStatus);
+  const unknownEngines: AnalyzerType[] = [
+    ...(textState === "unknown" ? ["AI_TEXT" as const] : []),
+    ...(cvState === "unknown" ? ["CV_VISION" as const] : [])
+  ];
+  return {
+    score: scoreResult?.totalScore ?? null,
+    cvStatus,
+    textState,
+    cvState,
+    textFailed: textState === "failed",
+    cvIncomplete: cvState === "failed" || cvState === "not-measured",
+    unknownEngines
+  };
+}
+
+type ScoreReading = ReturnType<typeof readScoreResult>;
+type EngineRow = ReportSummary["analyzers"][number] & { outcome: EngineOutcome | null };
+
+function isFiltering(filters: ReportFilters): boolean {
+  return filters.severity !== "ALL" || filters.analyzer !== "ALL" ||
+    filters.location !== "ALL" || filters.query.trim().length > 0;
+}
+
 export function FinalReportPanel({
   active,
   target,
@@ -134,8 +177,8 @@ export function FinalReportPanel({
   onShowOnPage,
   deviceScaleFactor = null,
   onRequestAnalysis,
-  isRequestingAnalysis = false,
-  analysisRequestError = null
+  isRequestingAnalysis,
+  analysisRequestError
 }: FinalReportPanelProps) {
   const [filters, setFilters] = useState<ReportFilters>(defaultReportFilters);
   const [expandedCodes, setExpandedCodes] = useState<ReadonlySet<string>>(() => new Set());
@@ -147,18 +190,8 @@ export function FinalReportPanel({
   // overview summary reports 0 for a request without a score result, so it is
   // not used as a fallback.
   const scoreResult = requestId === null ? undefined : scoreResults.find((result) => result.evaluationRequestId === requestId);
-  const score = scoreResult?.totalScore ?? null;
-  const cvStatus = scoreResult?.cvStatus ?? null;
-  // Only a recorded SUCCESS counts as done. Older analyses stored no outcome
-  // (null), which is neither a pass nor a failure: it is shown as unknown.
-  const textState = engineState(scoreResult?.textStatus);
-  const cvState = engineState(cvStatus);
-  const textFailed = textState === "failed";
-  const cvIncomplete = cvState === "failed" || cvState === "not-measured";
-  const unknownEngines: AnalyzerType[] = [
-    ...(textState === "unknown" ? ["AI_TEXT" as const] : []),
-    ...(cvState === "unknown" ? ["CV_VISION" as const] : [])
-  ];
+  const scored = readScoreResult(scoreResult);
+  const { textState, cvState } = scored;
   // An engine that did not run reports no issues; show that instead of "0건".
   const engineOutcome = (analyzer: AnalyzerType): EngineOutcome | null => {
     const state = analyzer === "CV_VISION" ? cvState : analyzer === "AI_TEXT" ? textState : "done";
@@ -196,8 +229,7 @@ export function FinalReportPanel({
   // Paper always carries every issue: the search and severity filters are a
   // screen convenience, and the printed summary counts the whole report.
   const groups = isPrinting ? allGroups : filteredGroups;
-  const filtersActive = effectiveFilters.severity !== "ALL" || effectiveFilters.analyzer !== "ALL" ||
-    effectiveFilters.location !== "ALL" || effectiveFilters.query.trim().length > 0;
+  const filtersActive = isFiltering(effectiveFilters);
 
   // Printing and saving as PDF include every issue, independent of the
   // collapsed groups and pages the viewer currently uses on screen.
@@ -228,10 +260,8 @@ export function FinalReportPanel({
     const nextFilters = { ...filters, ...next };
     setFilters(nextFilters);
     const nextEffective = getEffectiveReportFilters(nextFilters, locatorCheckState);
-    const nextActive = nextEffective.severity !== "ALL" || nextEffective.analyzer !== "ALL" ||
-      nextEffective.location !== "ALL" || nextEffective.query.trim().length > 0;
     // Show matches immediately; collapsing a group afterwards stays possible.
-    if (nextActive) {
+    if (isFiltering(nextEffective)) {
       setExpandedCodes(new Set(groupByCriterion(filterReportRows(rows, nextEffective, locationOf)).map((group) => group.code)));
     }
   }
@@ -266,197 +296,35 @@ export function FinalReportPanel({
 
   return (
     <article ref={reportRef} className="site-final-report" aria-labelledby="site-final-report-heading">
-      <header className="site-final-report__header">
-        <div className="site-final-report__identity">
-          <h2 id="site-final-report-heading" className="site-final-report__eyebrow">최종 리포트</h2>
-          <p className="site-final-report__page-label" aria-hidden="true">분석 페이지</p>
-          <p className="site-final-report__target">{target.name}</p>
-          {/* Address and date read as labelled chips; the labels stay for
-              screen readers while an icon carries them on screen. The print
-              action sits on the same row as a chip-sized pill. */}
-          <div className="site-final-report__meta-row">
-            <dl className="site-final-report__meta">
-              <div>
-                <dt className="sr-only">페이지 주소</dt>
-                <dd>
-                  <a href={target.accessUrl} target="_blank" rel="noreferrer" data-copyable title={target.accessUrl}>
-                    <span className="site-final-report__meta-text">{target.accessUrl.replace(/^https?:\/\//, "")}</span>
-                    <ArrowUpRight size={14} aria-hidden="true" />
-                    <span className="sr-only">(새 창에서 열림)</span>
-                  </a>
-                </dd>
-              </div>
-              <div>
-                <dt className="sr-only">분석 일시</dt>
-                {/* Re-analysis rides in the date chip, as in the results view. */}
-                <dd className={onRequestAnalysis ? "site-final-report__meta-date" : undefined}>
-                  <CalendarClock size={14} aria-hidden="true" />
-                  <span>{formatDateTime(analyzedAt)}</span>
-                  {onRequestAnalysis && (
-                    <button type="button" className="site-final-report__rescan"
-                      onClick={onRequestAnalysis} disabled={isRequestingAnalysis} aria-busy={isRequestingAnalysis}
-                      aria-describedby={analysisRequestError ? "site-final-report-analysis-error" : undefined}>
-                      <RefreshCw size={12} aria-hidden="true" />
-                      {isRequestingAnalysis ? "요청 중…" : "재분석"}
-                    </button>
-                  )}
-                </dd>
-              </div>
-            </dl>
-            <button type="button" className="site-final-report__print"
-              onClick={printReport} disabled={loadState !== "ready"}>
-              <Printer size={14} aria-hidden="true" />
-              인쇄 · PDF 저장
-            </button>
-          </div>
-        </div>
-        {analysisRequestError && (
-          <p id="site-final-report-analysis-error" className="site-final-report__header-error" role="alert">
-            {analysisRequestError}
-          </p>
-        )}
-      </header>
+      <ReportHeader
+        target={target}
+        analyzedAt={analyzedAt}
+        printDisabled={loadState !== "ready"}
+        onPrint={printReport}
+        onRequestAnalysis={onRequestAnalysis}
+        isRequestingAnalysis={isRequestingAnalysis}
+        analysisRequestError={analysisRequestError}
+      />
 
-      {loadState === "loading" && (
-        <p className="site-final-report__state" role="status">분석 결과를 불러오는 중입니다.</p>
-      )}
-      {loadState === "idle" && (
-        <p className="site-final-report__state" role="status">완료된 분석 결과가 없습니다.</p>
-      )}
-      {loadState === "error" && (
-        <div className="site-final-report__state" role="alert">
-          <p>분석 결과를 불러오지 못해 리포트를 만들 수 없습니다.</p>
-          {errorMessage && <p>{errorMessage}</p>}
-          <button type="button" className="site-final-report__button" onClick={onRetry}>
-            <RotateCcw size={16} aria-hidden="true" />
-            다시 불러오기
-          </button>
-        </div>
-      )}
+      <ReportLoadState loadState={loadState} errorMessage={errorMessage} onRetry={onRetry} />
 
       {loadState === "ready" && (
         <>
-          {/* The figures open the report on large rounded tiles. */}
-          <section className="site-final-report__section site-final-report__summary" aria-label="요약">
-            <div className="site-final-report__tiles">
-              <div className="site-final-report__tile site-final-report__tile--score">
-                <div className="site-final-report__score-head">
-                  <dl className="site-final-report__figure">
-                    <div>
-                      <dt>접근성 점수</dt>
-                      <dd>
-                        {score === null ? "미확인" : <>{formatScore(score)}<small>점</small></>}
-                        {/* Shown only when the score moved; an unchanged score needs no note. */}
-                        {scoreChange && scoreChange.scoreDelta !== 0 && (
-                          <span className="site-final-report__score-change"
-                            data-direction={scoreChange.scoreDelta > 0 ? "up" : "down"}>
-                            <span aria-hidden="true">
-                              {scoreChange.scoreDelta > 0 ? "+" : "−"}{formatScore(Math.abs(scoreChange.scoreDelta))}점
-                            </span>
-                            <span className="sr-only">
-                              {`지난 분석(${scoreChange.previous.label})보다 ${formatScore(Math.abs(scoreChange.scoreDelta))}점 ${scoreChange.scoreDelta > 0 ? "올랐습니다" : "내렸습니다"}`}
-                            </span>
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                  </dl>
-                  {trend.length > 1 && (
-                    <p className="site-final-report__tile-note">최근 {trend.length.toLocaleString("ko-KR")}번의 분석 기록입니다.</p>
-                  )}
-                </div>
-                <ReportScoreTrend items={trend} currentRequestId={requestId} printing={isPrinting} />
-              </div>
-
-              <div className="site-final-report__tile">
-                <dl className="site-final-report__figure">
-                  <div>
-                    <dt>발견된 문제</dt>
-                    <dd>{summary.total.toLocaleString("ko-KR")}<small>건</small></dd>
-                  </div>
-                </dl>
-                {scoreChange?.issueDelta != null && (
-                  <p className="site-final-report__delta" data-direction={direction(-scoreChange.issueDelta)}>
-                    {scoreChange.issueDelta === 0
-                      ? "지난 분석과 문제 수가 같습니다"
-                      : `지난 분석보다 ${formatCount(Math.abs(scoreChange.issueDelta))} ${scoreChange.issueDelta < 0 ? "줄었습니다" : "늘었습니다"}`}
-                  </p>
-                )}
-                <div className="site-final-report__severity-bar" aria-hidden="true">
-                  {summary.severities.filter((item) => item.count > 0).map((item) => (
-                    <span key={item.key} style={{ ...severityStyle(item.color), flexGrow: item.count }} />
-                  ))}
-                </div>
-                <ul className="site-final-report__severity-list" aria-label="심각도별 문제 수">
-                  {summary.severities.map((item) => (
-                    <li key={item.key} style={severityStyle(item.color)}>
-                      <span className="site-final-report__dot" aria-hidden="true" />
-                      <span className="site-final-report__severity-name">{item.label}</span>
-                      <strong>{formatCount(item.count)}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="site-final-report__tile">
-                <dl className="site-final-report__figure">
-                  <div>
-                    <dt>검사 범위</dt>
-                    <dd>{engines.filter((item) => !item.outcome).length}<small>/{engines.length} 완료</small></dd>
-                  </div>
-                </dl>
-                <p className="site-final-report__delta">{describeEngineScope(engines.map((item) => item.outcome))}</p>
-                <ul className="site-final-report__engine-list" aria-label="검사별 문제 수">
-                  {engines.map((item) => (
-                    <li key={item.analyzer}
-                      data-outcome={!item.outcome ? "done" : item.outcome.state === "unknown" ? "unknown" : "incomplete"}>
-                      {!item.outcome ? <CircleCheck size={16} aria-hidden="true" />
-                        : item.outcome.state === "unknown" ? <CircleHelp size={16} aria-hidden="true" />
-                          : <TriangleAlert size={16} aria-hidden="true" />}
-                      <span>{item.label} 검사</span>
-                      <strong>{item.outcome?.label ?? formatCount(item.count)}</strong>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-            {textFailed && (
-              <p className="site-final-report__notice" role="note">
-                <TriangleAlert size={16} aria-hidden="true" />
-                <span>텍스트 검사가 실패해 읽기 수준·링크 텍스트 등 문장 기반 문제는 이 리포트에 포함되지 않았고 점수에도 반영되지 않았습니다.</span>
-              </p>
-            )}
-            {cvIncomplete && (
-              <p className="site-final-report__notice" role="note">
-                <TriangleAlert size={16} aria-hidden="true" />
-                <span>시각 검사가 {cvStatus === "FAILED" ? "실패해" : "측정되지 않아"} 명도 대비 등 화면 기반 문제는 이 리포트에 포함되지 않았을 수 있습니다.</span>
-              </p>
-            )}
-            {unknownEngines.length > 0 && (
-              <p className="site-final-report__notice" role="note">
-                <CircleHelp size={16} aria-hidden="true" />
-                <span>
-                  {unknownEngines.map((analyzer) => `${analyzerLabels[analyzer]} 검사`).join("·")} 결과가 기록되지 않은 예전 분석이라
-                  이 검사가 맡은 항목은 ‘확인 안 됨’으로 표시했습니다. 다시 분석하면 확인할 수 있어요.
-                </span>
-              </p>
-            )}
-          </section>
+          <ReportSummarySection
+            scored={scored}
+            scoreChange={scoreChange}
+            trend={trend}
+            requestId={requestId}
+            printing={isPrinting}
+            summary={summary}
+            engines={engines}
+          />
 
           <section className="site-final-report__section site-final-report__criteria" aria-labelledby="site-final-report-criteria">
             <ReportCriteriaOverview overview={criteriaOverview} onShowCriterion={showCriterionByCode} />
           </section>
 
-          {summary.total === 0 ? (
-            <section className="site-final-report__section" aria-labelledby="site-final-report-empty">
-              <h3 id="site-final-report-empty" className="site-final-report__title">전체 문제</h3>
-              <p className="site-final-report__state" role="status">
-                {textFailed || cvIncomplete || unknownEngines.length > 0
-                  ? "완료된 검사에서 발견된 문제가 없습니다. 일부 검사의 결과를 확인할 수 없으니 위 안내를 확인해 주세요."
-                  : "이번 분석에서 발견된 문제가 없습니다. 자동 검사로 확인할 수 없는 항목은 직접 점검해 주세요."}
-              </p>
-            </section>
-          ) : (
+          {summary.total === 0 ? <ReportNoIssues scored={scored} /> : (
             <section className="site-final-report__section" aria-labelledby="site-final-report-issues">
               <h3 id="site-final-report-issues" className="site-final-report__title">
                 문제 {formatCount(summary.total)}
@@ -511,6 +379,240 @@ export function FinalReportPanel({
         </>
       )}
     </article>
+  );
+}
+
+function ReportHeader({
+  target,
+  analyzedAt,
+  printDisabled,
+  onPrint,
+  onRequestAnalysis,
+  isRequestingAnalysis = false,
+  analysisRequestError = null
+}: Pick<FinalReportPanelProps, "target" | "analyzedAt" | "onRequestAnalysis" | "isRequestingAnalysis" | "analysisRequestError"> & {
+  printDisabled: boolean;
+  onPrint: () => void;
+}) {
+  return (
+    <header className="site-final-report__header">
+      <div className="site-final-report__identity">
+        <h2 id="site-final-report-heading" className="site-final-report__eyebrow">최종 리포트</h2>
+        <p className="site-final-report__page-label" aria-hidden="true">분석 페이지</p>
+        <p className="site-final-report__target">{target.name}</p>
+        {/* Address and date read as labelled chips; the labels stay for
+            screen readers while an icon carries them on screen. The print
+            action sits on the same row as a chip-sized pill. */}
+        <div className="site-final-report__meta-row">
+          <dl className="site-final-report__meta">
+            <div>
+              <dt className="sr-only">페이지 주소</dt>
+              <dd>
+                <a href={target.accessUrl} target="_blank" rel="noreferrer" data-copyable title={target.accessUrl}>
+                  <span className="site-final-report__meta-text">{target.accessUrl.replace(/^https?:\/\//, "")}</span>
+                  <ArrowUpRight size={14} aria-hidden="true" />
+                  <span className="sr-only">(새 창에서 열림)</span>
+                </a>
+              </dd>
+            </div>
+            <div>
+              <dt className="sr-only">분석 일시</dt>
+              {/* Re-analysis rides in the date chip, as in the results view. */}
+              <dd className={onRequestAnalysis ? "site-final-report__meta-date" : undefined}>
+                <CalendarClock size={14} aria-hidden="true" />
+                <span>{formatDateTime(analyzedAt)}</span>
+                {onRequestAnalysis && (
+                  <button type="button" className="site-final-report__rescan"
+                    onClick={onRequestAnalysis} disabled={isRequestingAnalysis} aria-busy={isRequestingAnalysis}
+                    aria-describedby={analysisRequestError ? "site-final-report-analysis-error" : undefined}>
+                    <RefreshCw size={12} aria-hidden="true" />
+                    {isRequestingAnalysis ? "요청 중…" : "재분석"}
+                  </button>
+                )}
+              </dd>
+            </div>
+          </dl>
+          <button type="button" className="site-final-report__print"
+            onClick={onPrint} disabled={printDisabled}>
+            <Printer size={14} aria-hidden="true" />
+            인쇄 · PDF 저장
+          </button>
+        </div>
+      </div>
+      {analysisRequestError && (
+        <p id="site-final-report-analysis-error" className="site-final-report__header-error" role="alert">
+          {analysisRequestError}
+        </p>
+      )}
+    </header>
+  );
+}
+
+function ReportLoadState({ loadState, errorMessage, onRetry }: Pick<FinalReportPanelProps, "loadState" | "errorMessage" | "onRetry">) {
+  return (
+    <>
+      {loadState === "loading" && (
+        <p className="site-final-report__state" role="status">분석 결과를 불러오는 중입니다.</p>
+      )}
+      {loadState === "idle" && (
+        <p className="site-final-report__state" role="status">완료된 분석 결과가 없습니다.</p>
+      )}
+      {loadState === "error" && (
+        <div className="site-final-report__state" role="alert">
+          <p>분석 결과를 불러오지 못해 리포트를 만들 수 없습니다.</p>
+          {errorMessage && <p>{errorMessage}</p>}
+          <button type="button" className="site-final-report__button" onClick={onRetry}>
+            <RotateCcw size={16} aria-hidden="true" />
+            다시 불러오기
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ScoreTile({ score, scoreChange, trend, requestId, printing }: {
+  score: number | null;
+  scoreChange: ScoreChange | null;
+  trend: ScoreChartItem[];
+  requestId: number | null;
+  printing: boolean;
+}) {
+  return (
+    <div className="site-final-report__tile site-final-report__tile--score">
+      <div className="site-final-report__score-head">
+        <dl className="site-final-report__figure">
+          <div>
+            <dt>접근성 점수</dt>
+            <dd>
+              {score === null ? "미확인" : <>{formatScore(score)}<small>점</small></>}
+              {/* Shown only when the score moved; an unchanged score needs no note. */}
+              {scoreChange && scoreChange.scoreDelta !== 0 && (
+                <span className="site-final-report__score-change"
+                  data-direction={scoreChange.scoreDelta > 0 ? "up" : "down"}>
+                  <span aria-hidden="true">
+                    {scoreChange.scoreDelta > 0 ? "+" : "−"}{formatScore(Math.abs(scoreChange.scoreDelta))}점
+                  </span>
+                  <span className="sr-only">
+                    {`지난 분석(${scoreChange.previous.label})보다 ${formatScore(Math.abs(scoreChange.scoreDelta))}점 ${scoreChange.scoreDelta > 0 ? "올랐습니다" : "내렸습니다"}`}
+                  </span>
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
+        {trend.length > 1 && (
+          <p className="site-final-report__tile-note">최근 {trend.length.toLocaleString("ko-KR")}번의 분석 기록입니다.</p>
+        )}
+      </div>
+      <ReportScoreTrend items={trend} currentRequestId={requestId} printing={printing} />
+    </div>
+  );
+}
+
+function ReportSummarySection({ scored, scoreChange, trend, requestId, printing, summary, engines }: {
+  scored: ScoreReading;
+  scoreChange: ScoreChange | null;
+  trend: ScoreChartItem[];
+  requestId: number | null;
+  printing: boolean;
+  summary: ReportSummary;
+  engines: EngineRow[];
+}) {
+  const { cvStatus, textFailed, cvIncomplete, unknownEngines } = scored;
+  // The figures open the report on large rounded tiles.
+  return (
+    <section className="site-final-report__section site-final-report__summary" aria-label="요약">
+      <div className="site-final-report__tiles">
+        <ScoreTile score={scored.score} scoreChange={scoreChange} trend={trend} requestId={requestId} printing={printing} />
+
+        <div className="site-final-report__tile">
+          <dl className="site-final-report__figure">
+            <div>
+              <dt>발견된 문제</dt>
+              <dd>{summary.total.toLocaleString("ko-KR")}<small>건</small></dd>
+            </div>
+          </dl>
+          {scoreChange?.issueDelta != null && (
+            <p className="site-final-report__delta" data-direction={direction(-scoreChange.issueDelta)}>
+              {scoreChange.issueDelta === 0
+                ? "지난 분석과 문제 수가 같습니다"
+                : `지난 분석보다 ${formatCount(Math.abs(scoreChange.issueDelta))} ${scoreChange.issueDelta < 0 ? "줄었습니다" : "늘었습니다"}`}
+            </p>
+          )}
+          <div className="site-final-report__severity-bar" aria-hidden="true">
+            {summary.severities.filter((item) => item.count > 0).map((item) => (
+              <span key={item.key} style={{ ...severityStyle(item.color), flexGrow: item.count }} />
+            ))}
+          </div>
+          <ul className="site-final-report__severity-list" aria-label="심각도별 문제 수">
+            {summary.severities.map((item) => (
+              <li key={item.key} style={severityStyle(item.color)}>
+                <span className="site-final-report__dot" aria-hidden="true" />
+                <span className="site-final-report__severity-name">{item.label}</span>
+                <strong>{formatCount(item.count)}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="site-final-report__tile">
+          <dl className="site-final-report__figure">
+            <div>
+              <dt>검사 범위</dt>
+              <dd>{engines.filter((item) => !item.outcome).length}<small>/{engines.length} 완료</small></dd>
+            </div>
+          </dl>
+          <p className="site-final-report__delta">{describeEngineScope(engines.map((item) => item.outcome))}</p>
+          <ul className="site-final-report__engine-list" aria-label="검사별 문제 수">
+            {engines.map((item) => (
+              <li key={item.analyzer}
+                data-outcome={!item.outcome ? "done" : item.outcome.state === "unknown" ? "unknown" : "incomplete"}>
+                {!item.outcome ? <CircleCheck size={16} aria-hidden="true" />
+                  : item.outcome.state === "unknown" ? <CircleHelp size={16} aria-hidden="true" />
+                    : <TriangleAlert size={16} aria-hidden="true" />}
+                <span>{item.label} 검사</span>
+                <strong>{item.outcome?.label ?? formatCount(item.count)}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      {textFailed && (
+        <p className="site-final-report__notice" role="note">
+          <TriangleAlert size={16} aria-hidden="true" />
+          <span>텍스트 검사가 실패해 읽기 수준·링크 텍스트 등 문장 기반 문제는 이 리포트에 포함되지 않았고 점수에도 반영되지 않았습니다.</span>
+        </p>
+      )}
+      {cvIncomplete && (
+        <p className="site-final-report__notice" role="note">
+          <TriangleAlert size={16} aria-hidden="true" />
+          <span>시각 검사가 {cvStatus === "FAILED" ? "실패해" : "측정되지 않아"} 명도 대비 등 화면 기반 문제는 이 리포트에 포함되지 않았을 수 있습니다.</span>
+        </p>
+      )}
+      {unknownEngines.length > 0 && (
+        <p className="site-final-report__notice" role="note">
+          <CircleHelp size={16} aria-hidden="true" />
+          <span>
+            {unknownEngines.map((analyzer) => `${analyzerLabels[analyzer]} 검사`).join("·")} 결과가 기록되지 않은 예전 분석이라
+            이 검사가 맡은 항목은 ‘확인 안 됨’으로 표시했습니다. 다시 분석하면 확인할 수 있어요.
+          </span>
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ReportNoIssues({ scored }: { scored: ScoreReading }) {
+  return (
+    <section className="site-final-report__section" aria-labelledby="site-final-report-empty">
+      <h3 id="site-final-report-empty" className="site-final-report__title">전체 문제</h3>
+      <p className="site-final-report__state" role="status">
+        {scored.textFailed || scored.cvIncomplete || scored.unknownEngines.length > 0
+          ? "완료된 검사에서 발견된 문제가 없습니다. 일부 검사의 결과를 확인할 수 없으니 위 안내를 확인해 주세요."
+          : "이번 분석에서 발견된 문제가 없습니다. 자동 검사로 확인할 수 없는 항목은 직접 점검해 주세요."}
+      </p>
+    </section>
   );
 }
 
@@ -685,6 +787,11 @@ function CriterionGroup({
   );
 }
 
+// The group header already prints the shared advice.
+function unsharedDetails(row: RecentIssueRow, line: IssueLine, printing: boolean, shared?: SharedGuidance): IssuePart[] {
+  return printing && shared ? line.details.filter((part) => !shared.isShared(row, part)) : line.details;
+}
+
 function ReportIssueItem({
   row, groupTitle, printing, reading: givenReading, shared, location, deviceScaleFactor, onShowOnPage
 }: {
@@ -703,19 +810,10 @@ function ReportIssueItem({
   const [open, setOpen] = useState(false);
   const expanded = open || printing;
   const [htmlToggled, setHtmlExpanded] = useState(false);
-  // Paper prints the whole stored HTML so a developer can read every attribute.
-  const htmlExpanded = htmlToggled || printing;
   const reading = useMemo(() => givenReading ?? readIssue(row), [givenReading, row]);
   const line = useMemo(() => describeIssueLine(row, reading, shared), [row, reading, shared]);
-  // The group header already prints the shared advice.
-  const details = printing && shared ? line.details.filter((part) => !shared.isShared(row, part)) : line.details;
+  const details = unsharedDetails(row, line, printing, shared);
   const issueLocation = useMemo(() => describeIssueLocation(issue, deviceScaleFactor), [issue, deviceScaleFactor]);
-  const locator = issue.locator;
-  const carousel = locator?.carouselContext;
-  const content = locator?.content;
-  const html = locator?.htmlSnippet?.trim() ?? "";
-  const htmlTruncated = html.length > HTML_PREVIEW_LIMIT;
-  const htmlShown = htmlTruncated && !htmlExpanded ? `${html.slice(0, HTML_PREVIEW_LIMIT)}…` : html;
   const title = issue.issueTitle || groupTitle;
   const detailsId = `site-final-report-issue-${issue.id}`;
 
@@ -753,101 +851,148 @@ function ReportIssueItem({
             </span>
           )}
         </span>
-        {reading.contrast && (
-          <span className="site-final-report__ratio">
-            <span className="sr-only">명도 대비</span>
-            <strong>{reading.contrast.contrast || "측정값 없음"}</strong>
-            <span>{reading.contrast.required ? `기준 ${reading.contrast.required} 이상` : "기준 정보 없음"}</span>
-          </span>
-        )}
+        {reading.contrast && <ContrastRatio contrast={reading.contrast} />}
         <ChevronDown size={16} aria-hidden="true" className="site-final-report__chevron" />
       </div>
 
       <div id={detailsId} className="site-final-report__issue-details" hidden={!expanded}>
         {expanded && (
           <>
-            {line.compare && (
-              <div className="site-final-report__compare" data-copyable>
-                <div>
-                  <p className="site-final-report__compare-label">원래 문장</p>
-                  <p>{line.compare.before}</p>
-                </div>
-                <div>
-                  <p className="site-final-report__compare-label site-final-report__compare-label--after">이렇게 바꿔 보세요</p>
-                  <p>{line.compare.after}</p>
-                </div>
-                {line.compare.reason && <p className="site-final-report__compare-reason">{line.compare.reason}</p>}
-              </div>
-            )}
-            {details.length > 0 && (
-              <dl className="site-final-report__guide" data-copyable>
-                {details.map((part, index) => (
-                  <div key={index}>
-                    <dt>{partLabel(part)}</dt>
-                    <dd>{part.body}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-            <dl className="site-final-report__code-location">
-              <div>
-                <dt>코드 위치</dt>
-                <dd>
-                  {issueLocation === null ? "저장된 위치 정보가 없습니다." : issueLocation.kind === "path" ? (
-                    <ol>
-                      {issueLocation.steps.map((step, index) => (
-                        <li key={index}>
-                          {issueLocation.steps.length > 1 || step.context !== "DOCUMENT"
-                            ? <span className="site-final-report__context">{contextLabel(step.context)}</span>
-                            : null}
-                          <code data-copyable>{step.selector}</code>
-                          {step.frameUrl && <span className="site-final-report__frame-url" data-copyable>{step.frameUrl}</span>}
-                        </li>
-                      ))}
-                    </ol>
-                  ) : issueLocation.kind === "coordinates" ? (
-                    <span data-copyable>
-                      화면 좌표 x {issueLocation.x}, y {issueLocation.y}
-                      {issueLocation.width !== null && issueLocation.height !== null
-                        ? ` · ${issueLocation.width}×${issueLocation.height}`
-                        : ""} (요소 경로 없음)
-                    </span>
-                  ) : <code data-copyable>{issueLocation.value}</code>}
-                </dd>
-              </div>
-              {carousel && (
-                <div>
-                  <dt>슬라이드</dt>
-                  <dd>분석 당시 {carousel.slideCount}장 중 {carousel.slideIndex + 1}번째 슬라이드</dd>
-                </div>
-              )}
-              {content && (content.text || content.image) && (
-                <div>
-                  <dt>분석 당시 내용</dt>
-                  <dd data-copyable>
-                    {content.text && <span className="site-final-report__content-line">글자 {content.text}</span>}
-                    {content.image && <span className="site-final-report__content-line">이미지 <code>{content.image}</code></span>}
-                  </dd>
-                </div>
-              )}
-              {html && (
-                <div>
-                  <dt>분석 당시 HTML</dt>
-                  <dd>
-                    <pre data-copyable><code>{htmlShown}</code></pre>
-                    {htmlTruncated && (
-                      <button type="button" className="site-final-report__button site-final-report__link site-final-report__html-toggle"
-                        aria-expanded={htmlExpanded} onClick={() => setHtmlExpanded((current) => !current)}>
-                        {htmlExpanded ? "HTML 줄여 보기" : `HTML 전체 보기 (${html.length.toLocaleString("ko-KR")}자)`}
-                      </button>
-                    )}
-                  </dd>
-                </div>
-              )}
-            </dl>
+            <IssueAdvice compare={line.compare} details={details} />
+            <IssueCodeLocation issue={issue} location={issueLocation} htmlToggled={htmlToggled} printing={printing}
+              onToggleHtml={() => setHtmlExpanded((current) => !current)} />
           </>
         )}
       </div>
     </li>
+  );
+}
+
+function ContrastRatio({ contrast }: { contrast: ContrastFinding }) {
+  return (
+    <span className="site-final-report__ratio">
+      <span className="sr-only">명도 대비</span>
+      <strong>{contrast.contrast || "측정값 없음"}</strong>
+      <span>{contrast.required ? `기준 ${contrast.required} 이상` : "기준 정보 없음"}</span>
+    </span>
+  );
+}
+
+function IssueAdvice({ compare, details }: { compare: IssueLine["compare"]; details: IssuePart[] }) {
+  return (
+    <>
+      {compare && (
+        <div className="site-final-report__compare" data-copyable>
+          <div>
+            <p className="site-final-report__compare-label">원래 문장</p>
+            <p>{compare.before}</p>
+          </div>
+          <div>
+            <p className="site-final-report__compare-label site-final-report__compare-label--after">이렇게 바꿔 보세요</p>
+            <p>{compare.after}</p>
+          </div>
+          {compare.reason && <p className="site-final-report__compare-reason">{compare.reason}</p>}
+        </div>
+      )}
+      {details.length > 0 && (
+        <dl className="site-final-report__guide" data-copyable>
+          {details.map((part, index) => (
+            <div key={index}>
+              <dt>{partLabel(part)}</dt>
+              <dd>{part.body}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </>
+  );
+}
+
+function IssueCodeLocation({ issue, location, htmlToggled, printing, onToggleHtml }: {
+  issue: IssueResultModel;
+  location: ReportIssueLocation;
+  htmlToggled: boolean;
+  printing: boolean;
+  onToggleHtml: () => void;
+}) {
+  // Paper prints the whole stored HTML so a developer can read every attribute.
+  const htmlExpanded = htmlToggled || printing;
+  const locator = issue.locator;
+  const carousel = locator?.carouselContext;
+  const html = locator?.htmlSnippet?.trim() ?? "";
+  return (
+    <dl className="site-final-report__code-location">
+      <CodeLocationRow location={location} />
+      {carousel && (
+        <div>
+          <dt>슬라이드</dt>
+          <dd>분석 당시 {carousel.slideCount}장 중 {carousel.slideIndex + 1}번째 슬라이드</dd>
+        </div>
+      )}
+      <CapturedContentRow content={locator?.content} />
+      {html && <CapturedHtmlRow html={html} expanded={htmlExpanded} onToggle={onToggleHtml} />}
+    </dl>
+  );
+}
+
+function CodeLocationRow({ location }: { location: ReportIssueLocation }) {
+  return (
+    <div>
+      <dt>코드 위치</dt>
+      <dd>
+        {location === null ? "저장된 위치 정보가 없습니다." : location.kind === "path" ? (
+          <ol>
+            {location.steps.map((step, index) => (
+              <li key={index}>
+                {location.steps.length > 1 || step.context !== "DOCUMENT"
+                  ? <span className="site-final-report__context">{contextLabel(step.context)}</span>
+                  : null}
+                <code data-copyable>{step.selector}</code>
+                {step.frameUrl && <span className="site-final-report__frame-url" data-copyable>{step.frameUrl}</span>}
+              </li>
+            ))}
+          </ol>
+        ) : location.kind === "coordinates" ? (
+          <span data-copyable>
+            화면 좌표 x {location.x}, y {location.y}
+            {location.width !== null && location.height !== null
+              ? ` · ${location.width}×${location.height}`
+              : ""} (요소 경로 없음)
+          </span>
+        ) : <code data-copyable>{location.value}</code>}
+      </dd>
+    </div>
+  );
+}
+
+function CapturedContentRow({ content }: { content?: IssueLocatorContent | null }) {
+  if (!content || !(content.text || content.image)) return null;
+  return (
+    <div>
+      <dt>분석 당시 내용</dt>
+      <dd data-copyable>
+        {content.text && <span className="site-final-report__content-line">글자 {content.text}</span>}
+        {content.image && <span className="site-final-report__content-line">이미지 <code>{content.image}</code></span>}
+      </dd>
+    </div>
+  );
+}
+
+function CapturedHtmlRow({ html, expanded, onToggle }: { html: string; expanded: boolean; onToggle: () => void }) {
+  const htmlTruncated = html.length > HTML_PREVIEW_LIMIT;
+  const htmlShown = htmlTruncated && !expanded ? `${html.slice(0, HTML_PREVIEW_LIMIT)}…` : html;
+  return (
+    <div>
+      <dt>분석 당시 HTML</dt>
+      <dd>
+        <pre data-copyable><code>{htmlShown}</code></pre>
+        {htmlTruncated && (
+          <button type="button" className="site-final-report__button site-final-report__link site-final-report__html-toggle"
+            aria-expanded={expanded} onClick={onToggle}>
+            {expanded ? "HTML 줄여 보기" : `HTML 전체 보기 (${html.length.toLocaleString("ko-KR")}자)`}
+          </button>
+        )}
+      </dd>
+    </div>
   );
 }

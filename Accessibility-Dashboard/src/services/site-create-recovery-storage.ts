@@ -3,7 +3,9 @@ import { getTargetRescanStorageKey } from "@/services/analysis-recovery-storage"
 import {
   clearSessionRecoveryIfUnchanged,
   clearSessionRecoveryStorage,
+  isRecoveryAttemptId,
   isRecoveryTimestampStale,
+  isUuid,
   readSessionRecovery,
   writeSessionRecoveryIfUnchanged
 } from "@/services/recovery-storage";
@@ -113,102 +115,134 @@ export function isValidEvaluationTargetAccessUrl(value: string): boolean {
   }
 }
 
-function normalizePersistedSiteCreateAttempt(
-  value: unknown
-): PersistedSiteCreateAttempt | null {
-  if (!isObjectRecord(value)) {
-    return null;
-  }
+function isPreviousFailedRequestId(value: unknown): value is number | null {
+  return value === null || isPositiveId(value);
+}
 
+function normalizeSiteCreatePage(
+  value: Record<string, unknown>
+): { name: string; accessUrl: string } | null {
   const name = typeof value.name === "string" ? value.name.trim() : "";
   const accessUrl =
     typeof value.accessUrl === "string"
       ? normalizeSiteCreateAccessUrl(value.accessUrl)
       : "";
-  const previousTargetIds = normalizeIdList(value.previousTargetIds);
-  if (value.analysisKey !== undefined && (typeof value.analysisKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.analysisKey))) return null;
   if (
-    value.version !== 1 ||
-    typeof value.attemptId !== "string" ||
-    value.attemptId.length === 0 ||
-    value.attemptId.length > 100 ||
-    value.apiScope !== API_BASE_URL ||
-    !isPositiveId(value.projectId) ||
     name.length === 0 ||
     name.length > SITE_NAME_MAX_LENGTH ||
-    !isValidEvaluationTargetAccessUrl(accessUrl) ||
+    !isValidEvaluationTargetAccessUrl(accessUrl)
+  ) {
+    return null;
+  }
+  return { name, accessUrl };
+}
+
+function normalizeSiteCreateBase(
+  value: Record<string, unknown>
+): SiteCreateRecoveryBase | null {
+  const page = normalizeSiteCreatePage(value);
+  const previousTargetIds = normalizeIdList(value.previousTargetIds);
+  if (
+    value.version !== 1 ||
+    !isRecoveryAttemptId(value.attemptId) ||
+    value.apiScope !== API_BASE_URL ||
+    !isPositiveId(value.projectId) ||
+    page === null ||
     previousTargetIds === null ||
-    !Number.isSafeInteger(value.startedAt) ||
-    (value.startedAt as number) <= 0
+    !isPositiveId(value.startedAt)
   ) {
     return null;
   }
 
-  const base: SiteCreateRecoveryBase = {
-    ...(typeof value.analysisKey === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.analysisKey)
-      ? { analysisKey: value.analysisKey } : {}),
+  return {
+    ...(isUuid(value.analysisKey) ? { analysisKey: value.analysisKey } : {}),
     version: 1,
     attemptId: value.attemptId,
     apiScope: API_BASE_URL,
     projectId: value.projectId,
-    name,
-    accessUrl,
+    name: page.name,
+    accessUrl: page.accessUrl,
     previousTargetIds,
-    startedAt: value.startedAt as number
+    startedAt: value.startedAt
   };
+}
 
-  if (value.phase === "target-reconciling") {
-    return { ...base, phase: "target-reconciling" };
+function normalizeRequestReadyPhase(
+  value: Record<string, unknown>,
+  base: SiteCreateRecoveryBase
+): PersistedSiteCreateAttempt | null {
+  if (!isPositiveId(value.targetId) || !isPreviousFailedRequestId(value.previousFailedRequestId)) {
+    return null;
+  }
+  return {
+    ...base,
+    phase: "request-ready",
+    targetId: value.targetId,
+    previousFailedRequestId: value.previousFailedRequestId
+  };
+}
+
+function normalizeRequestReconcilingPhase(
+  value: Record<string, unknown>,
+  base: SiteCreateRecoveryBase
+): PersistedSiteCreateAttempt | null {
+  const knownRequestIds = normalizeIdList(value.knownRequestIds);
+  if (
+    !isPositiveId(value.targetId) ||
+    knownRequestIds === null ||
+    !isPreviousFailedRequestId(value.previousFailedRequestId)
+  ) {
+    return null;
+  }
+  return {
+    ...base,
+    phase: "request-reconciling",
+    targetId: value.targetId,
+    knownRequestIds,
+    previousFailedRequestId: value.previousFailedRequestId
+  };
+}
+
+function normalizePollPhase(
+  value: Record<string, unknown>,
+  base: SiteCreateRecoveryBase
+): PersistedSiteCreateAttempt | null {
+  const knownRequestIds = normalizeIdList(value.knownRequestIds);
+  if (!isPositiveId(value.targetId) || knownRequestIds === null || !isPositiveId(value.requestId)) {
+    return null;
+  }
+  return {
+    ...base,
+    phase: "poll",
+    targetId: value.targetId,
+    knownRequestIds,
+    requestId: value.requestId
+  };
+}
+
+function normalizePersistedSiteCreateAttempt(
+  value: unknown
+): PersistedSiteCreateAttempt | null {
+  if (!isObjectRecord(value) || (value.analysisKey !== undefined && !isUuid(value.analysisKey))) {
+    return null;
+  }
+  const base = normalizeSiteCreateBase(value);
+  if (base === null) {
+    return null;
   }
 
-  if (value.phase === "request-ready" && isPositiveId(value.targetId)) {
-    if (
-      value.previousFailedRequestId !== null &&
-      !isPositiveId(value.previousFailedRequestId)
-    ) {
+  switch (value.phase) {
+    case "target-reconciling":
+      return { ...base, phase: "target-reconciling" };
+    case "request-ready":
+      return normalizeRequestReadyPhase(value, base);
+    case "request-reconciling":
+      return normalizeRequestReconcilingPhase(value, base);
+    case "poll":
+      return normalizePollPhase(value, base);
+    default:
       return null;
-    }
-    return {
-      ...base,
-      phase: "request-ready",
-      targetId: value.targetId,
-      previousFailedRequestId: value.previousFailedRequestId as number | null
-    };
   }
-
-  if (value.phase === "request-reconciling" && isPositiveId(value.targetId)) {
-    const knownRequestIds = normalizeIdList(value.knownRequestIds);
-    if (
-      knownRequestIds === null ||
-      (value.previousFailedRequestId !== null &&
-        !isPositiveId(value.previousFailedRequestId))
-    ) {
-      return null;
-    }
-    return {
-      ...base,
-      phase: "request-reconciling",
-      targetId: value.targetId,
-      knownRequestIds,
-      previousFailedRequestId: value.previousFailedRequestId as number | null
-    };
-  }
-
-  if (value.phase === "poll" && isPositiveId(value.targetId)) {
-    const knownRequestIds = normalizeIdList(value.knownRequestIds);
-    if (knownRequestIds === null || !isPositiveId(value.requestId)) {
-      return null;
-    }
-    return {
-      ...base,
-      phase: "poll",
-      targetId: value.targetId,
-      knownRequestIds,
-      requestId: value.requestId
-    };
-  }
-
-  return null;
 }
 
 export function isSiteCreateAttemptStale(

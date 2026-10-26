@@ -167,6 +167,19 @@ export function subscribeQuickAnalysisRegistry(listener: () => void): () => void
   };
 }
 
+// Look projects up once instead of scanning every project per record.
+function indexProjects(organizations: readonly OrganizationModel[]) {
+  const projectById = new Map<number, OrganizationModel>();
+  const projectByPageId = new Map<number, OrganizationModel>();
+  for (const organization of organizations) {
+    if (!projectById.has(organization.id)) projectById.set(organization.id, organization);
+    for (const target of organization.evaluationTargets) {
+      if (!projectByPageId.has(target.id)) projectByPageId.set(target.id, organization);
+    }
+  }
+  return { projectById, projectByPageId };
+}
+
 export function buildRecentAnalyzedPages({
   organizations,
   quickAnalysisResults,
@@ -179,16 +192,7 @@ export function buildRecentAnalyzedPages({
   limit?: number;
 }): RecentAnalyzedPage[] {
   const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : MAX_RECENT_ANALYZED_PAGES;
-
-  // Look projects up once instead of scanning every project per record.
-  const projectById = new Map<number, OrganizationModel>();
-  const projectByPageId = new Map<number, OrganizationModel>();
-  for (const organization of organizations) {
-    if (!projectById.has(organization.id)) projectById.set(organization.id, organization);
-    for (const target of organization.evaluationTargets) {
-      if (!projectByPageId.has(target.id)) projectByPageId.set(target.id, organization);
-    }
-  }
+  const { projectById, projectByPageId } = indexProjects(organizations);
 
   // Each page keeps only its latest record (ties: the lower project id), so
   // the sort below covers at most one entry per page.

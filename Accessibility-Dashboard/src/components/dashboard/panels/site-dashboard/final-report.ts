@@ -177,6 +177,23 @@ export function getEffectiveReportFilters(filters: ReportFilters, locatorCheckSt
   return locatorCheckState === "ready" || filters.location === "ALL" ? filters : { ...filters, location: "ALL" };
 }
 
+// "위치 표시 불가" includes page settings, like the report metric.
+function matchesLocation(location: ReportFilters["location"], status: ReportLocationStatus): boolean {
+  return location === "on-page" ? canShowOnPage(status)
+    : location === "unavailable" ? status === "unavailable" || status === "page-setting"
+      : status === location;
+}
+
+function matchesQuery(issue: IssueResultModel, query: string): boolean {
+  return [
+    issue.issueTitle,
+    formatIssueCodeLabel(issue.issueCode),
+    issue.locationPath,
+    issue.locator?.htmlSnippet ?? "",
+    issue.message
+  ].some((value) => value.toLocaleLowerCase("ko").includes(query));
+}
+
 export function filterReportRows(
   rows: readonly RecentIssueRow[],
   filters: ReportFilters,
@@ -186,23 +203,8 @@ export function filterReportRows(
   return rows.filter((row) => {
     if (filters.severity !== "ALL" && row.severity.key !== filters.severity) return false;
     if (filters.analyzer !== "ALL" && row.analyzerType !== filters.analyzer) return false;
-    if (filters.location !== "ALL") {
-      const status = locationOf(row);
-      // "위치 표시 불가" includes page settings, like the report metric.
-      const matches = filters.location === "on-page" ? canShowOnPage(status)
-        : filters.location === "unavailable" ? status === "unavailable" || status === "page-setting"
-          : status === filters.location;
-      if (!matches) return false;
-    }
-    if (!query) return true;
-    const { issue } = row;
-    return [
-      issue.issueTitle,
-      formatIssueCodeLabel(issue.issueCode),
-      issue.locationPath,
-      issue.locator?.htmlSnippet ?? "",
-      issue.message
-    ].some((value) => value.toLocaleLowerCase("ko").includes(query));
+    if (filters.location !== "ALL" && !matchesLocation(filters.location, locationOf(row))) return false;
+    return !query || matchesQuery(row.issue, query);
   });
 }
 
@@ -238,9 +240,8 @@ export type ReportIssueLocation =
 // Coordinate-only findings (the visual engine) keep a coordinate label in
 // `selector`; it must not be presented as a CSS selector a developer can search.
 // Screenshot pixels are shown in document CSS pixels, like the page markers.
-export function describeIssueLocation(issue: IssueResultModel, deviceScaleFactor?: number | null): ReportIssueLocation {
-  const locator = issue.locator;
-  const steps = (Array.isArray(locator?.pathSteps) ? locator.pathSteps : [])
+function locatorPathSteps(locator: IssueResultModel["locator"]) {
+  return (Array.isArray(locator?.pathSteps) ? locator.pathSteps : [])
     .filter((step) => typeof step?.selector === "string" && step.selector.trim().length > 0)
     .map((step) => ({
       context: String(step.context),
@@ -248,6 +249,11 @@ export function describeIssueLocation(issue: IssueResultModel, deviceScaleFactor
       // about:blank is a placeholder for frames without their own document.
       ...(typeof step.frameUrl === "string" && step.frameUrl && step.frameUrl !== "about:blank" ? { frameUrl: step.frameUrl } : {})
     }));
+}
+
+export function describeIssueLocation(issue: IssueResultModel, deviceScaleFactor?: number | null): ReportIssueLocation {
+  const locator = issue.locator;
+  const steps = locatorPathSteps(locator);
   if (steps.length > 0) return { kind: "path", steps };
   const box = getIssueCoordinateBox(issue, deviceScaleFactor);
   if (box) {

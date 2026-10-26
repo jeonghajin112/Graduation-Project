@@ -69,7 +69,7 @@ const NO_ROWS: RecentIssueRow[] = [];
 
 export function UnavailableLocatorPanel({
   checkState,
-  hasHiddenIssues = false,
+  hasHiddenIssues,
   mode = "unavailable",
   recoverableRows = NO_ROWS,
   onSelectIssue,
@@ -112,34 +112,7 @@ export function UnavailableLocatorPanel({
     if (mode !== "unavailable") {
       return null;
     }
-    return (
-      <section
-        className="site-rail-card site-unavailable-locator-panel site-unavailable-locator-panel--unavailable is-empty"
-        data-locator-mode="unavailable"
-        data-locator-check-state={checkState}
-        data-unavailable-locator-count={checkState === "ready" ? 0 : undefined}
-        aria-labelledby={headingId}
-        aria-busy={checkState === "loading"}
-      >
-        <div className="site-unavailable-locator-panel__header">
-          <div className="site-rail-card__heading">
-            <h3 id={headingId}>화면에 표시되지 않은 문제</h3>
-          </div>
-          {checkState === "ready" && (
-            <span className="site-unavailable-locator-panel__count" aria-hidden="true">0건</span>
-          )}
-        </div>
-        <p className="site-unavailable-locator-panel__empty" role="status">
-          {checkState === "loading"
-            ? "문제 위치를 확인하고 있습니다."
-            : checkState === "error"
-              ? "검사 화면에 연결하지 못해 문제 위치를 확인할 수 없습니다."
-              : hasHiddenIssues
-                ? "그 밖의 문제는 위 목록에서 확인할 수 있습니다."
-                : "모든 문제가 화면에 표시되고 있습니다."}
-        </p>
-      </section>
-    );
+    return <EmptyLocatorPanel checkState={checkState} hasHiddenIssues={hasHiddenIssues} headingId={headingId} />;
   }
 
   return (
@@ -192,6 +165,41 @@ export function UnavailableLocatorPanel({
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function EmptyLocatorPanel({ checkState, hasHiddenIssues, headingId }: {
+  checkState: LocatorCheckState;
+  hasHiddenIssues?: boolean;
+  headingId: string;
+}) {
+  return (
+    <section
+      className="site-rail-card site-unavailable-locator-panel site-unavailable-locator-panel--unavailable is-empty"
+      data-locator-mode="unavailable"
+      data-locator-check-state={checkState}
+      data-unavailable-locator-count={checkState === "ready" ? 0 : undefined}
+      aria-labelledby={headingId}
+      aria-busy={checkState === "loading"}
+    >
+      <div className="site-unavailable-locator-panel__header">
+        <div className="site-rail-card__heading">
+          <h3 id={headingId}>화면에 표시되지 않은 문제</h3>
+        </div>
+        {checkState === "ready" && (
+          <span className="site-unavailable-locator-panel__count" aria-hidden="true">0건</span>
+        )}
+      </div>
+      <p className="site-unavailable-locator-panel__empty" role="status">
+        {checkState === "loading"
+          ? "문제 위치를 확인하고 있습니다."
+          : checkState === "error"
+            ? "검사 화면에 연결하지 못해 문제 위치를 확인할 수 없습니다."
+            : hasHiddenIssues
+              ? "그 밖의 문제는 위 목록에서 확인할 수 있습니다."
+              : "모든 문제가 화면에 표시되고 있습니다."}
+      </p>
     </section>
   );
 }

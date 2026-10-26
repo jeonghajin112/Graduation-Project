@@ -1,6 +1,33 @@
 import { useId, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
+function trapLayerTabFocus(layer: HTMLElement, event: KeyboardEvent) {
+  const focusableElements = Array.from(
+    layer.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => element.getClientRects().length > 0);
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    layer.focus({ preventScroll: true });
+    return;
+  }
+
+  const firstElement = focusableElements[0]!;
+  const lastElement = focusableElements[focusableElements.length - 1]!;
+  const focusedElement = document.activeElement;
+  if (!layer.contains(focusedElement)) {
+    event.preventDefault();
+    (event.shiftKey ? lastElement : firstElement).focus({ preventScroll: true });
+  } else if (event.shiftKey && (focusedElement === firstElement || focusedElement === layer)) {
+    event.preventDefault();
+    lastElement.focus({ preventScroll: true });
+  } else if (!event.shiftKey && focusedElement === lastElement) {
+    event.preventDefault();
+    firstElement.focus({ preventScroll: true });
+  }
+}
+
 function useModalLayerOwnership<TElement extends HTMLElement>(onEscape?: () => void) {
   const layerRef = useRef<TElement>(null);
   const onEscapeRef = useRef(onEscape);
@@ -32,33 +59,8 @@ function useModalLayerOwnership<TElement extends HTMLElement>(onEscape?: () => v
         onEscapeRef.current();
         return;
       }
-      if (event.key !== "Tab") {
-        return;
-      }
-
-      const focusableElements = Array.from(
-        layer.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      ).filter((element) => element.getClientRects().length > 0);
-      if (focusableElements.length === 0) {
-        event.preventDefault();
-        layer.focus({ preventScroll: true });
-        return;
-      }
-
-      const firstElement = focusableElements[0]!;
-      const lastElement = focusableElements[focusableElements.length - 1]!;
-      const focusedElement = document.activeElement;
-      if (!layer.contains(focusedElement)) {
-        event.preventDefault();
-        (event.shiftKey ? lastElement : firstElement).focus({ preventScroll: true });
-      } else if (event.shiftKey && (focusedElement === firstElement || focusedElement === layer)) {
-        event.preventDefault();
-        lastElement.focus({ preventScroll: true });
-      } else if (!event.shiftKey && focusedElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus({ preventScroll: true });
+      if (event.key === "Tab") {
+        trapLayerTabFocus(layer, event);
       }
     };
     document.addEventListener("keydown", keepFocusInLayer);

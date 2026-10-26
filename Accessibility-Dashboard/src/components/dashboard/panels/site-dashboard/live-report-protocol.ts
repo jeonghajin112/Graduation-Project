@@ -196,22 +196,31 @@ export function isLiveReportSessionSafe(
 ): boolean {
   try {
     const runtimeUrl = new URL(session.runtimeUrl);
-    const expiresAt = Date.parse(session.expiresAt);
     return (
       runtimeUrl.username.length === 0 &&
       runtimeUrl.password.length === 0 &&
       runtimeUrl.origin === session.viewerOrigin &&
       isLiveReportViewerOriginAllowed(session.viewerOrigin, viewerBaseUrl) &&
       session.viewerOrigin !== dashboardOrigin &&
-      isUrlSafeToken(session.nonce) &&
-      isUrlSafeToken(session.bridgeSecret) &&
-      session.bridgeSecret !== session.nonce &&
-      Number.isFinite(expiresAt) &&
-      expiresAt > now
+      hasDistinctLiveReportTokens(session) &&
+      isLiveReportSessionUnexpired(session, now)
     );
   } catch {
     return false;
   }
+}
+
+function hasDistinctLiveReportTokens(session: Pick<LiveReportSession, "nonce" | "bridgeSecret">): boolean {
+  return (
+    isUrlSafeToken(session.nonce) &&
+    isUrlSafeToken(session.bridgeSecret) &&
+    session.bridgeSecret !== session.nonce
+  );
+}
+
+function isLiveReportSessionUnexpired(session: Pick<LiveReportSession, "expiresAt">, now: number): boolean {
+  const expiresAt = Date.parse(session.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt > now;
 }
 
 export function createLiveReportChallenge(
