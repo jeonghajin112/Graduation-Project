@@ -20,16 +20,11 @@ export function compareEvaluationRequestRecency(
 }
 
 export function selectLatestEvaluationRequest(
-  requests: readonly EvaluationRequestModel[],
-  eligibleRequestIds?: ReadonlySet<number>
+  requests: readonly EvaluationRequestModel[]
 ): EvaluationRequestModel | null {
   let latestRequest: EvaluationRequestModel | null = null;
 
   for (const request of requests) {
-    if (eligibleRequestIds && !eligibleRequestIds.has(request.id)) {
-      continue;
-    }
-
     if (!latestRequest || compareEvaluationRequestRecency(request, latestRequest) > 0) {
       latestRequest = request;
     }

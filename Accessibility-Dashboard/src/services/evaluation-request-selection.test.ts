@@ -35,7 +35,6 @@ describe("evaluation request selection", () => {
     expect(selectLatestEvaluationRequest([])).toBeNull();
     expect(buildLatestEvaluationRequestByTargetId([]).size).toBe(0);
     const requests = [request(1, 101, "2026-09-09T00:00:00Z")];
-    expect(selectLatestEvaluationRequest(requests, new Set())).toBeNull();
     expect(buildLatestEvaluationRequestByTargetId(requests, new Set()).size).toBe(0);
   });
 
@@ -65,7 +64,6 @@ describe("evaluation request selection", () => {
     expect(all.get(101)).toBe(pendingA);
     expect(all.get(102)).toBe(completedB);
     const eligible = new Set([1, 3]);
-    expect(selectLatestEvaluationRequest(requests, eligible)).toBe(completedB);
     const withResults = buildLatestEvaluationRequestByTargetId(requests, eligible);
     expect(withResults.get(101)).toBe(completedA);
     expect(withResults.get(102)).toBe(completedB);

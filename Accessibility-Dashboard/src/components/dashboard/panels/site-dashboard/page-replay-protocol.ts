@@ -15,7 +15,7 @@ import {
   type IssueCoordinateBox
 } from "./issue-locator";
 import type { RecentIssueRow } from "./types";
-import { hasExactOwnKeys, isDocumentToken, isObjectRecord } from "@/lib/guards";
+import { isDocumentToken, isObjectRecord } from "@/lib/guards";
 
 export const DASHBOARD_REPLAY_SOURCE = "accessibility-dashboard" as const;
 export const PAGE_REPLAY_SOURCE = "accessibility-page-replay" as const;
@@ -37,12 +37,10 @@ export type ReplayViewportMetrics = {
 // Bounds the live viewer enforces on INIT_ISSUES (bridge-runtime.js). One
 // issue outside them makes the viewer reject every issue in the command.
 export const REPLAY_BRIDGE_LIMITS = {
-  issues: 10_000,
   pathSteps: 128
 } as const;
 
 const LOCATOR_REASON_MAX_LENGTH = 128;
-const BLOCKED_LINK_HREF_MAX_LENGTH = 2_048;
 const COMMAND_TYPE_PATTERN = /^[A-Z_]{1,32}$/;
 const LEGACY_TEXT_ANALYSIS_INPUT_MAX_LENGTH = 16_384;
 
@@ -249,18 +247,6 @@ export type PageReplayToDashboardMessage =
       ownerKind?: LocatorOwnerKind;
     }
   | {
-      source: typeof PAGE_REPLAY_SOURCE;
-      type: "LINK_BLOCKED";
-      documentToken: string;
-      href?: string;
-    }
-  | {
-      source: typeof PAGE_REPLAY_SOURCE;
-      type: "FORM_BLOCKED";
-      documentToken: string;
-      method: "GET" | "POST" | "DIALOG";
-    }
-  | {
       /** The viewer refused a command it received in sequence. */
       source: typeof PAGE_REPLAY_SOURCE;
       type: "COMMAND_REJECTED";
@@ -276,25 +262,14 @@ export type LiveDocumentHealthMessage = Extract<
   { type: "DOCUMENT_HEALTH" }
 >;
 
-const LIVE_DOCUMENT_MIN_TEXT_LENGTH = 12;
-const LIVE_DOCUMENT_MIN_CONTROL_COUNT = 2;
-const LIVE_DOCUMENT_MIN_IMAGE_COUNT = 2;
-const LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA = 10_000;
-const LIVE_DOCUMENT_MIN_MEANINGFUL_SAMPLES = 1;
-
+/**
+ * The bridge applies the thresholds itself (bridge-runtime.js measureDocumentHealth)
+ * and reports MEANINGFUL only for a substantive page.
+ */
 export function isMeaningfulLiveDocumentHealth(
   message: LiveDocumentHealthMessage
 ): boolean {
-  const hasSubstantiveContent =
-    message.visibleTextLength >= LIVE_DOCUMENT_MIN_TEXT_LENGTH ||
-    message.visibleControlCount >= LIVE_DOCUMENT_MIN_CONTROL_COUNT ||
-    message.visibleImageCount >= LIVE_DOCUMENT_MIN_IMAGE_COUNT ||
-    message.largestVisibleVisualArea >= LIVE_DOCUMENT_MIN_VISIBLE_VISUAL_AREA;
-  return (
-    message.status === "MEANINGFUL" &&
-    message.consecutiveMeaningfulSamples >= LIVE_DOCUMENT_MIN_MEANINGFUL_SAMPLES &&
-    hasSubstantiveContent
-  );
+  return message.status === "MEANINGFUL";
 }
 
 export function isValidReplayViewportMetrics(
@@ -623,7 +598,8 @@ function toOptionalBoundedReplayText(
 type ReplayMessageType = PageReplayToDashboardMessage["type"];
 type ReplayMessageFields = Record<string, unknown>;
 // A parser sees a message whose source and document token are already checked
-// and accepts it only when the fields its type adds are exactly right.
+// and accepts it when the fields its type needs are right; fields a newer
+// bridge adds are ignored instead of dropping the message.
 type ReplayMessageParser = (value: ReplayMessageFields, documentToken: string) => PageReplayToDashboardMessage | null;
 
 const locatorConnectionStatuses: readonly unknown[] = ["CONNECTED", "VISIBLE", "OFFSCREEN", "HIDDEN_STATE", "UNAVAILABLE"];
@@ -636,14 +612,9 @@ const documentHealthCounts = [
   "visibleTextLength"
 ] as const;
 
-/** The message carries the common header, then exactly `fields`. */
+/** The message carries every one of `fields` (others are allowed). */
 function hasMessageFields(value: ReplayMessageFields, fields: readonly string[] = []): boolean {
-  return hasExactOwnKeys(value, ["source", "type", "documentToken", ...fields]);
-}
-
-/** The optional fields among `keys` that the message actually carries. */
-function presentFields(value: ReplayMessageFields, keys: readonly string[]): string[] {
-  return keys.filter((key) => hasOwnKey(value, key));
+  return fields.every((field) => hasOwnKey(value, field));
 }
 
 function readBoundedCounts<K extends string>(value: ReplayMessageFields, keys: readonly K[]): Record<K, number> | null {
@@ -707,7 +678,7 @@ const pageReplayMessageParsers: Readonly<Record<ReplayMessageType, ReplayMessage
   LOCATOR_STATUS: (value, documentToken) => {
     const { issueId, status, reason, recoverable, ownerKind } = value;
     const valid =
-      hasMessageFields(value, ["issueId", "status", ...presentFields(value, ["reason", "recoverable", "ownerKind"])]) &&
+      hasMessageFields(value, ["issueId", "status"]) &&
       isIssueId(issueId) &&
       locatorConnectionStatuses.includes(status) &&
       (reason === undefined || (typeof reason === "string" && reason.length <= LOCATOR_REASON_MAX_LENGTH)) &&
@@ -725,21 +696,6 @@ const pageReplayMessageParsers: Readonly<Record<ReplayMessageType, ReplayMessage
       ...(typeof recoverable === "boolean" ? { recoverable } : {}),
       ...(ownerKind !== undefined ? { ownerKind: ownerKind as LocatorOwnerKind } : {})
     };
-  },
-
-  FORM_BLOCKED: (value, documentToken) => {
-    const { method } = value;
-    if (!hasMessageFields(value, ["method"]) || (method !== "GET" && method !== "POST" && method !== "DIALOG")) return null;
-    return { source: PAGE_REPLAY_SOURCE, type: "FORM_BLOCKED", documentToken, method };
-  },
-
-  LINK_BLOCKED: (value, documentToken) => {
-    const { href } = value;
-    if (!hasMessageFields(value, presentFields(value, ["href"])) ||
-        (href !== undefined && (typeof href !== "string" || href.length > BLOCKED_LINK_HREF_MAX_LENGTH))) {
-      return null;
-    }
-    return { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken, ...(href !== undefined ? { href } : {}) };
   },
 
   COMMAND_REJECTED: (value, documentToken) => {

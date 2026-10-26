@@ -46,7 +46,6 @@ const target = (id: number): EvaluationTarget => ({
 });
 
 const dashboard: DashboardViewModel = {
-  analysisProtocolVersion: 1,
   organizations: [{
     id: 1, name: "Project", description: "", status: "ACTIVE", updatedAt: timestamp,
     evaluationTargets: [101, 102].map((id) => ({

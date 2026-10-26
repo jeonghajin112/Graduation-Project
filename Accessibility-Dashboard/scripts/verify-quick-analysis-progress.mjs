@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -29,7 +30,8 @@ try {
     window.setInterval = (fn, ms, ...args) => interval(fn, ms === 5000 ? 150 : ms, ...args);
   });
   await page.route("**/api/**", async route => {
-    const pathname = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
     requestJournal.push({
       pathname,
       statuses: requests.map(({ id, status }) => ({ id, status })),
@@ -54,6 +56,11 @@ try {
         requestedAt: new Date(Date.parse(timestamp) + id * 1000).toISOString(), updatedAt: timestamp };
       requests.push(request);
       return fulfillJson(route, request);
+    }
+    if (pathname === "/api/requests/statuses") {
+      // The unreadable request comes back without a record; its peers still update.
+      return fulfillJson(route, statusEntries(readStatusIds(url),
+        id => id === failingStatusId ? null : requests.find(item => item.id === id) ?? null));
     }
     const request = requests.find(item => pathname === "/api/requests/" + item.id);
     if (request) return fulfillJson(route, request.id === failingStatusId ? null : request,

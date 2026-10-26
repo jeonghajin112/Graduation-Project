@@ -12,6 +12,7 @@ import {
   createDashboardOverview,
   fulfillJson
 } from "./fixtures/dashboard-api-fixture.mjs";
+import { readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -81,7 +82,8 @@ try {
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
     journal.push({ method: request.method(), pathname });
 
     if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
@@ -94,12 +96,11 @@ try {
       return;
     }
 
-    if (request.method() === "GET" && pathname === `/api/requests/${requestId}`) {
+    if (request.method() === "GET" && pathname === "/api/requests/statuses") {
       statusGets += 1;
-      await fulfillJson(
-        route,
-        evaluationRequest(allowTerminalStatus ? "FAILED" : "IN_PROGRESS")
-      );
+      assert.deepEqual(readStatusIds(url), [requestId]);
+      await fulfillJson(route, statusEntries(readStatusIds(url), () =>
+        evaluationRequest(allowTerminalStatus ? "FAILED" : "IN_PROGRESS")));
       return;
     }
 

@@ -25,7 +25,7 @@ describe("report keyboard exits", () => {
   it.each(["forward", "backward"])("accepts a bounded %s exit", direction => {
     expect(parsePageReplayMessage({ ...message, direction })).toEqual({ ...message, direction });
   });
-  it.each([{direction: "up"}, {direction: null}, {documentToken: ""}, {selector: "#outside"}])(
+  it.each([{direction: "up"}, {direction: null}, {documentToken: ""}])(
     "rejects malformed focus events %j", patch => {
       expect(parsePageReplayMessage({...message, ...patch})).toBeNull();
     });
@@ -37,7 +37,7 @@ describe("live document scroll state", () => {
     expect(parsePageReplayMessage(message)).toEqual(message);
     expect(parsePageReplayMessage({ ...message, isScrolled: false })).toEqual({ ...message, isScrolled: false });
   });
-  it.each([{ isScrolled: 1 }, { isScrolled: "true" }, { isScrolled: null }, { documentToken: "" }, { extra: true }])(
+  it.each([{ isScrolled: 1 }, { isScrolled: "true" }, { isScrolled: null }, { documentToken: "" }])(
     "rejects malformed scroll events %j", patch => {
       expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
     }
@@ -50,30 +50,24 @@ describe("live document titles", () => {
     expect(parsePageReplayMessage(message)).toEqual(message);
     expect(parsePageReplayMessage({ ...message, title: " " })).toEqual({ ...message, title: "" });
   });
-  it.each([{ title: "x".repeat(301) }, { title: null }, { title: 42 }, { documentToken: "" }, { extra: true }])(
+  it.each([{ title: "x".repeat(301) }, { title: null }, { title: 42 }, { documentToken: "" }])(
     "rejects malformed title events %j", patch => {
       expect(parsePageReplayMessage({ ...message, ...patch })).toBeNull();
     }
   );
 });
 
-describe("blocked form notifications", () => {
-  const message = {
-    source: PAGE_REPLAY_SOURCE,
-    type: "FORM_BLOCKED",
-    documentToken: "live_document",
-    method: "POST"
-  };
-
-  it.each(["GET", "POST", "DIALOG"])("accepts the producer's %s method without treating it as connection failure", (method) => {
-    expect(parsePageReplayMessage({ ...message, method })).toEqual({ ...message, method });
+describe("fields a newer bridge adds", () => {
+  it("are ignored, never copied, and never drop a known message", () => {
+    const focus = { source: PAGE_REPLAY_SOURCE, type: "REPORT_FOCUS_EXIT", documentToken: "live_document", direction: "forward" };
+    expect(parsePageReplayMessage({ ...focus, selector: "#outside" })).toEqual(focus);
+    const ready = { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken: "doc_501" };
+    expect(parsePageReplayMessage({ ...ready, unexpected: true })).toEqual(ready);
   });
 
-  it.each([
-    { method: "DELETE" }, { method: "post" }, { method: 1 }, { method: undefined },
-    { documentToken: "" }, { source: DASHBOARD_REPLAY_SOURCE }, { extra: true }
-  ])("rejects a malformed blocked-form payload: %j", (override) => {
-    expect(parsePageReplayMessage({ ...message, ...override })).toBeNull();
+  it("does not parse notifications the dashboard never handles", () => {
+    expect(parsePageReplayMessage({ source: PAGE_REPLAY_SOURCE, type: "FORM_BLOCKED", documentToken: "doc_1", method: "POST" })).toBeNull();
+    expect(parsePageReplayMessage({ source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken: "doc_1" })).toBeNull();
   });
 });
 
@@ -244,8 +238,7 @@ describe("replay document and issue messages", () => {
         { documentToken: "" },
         { documentToken: "bad token" },
         { documentToken: "a".repeat(129) },
-        { source: DASHBOARD_REPLAY_SOURCE },
-        { unexpected: true }
+        { source: DASHBOARD_REPLAY_SOURCE }
       ]) {
         expect(parsePageReplayMessage({ ...message, ...overrides })).toBeNull();
       }
@@ -264,7 +257,7 @@ describe("replay document and issue messages", () => {
       }
       expect(parsePageReplayMessage({ ...message, documentToken: undefined })).toBeNull();
       expect(parsePageReplayMessage({ ...message, documentToken: "bad token" })).toBeNull();
-      expect(parsePageReplayMessage({ ...message, title: "Untrusted viewer content" })).toBeNull();
+      expect(parsePageReplayMessage({ ...message, title: "Untrusted viewer content" })).toEqual(message);
     }
   );
 
@@ -358,8 +351,7 @@ describe("replay locator status messages", () => {
     { issueId: 9001, status: "UNAVAILABLE", documentToken: "bad token" },
     { issueId: 9001, status: "UNAVAILABLE", reason: 42 },
     { issueId: 9001, status: "VISIBLE", recoverable: true },
-    { issueId: 9001, status: "HIDDEN_STATE", recoverable: "yes" },
-    { issueId: 9001, status: "UNAVAILABLE", extra: true }
+    { issueId: 9001, status: "HIDDEN_STATE", recoverable: "yes" }
   ])("rejects malformed locator status payload %#", (overrides) => {
     const payload: Record<string, unknown> = {
       source: PAGE_REPLAY_SOURCE,
@@ -412,8 +404,7 @@ describe("live document health messages", () => {
     { largestVisibleVisualArea: 1.5 },
     { largestVisibleVisualArea: 1_000_001 },
     { visibleTextLength: Number.POSITIVE_INFINITY },
-    { visibleTextLength: 1_000_001 },
-    { unexpected: true }
+    { visibleTextLength: 1_000_001 }
   ])("rejects malformed document health payload %#", (overrides) => {
     expect(parsePageReplayMessage({
       source: PAGE_REPLAY_SOURCE,
@@ -444,13 +435,13 @@ describe("live document health messages", () => {
     })).toBeNull();
   });
 
-  it("accepts the first substantive sample but rejects a small loading image", () => {
+  it("follows the bridge's verdict: a small loading image is EMPTY, the first substantive sample is MEANINGFUL", () => {
     const loadingImage = parsePageReplayMessage({
       source: PAGE_REPLAY_SOURCE,
       type: "DOCUMENT_HEALTH",
       documentToken: "live_doc_loader",
-      status: "MEANINGFUL",
-      consecutiveMeaningfulSamples: 8,
+      status: "EMPTY",
+      consecutiveMeaningfulSamples: 0,
       visibleControlCount: 0,
       visibleElementCount: 3,
       visibleImageCount: 1,
@@ -736,12 +727,9 @@ describe("viewer command rejections and bounded strings", () => {
     }
   });
 
-  it("bounds locator reasons and blocked link addresses", () => {
+  it("bounds locator reasons", () => {
     const status = { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken: "doc_1", issueId: 1, status: "UNAVAILABLE" };
     expect(parsePageReplayMessage({ ...status, reason: "R".repeat(128) })).not.toBeNull();
     expect(parsePageReplayMessage({ ...status, reason: "R".repeat(129) })).toBeNull();
-    const link = { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken: "doc_1" };
-    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_048) })).not.toBeNull();
-    expect(parsePageReplayMessage({ ...link, href: "h".repeat(2_049) })).toBeNull();
   });
 });

@@ -718,12 +718,7 @@ export async function fetchEvaluationRequests(
   return apiGet("/requests", parseEvaluationRequestsResponse, signal);
 }
 
-export async function deleteEvaluationTargetModel({
-  siteId
-}: {
-  projectId: number;
-  siteId: number;
-}, signal?: AbortSignal): Promise<void> {
+export async function deleteEvaluationTargetModel(siteId: number, signal?: AbortSignal): Promise<void> {
   await apiRequest(`/targets/${siteId}/delete`, parseVoidResponse, {
     method: "PATCH",
     signal
@@ -804,7 +799,6 @@ export async function fetchDashboardViewModel(signal?: AbortSignal): Promise<Das
   const visibleRequestIds = new Set(visibleRequests.map((request) => request.id));
 
   return {
-    ...(overview.analysisProtocolVersion !== undefined ? { analysisProtocolVersion: overview.analysisProtocolVersion } : {}),
     organizations: buildOrganizationsFromApi(
       organizations,
       evaluationTargets,

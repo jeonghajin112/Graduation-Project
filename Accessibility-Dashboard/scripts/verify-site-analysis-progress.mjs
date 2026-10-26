@@ -3,6 +3,9 @@ import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import {
+  activeRequestsForTarget, createAnalysisAttempts, idempotencyKey, readAttemptKey, readStatusIds, statusEntries
+} from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -20,6 +23,7 @@ const requests = [
 const summaries = [{ requestId: 500, totalScore: 90, totalIssueCount: 0, requestedAt: timestamp }];
 const resultReads = [];
 let rescanPosts = 0;
+const attempts = createAnalysisAttempts();
 let releaseRescan;
 const rescanResponse = new Promise(resolve => { releaseRescan = resolve; });
 let markRescanReceived;
@@ -87,13 +91,21 @@ try {
         markRescanReceived();
         await rescanResponse;
       }
-      const acceptedRequest = { id: 500 + rescanPosts, evaluationTargetId: 101, status: "PENDING",
-        requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const repeated = attempts.find(idempotencyKey(route));
+      if (repeated) return fulfillJson(route, repeated);
+      const acceptedRequest = attempts.remember(idempotencyKey(route), {
+        id: 500 + rescanPosts, evaluationTargetId: 101, status: "PENDING",
+        requestedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       requests.push(acceptedRequest);
       // A lost response must reconcile the accepted request, never send another POST.
       if (rescanPosts === 3) return route.abort("failed");
       return fulfillJson(route, acceptedRequest);
     }
+    if (url.pathname === "/api/requests/statuses") return fulfillJson(route,
+      statusEntries(readStatusIds(url), id => requests.find(request => request.id === id) ?? null));
+    if (url.pathname === "/api/requests/active") return fulfillJson(route, activeRequestsForTarget(requests, url));
+    const attemptKey = readAttemptKey(url.pathname);
+    if (attemptKey) return fulfillJson(route, attempts.find(attemptKey));
     const request = requests.find(request => url.pathname === `/api/requests/${request.id}`);
     if (request) return fulfillJson(route, request);
     const result = url.pathname.match(/^\/api\/results\/requests\/(\d+)\/(.+)$/);

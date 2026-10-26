@@ -8,6 +8,13 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createDashboardOverview } from "./fixtures/dashboard-api-fixture.mjs";
+import {
+  createAnalysisAttempts,
+  idempotencyKey,
+  readAttemptKey,
+  readStatusIds,
+  statusEntries
+} from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -115,12 +122,52 @@ function dashboardPayload(
   }
   if (pathname === "/api/organizations") return directoryVisible ? [organization] : [];
   if (pathname === "/api/organizations/1/evaluation-targets") return targets;
-  if (pathname === "/api/requests") {
-    return committed ? [completed ? completedRequest : pendingRequest] : [];
-  }
   if (pathname === "/api/results/requests/501/summary") return summary;
   if (pathname === "/api/results/requests/501/issues") return [];
   return [];
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The backend's side of `POST /api/requests/evaluate`: a repeated
+ * Idempotency-Key returns the request it created first, and
+ * `GET /api/requests/attempts/{key}` reads that request back (or null).
+ */
+function createQuickAnalysisServer(createdRequest = pendingRequest) {
+  const attempts = createAnalysisAttempts();
+  const postKeys = [];
+  const lookupKeys = [];
+  return {
+    attempts,
+    postKeys,
+    lookupKeys,
+    acceptPost(route) {
+      const key = idempotencyKey(route);
+      postKeys.push(key);
+      return attempts.remember(key, attempts.find(key) ?? createdRequest);
+    },
+    lookup(key) {
+      lookupKeys.push(key);
+      return attempts.find(key);
+    }
+  };
+}
+
+/** Every POST and receipt lookup used one key, and the server holds one request. */
+function assertSingleKeyedSubmission(server, message) {
+  const [key] = server.postKeys;
+  assert.match(key ?? "", uuidPattern, `${message}: the evaluate POST must carry an Idempotency-Key`);
+  assert.deepEqual(new Set(server.postKeys), new Set([key]), `${message}: a resend must reuse the original key`);
+  assert.ok(
+    server.lookupKeys.every((lookupKey) => lookupKey === key),
+    `${message}: receipt lookups must use the POST's key`
+  );
+  assert.deepEqual(server.attempts.keys(), [key], `${message}: the server must hold exactly one request`);
+}
+
+function statusesFor(url, findRequest) {
+  return statusEntries(readStatusIds(url), findRequest);
 }
 
 async function clickQuickSubmit(page, count = 1) {
@@ -141,7 +188,7 @@ async function waitForQuickInput(page) {
 }
 
 async function waitForQuickStatusCheck(page) {
-  // Four bounded GET-only reconciliation attempts intentionally follow an
+  // Bounded receipt lookups (GET /api/requests/attempts/{key}) follow an
   // ambiguous POST timeout. Leave CI headroom for those real-time waits when
   // this fixture runs alongside the other Chromium regression suites.
   await page
@@ -176,19 +223,28 @@ async function verifyQuickAmbiguousCommitAndMutex(browser) {
   let posts = 0;
   let committed = false;
   let completed = false;
+  const server = createQuickAnalysisServer();
   const page = await browser.newPage();
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
       posts += 1;
       committed = true;
+      server.acceptPost(route);
       await fulfillJson(route, { message: "response lost after commit" }, 503);
       return;
     }
-    if (pathname === "/api/requests/501") {
+    const attemptKey = readAttemptKey(pathname);
+    if (attemptKey !== null) {
+      await fulfillJson(route, server.lookup(attemptKey));
+      return;
+    }
+    if (pathname === "/api/requests/statuses") {
       completed = true;
-      await fulfillJson(route, completedRequest);
+      await fulfillJson(route, statusesFor(url, (id) =>
+        committed && id === completedRequest.id ? completedRequest : null));
       return;
     }
     if (pathname === "/api/targets/101") {
@@ -203,8 +259,10 @@ async function verifyQuickAmbiguousCommitAndMutex(browser) {
   await clickQuickSubmit(page, 2);
   await waitForQuickInput(page);
   assert.equal(posts, 1, "same-task Quick Analyze submit must send one POST");
+  assert.ok(server.lookupKeys.length >= 1, "a lost POST response must be recovered by its receipt key");
+  assertSingleKeyedSubmission(server, "ambiguous Quick Analyze commit");
   await page.close();
-  return { posts, finalPath: "/analyze" };
+  return { posts, receiptLookups: server.lookupKeys.length, finalPath: "/analyze" };
 }
 
 async function verifyQuickCheckpointResume(browser) {
@@ -219,9 +277,13 @@ async function verifyQuickCheckpointResume(browser) {
     status: "PENDING", updatedAt: null
   })), quickRecoveryStorageKey);
   await page.route("**/api/**", async route => {
-    const pathname = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
     if (route.request().method() === "POST") posts++;
-    if (pathname === "/api/requests/501") { statusGets++; return fulfillJson(route, pendingRequest); }
+    if (pathname === "/api/requests/statuses") {
+      statusGets++;
+      return fulfillJson(route, statusesFor(url, id => id === pendingRequest.id ? pendingRequest : null));
+    }
     if (pathname === "/api/targets/101") { targetGets++; return fulfillJson(route, null, 503); }
     return fulfillJson(route, dashboardPayload(pathname, { committed }));
   });
@@ -238,11 +300,19 @@ async function verifyQuickCheckpointResume(browser) {
 async function verifyQuickTerminalFailure(browser) {
   let posts = 0;
   let committed = false;
+  const server = createQuickAnalysisServer(failedRequest);
   const page = await browser.newPage();
   await page.route("**/api/**", async route => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (route.request().method() === "POST") { posts++; committed = true; return fulfillJson(route, failedRequest); }
-    if (pathname === "/api/requests/501") return fulfillJson(route, failedRequest);
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
+    if (route.request().method() === "POST") {
+      posts++;
+      committed = true;
+      return fulfillJson(route, server.acceptPost(route));
+    }
+    if (pathname === "/api/requests/statuses") {
+      return fulfillJson(route, statusesFor(url, id => committed && id === failedRequest.id ? failedRequest : null));
+    }
     return fulfillJson(route, dashboardPayload(pathname, { committed }));
   });
   await page.goto(baseUrl + "/analyze", { waitUntil: "networkidle" });
@@ -252,6 +322,7 @@ async function verifyQuickTerminalFailure(browser) {
   await page.getByRole("complementary").getByRole("button", { name: organization.name, exact: true }).click();
   await page.locator('.sidebar-tree-projects [data-analysis-request-id="501"][data-analysis-status="FAILED"]').waitFor();
   assert.equal(posts, 1);
+  assertSingleKeyedSubmission(server, "terminal Quick Analyze failure");
   assert.equal(await page.evaluate(key => sessionStorage.getItem(key), quickRecoveryStorageKey), null);
   await page.close();
   return { posts, inputReleased: true };
@@ -263,17 +334,18 @@ async function verifyQuickStatusGetTimeout(browser) {
   page.setDefaultTimeout(7000);
   await page.addInitScript(() => {
     const nativeFetch = window.fetch;
-    window.__quickStatusTimeoutProbe = { gets: 0, aborted: 0 };
+    window.__quickStatusTimeoutProbe = { gets: 0, aborted: 0, ids: [] };
     window.fetch = (input, init) => {
       const inputRequest = input instanceof Request ? input : null;
       const method = String(init?.method ?? inputRequest?.method ?? "GET").toUpperCase();
       const rawUrl = inputRequest?.url ?? String(input);
-      const pathname = new URL(rawUrl, window.location.href).pathname;
-      if (method !== "GET" || pathname !== "/api/requests/501") {
+      const url = new URL(rawUrl, window.location.href);
+      if (method !== "GET" || url.pathname !== "/api/requests/statuses") {
         return nativeFetch(input, init);
       }
 
       window.__quickStatusTimeoutProbe.gets += 1;
+      window.__quickStatusTimeoutProbe.ids.push(url.searchParams.get("ids"));
       const signal = init?.signal ?? inputRequest?.signal;
       return new Promise((resolve, reject) => {
         const rejectAsAborted = () => {
@@ -288,12 +360,13 @@ async function verifyQuickStatusGetTimeout(browser) {
       });
     };
   });
+  const server = createQuickAnalysisServer();
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
       posts += 1;
-      await fulfillJson(route, pendingRequest);
+      await fulfillJson(route, server.acceptPost(route));
       return;
     }
     await fulfillJson(route, dashboardPayload(pathname));
@@ -309,6 +382,11 @@ async function verifyQuickStatusGetTimeout(browser) {
     async () => (await page.evaluate(() => window.__quickStatusTimeoutProbe.gets)) === 1,
     "Quick Analyze status GET was not observed"
   );
+  assert.deepEqual(
+    await page.evaluate(() => window.__quickStatusTimeoutProbe.ids),
+    [String(pendingRequest.id)],
+    "the accepted request must be polled through the status batch endpoint"
+  );
   await page.clock.runFor(10_000);
   await waitForObservedCondition(
     async () => (await page.evaluate(() => window.__quickStatusTimeoutProbe.aborted)) === 1,
@@ -316,6 +394,7 @@ async function verifyQuickStatusGetTimeout(browser) {
   );
   await waitForQuickInput(page);
   assert.equal(posts, 1, "a status GET timeout must not repeat the evaluate POST");
+  assertSingleKeyedSubmission(server, "status GET timeout");
   await page.close();
   return { posts, statusGets: 1 };
 }
@@ -324,10 +403,15 @@ async function verifyQuickNonFinalPollingTimeout(browser) {
   let posts = 0;
   let statusGets = 0;
   const page = await browser.newPage();
+  const server = createQuickAnalysisServer();
   await page.route("**/api/**", async route => {
-    const pathname = new URL(route.request().url()).pathname;
-    if (route.request().method() === "POST") { posts++; return fulfillJson(route, pendingRequest); }
-    if (pathname === "/api/requests/501") { statusGets++; return fulfillJson(route, pendingRequest); }
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
+    if (route.request().method() === "POST") { posts++; return fulfillJson(route, server.acceptPost(route)); }
+    if (pathname === "/api/requests/statuses") {
+      statusGets++;
+      return fulfillJson(route, statusesFor(url, id => id === pendingRequest.id ? pendingRequest : null));
+    }
     return fulfillJson(route, dashboardPayload(pathname));
   });
   await page.goto(baseUrl + "/analyze", { waitUntil: "networkidle" });
@@ -341,6 +425,7 @@ async function verifyQuickNonFinalPollingTimeout(browser) {
     await waitForQuickInput(page);
   }
   assert.equal(posts, 1, "long-running jobs must not repeat POST");
+  assertSingleKeyedSubmission(server, "long-running Quick Analyze job");
   await page.close();
   return { posts, statusGets };
 }
@@ -352,6 +437,7 @@ async function verifyQuickPostTimeout(browser) {
     const nativeFetch = window.fetch;
     window.__quickTimeoutProbe = {
       posts: 0,
+      key: null,
       startedAt: null,
       abortedAt: null
     };
@@ -366,6 +452,7 @@ async function verifyQuickPostTimeout(browser) {
 
       const probe = window.__quickTimeoutProbe;
       probe.posts += 1;
+      probe.key = new Headers(init?.headers ?? inputRequest?.headers).get("Idempotency-Key");
       probe.startedAt = Date.now();
       const signal = init?.signal ?? inputRequest?.signal;
       return new Promise((resolve, reject) => {
@@ -381,8 +468,17 @@ async function verifyQuickPostTimeout(browser) {
       });
     };
   });
+  const lookupKeys = [];
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
+    const attemptKey = readAttemptKey(pathname);
+    if (attemptKey !== null) {
+      // The receipt read is temporarily unavailable, so the outcome stays
+      // unknown without the UI resending the POST.
+      lookupKeys.push(attemptKey);
+      await fulfillJson(route, { message: "receipt lookup temporarily unavailable" }, 503);
+      return;
+    }
     await fulfillJson(
       route,
       dashboardPayload(pathname, { committed: false, directoryVisible: false })
@@ -411,13 +507,24 @@ async function verifyQuickPostTimeout(browser) {
     `Quick Analyze POST AbortSignal must fire at its 15-second deadline, observed ${observedAbortDelay}ms`
   );
 
-  // Let the bounded GET-only reconciliation use real time. This avoids coupling
+  // Let the bounded receipt reconciliation use real time. This avoids coupling
   // the assertion to Playwright route delivery/microtask ordering under a fake clock.
   await page.clock.resume();
   await waitForQuickStatusCheck(page);
   await assertQuickStatusCheckPresentation(page);
+  assert.match(probe.key ?? "", uuidPattern, "the evaluate POST must carry an Idempotency-Key");
+  assert.ok(lookupKeys.length >= 1, "a timed-out POST must be reconciled by its receipt key");
+  assert.ok(
+    lookupKeys.every((key) => key === probe.key),
+    "receipt lookups must use the timed-out POST's key"
+  );
+  assert.equal(
+    await page.evaluate(() => window.__quickTimeoutProbe.posts),
+    1,
+    "an unreadable receipt must not resend the POST"
+  );
   await page.close();
-  return { posts: probe.posts, abortedAfterVirtualMs: observedAbortDelay };
+  return { posts: probe.posts, receiptLookups: lookupKeys.length, abortedAfterVirtualMs: observedAbortDelay };
 }
 
 async function verifyQuickRecoveryAfterReload(browser) {
@@ -427,19 +534,34 @@ async function verifyQuickRecoveryAfterReload(browser) {
   const postSeen = new Promise((resolve) => {
     postSeenResolve = resolve;
   });
+  const server = createQuickAnalysisServer();
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
       posts += 1;
+      server.acceptPost(route);
       await fulfillJson(route, { message: "response lost after commit" }, 503);
       postSeenResolve();
       return;
     }
-    if (pathname === "/api/requests/501") {
-      await fulfillJson(route, completedRequest);
+    const attemptKey = readAttemptKey(pathname);
+    if (attemptKey !== null) {
+      // Until recovery is allowed the receipt read is unavailable, so the
+      // committed request stays unconfirmed across the reload.
+      if (!allowRecovery) {
+        await fulfillJson(route, { message: "receipt lookup temporarily unavailable" }, 503);
+        return;
+      }
+      await fulfillJson(route, server.lookup(attemptKey));
+      return;
+    }
+    if (pathname === "/api/requests/statuses") {
+      await fulfillJson(route, statusesFor(url, (id) =>
+        allowRecovery && id === completedRequest.id ? completedRequest : null));
       return;
     }
     if (pathname === "/api/targets/101") {
@@ -473,6 +595,8 @@ async function verifyQuickRecoveryAfterReload(browser) {
   await clickQuickSubmit(page);
   await waitForQuickInput(page);
   assert.equal(posts, 1, "Quick Analyze reload recovery must remain GET-only");
+  assert.ok(server.lookupKeys.length >= 1, "reload recovery must read the receipt by its key");
+  assertSingleKeyedSubmission(server, "Quick Analyze reload recovery");
   assert.equal(
     await page.evaluate((key) => sessionStorage.getItem(key), quickRecoveryStorageKey),
     null,
@@ -489,19 +613,32 @@ async function verifyQuickRecoveryAfterSpaUnmount(browser) {
   const postSeen = new Promise((resolve) => {
     postSeenResolve = resolve;
   });
+  const server = createQuickAnalysisServer();
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
       posts += 1;
+      server.acceptPost(route);
       await fulfillJson(route, { message: "response lost after commit" }, 503);
       postSeenResolve();
       return;
     }
-    if (pathname === "/api/requests/501") {
-      await fulfillJson(route, completedRequest);
+    const attemptKey = readAttemptKey(pathname);
+    if (attemptKey !== null) {
+      if (!allowRecovery) {
+        await fulfillJson(route, { message: "receipt lookup temporarily unavailable" }, 503);
+        return;
+      }
+      await fulfillJson(route, server.lookup(attemptKey));
+      return;
+    }
+    if (pathname === "/api/requests/statuses") {
+      await fulfillJson(route, statusesFor(url, (id) =>
+        allowRecovery && id === completedRequest.id ? completedRequest : null));
       return;
     }
     if (pathname === "/api/targets/101") {
@@ -540,6 +677,8 @@ async function verifyQuickRecoveryAfterSpaUnmount(browser) {
   await clickQuickSubmit(page);
   await waitForQuickInput(page);
   assert.equal(posts, 1, "Quick Analyze SPA remount recovery must remain GET-only");
+  assert.ok(server.lookupKeys.length >= 1, "SPA remount recovery must read the receipt by its key");
+  assertSingleKeyedSubmission(server, "Quick Analyze SPA remount recovery");
   await page.close();
   return { posts, sameDocument: true };
 }
@@ -550,6 +689,7 @@ async function verifyQuickDifferentUrlFailsClosed(browser) {
   const postSeen = new Promise((resolve) => {
     postSeenResolve = resolve;
   });
+  const server = createQuickAnalysisServer();
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   await page.route("**/api/**", async (route) => {
@@ -557,8 +697,16 @@ async function verifyQuickDifferentUrlFailsClosed(browser) {
     const pathname = new URL(request.url()).pathname;
     if (request.method() === "POST" && pathname === "/api/requests/evaluate") {
       posts += 1;
+      server.acceptPost(route);
       await fulfillJson(route, { message: "response lost after commit" }, 503);
       postSeenResolve();
+      return;
+    }
+    const attemptKey = readAttemptKey(pathname);
+    if (attemptKey !== null) {
+      // The receipt stays unreadable, so the original attempt stays ambiguous.
+      server.lookupKeys.push(attemptKey);
+      await fulfillJson(route, { message: "receipt lookup temporarily unavailable" }, 503);
       return;
     }
     await fulfillJson(
@@ -584,6 +732,12 @@ async function verifyQuickDifferentUrlFailsClosed(browser) {
   );
   assert.equal(posts, 1, "a different URL must not discard an ambiguous Quick POST");
   assert.equal(storedRecovery.url, recoveryUrl);
+  assertSingleKeyedSubmission(server, "different-URL guard");
+  assert.equal(
+    storedRecovery.attemptId,
+    server.postKeys[0],
+    "the preserved checkpoint must keep the ambiguous POST's Idempotency-Key"
+  );
   await retryButton.click();
   await page.locator("#quick-analyze-url").waitFor();
   assert.equal(await page.locator("#quick-analyze-url").inputValue(), recoveryUrl);

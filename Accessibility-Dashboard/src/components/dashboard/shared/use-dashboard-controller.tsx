@@ -265,9 +265,9 @@ export function useDashboardController({
   );
 
   const handleDeleteEvaluationTargetModel = useCallback(
-    async ({ projectId, siteId }: { projectId: number; siteId: number }) => {
+    async ({ siteId }: { projectId: number; siteId: number }) => {
       await applyDirectoryMutation({
-        operation: (signal) => deleteEvaluationTargetModel({ projectId, siteId }, signal),
+        operation: (signal) => deleteEvaluationTargetModel(siteId, signal),
         readApplied: readEvaluationTargetRemoved(siteId),
         removal: { targetId: siteId }
       });

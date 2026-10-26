@@ -39,7 +39,6 @@ export function DashboardRoutePanels({
       <Suspense fallback={<RoutePanelFallback />}>
         {dashboard.menu === "analyze" && (
           <QuickAnalyzePanel
-            supportsIdempotency={dashboard.dashboardData?.analysisProtocolVersion === 1}
             {...(actions
               ? { onAnalysisAccepted: actions.handleQuickAnalysisAccepted }
               : { readOnly: true })}

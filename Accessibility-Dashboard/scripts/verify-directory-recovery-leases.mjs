@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { activeRequestsForTarget, readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -120,7 +121,8 @@ try {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
 
     if (method === "GET" && pathname === "/api/dashboard/overview") {
       observed.overviewGets += 1;
@@ -169,11 +171,16 @@ try {
       await fulfillJson(route, pendingRequest, { status: 201 });
       return;
     }
-    if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
+    if (method === "GET" && pathname === "/api/requests/active") {
+      await fulfillJson(route, activeRequestsForTarget(requests, url));
+      return;
+    }
+    if (method === "GET" && pathname === "/api/requests/statuses") {
+      assert.deepEqual(readStatusIds(url), [pendingRequest.id]);
       observed.requestStatusGets += 1;
       requestCompleted = true;
       requests = [completedRequest];
-      await fulfillJson(route, completedRequest);
+      await fulfillJson(route, statusEntries(readStatusIds(url), () => completedRequest));
       return;
     }
 

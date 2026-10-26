@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -204,8 +205,8 @@ async function installBootstrapStallProbe(page) {
 async function runMutationReplacementScenario(browser) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const { stalledRequestStarted } = await installBackgroundPollProbe(page, {
-    stalledPath: `/api/requests/${pendingRequest.id}`,
-    staleData: pendingRequest
+    stalledPath: "/api/requests/statuses",
+    staleData: statusEntries([pendingRequest.id], () => pendingRequest)
   });
   const observed = {
     organizationPosts: 0,
@@ -238,8 +239,10 @@ async function runMutationReplacementScenario(browser) {
         );
         return;
       }
-      if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
-        await fulfillJson(route, pendingRequest);
+      if (method === "GET" && pathname === "/api/requests/statuses") {
+        const ids = readStatusIds(new URL(request.url()));
+        assert.deepEqual(ids, [pendingRequest.id], "only the active request may be polled");
+        await fulfillJson(route, statusEntries(ids, () => pendingRequest));
         return;
       }
       if (method === "POST" && pathname === "/api/organizations") {
@@ -367,7 +370,7 @@ async function runRetrySupersededByMutationScenario(browser) {
         return;
       }
 
-      if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
+      if (method === "GET" && pathname === "/api/requests/statuses") {
         await route.fulfill({
           status: 503,
           contentType: "application/json",

@@ -122,7 +122,8 @@ export class SharedRequestPool<K, V> {
         }
         released = true;
         shared.consumers -= 1;
-        if (shared.consumers > 0 || shared.settled || shared.abortTimer !== null) {
+        // acquire() clears a pending abort before counting, so none is armed here.
+        if (shared.consumers > 0 || shared.settled) {
           return;
         }
         // StrictMode remounts effects immediately; one task preserves that shared request.

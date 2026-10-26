@@ -45,7 +45,7 @@ export function parseDashboardRoute(pathname: string): ParsedDashboardRoute {
     }
 
     const pageId =
-      segments[2] === "pages" || segments[2] === "sites"
+      segments[2] === "pages"
         ? parsePositiveInteger(segments[3])
         : null;
 

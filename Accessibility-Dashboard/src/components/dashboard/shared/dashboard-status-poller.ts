@@ -1,9 +1,11 @@
 import { fetchEvaluationStatuses } from "@/services/analysis-protocol-api";
 import { createRequestDeadline } from "@/services/async-cancellation";
-import { fetchEvaluationRequest, isAbortError } from "@/services/backend-api";
+import { isAbortError } from "@/services/backend-api";
 import type { DashboardViewModel, EvaluationRequestModel } from "@/types/accessibility-domain";
 import { failedPoll, type RequestPollObservation } from "./request-poll-policy";
 import type { LoadDashboard } from "./use-dashboard-data";
+
+const STATUS_BATCH_SIZE = 100;
 
 type StatusPollerOptions = {
   activeEvaluationRequestIds: number[];
@@ -17,7 +19,7 @@ type StatusPollerOptions = {
   updatePausedCount: () => void;
 };
 
-// Active-request transport is loaded only while there are requests to track.
+// Created only while there are active requests to track.
 export function createDashboardStatusPoller({
   activeEvaluationRequestIds, observations, getDashboard, signal, timeoutMs,
   loadDashboard, trackEvaluationRequest, forgetRequest, updatePausedCount
@@ -45,9 +47,7 @@ export function createDashboardStatusPoller({
     ids.forEach(id => inFlight.add(id));
     const deadline = createRequestDeadline({ signal, timeoutMs });
     try {
-      const entries = getDashboard()?.analysisProtocolVersion === 1
-        ? await fetchEvaluationStatuses(ids, deadline.controller.signal)
-        : [{ id: ids[0], outcome: "FOUND" as const, request: await fetchEvaluationRequest(ids[0], deadline.controller.signal) }];
+      const entries = await fetchEvaluationStatuses(ids, deadline.controller.signal);
       if (signal.aborted) return;
       let needsOverview = false;
       for (const entry of entries) {
@@ -87,9 +87,8 @@ export function createDashboardStatusPoller({
       const observation = observations.get(id);
       return !inFlight.has(id) && !observation?.paused && (observation?.nextAttemptAt ?? 0) <= now;
     }).sort((a, b) => (observations.get(a)?.lastAttemptAt ?? 0) - (observations.get(b)?.lastAttemptAt ?? 0));
-    const batchSize = getDashboard()?.analysisProtocolVersion === 1 ? 100 : 1;
     // Limit concurrent transports, not just the number of IDs in each call.
-    for (let start = 0; start < due.length && activeBatches < 4; start += batchSize) void pollBatch(due.slice(start, start + batchSize));
+    for (let start = 0; start < due.length && activeBatches < 4; start += STATUS_BATCH_SIZE) void pollBatch(due.slice(start, start + STATUS_BATCH_SIZE));
   };
 
   return pollActiveRequestStatuses;

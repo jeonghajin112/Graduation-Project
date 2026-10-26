@@ -8,6 +8,14 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import {
+  activeRequestsForTarget,
+  createAnalysisAttempts,
+  idempotencyKey,
+  readAttemptKey,
+  readStatusIds,
+  statusEntries
+} from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -69,6 +77,8 @@ const failedRequest = {
   updatedAt: "2026-08-29T10:00:01.000Z"
 };
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function activeOverview() {
   return createDashboardOverview({
     organizations: [organization],
@@ -79,14 +89,18 @@ function activeOverview() {
 async function verifyLeaseRelease(browser, statusOutcome) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const observed = {
+    activeRequestGets: 0,
+    attemptLookupGets: 0,
     incompleteOverviewGets: 0,
     overviewGets: 0,
-    requestListGets: 0,
     requestPosts: 0,
     requestStatusGets: 0,
     targetDeletePatches: 0,
+    postKeys: [],
+    attemptLookupKeys: [],
     unknownRequests: []
   };
+  const attempts = createAnalysisAttempts();
   let baselineDeleted = false;
   let requestCommitted = false;
 
@@ -115,7 +129,8 @@ async function verifyLeaseRelease(browser, statusOutcome) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
 
     if (method === "GET" && pathname === "/api/dashboard/overview") {
       observed.overviewGets += 1;
@@ -136,9 +151,19 @@ async function verifyLeaseRelease(browser, statusOutcome) {
       await fulfillJson(route, baselineDeleted ? [] : [target]);
       return;
     }
-    if (method === "GET" && pathname === "/api/requests") {
-      observed.requestListGets += 1;
-      await fulfillJson(route, requestCommitted ? [pendingRequest] : []);
+    if (method === "GET" && pathname === "/api/requests/active") {
+      observed.activeRequestGets += 1;
+      await fulfillJson(
+        route,
+        activeRequestsForTarget(requestCommitted ? [pendingRequest] : [], url)
+      );
+      return;
+    }
+    const attemptKey = method === "GET" ? readAttemptKey(pathname) : null;
+    if (attemptKey !== null) {
+      observed.attemptLookupGets += 1;
+      observed.attemptLookupKeys.push(attemptKey);
+      await fulfillJson(route, attempts.find(attemptKey));
       return;
     }
     if (method === "GET" && pathname === `/api/targets/${target.id}`) {
@@ -147,6 +172,10 @@ async function verifyLeaseRelease(browser, statusOutcome) {
     }
     if (method === "POST" && pathname === "/api/requests") {
       observed.requestPosts += 1;
+      const key = idempotencyKey(route);
+      observed.postKeys.push(key);
+      // The server answers a repeated key with the request it created first.
+      attempts.remember(key, attempts.find(key) ?? pendingRequest);
       requestCommitted = true;
       if (statusOutcome === "FAILED") {
         await fulfillJson(route, pendingRequest, { status: 201 });
@@ -159,10 +188,16 @@ async function verifyLeaseRelease(browser, statusOutcome) {
       }
       return;
     }
-    if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
-      observed.requestStatusGets += 1;
+    if (method === "GET" && pathname === "/api/requests/statuses") {
+      if (readStatusIds(url).includes(pendingRequest.id)) {
+        observed.requestStatusGets += 1;
+      }
       if (statusOutcome === "FAILED") {
-        await fulfillJson(route, failedRequest);
+        await fulfillJson(
+          route,
+          statusEntries(readStatusIds(url), (id) =>
+            id === pendingRequest.id && requestCommitted ? failedRequest : null)
+        );
       } else {
         await fulfillJson(
           route,
@@ -202,11 +237,18 @@ async function verifyLeaseRelease(browser, statusOutcome) {
     await page.waitForURL("**/analyze", { timeout: 10_000 });
 
     assert.equal(observed.requestPosts, 1, "status recovery must not duplicate the POST");
+    assert.match(observed.postKeys[0] ?? "", uuidPattern, "the rescan POST must carry an Idempotency-Key");
     assert.equal(
-      observed.requestListGets,
-      statusOutcome === "FAILED" ? 1 : 2,
-      "an ambiguous POST must reconcile by GET without sending another request"
+      observed.activeRequestGets,
+      1,
+      "the rescan preflight must read only this page's active requests, once"
     );
+    assert.deepEqual(
+      observed.attemptLookupKeys,
+      statusOutcome === "FAILED" ? [] : [observed.postKeys[0]],
+      "an ambiguous POST must reconcile by GET (its own key) without sending another request"
+    );
+    assert.deepEqual(attempts.keys(), [observed.postKeys[0]], "the server must hold exactly one request");
     assert.equal(observed.requestStatusGets, 0, "handoff does not await status");
     assert.equal(observed.targetDeletePatches, 1);
     assert.equal(
@@ -225,14 +267,18 @@ async function verifyLeaseRelease(browser, statusOutcome) {
 async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const observed = {
+    activeRequestGets: 0,
+    attemptLookupGets: 0,
     backgroundStatusGets: 0,
     incompleteOverviewGets: 0,
     overviewGets: 0,
-    requestListGets: 0,
     requestPosts: 0,
     requestStatusGets: 0,
+    postKeys: [],
+    attemptLookupKeys: [],
     unknownRequests: []
   };
+  const attempts = createAnalysisAttempts();
   let authoritativeBaselineDeleted = false;
   let requestCommitted = false;
   let resolveFirstIncompleteOverview;
@@ -280,7 +326,8 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
 
     if (method === "GET" && pathname === "/api/dashboard/overview") {
       observed.overviewGets += 1;
@@ -318,16 +365,26 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
       );
       return;
     }
-    if (method === "GET" && pathname === "/api/requests") {
-      observed.requestListGets += 1;
-      if (observed.requestListGets > 1) {
-        resolveReconcileStarted();
-        await reconcileGate;
-      }
+    if (method === "GET" && pathname === "/api/requests/active") {
+      observed.activeRequestGets += 1;
       await fulfillJson(
         route,
-        requestCommitted ? [backgroundRequest, pendingRequest] : [backgroundRequest]
+        activeRequestsForTarget(
+          requestCommitted ? [backgroundRequest, pendingRequest] : [backgroundRequest],
+          url
+        )
       );
+      return;
+    }
+    const attemptKey = method === "GET" ? readAttemptKey(pathname) : null;
+    if (attemptKey !== null) {
+      // Every receipt lookup after the lost POST waits for the gate, so the
+      // reconciliation stays unresolved while the test inspects the lease.
+      observed.attemptLookupGets += 1;
+      observed.attemptLookupKeys.push(attemptKey);
+      resolveReconcileStarted();
+      await reconcileGate;
+      await fulfillJson(route, attempts.find(attemptKey));
       return;
     }
     if (method === "GET" && pathname === `/api/targets/${target.id}`) {
@@ -336,6 +393,9 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
     }
     if (method === "POST" && pathname === "/api/requests") {
       observed.requestPosts += 1;
+      const key = idempotencyKey(route);
+      observed.postKeys.push(key);
+      attempts.remember(key, attempts.find(key) ?? pendingRequest);
       requestCommitted = true;
       await fulfillJson(
         route,
@@ -344,18 +404,16 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
       );
       return;
     }
-    if (method === "GET" && pathname === `/api/requests/${backgroundRequest.id}`) {
-      observed.backgroundStatusGets += 1;
+    if (method === "GET" && pathname === "/api/requests/statuses") {
+      const ids = readStatusIds(url);
+      if (ids.includes(backgroundRequest.id)) {
+        observed.backgroundStatusGets += 1;
+      }
+      if (ids.includes(pendingRequest.id)) {
+        observed.requestStatusGets += 1;
+      }
+      // A failed status read makes the shell refresh the overview.
       await fulfillJson(route, { message: "refresh overview" }, { status: 503 });
-      return;
-    }
-    if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
-      observed.requestStatusGets += 1;
-      await fulfillJson(
-        route,
-        { message: "temporary request status failure" },
-        { status: 503 }
-      );
       return;
     }
 
@@ -428,7 +486,13 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
         { timeout: 10_000 }
       );
       assert.equal(observed.requestPosts, 1, "background settlement must never resend the POST");
-      assert.equal(observed.requestListGets, 3, "the abandoned POST is settled by one extra GET");
+      assert.equal(observed.activeRequestGets, 1, "only the original click runs the active-request preflight");
+      assert.deepEqual(
+        observed.attemptLookupKeys,
+        [observed.postKeys[0], observed.postKeys[0]],
+        "the abandoned POST is settled by one extra receipt GET for its own key"
+      );
+      assert.deepEqual(attempts.keys(), [observed.postKeys[0]], "the server must hold exactly one request");
       assert.equal(observed.requestStatusGets, 0);
       // The next authoritative overview may come from the settled rescan's own
       // refresh rather than from a second (backed-off) background status poll.
@@ -446,7 +510,10 @@ async function verifyLeaseHeldDuringReconciliation(browser, releaseMode) {
     await page.waitForURL("**/analyze", { timeout: 10_000 });
 
     assert.equal(observed.requestPosts, 1);
-    assert.equal(observed.requestListGets, 2);
+    assert.match(observed.postKeys[0] ?? "", uuidPattern, "the rescan POST must carry an Idempotency-Key");
+    assert.equal(observed.activeRequestGets, 1);
+    assert.deepEqual(observed.attemptLookupKeys, [observed.postKeys[0]]);
+    assert.deepEqual(attempts.keys(), [observed.postKeys[0]], "the server must hold exactly one request");
     assert.equal(observed.requestStatusGets, 0, "receipt handoff does not await status");
     assert.equal(observed.backgroundStatusGets, 1);
     assert.equal(observed.incompleteOverviewGets, 2);

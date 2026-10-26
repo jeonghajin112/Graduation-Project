@@ -193,7 +193,6 @@ export type DashboardLatestIssueCount = {
 };
 
 export type DashboardViewModel = {
-  analysisProtocolVersion?: number;
   organizations: OrganizationModel[];
   evaluationRequests: EvaluationRequestModel[];
   resultSummaries: EvaluationResultSummary[];
@@ -202,7 +201,6 @@ export type DashboardViewModel = {
 };
 
 export type DashboardOverviewApiResponse = {
-  analysisProtocolVersion?: number;
   organizations: Array<Organization & { evaluationTargets: EvaluationTarget[] }>;
   evaluationRequests: EvaluationRequest[];
   resultSummaries: EvaluationResultSummary[];

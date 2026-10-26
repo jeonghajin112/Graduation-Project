@@ -14,7 +14,6 @@ import {
   clearQuickAnalysisAttempt,
   readQuickAnalysisRecovery,
   writeQuickAnalysisAttempt,
-  REQUEST_IDS_MAX_LENGTH,
   type PersistedQuickAnalysisAttempt
 } from "@/services/analysis-recovery-storage";
 
@@ -39,7 +38,6 @@ import {
 import { useMutationOperation } from "../shared/use-mutation-operation";
 import { QuickAnalysisProgress } from "./quick-analysis-progress";
 import { toRequestStatus } from "./quick-analysis-status";
-import { isPositiveSafeInteger } from "@/lib/guards";
 
 const QUICK_ANALYSIS_RECONCILE_ATTEMPTS = 4;
 const QUICK_ANALYSIS_RECONCILE_INTERVAL_MS = 1000;
@@ -129,21 +127,15 @@ function requestCheckpointFromResponse(
   url: string,
   request: EvaluationRequestModel,
   recovery: Pick<QuickAnalysisCheckpointBase, "attemptId" | "startedAt">
-): Extract<QuickAnalysisCheckpoint, { kind: "request" }> | null {
-  if (!isPositiveSafeInteger(request?.id)) {
-    return null;
-  }
-
+): Extract<QuickAnalysisCheckpoint, { kind: "request" }> {
   return {
     kind: "request",
     ...recovery,
     url,
     requestId: request.id,
-    targetId: isPositiveSafeInteger(request.evaluationTargetId)
-      ? request.evaluationTargetId
-      : null,
-    status: typeof request.status === "string" ? request.status : null,
-    updatedAt: typeof request.updatedAt === "string" ? request.updatedAt : null
+    targetId: request.evaluationTargetId,
+    status: request.status,
+    updatedAt: request.updatedAt
   };
 }
 
@@ -248,18 +240,15 @@ function findReconciledQuickAnalysisRequest(
 }
 
 export function QuickAnalyzePanel({
-  supportsIdempotency = false,
   onAnalysisAccepted,
   readOnly
-}: {
-  supportsIdempotency?: boolean;
-} & (
+}:
   | { readOnly: true; onAnalysisAccepted?: never }
   | {
       readOnly?: false;
       onAnalysisAccepted: (request: EvaluationRequestModel, url: string) => void;
     }
-)) {
+) {
   const initialRecoveryRef = useRef<ReturnType<typeof readQuickAnalysisRecovery> | null>(null);
   if (initialRecoveryRef.current === null) {
     initialRecoveryRef.current = readOnly
@@ -428,25 +417,11 @@ export function QuickAnalyzePanel({
       }
 
       if (checkpoint === null) {
-        // Capture the request baseline before POST. If the POST response is
-        // lost, later attempts can recover exactly one new request for this URL
-        // without sending the mutation again.
-        const baseline = supportsIdempotency ? null : await runQuickAnalysisRequestWithTimeout({
-          signal,
-          timeoutMessage: "분석을 준비하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
-          operation: (requestSignal) =>
-            fetchDashboardViewModel(requestSignal)
-        });
-        if (!isActiveOperation()) {
-          return;
-        }
-
+        // The attempt id doubles as the server's Idempotency-Key. If the POST
+        // response is lost, later attempts look the request up by that key
+        // instead of sending a second analysis.
         const attemptId = createRandomUuid();
         const startedAt = Date.now();
-        const knownRequestIds = baseline?.evaluationRequests.map((request) => request.id) ?? [];
-        if (knownRequestIds.length > REQUEST_IDS_MAX_LENGTH) {
-          throw new UserFacingError("분석 이력이 복구 저장 한도 10,000건을 초과했습니다. 서버의 새 접수 기능이 적용된 뒤 다시 시도해 주세요.");
-        }
         const postingAttempt: PersistedQuickAnalysisAttempt = {
           version: 1,
           attemptId,
@@ -454,8 +429,8 @@ export function QuickAnalyzePanel({
           startedAt,
           url: normalized,
           phase: "posting",
-          serverKey: supportsIdempotency ? true : undefined,
-          knownRequestIds
+          serverKey: true,
+          knownRequestIds: []
         };
         persistCheckpoint(postingAttempt, null);
 
@@ -464,11 +439,11 @@ export function QuickAnalyzePanel({
           { kind: "reconciling" }
         > = {
           kind: "reconciling",
-          serverKey: supportsIdempotency ? true : undefined,
+          serverKey: true,
           attemptId,
           startedAt,
           url: normalized,
-          knownRequestIds
+          knownRequestIds: []
         };
         checkpointRef.current = reconcilingCheckpoint;
         checkpoint = reconcilingCheckpoint;
@@ -478,17 +453,9 @@ export function QuickAnalyzePanel({
             signal,
             timeoutMessage: "분석을 시작하는 데 시간이 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.",
             operation: (requestSignal) =>
-              startUrlEvaluation(normalized, requestSignal, supportsIdempotency ? attemptId : undefined),
-            accept: (created) => {
-              const requestCheckpoint = requestCheckpointFromResponse(normalized, created, {
-                attemptId,
-                startedAt
-              });
-              return requestCheckpoint !== null &&
-                !knownRequestIds.includes(requestCheckpoint.requestId)
-                ? requestCheckpoint
-                : null;
-            }
+              startUrlEvaluation(normalized, requestSignal, attemptId),
+            accept: (created) =>
+              requestCheckpointFromResponse(normalized, created, { attemptId, startedAt })
           });
           if (!isActiveOperation()) {
             return;
@@ -527,7 +494,7 @@ export function QuickAnalyzePanel({
                 operation: async probeSignal => await fetchAnalysisAttempt(reconcilingCheckpoint.attemptId, probeSignal)
                   ?? await startUrlEvaluation(reconcilingCheckpoint.url, probeSignal, reconcilingCheckpoint.attemptId)
               });
-              return request && isActiveOperation()
+              return isActiveOperation()
                 ? requestCheckpointFromResponse(normalized, request, reconcilingCheckpoint) : null;
             }
             const reconciledData = await runQuickAnalysisRequestWithTimeout({
@@ -563,6 +530,7 @@ export function QuickAnalyzePanel({
 
       // A positive receipt releases this form. Status/result reads are owned by
       // the dashboard and cannot hold the next submission hostage.
+      // Only a checkpoint saved by an earlier build can lack its page ID.
       if (checkpoint.targetId === null) {
         const requestId = checkpoint.requestId;
         const request = await runQuickAnalysisRequestWithTimeout({
@@ -570,11 +538,8 @@ export function QuickAnalyzePanel({
           timeoutMessage: "분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.",
           operation: (requestSignal) => fetchEvaluationRequest(requestId, requestSignal)
         });
-        const recovered = requestCheckpointFromResponse(normalized, request, checkpoint);
         if (!isActiveOperation()) return;
-        if (!recovered || recovered.requestId !== requestId || recovered.targetId === null) {
-          throw new UserFacingError("분석 접수 정보를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.");
-        }
+        const recovered = requestCheckpointFromResponse(normalized, request, checkpoint);
         checkpoint = recovered;
         checkpointRef.current = recovered;
         persistCheckpoint(recovered);

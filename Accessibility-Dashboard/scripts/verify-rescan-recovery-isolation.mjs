@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
 import { installApiRouteFixture } from "./fixtures/api-route-fixture.mjs";
+import { activeRequestsForTarget, idempotencyKey, readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -37,15 +38,18 @@ async function createScenario(browser, mode, seededRecovery) {
   const responseGate = new Promise(resolve => { releaseResponse = resolve; });
   let notifyPending;
   const responsePending = new Promise(resolve => { notifyPending = resolve; });
-  const fixture = await installApiRouteFixture(page, [
+  const routes = [
     { method: "GET", pathname: "/api/dashboard/overview", handle: route => fulfillJson(route,
       createDashboardOverview({ organizations: [organization], evaluationTargets: targets, evaluationRequests: requests })) },
     ...targets.map(target => ({ method: "GET", pathname: `/api/targets/${target.id}`, handle: route =>
       fulfillJson(route, target, { status: mode === "target-get-503" && target.id === 101 ? 503 : 200 }) })),
-    { method: "GET", pathname: "/api/requests", handle: async route => {
+    { method: "GET", pathname: "/api/requests/active", handle: async route => {
       if (mode === "cancel-preflight") { notifyPending(); await responseGate; }
-      return fulfillJson(route, requests, { status: mode === "list-get-503" && posts.length === 0 ? 503 : 200 });
+      return fulfillJson(route, activeRequestsForTarget(requests, new URL(route.request().url())),
+        { status: mode === "active-get-503" && posts.length === 0 ? 503 : 200 });
     } },
+    { method: "GET", pathname: "/api/requests/statuses", handle: route => fulfillJson(route,
+      statusEntries(readStatusIds(new URL(route.request().url())), id => requests.find(request => request.id === id) ?? null)) },
     { method: "POST", pathname: "/api/requests", handle: async route => {
       const targetId = route.request().postDataJSON().evaluationTargetId;
       posts.push(targetId);
@@ -56,11 +60,15 @@ async function createScenario(browser, mode, seededRecovery) {
       if (targetId === 101 && mode === "post-422") return fulfillJson(route, null, { status: 422 });
       const request = requestFor(targetId);
       requests.push(request);
+      // The server keeps the keyed receipt even when the response is lost.
+      routes.push({ method: "GET", pathname: `/api/requests/attempts/${idempotencyKey(route)}`,
+        handle: receipt => fulfillJson(receipt, request) });
       return fulfillJson(route, request, { status: mode === "lost-post-response" ? 503 : 201 });
     } },
     ...targets.map(target => ({ method: "GET", pathname: `/api/requests/${target.id + 1000}`,
       handle: route => fulfillJson(route, requestFor(target.id)) }))
-  ]);
+  ];
+  const fixture = await installApiRouteFixture(page, routes);
   const open = async id => {
     await page.goto(`${baseUrl}/projects/1/pages/${id}`, { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "재분석", exact: true }).waitFor();
@@ -82,9 +90,8 @@ async function verifyFailureIsolation(browser, mode) {
     // Navigating reloads the app in the same session: the safe failure must not
     // reappear as a blocked recovery after a route change or reload.
     await open(102);
-    if (mode === "list-get-503") {
-      await page.route("**/api/requests", route => route.request().method() === "GET"
-        ? fulfillJson(route, []) : route.fallback());
+    if (mode === "active-get-503") {
+      await page.route(url => url.pathname === "/api/requests/active", route => fulfillJson(route, []));
     }
     await page.getByRole("button", { name: "재분석", exact: true }).click();
     await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
@@ -125,7 +132,10 @@ async function verifyLostResponse(browser) {
     await page.getByRole("button", { name: "재분석", exact: true }).evaluate(button => { button.click(); button.click(); });
     await page.getByRole("heading", { name: "분석 순서를 기다리고 있습니다", exact: true }).waitFor();
     assert.deepEqual(posts, [101], "response loss and double click must never duplicate POST");
-    assert.equal(fixture.countRequests({ method: "GET", pathname: "/api/requests" }), 2);
+    assert.equal(fixture.countRequests({ method: "GET", pathname: "/api/requests/active" }), 1,
+      "one active-request preflight before the POST");
+    assert.equal(fixture.journal.filter(entry => entry.pathname.startsWith("/api/requests/attempts/")).length, 1,
+      "the lost response is reconciled by its idempotency receipt");
     assert.deepEqual(await readAll(page), [null, null, null]);
     console.log("PASS rescan recovery: lost response reconciles by GET");
   } finally { await scenario.close(); }
@@ -165,7 +175,7 @@ async function verifyOwnershipAndCancel(browser, mode) {
 
 const browser = await chromium.launch({ headless: true });
 try {
-  for (const mode of ["target-get-503", "list-get-503", "post-422"]) await verifyFailureIsolation(browser, mode);
+  for (const mode of ["target-get-503", "active-get-503", "post-422"]) await verifyFailureIsolation(browser, mode);
   await verifyLegacyAndCreationRecovery(browser, false);
   await verifyLegacyAndCreationRecovery(browser, true);
   await verifyLostResponse(browser);

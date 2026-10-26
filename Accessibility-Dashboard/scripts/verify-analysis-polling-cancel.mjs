@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import { readStatusIds, statusEntries } from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -44,11 +45,14 @@ const pendingRequest = {
   updatedAt: timestamp
 };
 
-const POLL_PATH = "/api/requests/501";
+const POLL_PATH = "/api/requests/statuses";
 
-function payloadFor(pathname) {
+function payloadFor(pathname, url) {
   if (pathname === "/api/requests" || pathname === "/api/requests/evaluate") return [pendingRequest];
-  if (pathname === POLL_PATH) return pendingRequest;
+  if (pathname === POLL_PATH) {
+    assert.deepEqual(readStatusIds(url), [pendingRequest.id]);
+    return statusEntries(readStatusIds(url), () => pendingRequest);
+  }
   if (pathname === "/api/organizations") return [organization];
   if (pathname === "/api/organizations/1/evaluation-targets") return [target];
   if (pathname === "/api/targets/101") return target;
@@ -67,7 +71,8 @@ try {
   });
   await page.route("**/api/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
 
     if (request.method() === "GET" && pathname === "/api/dashboard/overview") {
       await fulfillJson(route, createDashboardOverview({
@@ -83,7 +88,7 @@ try {
     }
 
     const body =
-      request.method() === "POST" && pathname === "/api/requests/evaluate" ? pendingRequest : payloadFor(pathname);
+      request.method() === "POST" && pathname === "/api/requests/evaluate" ? pendingRequest : payloadFor(pathname, url);
 
     if (
       ![

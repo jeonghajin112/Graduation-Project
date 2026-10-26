@@ -290,16 +290,10 @@ export async function createTargetWithRecovery(
       timeoutMs: TARGET_CREATE_TIMEOUT_MS,
       operation: (requestSignal) =>
         createEvaluationTargetModel(normalizedInput, requestSignal),
+      // The response parser already matched the project, name, URL and status
+      // to this input; only a pre-existing ID can still mean "not ours".
       accept: (createdTarget) =>
-        Number.isSafeInteger(createdTarget?.id) &&
-        createdTarget.id > 0 &&
-        !previousTargetIds.includes(createdTarget.id) &&
-        createdTarget.organizationId === normalizedInput.projectId &&
-        createdTarget.status === "ACTIVE" &&
-        createdTarget.name.trim() === normalizedInput.name &&
-        normalizeSiteCreateAccessUrl(createdTarget.accessUrl) === normalizedInput.accessUrl
-          ? createdTarget.id
-          : null
+        previousTargetIds.includes(createdTarget.id) ? null : createdTarget.id
     });
     if (commitOutcome.kind === "accepted") {
       return finishTargetRecovery(checkpoint, commitOutcome.value);

@@ -9,6 +9,14 @@ import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 import { createDashboardOverview, fulfillJson } from "./fixtures/dashboard-api-fixture.mjs";
+import {
+  activeRequestsForTarget,
+  createAnalysisAttempts,
+  idempotencyKey,
+  readAttemptKey,
+  readStatusIds,
+  statusEntries
+} from "./fixtures/analysis-protocol-fixture.mjs";
 import { resolveTestBaseUrl } from "./frontend-test-runtime.mjs";
 
 const baseUrl = resolveTestBaseUrl();
@@ -107,12 +115,18 @@ const observed = {
   targetStatusGets: 0,
   targetPosts: 0,
   requestPosts: 0,
+  requestPostKeys: [],
+  createdRequestIds: [],
+  activeRequestGets: 0,
+  attemptGets: [],
+  fullRequestListGets: 0,
   terminalFailedStatusGets: 0,
   requestStatusGets: 0,
   targetPostBody: null,
   requestPostBodies: [],
   unknownRequests: new Set()
 };
+const attempts = createAnalysisAttempts();
 
 let targets = [inactiveTarget];
 let requests = [];
@@ -129,7 +143,8 @@ try {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
 
     if (method === "GET" && pathname === "/api/dashboard/overview") {
       const hasCompletedRequest = requests.some((candidate) => candidate.status === "COMPLETED");
@@ -175,7 +190,24 @@ try {
     }
 
     if (method === "GET" && pathname === "/api/requests") {
+      // Keyed checkpoints reconcile through /attempts/{key}; the full request
+      // directory is only for key-less checkpoints, which this flow never sends.
+      observed.fullRequestListGets += 1;
       await fulfillJson(route, requests);
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/requests/active") {
+      observed.activeRequestGets += 1;
+      assert.equal(url.searchParams.get("targetId"), String(target.id));
+      await fulfillJson(route, activeRequestsForTarget(requests, url));
+      return;
+    }
+
+    const attemptKey = method === "GET" ? readAttemptKey(pathname) : null;
+    if (attemptKey !== null) {
+      observed.attemptGets.push(attemptKey);
+      await fulfillJson(route, attempts.find(attemptKey));
       return;
     }
 
@@ -207,8 +239,20 @@ try {
     if (method === "POST" && pathname === "/api/requests") {
       observed.requestPosts += 1;
       observed.requestPostBodies.push(JSON.parse(request.postData() ?? "null"));
+      const key = idempotencyKey(route);
+      observed.requestPostKeys.push(key);
+      assert.match(key ?? "", /^[0-9a-f-]{36}$/, "every analysis POST must carry an Idempotency-Key");
 
-      if (observed.requestPosts === 1) {
+      // Like AnalysisSubmissionService: a repeated key returns the request it
+      // created first instead of creating another one.
+      const replayed = attempts.find(key);
+      if (replayed) {
+        await fulfillJson(route, replayed);
+        return;
+      }
+      const freshKeyPosts = new Set(observed.requestPostKeys).size;
+
+      if (freshKeyPosts === 1) {
         await route.fulfill({
           // A definite rejection permits a deliberate new request. Ambiguous
           // 5xx/timeouts are covered by verify-site-create-guards and must
@@ -220,17 +264,21 @@ try {
         return;
       }
 
-      if (observed.requestPosts === 2) {
+      if (freshKeyPosts === 2) {
         requests = [terminalFailedRequest];
+        observed.createdRequestIds.push(terminalPendingRequest.id);
+        attempts.remember(key, terminalPendingRequest);
         await secondRequestResponseGate;
         await fulfillJson(route, terminalPendingRequest);
         return;
       }
 
       requests = [terminalFailedRequest, pendingRequest];
+      observed.createdRequestIds.push(pendingRequest.id);
+      attempts.remember(key, pendingRequest);
       await route.fulfill({
         // The request committed but its response was lost. Recovery must use
-        // the targeted request list even while overview is malformed.
+        // the keyed attempt receipt even while overview is malformed.
         status: 503,
         contentType: "application/json",
         body: JSON.stringify({ message: "request response lost after commit" })
@@ -238,26 +286,28 @@ try {
       return;
     }
 
-    if (method === "GET" && pathname === `/api/requests/${terminalPendingRequest.id}`) {
-      observed.terminalFailedStatusGets += 1;
-      await fulfillJson(route, terminalFailedRequest);
-      return;
-    }
-
-    if (method === "GET" && pathname === `/api/requests/${pendingRequest.id}`) {
-      observed.requestStatusGets += 1;
-
-      if (observed.requestStatusGets === 1) {
-        await route.fulfill({
-          status: 503,
-          contentType: "application/json",
-          body: JSON.stringify({ message: "status temporarily unavailable" })
-        });
-        return;
+    if (method === "GET" && pathname === "/api/requests/statuses") {
+      const ids = readStatusIds(url);
+      assert.ok(ids.length > 0 && ids.length <= 100, "status batches must hold 1..100 ids");
+      if (ids.includes(terminalPendingRequest.id)) {
+        observed.terminalFailedStatusGets += 1;
       }
+      if (ids.includes(pendingRequest.id)) {
+        observed.requestStatusGets += 1;
 
-      requests = [terminalFailedRequest, completedRequest];
-      await fulfillJson(route, completedRequest);
+        if (observed.requestStatusGets === 1) {
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ message: "status temporarily unavailable" })
+          });
+          return;
+        }
+
+        requests = [terminalFailedRequest, completedRequest];
+      }
+      await fulfillJson(route, statusEntries(ids, (id) =>
+        requests.find((candidate) => candidate.id === id) ?? null));
       return;
     }
 
@@ -418,6 +468,25 @@ try {
   await dialog.waitFor({ state: "hidden" });
   assert.equal(observed.targetPosts, 1, "analysis recovery must reuse the original target");
   assert.equal(observed.requestPosts, 3, "lost response must reconcile without a fourth POST");
+  assert.equal(
+    new Set(observed.requestPostKeys).size,
+    3,
+    "each deliberate analysis attempt must use its own Idempotency-Key"
+  );
+  assert.ok(
+    observed.attemptGets.length > 0 &&
+      observed.attemptGets.every((key) => key === observed.requestPostKeys[2]),
+    "the lost POST must be reconciled through the receipt of its own key"
+  );
+  assert.deepEqual(
+    observed.createdRequestIds,
+    [terminalPendingRequest.id, pendingRequest.id],
+    "lost-response recovery must not create a second analysis request"
+  );
+  assert.ok(
+    observed.activeRequestGets >= observed.requestPosts,
+    "every analysis POST must follow the targeted active-request preflight"
+  );
   assert.equal(await page.evaluate(key => sessionStorage.getItem(key), storageKey), null);
   assert.deepEqual(observed.targetPostBody, { name: target.name, accessUrl: target.accessUrl });
   assert.ok(observed.requestPostBodies.every(body => body.evaluationTargetId === target.id));
@@ -533,6 +602,11 @@ try {
   await dialog.getByRole("button", { name: "닫기", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
   await page.evaluate((key) => sessionStorage.removeItem(key), storageKey);
+  assert.equal(
+    observed.fullRequestListGets,
+    0,
+    "keyed analysis requests must never read the full request directory"
+  );
   assert.deepEqual([...observed.unknownRequests], []);
 
   console.log(
@@ -543,6 +617,10 @@ try {
         targetStatusGets: observed.targetStatusGets,
         targetPosts: observed.targetPosts,
         requestPosts: observed.requestPosts,
+        distinctIdempotencyKeys: new Set(observed.requestPostKeys).size,
+        createdRequestIds: observed.createdRequestIds,
+        activeRequestGets: observed.activeRequestGets,
+        attemptGets: observed.attemptGets.length,
         terminalFailedStatusGets: observed.terminalFailedStatusGets,
         requestStatusGets: observed.requestStatusGets,
         finalPath: new URL(page.url()).pathname

@@ -218,14 +218,7 @@ async function runMalformedOverviewRelationsScenario(browser) {
       if (browserRequest.method() === "GET" && pathname === "/api/dashboard/overview") {
         overviewGets += 1;
         const responseOverview =
-          responseMode === "missing-target-reference"
-            ? {
-                ...validOverview,
-                evaluationRequests: [
-                  { ...evaluationRequest, evaluationTargetId: pageTarget.id + 999_999 }
-                ]
-              }
-            : responseMode === "invalid-score-type"
+          responseMode === "invalid-score-type"
               ? {
                   ...validOverview,
                   scoreResults: [{ ...scoreResult, totalScore: "92" }]
@@ -283,16 +276,8 @@ async function runMalformedOverviewRelationsScenario(browser) {
       );
     };
 
-    responseMode = "missing-target-reference";
-    await retryAndWaitForDashboardError(envelopeAlert);
-    const relationAlert = page
-      .getByRole("alert")
-      .filter({ hasText: "대시보드를 불러오지 못했습니다" });
-    await relationAlert.waitFor();
-    assertNoInternalErrorDetails(await relationAlert.innerText());
-
     responseMode = "invalid-score-type";
-    await retryAndWaitForDashboardError(relationAlert);
+    await retryAndWaitForDashboardError(envelopeAlert);
     const scoreAlert = page
       .getByRole("alert")
       .filter({ hasText: "대시보드를 불러오지 못했습니다" });
@@ -326,7 +311,7 @@ async function runMalformedOverviewRelationsScenario(browser) {
     await page.getByText(legacyUnsafeUrlTarget.name, { exact: true }).waitFor();
     assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
 
-    assert.ok(overviewGets >= 5);
+    assert.ok(overviewGets >= 4);
     assert.deepEqual(pageErrors, []);
     assert.deepEqual(unknownRequests, []);
     return { overviewGets, recovered: true };

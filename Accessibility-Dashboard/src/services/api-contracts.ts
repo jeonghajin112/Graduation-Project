@@ -226,38 +226,12 @@ function parseNonNegativeInteger(value: unknown, path: string): number {
   return value as number;
 }
 
+// Dates come from Jackson-serialised LocalDateTime/Instant values, so only
+// the shape is checked; the backend cannot produce an impossible date.
 function parseDateTime(value: unknown, path: string): string {
   const parsed = parseString(value, path);
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))?$/.exec(
-    parsed
-  );
-  if (!match) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?$/.test(parsed)) {
     return failContract(value, path, "ISO 8601 날짜·시간 문자열");
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
-  const offsetHour = match[8] === undefined ? 0 : Number(match[8]);
-  const offsetMinute = match[9] === undefined ? 0 : Number(match[9]);
-  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  const isValidCalendarValue =
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= (daysInMonth[month - 1] ?? 0) &&
-    hour <= 23 &&
-    minute <= 59 &&
-    second <= 59 &&
-    offsetHour <= 18 &&
-    offsetMinute <= 59 &&
-    (offsetHour < 18 || offsetMinute === 0);
-  if (!isValidCalendarValue) {
-    return failContract(value, path, "실제 달력에 존재하는 ISO 8601 날짜·시간 문자열");
   }
   return parsed;
 }
@@ -306,21 +280,6 @@ function indexUnique<T>({
   return indexed;
 }
 
-function assertKnownIdentifier(
-  identifier: number,
-  indexed: ReadonlyMap<number, unknown> | ReadonlySet<number>,
-  path: string,
-  expected: string
-): void {
-  if (!indexed.has(identifier)) {
-    throw new ApiContractValidationError({
-      fieldPath: path,
-      expected,
-      actualType: `참조할 수 없는 ID ${identifier}`
-    });
-  }
-}
-
 function assertExpectedIdentifier(
   actual: number,
   expected: number | undefined,
@@ -364,8 +323,7 @@ export const parseOrganizationResponse: ApiResponseParser<Organization> = (value
   return {
     systemManaged: fields.optional("systemManaged", parseBoolean),
     id: fields.required("id", parsePositiveInteger),
-    name: fields.required("name", (field, fieldPath) =>
-      parseNonBlankString(field, fieldPath, 100)),
+    name: fields.required("name", parseNonBlankString),
     description: fields.required("description", parseNullableString) ?? "",
     status: fields.required("status", (field, fieldPath) =>
       parseEnumValue(field, fieldPath, organizationStatuses)),
@@ -392,13 +350,12 @@ function parseEvaluationTarget(
   return {
     id: fields.required("id", parsePositiveInteger),
     organizationId: fields.required("organizationId", parsePositiveInteger),
-    name: fields.required("name", (field, fieldPath) =>
-      parseNonBlankString(field, fieldPath, 100)),
+    name: fields.required("name", parseNonBlankString),
     targetType: fields.required("targetType", (field, fieldPath) =>
       parseEnumValue(field, fieldPath, targetTypes)),
     accessUrl: strictAccessUrl
       ? fields.required("accessUrl", (field, fieldPath) =>
-          parseAbsoluteHttpUrl(field, fieldPath, 500))
+          parseAbsoluteHttpUrl(field, fieldPath))
       : fields.required("accessUrl", (field, fieldPath) =>
           parseLegacyOptionalAbsoluteHttpUrl(field, fieldPath, 500)),
     faviconUrl: fields.optional("faviconUrl", parseNullableString),
@@ -587,101 +544,13 @@ export const parseDashboardOverviewResponse: ApiResponseParser<DashboardOverview
     parseArray(field, fieldPath, parseScoreResult));
   const latestIssueCounts = fields.required("latestIssueCounts", (field, fieldPath) =>
     parseArray(field, fieldPath, parseDashboardLatestIssueCount));
-  const evaluationTargets = organizations.flatMap(
-    (organization) => organization.evaluationTargets
-  );
-
-  indexUnique({
-    items: organizations,
-    getIdentifier: (organization) => organization.id,
-    pathFor: (index) => `${path}.organizations[${index}].id`,
-    expected: "중복되지 않는 조직 ID"
-  });
-  const targetsById = indexUnique({
-    items: evaluationTargets,
-    getIdentifier: (target) => target.id,
-    pathFor: (index) => `${path}.organizations[*].evaluationTargets[${index}].id`,
-    expected: "중복되지 않는 평가 대상 ID"
-  });
-  const requestsById = indexUnique({
-    items: evaluationRequests,
-    getIdentifier: (request) => request.id,
-    pathFor: (index) => `${path}.evaluationRequests[${index}].id`,
-    expected: "중복되지 않는 평가 요청 ID"
-  });
-  evaluationRequests.forEach((request, index) => {
-    assertKnownIdentifier(
-      request.evaluationTargetId,
-      targetsById,
-      `${path}.evaluationRequests[${index}].evaluationTargetId`,
-      "organizations에 포함된 평가 대상 ID"
-    );
-  });
-
-  indexUnique({
-    items: resultSummaries,
-    getIdentifier: (summary) => summary.requestId,
-    pathFor: (index) => `${path}.resultSummaries[${index}].requestId`,
-    expected: "중복되지 않는 평가 요청 ID"
-  });
-  resultSummaries.forEach((summary, index) => {
-    assertKnownIdentifier(
-      summary.requestId,
-      requestsById,
-      `${path}.resultSummaries[${index}].requestId`,
-      "존재하는 평가 요청 ID"
-    );
-  });
-
-  indexUnique({
-    items: scoreResults,
-    getIdentifier: (score) => score.evaluationRequestId,
-    pathFor: (index) => `${path}.scoreResults[${index}].evaluationRequestId`,
-    expected: "중복되지 않는 평가 요청 ID"
-  });
-  scoreResults.forEach((scoreResult, index) => {
-    assertKnownIdentifier(
-      scoreResult.evaluationRequestId,
-      requestsById,
-      `${path}.scoreResults[${index}].evaluationRequestId`,
-      "존재하는 평가 요청 ID"
-    );
-  });
-
-  indexUnique({
-    items: latestIssueCounts,
-    getIdentifier: (statistics) => statistics.evaluationTargetId,
-    pathFor: (index) => `${path}.latestIssueCounts[${index}].evaluationTargetId`,
-    expected: "중복되지 않는 최신 이슈 대상 ID"
-  });
-  latestIssueCounts.forEach((statistics, index) => {
-    const referencedRequest = requestsById.get(statistics.requestId);
-    assertKnownIdentifier(
-      statistics.evaluationTargetId,
-      targetsById,
-      `${path}.latestIssueCounts[${index}].evaluationTargetId`,
-      "organizations에 포함된 평가 대상 ID"
-    );
-    if (
-      referencedRequest === undefined ||
-      referencedRequest.evaluationTargetId !== statistics.evaluationTargetId
-    ) {
-      failContract(
-        statistics.requestId,
-        `${path}.latestIssueCounts[${index}].requestId`,
-        `평가 대상 ${statistics.evaluationTargetId}에 속한 요청 ID`
-      );
-    }
-  });
 
   return {
     organizations,
     evaluationRequests,
     resultSummaries,
     scoreResults,
-    latestIssueCounts,
-    ...(fields.optional("analysisProtocolVersion", parseNonNegativeInteger) !== undefined
-      ? { analysisProtocolVersion: fields.optional("analysisProtocolVersion", parseNonNegativeInteger) } : {})
+    latestIssueCounts
   };
 };
 

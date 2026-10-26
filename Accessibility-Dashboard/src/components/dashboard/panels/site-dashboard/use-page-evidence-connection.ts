@@ -12,10 +12,6 @@ import {
   type EvidenceFrameKind
 } from "./evidence-source";
 import {
-  consumeLiveReportAutomaticRecovery,
-  createLiveReportAutomaticRecoveryState
-} from "./live-report-recovery";
-import {
   advancePageEvidenceLoadingPhase,
   type PageEvidenceLoadingPhase
 } from "./page-evidence-loading-progress";
@@ -56,7 +52,6 @@ type LiveReportPortConnection = {
   documentToken: string | null;
   /** The iframe load event of this document was already observed. */
   documentLoaded: boolean;
-  nextInboundSequence: number;
   nextOutboundSequence: number;
   port: MessagePort;
   sessionId: string;
@@ -76,8 +71,9 @@ const LIVE_REPORT_BRIDGE_ACK_TIMEOUT_MS = 4_000;
 // Keep this deadline above that server-side worst case so slow, valid sites get
 // a fair chance to finish before the live-only error state is shown.
 const REPLAY_FRAME_LOAD_TIMEOUT_MS = 120_000;
-// Match the live viewer's bounded INIT_ISSUES input. Overflow remains in the
-// unavailable list rather than waiting for statuses the viewer cannot send.
+// Stays under the viewer's INIT_ISSUES bound (10,000 in bridge-runtime.js).
+// Overflow remains in the unavailable list rather than waiting for statuses
+// the viewer was never asked for.
 const LIVE_REPORT_ISSUE_LIMIT = 5_000;
 // After INIT_ISSUES the viewer reports every issue within a few frames. An
 // issue still unreported after this is listed as not shown on the page.
@@ -138,11 +134,8 @@ export function usePageEvidenceConnection({
   const retiredDocumentTokensRef = useRef(new Set<string>());
   const frameLoadObservedRef = useRef(false);
   const replayFrameLoadTimeoutRef = useRef<number | null>(null);
-  const replayFrameLoadWatchdogEpochRef = useRef(0);
   const replayReadyTimeoutRef = useRef<number | null>(null);
-  const replayReadyWatchdogEpochRef = useRef(0);
   const locatorStatusTimeoutRef = useRef<number | null>(null);
-  const locatorStatusWatchdogEpochRef = useRef(0);
   // Set by an iframe load that replaced a connected document. Only then may a
   // new AVAILABLE announcement replace an established bridge connection.
   const liveReconnectAllowedRef = useRef(false);
@@ -161,9 +154,8 @@ export function usePageEvidenceConnection({
   const replayOriginSelectionRef = useRef<{ issueId: number | null } | null>(null);
   const selectedIssueStateRef = useRef(selectedIssueId);
   const selectedIssueFocusRequestIdRef = useRef(0);
-  const automaticLiveRecoveryRef = useRef(
-    createLiveReportAutomaticRecoveryState(evaluationRequestId)
-  );
+  // Each analysis request gets one automatic live-session recovery.
+  const recoveredRequestIdRef = useRef<number | null>(null);
 
   const omitCoordinateBoxes = captureMetadataStatus === "missing" || captureMetadataStatus === "error";
   const replayIssues = useMemo(
@@ -241,14 +233,6 @@ export function usePageEvidenceConnection({
     selectedIssueStateRef.current = selectedIssueId;
   }, [selectedIssueId]);
 
-  useLayoutEffect(() => {
-    if (automaticLiveRecoveryRef.current.requestId !== evaluationRequestId) {
-      automaticLiveRecoveryRef.current = createLiveReportAutomaticRecoveryState(
-        evaluationRequestId
-      );
-    }
-  }, [evaluationRequestId]);
-
   function advanceReplayLoadingPhase(nextPhase: PageEvidenceLoadingPhase) {
     setReplayLoadingPhase((currentPhase) =>
       advancePageEvidenceLoadingPhase(currentPhase, nextPhase)
@@ -256,7 +240,6 @@ export function usePageEvidenceConnection({
   }
 
   function clearReplayFrameLoadTimeout() {
-    replayFrameLoadWatchdogEpochRef.current += 1;
     if (replayFrameLoadTimeoutRef.current !== null) {
       window.clearTimeout(replayFrameLoadTimeoutRef.current);
       replayFrameLoadTimeoutRef.current = null;
@@ -264,7 +247,6 @@ export function usePageEvidenceConnection({
   }
 
   function clearReplayReadyTimeout() {
-    replayReadyWatchdogEpochRef.current += 1;
     if (replayReadyTimeoutRef.current !== null) {
       window.clearTimeout(replayReadyTimeoutRef.current);
       replayReadyTimeoutRef.current = null;
@@ -272,7 +254,6 @@ export function usePageEvidenceConnection({
   }
 
   function clearLocatorStatusTimeout() {
-    locatorStatusWatchdogEpochRef.current += 1;
     if (locatorStatusTimeoutRef.current !== null) {
       window.clearTimeout(locatorStatusTimeoutRef.current);
       locatorStatusTimeoutRef.current = null;
@@ -281,11 +262,7 @@ export function usePageEvidenceConnection({
 
   function armLocatorStatusTimeout(issueIds: readonly number[]) {
     clearLocatorStatusTimeout();
-    const watchdogEpoch = locatorStatusWatchdogEpochRef.current;
     locatorStatusTimeoutRef.current = window.setTimeout(() => {
-      if (locatorStatusWatchdogEpochRef.current !== watchdogEpoch) {
-        return;
-      }
       locatorStatusTimeoutRef.current = null;
       settleMissingLocatorStates(issueIds, { status: "UNAVAILABLE", reason: "STATUS_TIMEOUT" });
     }, LOCATOR_STATUS_TIMEOUT_MS);
@@ -317,15 +294,12 @@ export function usePageEvidenceConnection({
     ) {
       cancelPendingLocatorStates();
       const currentRequestId = evaluationRequestIdRef.current;
-      const recovery = consumeLiveReportAutomaticRecovery(
-        automaticLiveRecoveryRef.current,
-        currentRequestId
-      );
-      automaticLiveRecoveryRef.current = recovery.nextState;
+      const shouldRetry = currentRequestId !== null && recoveredRequestIdRef.current !== currentRequestId;
+      if (shouldRetry) recoveredRequestIdRef.current = currentRequestId;
       setFailedLiveSessionId(sessionId);
       setReplayLoadingPhase("request-started");
       setReplayConnectionState("loading");
-      if (recovery.shouldRetry) {
+      if (shouldRetry) {
         retryLiveReportSessionRef.current();
       }
     }
@@ -333,11 +307,7 @@ export function usePageEvidenceConnection({
 
   function armReplayFrameLoadTimeout() {
     clearReplayFrameLoadTimeout();
-    const watchdogEpoch = replayFrameLoadWatchdogEpochRef.current;
     replayFrameLoadTimeoutRef.current = window.setTimeout(() => {
-      if (replayFrameLoadWatchdogEpochRef.current !== watchdogEpoch) {
-        return;
-      }
       replayFrameLoadTimeoutRef.current = null;
       setFallbackIssueId(null);
       const activeSession = liveSessionRef.current;
@@ -351,11 +321,7 @@ export function usePageEvidenceConnection({
 
   function armLiveReportBridgeAckTimeout(sessionId: string) {
     clearReplayReadyTimeout();
-    const watchdogEpoch = replayReadyWatchdogEpochRef.current;
     replayReadyTimeoutRef.current = window.setTimeout(() => {
-      if (replayReadyWatchdogEpochRef.current !== watchdogEpoch) {
-        return;
-      }
       replayReadyTimeoutRef.current = null;
       const connection = liveReportPortRef.current;
       if (
@@ -370,11 +336,7 @@ export function usePageEvidenceConnection({
 
   function armReplayReadyTimeout() {
     clearReplayReadyTimeout();
-    const watchdogEpoch = replayReadyWatchdogEpochRef.current;
     replayReadyTimeoutRef.current = window.setTimeout(() => {
-      if (replayReadyWatchdogEpochRef.current !== watchdogEpoch) {
-        return;
-      }
       replayReadyTimeoutRef.current = null;
       setFallbackIssueId(null);
       const activeSession = liveSessionRef.current;
@@ -495,26 +457,12 @@ export function usePageEvidenceConnection({
 
     closeLiveReportPort();
 
-    let challenge: string;
-    try {
-      challenge = createLiveReportChallenge();
-    } catch {
-      failLiveReportConnection(session.sessionId);
-      return;
-    }
-
-    let channel: MessageChannel;
-    try {
-      channel = new MessageChannel();
-    } catch {
-      failLiveReportConnection(session.sessionId);
-      return;
-    }
+    const challenge = createLiveReportChallenge();
+    const channel = new MessageChannel();
     const connection: LiveReportPortConnection = {
       challenge,
       documentToken: null,
       documentLoaded,
-      nextInboundSequence: 1,
       nextOutboundSequence: 1,
       port: channel.port1,
       sessionId: session.sessionId,
@@ -527,18 +475,12 @@ export function usePageEvidenceConnection({
         return;
       }
 
-      const message = parseLiveReportPortMessage(event.data, {
-        session,
-        challenge,
-        expectedSequence: connection.nextInboundSequence,
-        expectedDocumentToken: connection.documentToken
-      });
+      const message = parseLiveReportPortMessage(event.data, connection.documentToken);
       if (!message) {
         failLiveReportConnection(session.sessionId);
         return;
       }
 
-      connection.nextInboundSequence += 1;
       if (message.type === "ACK") {
         connection.documentToken = message.documentToken;
         liveReconnectAllowedRef.current = false;
@@ -1092,7 +1034,7 @@ export function usePageEvidenceConnection({
 
   // A retry the user asked for earns one automatic recovery again.
   function resetAutomaticLiveRecovery() {
-    automaticLiveRecoveryRef.current = createLiveReportAutomaticRecoveryState(evaluationRequestIdRef.current);
+    recoveredRequestIdRef.current = null;
   }
 
   function retryFrame() {
@@ -1107,8 +1049,7 @@ export function usePageEvidenceConnection({
       // A live session can have exhausted its bounded request
       // or byte budget. Retrying the same URL can never heal
       // that state, so ask the owner to create a fresh session.
-      automaticLiveRecoveryRef.current =
-        createLiveReportAutomaticRecoveryState(evaluationRequestId);
+      recoveredRequestIdRef.current = null;
       onRetryLiveSession();
     } else {
       setFrameRevision((current) => current + 1);

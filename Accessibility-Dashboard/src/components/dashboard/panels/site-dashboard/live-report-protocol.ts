@@ -42,24 +42,14 @@ export type LiveReportSessionExhaustedMessage = {
 };
 
 export type LiveReportPortAckMessage = {
-  source: typeof LIVE_REPORT_PAGE_SOURCE;
   type: "ACK";
-  protocolVersion: typeof LIVE_REPORT_PROTOCOL_VERSION;
-  bridgeSecret: string;
-  challenge: string;
   documentToken: string;
-  sequence: number;
 };
 
 export type LiveReportPortEventMessage = {
-  source: typeof LIVE_REPORT_PAGE_SOURCE;
   type: "EVENT";
-  protocolVersion: typeof LIVE_REPORT_PROTOCOL_VERSION;
-  bridgeSecret: string;
-  challenge: string;
   documentToken: string;
-  sequence: number;
-  /** Null for an authenticated event this dashboard does not understand. */
+  /** Null for an event this dashboard does not understand. */
   payload: PageReplayToDashboardMessage | null;
 };
 
@@ -76,13 +66,6 @@ export type LiveReportPortCommandMessage = {
 
 export type LiveReportPortMessage = LiveReportPortAckMessage | LiveReportPortEventMessage;
 
-type ParseLiveReportPortMessageOptions = {
-  session: Pick<LiveReportSession, "bridgeSecret">;
-  challenge: string;
-  expectedSequence: number;
-  expectedDocumentToken: string | null;
-};
-
 function isUrlSafeToken(value: unknown, maximumLength = LIVE_REPORT_TOKEN_MAX_LENGTH): value is string {
   return (
     typeof value === "string" &&
@@ -90,10 +73,6 @@ function isUrlSafeToken(value: unknown, maximumLength = LIVE_REPORT_TOKEN_MAX_LE
     value.length <= maximumLength &&
     /^[A-Za-z0-9_-]+$/.test(value)
   );
-}
-
-function isSequence(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
 export function parseLiveReportBridgeAvailableMessage(
@@ -238,9 +217,6 @@ export function isLiveReportSessionSafe(
 export function createLiveReportChallenge(
   cryptoSource: Pick<Crypto, "getRandomValues"> = globalThis.crypto
 ): string {
-  if (!cryptoSource || typeof cryptoSource.getRandomValues !== "function") {
-    throw new Error("A cryptographically secure random source is required for live reports.");
-  }
   const bytes = new Uint8Array(32);
   cryptoSource.getRandomValues(bytes);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -274,92 +250,36 @@ export function getLiveReportConnectTargetOrigin(
   return candidateOrigin;
 }
 
+/**
+ * Reads a message from the private port. Only the bridge holds the other end
+ * and a port delivers in order, so the secret, challenge and sequence the
+ * bridge repeats on every message need no second check here; the message must
+ * only belong to the acknowledged document. `expectedDocumentToken` is null
+ * until the bridge's ACK names it.
+ */
 export function parseLiveReportPortMessage(
   value: unknown,
-  {
-    session,
-    challenge,
-    expectedSequence,
-    expectedDocumentToken
-  }: ParseLiveReportPortMessageOptions
+  expectedDocumentToken: string | null
 ): LiveReportPortMessage | null {
   if (
     !isPlainRecord(value) ||
     value.source !== LIVE_REPORT_PAGE_SOURCE ||
-    value.protocolVersion !== LIVE_REPORT_PROTOCOL_VERSION ||
-    value.bridgeSecret !== session.bridgeSecret ||
-    value.challenge !== challenge ||
-    !isSequence(value.sequence) ||
-    value.sequence !== expectedSequence ||
     !isDocumentToken(value.documentToken)
   ) {
     return null;
   }
-
-  if (
-    value.type === "ACK" &&
-    expectedDocumentToken === null &&
-    hasExactOwnKeys(value, [
-      "source",
-      "type",
-      "protocolVersion",
-      "bridgeSecret",
-      "challenge",
-      "documentToken",
-      "sequence"
-    ])
-  ) {
-    return {
-      source: LIVE_REPORT_PAGE_SOURCE,
-      type: "ACK",
-      protocolVersion: LIVE_REPORT_PROTOCOL_VERSION,
-      bridgeSecret: session.bridgeSecret,
-      challenge,
-      documentToken: value.documentToken,
-      sequence: value.sequence
-    };
+  if (value.type === "ACK") {
+    return expectedDocumentToken === null ? { type: "ACK", documentToken: value.documentToken } : null;
   }
-
-  if (
-    value.type !== "EVENT" ||
-    expectedDocumentToken === null ||
-    value.documentToken !== expectedDocumentToken ||
-    !hasExactOwnKeys(value, [
-      "source",
-      "type",
-      "protocolVersion",
-      "bridgeSecret",
-      "challenge",
-      "documentToken",
-      "sequence",
-      "payload"
-    ])
-  ) {
+  if (value.type !== "EVENT" || value.documentToken !== expectedDocumentToken) {
     return null;
   }
-
-  // The envelope is authenticated and in order, so an unknown or newer event
-  // is skipped instead of tearing down the report. It must still belong to
-  // the acknowledged document.
-  if (
-    !isPlainRecord(value.payload) ||
-    (Object.prototype.hasOwnProperty.call(value.payload, "documentToken") &&
-      value.payload.documentToken !== value.documentToken)
-  ) {
-    return null;
-  }
-  const parsedPayload = parsePageReplayMessage(value.payload);
-  const payload = parsedPayload?.documentToken === value.documentToken ? parsedPayload : null;
-
+  // An event this dashboard does not understand is skipped, not fatal.
+  const payload = parsePageReplayMessage(value.payload);
   return {
-    source: LIVE_REPORT_PAGE_SOURCE,
     type: "EVENT",
-    protocolVersion: LIVE_REPORT_PROTOCOL_VERSION,
-    bridgeSecret: session.bridgeSecret,
-    challenge,
     documentToken: value.documentToken,
-    sequence: value.sequence,
-    payload
+    payload: payload?.documentToken === value.documentToken ? payload : null
   };
 }
 

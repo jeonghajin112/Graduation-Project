@@ -1,4 +1,4 @@
-import type { DashboardViewModel } from "@/types/accessibility-domain";
+import type { DashboardViewModel, RequestStatus } from "@/types/accessibility-domain";
 
 export type DirectoryRecoveryToken = symbol;
 
@@ -31,22 +31,14 @@ export function createDirectoryRecoveryLease(baseline: DashboardViewModel | null
   };
 }
 
-function getRequestStatusProgress(status: string): number | null {
-  switch (status) {
-    case "PENDING":
-      return 0;
-    case "IN_PROGRESS":
-    case "RUNNING":
-      return 1;
-    case "COMPLETED":
-    case "FAILED":
-      return 2;
-    default:
-      return null;
-  }
-}
+const REQUEST_STATUS_PROGRESS: Record<RequestStatus, number> = {
+  PENDING: 0,
+  IN_PROGRESS: 1,
+  COMPLETED: 2,
+  FAILED: 2
+};
 
-function requestStatusHasNotRolledBack(baselineStatus: string, nextStatus: string): boolean {
+function requestStatusHasNotRolledBack(baselineStatus: RequestStatus, nextStatus: RequestStatus): boolean {
   if (nextStatus === baselineStatus) {
     return true;
   }
@@ -56,15 +48,7 @@ function requestStatusHasNotRolledBack(baselineStatus: string, nextStatus: strin
     return false;
   }
 
-  const baselineProgress = getRequestStatusProgress(baselineStatus);
-  const nextProgress = getRequestStatusProgress(nextStatus);
-  if (baselineProgress === null || nextProgress === null) {
-    // A backend can add a status before this client is upgraded. Fail closed
-    // for transitions we cannot order. Equality was handled above.
-    return false;
-  }
-
-  return nextProgress >= baselineProgress;
+  return REQUEST_STATUS_PROGRESS[nextStatus] >= REQUEST_STATUS_PROGRESS[baselineStatus];
 }
 
 export function requestHasNotRolledBack(

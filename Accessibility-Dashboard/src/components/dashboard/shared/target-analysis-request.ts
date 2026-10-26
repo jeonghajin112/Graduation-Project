@@ -436,11 +436,7 @@ export async function requestTargetAnalysis(
 
   releaseRequestCheckpoint(targetAnalysisRequestCheckpointRef.current);
 
-  const knownRequestIds = new Set(
-    (dashboardData?.analysisProtocolVersion === 1 ? [] : dashboardData?.evaluationRequests ?? [])
-      .filter((request) => request.evaluationTargetId === targetId)
-      .map((request) => request.id)
-  );
+  const knownRequestIds = new Set<number>();
   if (effectiveFailedRequestId !== null) {
     knownRequestIds.add(effectiveFailedRequestId);
   }
@@ -451,8 +447,7 @@ export async function requestTargetAnalysis(
   let beforeRequests: EvaluationRequestModel[];
   try {
     beforeRequests = await runWithNetworkDeadline(
-      (requestSignal) => dashboardData?.analysisProtocolVersion === 1
-        ? fetchActiveTargetRequests(targetId, requestSignal) : fetchEvaluationRequests(requestSignal),
+      (requestSignal) => fetchActiveTargetRequests(targetId, requestSignal),
       signal
     );
     signal?.throwIfAborted();
@@ -472,7 +467,7 @@ export async function requestTargetAnalysis(
         request.evaluationTargetId === targetId &&
         request.status !== "COMPLETED" &&
         request.status !== "FAILED"
-    ) ?? []
+    )
   );
   if (inFlightRequest) {
     if (slot.kind === "rescan") {
@@ -505,7 +500,7 @@ export async function requestTargetAnalysis(
     {
       ...readyAttempt,
       phase: "request-reconciling",
-      analysisKey: dashboardData?.analysisProtocolVersion === 1 ? createRandomUuid() : undefined,
+      analysisKey: createRandomUuid(),
       targetId,
       knownRequestIds: [...knownRequestIds],
       previousFailedRequestId: effectiveFailedRequestId
@@ -527,8 +522,7 @@ export async function requestTargetAnalysis(
         signal,
         operation: async (requestSignal) =>
           (await submitEvaluationTargetRescan(targetId, requestSignal, analysisKey)).id,
-        accept: (requestId) =>
-          requestId !== null && !knownRequestIds.has(requestId) ? requestId : null
+        accept: (requestId) => (knownRequestIds.has(requestId) ? null : requestId)
       });
       if (commitOutcome.kind === "accepted") {
         return acceptRequest(checkpoint, {

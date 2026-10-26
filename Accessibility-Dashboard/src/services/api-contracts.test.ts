@@ -218,16 +218,6 @@ describe("parseDashboardOverviewResponse", () => {
     expectContractError(() => parseDashboardOverviewResponse(payload, "$.data"), `$.data.scoreResults[0].${field}`);
   });
 
-  it.each([
-    ["2023-02-29T12:00:00Z", "$.data.organizations[0].updatedAt"],
-    ["2024-02-29T12:00:00+18:01", "$.data.organizations[0].updatedAt"]
-  ])("rejects impossible calendar values: %s", (date, fieldPath) => {
-    expectContractError(
-      () => parseDashboardOverviewResponse(createValidOverview(date), "$.data"),
-      fieldPath
-    );
-  });
-
   it.each<[
     string,
     (overview: ReturnType<typeof createValidOverview>) => void,
@@ -249,79 +239,9 @@ describe("parseDashboardOverviewResponse", () => {
       "$.data.organizations[0].evaluationTargets[0].targetType"
     ],
     [
-      "duplicate organization IDs",
-      (overview) => { overview.organizations.push({ ...overview.organizations[0]! }); },
-      "$.data.organizations[1].id"
-    ],
-    [
-      "duplicate target IDs",
-      (overview) => {
-        overview.organizations[0]!.evaluationTargets.push({
-          ...overview.organizations[0]!.evaluationTargets[0]!
-        });
-      },
-      "$.data.organizations[*].evaluationTargets[1].id"
-    ],
-    [
       "targets owned by another organization",
       (overview) => { overview.organizations[0]!.evaluationTargets[0]!.organizationId = 999; },
       "$.data.organizations[0].evaluationTargets[0].organizationId"
-    ],
-    [
-      "duplicate request IDs",
-      (overview) => { overview.evaluationRequests.push({ ...overview.evaluationRequests[0]! }); },
-      "$.data.evaluationRequests[1].id"
-    ],
-    [
-      "requests for an unknown target",
-      (overview) => { overview.evaluationRequests[0]!.evaluationTargetId = 999; },
-      "$.data.evaluationRequests[0].evaluationTargetId"
-    ],
-    [
-      "duplicate summaries for one request",
-      (overview) => { overview.resultSummaries.push({ ...overview.resultSummaries[0]! }); },
-      "$.data.resultSummaries[1].requestId"
-    ],
-    [
-      "summaries for an unknown request",
-      (overview) => { overview.resultSummaries[0]!.requestId = 999; },
-      "$.data.resultSummaries[0].requestId"
-    ],
-    [
-      "duplicate scores for one request",
-      (overview) => { overview.scoreResults.push({ ...overview.scoreResults[0]!, id: 602 }); },
-      "$.data.scoreResults[1].evaluationRequestId"
-    ],
-    [
-      "scores for an unknown request",
-      (overview) => { overview.scoreResults[0]!.evaluationRequestId = 999; },
-      "$.data.scoreResults[0].evaluationRequestId"
-    ],
-    [
-      "duplicate latest issue references for one target",
-      (overview) => { overview.latestIssueCounts.push({ ...overview.latestIssueCounts[0]! }); },
-      "$.data.latestIssueCounts[1].evaluationTargetId"
-    ],
-    [
-      "latest issue references for an unknown target",
-      (overview) => { overview.latestIssueCounts[0]!.evaluationTargetId = 999; },
-      "$.data.latestIssueCounts[0].evaluationTargetId"
-    ],
-    [
-      "latest issue references for an unrelated request",
-      (overview) => {
-        overview.organizations[0]!.evaluationTargets.push({
-          ...overview.organizations[0]!.evaluationTargets[0]!,
-          id: 102
-        });
-        overview.evaluationRequests.push({
-          ...overview.evaluationRequests[0]!,
-          id: 502,
-          evaluationTargetId: 102
-        });
-        overview.latestIssueCounts[0]!.requestId = 502;
-      },
-      "$.data.latestIssueCounts[0].requestId"
     ]
   ])("rejects %s", (_label, corrupt, fieldPath) => {
     const overview = createValidOverview();

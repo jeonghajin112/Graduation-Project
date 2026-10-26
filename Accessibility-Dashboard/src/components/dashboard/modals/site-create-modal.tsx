@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { preventAccidentalSubmit } from "../shared/form-keyboard";
-import { throwIfAborted } from "@/services/async-cancellation";
 import { getApiErrorMessage, isAbortError } from "@/services/backend-api";
 import {
   SITE_NAME_MAX_LENGTH,
@@ -269,7 +268,6 @@ export function SiteCreateModal({
         if (!isActiveOperation()) {
           return;
         }
-        throwIfAborted(signal);
         nextResumePoint = { kind: "request", targetId };
         setResumePoint(nextResumePoint);
       } else {
@@ -290,7 +288,6 @@ export function SiteCreateModal({
         if (!isActiveOperation()) {
           return;
         }
-        throwIfAborted(signal);
         nextResumePoint = { kind: "poll", targetId, requestId };
         setResumePoint(nextResumePoint);
       }

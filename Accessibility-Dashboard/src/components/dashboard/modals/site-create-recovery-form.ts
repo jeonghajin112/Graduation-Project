@@ -4,11 +4,12 @@ import type {
 } from "@/services/site-create-recovery-storage";
 
 import { EVALUATION_REQUEST_FAILED_MESSAGE } from "../shared/evaluation-request-status";
+import { SITE_RECOVERY_BLOCKED_MESSAGE } from "../shared/site-create-recovery-workflow";
 
-export const SITE_RECOVERY_PERSISTENCE_MESSAGE =
-  "브라우저에 이전 작업 상태를 저장하지 못해 요청을 시작하지 않았습니다. 브라우저 저장 공간과 설정을 확인해 주세요.";
-export const SITE_RECOVERY_BLOCKED_MESSAGE =
-  "확인할 수 없는 이전 페이지 작업이 남아 있어 중복 요청을 막았습니다. 이미 페이지가 추가되었는지 확인한 뒤 이전 작업 정보를 삭제해 주세요.";
+export {
+  SITE_RECOVERY_BLOCKED_MESSAGE,
+  SITE_RECOVERY_PERSISTENCE_MESSAGE
+} from "../shared/site-create-recovery-workflow";
 export const SITE_RECOVERY_STALE_MESSAGE =
   "오래된 페이지 작업 정보가 남아 있습니다. 목록에서 완료 여부를 확인한 뒤 이전 작업 정보를 삭제할 수 있습니다.";
 export const SITE_RECOVERY_CONFLICT_MESSAGE =

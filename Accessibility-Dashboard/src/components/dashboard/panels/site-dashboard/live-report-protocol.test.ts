@@ -63,27 +63,6 @@ function createReadyEvent(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("blocked form port boundary", () => {
-  const event = createReadyEvent({ payload: {
-    source: PAGE_REPLAY_SOURCE, type: "FORM_BLOCKED", documentToken, method: "POST"
-  } });
-  const options = { session, challenge, expectedSequence: 2, expectedDocumentToken: documentToken };
-
-  it("consumes a valid notification while preserving the next event's sequence", () => {
-    expect(parseLiveReportPortMessage(event, options)?.type).toBe("EVENT");
-    expect(parseLiveReportPortMessage(createReadyEvent({ sequence: 3 }), {
-      ...options, expectedSequence: 3
-    })?.type).toBe("EVENT");
-  });
-
-  it.each([
-    { sequence: 1 }, { sequence: 3 }, { challenge: "other" }, { bridgeSecret: "other" },
-    { documentToken: "other" }, { protocolVersion: 2 }, { extra: true }
-  ])("does not relax authentication, identity, or ordering: %j", (override) => {
-    expect(parseLiveReportPortMessage({ ...event, ...override }, options)).toBeNull();
-  });
-});
-
 describe("live report session boundary", () => {
   it("requires the configured route origin, separate secrets, and an unexpired session", () => {
     const dashboardOrigin = "https://dashboard.example.test";
@@ -270,55 +249,21 @@ describe("live report session boundary", () => {
     }
   });
 
-  it("accepts ACK sequence 1 only when every authentication field and key matches", () => {
-    expect(parseLiveReportPortMessage(createAck(), {
-      session,
-      challenge,
-      expectedSequence: 1,
-      expectedDocumentToken: null
-    })).toEqual(createAck());
-
-    for (const value of [
-      createAck({ bridgeSecret: "x".repeat(43) }),
-      createAck({ challenge: "x".repeat(64) }),
-      createAck({ sequence: 2 }),
-      createAck({ protocolVersion: 2 }),
-      createAck({ documentToken: "contains whitespace" }),
-      createAck({ unexpected: true })
-    ]) {
-      expect(parseLiveReportPortMessage(value, {
-        session,
-        challenge,
-        expectedSequence: 1,
-        expectedDocumentToken: null
-      })).toBeNull();
-    }
+  it("accepts the ACK only before a document is acknowledged", () => {
+    expect(parseLiveReportPortMessage(createAck(), null)).toEqual({ type: "ACK", documentToken });
+    expect(parseLiveReportPortMessage(createAck(), documentToken)).toBeNull();
+    expect(parseLiveReportPortMessage(createAck({ source: "other" }), null)).toBeNull();
+    expect(parseLiveReportPortMessage(createAck({ documentToken: "contains whitespace" }), null)).toBeNull();
   });
 
-  it("unwraps only the next EVENT for the acknowledged document token", () => {
-    expect(parseLiveReportPortMessage(createReadyEvent(), {
-      session,
-      challenge,
-      expectedSequence: 2,
-      expectedDocumentToken: documentToken
-    })).toEqual(createReadyEvent());
-
-    for (const value of [
-      createReadyEvent({ sequence: 3 }),
-      createReadyEvent({ documentToken: "other_document" }),
-      createReadyEvent({
-        payload: { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken: "other_document" }
-      }),
-      createReadyEvent({ payload: "not an event" }),
-      createReadyEvent({ unexpected: true })
-    ]) {
-      expect(parseLiveReportPortMessage(value, {
-        session,
-        challenge,
-        expectedSequence: 2,
-        expectedDocumentToken: documentToken
-      })).toBeNull();
-    }
+  it("unwraps an EVENT only for the acknowledged document", () => {
+    expect(parseLiveReportPortMessage(createReadyEvent(), documentToken)).toEqual({
+      type: "EVENT",
+      documentToken,
+      payload: { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken }
+    });
+    expect(parseLiveReportPortMessage(createReadyEvent(), null)).toBeNull();
+    expect(parseLiveReportPortMessage(createReadyEvent({ documentToken: "other_document" }), documentToken)).toBeNull();
   });
 
   it("wraps commands with an independent parent sequence", () => {
@@ -345,25 +290,27 @@ describe("live report session boundary", () => {
   });
 });
 
-describe("authenticated events the dashboard does not understand", () => {
-  const options = { session, challenge, expectedSequence: 2, expectedDocumentToken: documentToken };
-
-  it("consumes them without a payload instead of failing the connection", () => {
+describe("port events the dashboard does not understand", () => {
+  it("are skipped without a payload instead of failing the connection", () => {
     for (const payload of [
-      { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken, extra: true },
       { source: PAGE_REPLAY_SOURCE, type: "NEWER_EVENT", documentToken },
-      { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken, issueId: 1, status: "SOMEWHERE" }
+      { source: PAGE_REPLAY_SOURCE, type: "LINK_BLOCKED", documentToken, href: "https://example.com/" },
+      { source: PAGE_REPLAY_SOURCE, type: "LOCATOR_STATUS", documentToken, issueId: 1, status: "SOMEWHERE" },
+      { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken: "other_document" },
+      "not an event"
     ]) {
-      const parsed = parseLiveReportPortMessage(createReadyEvent({ payload }), options);
+      const parsed = parseLiveReportPortMessage(createReadyEvent({ payload }), documentToken);
       expect(parsed?.type).toBe("EVENT");
       expect(parsed?.type === "EVENT" ? parsed.payload : undefined).toBeNull();
     }
   });
 
-  it("still rejects an event for another document", () => {
-    expect(parseLiveReportPortMessage(createReadyEvent({
-      payload: { source: PAGE_REPLAY_SOURCE, type: "NEWER_EVENT", documentToken: "other_document" }
-    }), options)).toBeNull();
+  it("keep known events when a newer bridge adds fields", () => {
+    const parsed = parseLiveReportPortMessage(createReadyEvent({
+      extra: true,
+      payload: { source: PAGE_REPLAY_SOURCE, type: "READY", documentToken, extra: true }
+    }), documentToken);
+    expect(parsed?.type === "EVENT" ? parsed.payload?.type : undefined).toBe("READY");
   });
 });
 
